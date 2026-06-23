@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from clarinet.config.python_loader import load_python_config
+from clarinet.utils.config_loader import load_record_config
 
 
 def _write(p: Path, obj: object) -> None:
@@ -62,5 +63,25 @@ async def test_python_mode_sidecar_bundles_external_def(tmp_path: Path) -> None:
     items = await load_python_config(tmp_path)
     schema = {i.name: i for i in items}["lesion"].data_schema
 
+    assert schema["properties"]["grade"] == {"$ref": "#/$defs/Grade"}
+    assert "Grade" in schema["$defs"]
+
+
+@pytest.mark.asyncio
+async def test_config_loader_bundles_external_def(tmp_path: Path) -> None:
+    _write(tmp_path / "_common.schema.json", {"$defs": {"Grade": {"type": "string"}}})
+    _write(
+        tmp_path / "lesion.schema.json",
+        {"type": "object", "properties": {"grade": {"$ref": "_common.schema.json#/$defs/Grade"}}},
+    )
+    _write(
+        tmp_path / "lesion.json",
+        {"name": "lesion", "level": "SERIES", "data_schema": "lesion.schema.json"},
+    )
+
+    props = await load_record_config(tmp_path / "lesion.json")
+
+    assert props is not None
+    schema = props["data_schema"]
     assert schema["properties"]["grade"] == {"$ref": "#/$defs/Grade"}
     assert "Grade" in schema["$defs"]
