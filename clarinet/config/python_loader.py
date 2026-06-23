@@ -19,6 +19,7 @@ import aiofiles
 from clarinet.config.primitives import FileDef, RecordDef, fileref_to_file_definition
 from clarinet.models.record import RecordTypeCreate
 from clarinet.utils.logger import logger
+from clarinet.utils.schema_bundler import bundle_external_defs
 
 # Fields whose values can reference external .py files
 _SCRIPT_FIELDS = ("slicer_script", "slicer_result_validator")
@@ -82,7 +83,7 @@ async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any
         async with aiofiles.open(schema_path) as f:
             content = await f.read()
         parsed: dict[str, Any] = json.loads(content)
-        return parsed
+        return bundle_external_defs(parsed, schema_path.parent)
 
     # Try sidecar
     sidecar = folder / f"{rt_def.name}.schema.json"
@@ -90,7 +91,7 @@ async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any
         async with aiofiles.open(sidecar) as f:
             content = await f.read()
         sidecar_parsed: dict[str, Any] = json.loads(content)
-        return sidecar_parsed
+        return bundle_external_defs(sidecar_parsed, folder)
 
     return None
 
