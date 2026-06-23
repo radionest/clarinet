@@ -18,6 +18,7 @@ paths:
 | `pipeline_retry_delay` (int) | 5 | Initial retry delay in seconds |
 | `pipeline_retry_max_delay` (int) | 120 | Max retry delay with exponential backoff |
 | `pipeline_ack_type` (AcknowledgeType) | `when_executed` | `when_received` \| `when_executed` \| `when_saved` |
+| `pipeline_version_check_enabled` (bool) | True | Embed a version fingerprint (clarinet version + `plan/` hash) into queue names so stale workers listen on dead queues; also enables the worker startup fingerprint diagnostic. Off = legacy un-versioned queue names |
 | `PYTEST_WORKERS` (env, Makefile) | 10 | Max xdist workers; override: `PYTEST_WORKERS=4 make test-fast` |
 
 ## Testing
