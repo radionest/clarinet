@@ -20,10 +20,18 @@ from clarinet.api.app import app
 # Import all models to ensure metadata is populated
 from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
-from clarinet.settings import Settings
+from clarinet.settings import Settings, settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
 from tests.utils.cookies import patch_cookie_forwarding
+
+# Disable version gating on the module singleton before any test module is imported.
+# This is the single, load-bearing disable: the queue-name properties and warn_if_stale
+# read the module singleton `settings` (not the DI-injected test_settings), and test
+# modules capture constants like `DEFAULT_QUEUE = settings.default_queue_name` at collection
+# time — before any fixture runs — so the flag must already be off here. Individual
+# fingerprint tests opt back in explicitly via monkeypatch.setattr.
+settings.pipeline_version_check_enabled = False
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -110,6 +118,15 @@ def _plan_package_sanitation():
     from clarinet.config.plan_package import deactivate_plan_package
 
     deactivate_plan_package()
+
+
+@pytest.fixture(autouse=True)
+def _reset_fingerprint_cache():
+    from clarinet.services.pipeline.fingerprint import reset_fingerprint_cache
+
+    reset_fingerprint_cache()
+    yield
+    reset_fingerprint_cache()
 
 
 @pytest.fixture(autouse=True, scope="session")

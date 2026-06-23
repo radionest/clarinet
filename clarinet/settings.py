@@ -368,6 +368,8 @@ class Settings(BaseSettings):
     pipeline_retry_delay: int = 5  # Initial retry delay (seconds)
     pipeline_retry_max_delay: int = 120  # Max retry delay with backoff
     pipeline_ack_type: AcknowledgeType = AcknowledgeType.WHEN_EXECUTED
+    # Gate workers by version fingerprint (queue-name segment); also enables the worker startup diagnostic
+    pipeline_version_check_enabled: bool = True
 
     # Viewer plugin settings (nested dict, configured via [viewers.<name>] in TOML)
     viewers: dict[str, dict[str, Any]] = {}
@@ -442,25 +444,39 @@ class Settings(BaseSettings):
         name = re.sub(r"[^a-z0-9_]", "", name)
         return name or "clarinet"
 
+    def _versioned_queue(self, kind: str) -> str:
+        """Queue name with an optional version-fingerprint segment.
+
+        With the gate enabled (default), embeds a short fingerprint of the
+        clarinet version + ``plan/`` content so workers on stale code listen on
+        different (dead) queues. Lazy import avoids a settings↔fingerprint cycle.
+        """
+        ns = self.pipeline_task_namespace
+        if not self.pipeline_version_check_enabled:
+            return f"{ns}.{kind}"
+        from clarinet.services.pipeline.fingerprint import queue_version_segment
+
+        return f"{ns}.{queue_version_segment()}.{kind}"
+
     @property
     def default_queue_name(self) -> str:
-        """Project-namespaced default queue name."""
-        return f"{self.pipeline_task_namespace}.default"
+        """Project-namespaced default queue name (version-gated)."""
+        return self._versioned_queue("default")
 
     @property
     def gpu_queue_name(self) -> str:
-        """Project-namespaced GPU queue name."""
-        return f"{self.pipeline_task_namespace}.gpu"
+        """Project-namespaced GPU queue name (version-gated)."""
+        return self._versioned_queue("gpu")
 
     @property
     def dicom_queue_name(self) -> str:
-        """Project-namespaced DICOM queue name."""
-        return f"{self.pipeline_task_namespace}.dicom"
+        """Project-namespaced DICOM queue name (version-gated)."""
+        return self._versioned_queue("dicom")
 
     @property
     def quarto_queue_name(self) -> str:
-        """Project-namespaced Quarto render queue name."""
-        return f"{self.pipeline_task_namespace}.quarto"
+        """Project-namespaced Quarto render queue name (version-gated)."""
+        return self._versioned_queue("quarto")
 
     @property
     def dlq_queue_name(self) -> str:

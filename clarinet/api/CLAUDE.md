@@ -55,6 +55,7 @@ Mounted at `/api/pipelines` (unconditionally). Endpoints:
 - `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand; no auth
 - `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`AdminUserDep`; service token resolves to admin — regular users must not forge audit)
 - `GET /api/pipelines/runs[/{task_id}]` — list/get runs (`AdminUserDep`)
+- `GET /api/pipelines/fingerprint` — API version fingerprint (no auth; workers); used by the worker startup staleness diagnostic
 
 Uses `PipelineDefinitionRepositoryDep` + `PipelineTaskRunRepositoryDep`. Record-scoped view: `GET /api/records/{id}/runs` in record.py (`AuthorizedRecordDep`).
 
