@@ -13,6 +13,7 @@ from typing import Any
 import aiofiles
 
 from clarinet.utils.logger import logger
+from clarinet.utils.schema_bundler import bundle_external_defs
 
 # Fields whose values can reference external .py files
 _SCRIPT_FIELDS = ("slicer_script", "slicer_result_validator")
@@ -196,7 +197,8 @@ async def _resolve_data_schema(
     if isinstance(data_schema, str) and data_schema.endswith(".json"):
         schema_path = config_dir / data_schema
         async with aiofiles.open(schema_path) as f:
-            props["data_schema"] = json.loads(await f.read())
+            parsed = json.loads(await f.read())
+        props["data_schema"] = bundle_external_defs(parsed, schema_path.parent)
         return props
 
     # 2. Inline dict (TOML table or parsed JSON object)
@@ -212,7 +214,8 @@ async def _resolve_data_schema(
     sidecar = config_dir / f"{stem}.schema.json"
     if sidecar.is_file():
         async with aiofiles.open(sidecar) as f:
-            props["data_schema"] = json.loads(await f.read())
+            parsed = json.loads(await f.read())
+        props["data_schema"] = bundle_external_defs(parsed, config_dir)
         return props
 
     # 5. Nothing found

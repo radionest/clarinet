@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import ReconcileResult, reconcile_record_types
-from clarinet.exceptions.domain import ConfigurationError
+from clarinet.exceptions.domain import ConfigLoadError, ConfigurationError
 from clarinet.models import RecordType, RecordTypeCreate, User, UserRole
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.utils.auth import get_password_hash
@@ -367,6 +367,8 @@ async def reconcile_config(
                     continue
                 props = resolve_task_files(props, project_registry)
                 all_items.append(RecordTypeCreate(**props))
+            except ConfigLoadError:
+                raise
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 

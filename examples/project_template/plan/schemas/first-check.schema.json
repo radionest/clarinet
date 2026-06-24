@@ -14,11 +14,7 @@
     },
     "then": {
         "properties": {
-            "study_type": {
-                "type": "string",
-                "title": "Тип исследования",
-                "enum": ["CT", "MRI"]
-            },
+            "study_type": { "$ref": "_common.schema.json#/$defs/StudyType" },
             "best_series": {
                 "type": "string",
                 "title": "Лучшая серия",
