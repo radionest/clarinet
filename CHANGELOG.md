@@ -28,6 +28,22 @@
 - **Ops**: the `call:` node-id in pipeline payloads now uses the
   `clarinet_plan.`-rooted module name. On upgrade, drain pipeline queues and
   restart the API and all workers together so both sides agree on the id format.
+- **Slicer segmentation geometry guards.**
+  `SlicerHelper.load_segmentation` now raises `SlicerHelperError` when a loaded
+  `.seg.nrrd`'s reference geometry does not match the active source volume (when
+  one is set), instead of silently re-gridding the mask onto the volume (which
+  masked the projection Z-flip class of bug). The `SlicerHelper` set-operations
+  (`subtract_segmentations` — both operands — / `merge_as_pool` /
+  `binarize_and_split_islands`) now classify an empty labelmap export: a
+  genuinely empty source is tolerated (warning + no-op / empty result),
+  while a source that *carries* voxels but exports empty — a flipped/foreign grid
+  that does not overlap the reference extent — raises pointing at
+  `conform_seg_to_grid`. **Downstream migration:** projects with historically
+  foreign-grid segmentations must conform them to their volume grid
+  (`conform_seg_to_grid`) **before** upgrading — otherwise interactive Slicer
+  scripts that `load_segmentation` a misaligned mask start raising. The
+  empty-source set-op change is non-breaking (strictly more tolerant than the
+  previous opaque `arrayFromVolume` crash).
 
 ### Improved
 
