@@ -180,16 +180,22 @@ Concrete sequence to move an **already-deployed** Clarinet instance from `builti
 `external`. Paths below match the systemd deploy (`deploy/`): API unit `clarinet-api.service`,
 `WorkingDirectory=/opt/clarinet`, stand overrides in `/opt/clarinet/settings.custom.toml`
 (loaded over the project's `settings.toml`). Substitute `{base_path}` with the instance's
-`root_url` (e.g. `/liver_nir`), empty for a root deploy.
+`root_url` (e.g. `/liver_nir`, empty for a root deploy) and `HOST` with the public hostname,
+wherever they appear below. Steps 1–2 are one-time Orthanc/nginx setup — skip them if those are
+already in place; steps 0 and 3–5 are the per-instance switch.
 
-**0. Prereq — refresh the OHIF template (only when upgrading Clarinet).** The serve-time
-renderer needs the `__CLARINET_DATASOURCES__` sentinel in the runtime `app-config.js`; a
-pre-feature install lacks it (the API then logs a warning and serves the config unrendered).
-After upgrading to a Clarinet build with the external backend, refresh it once:
+**0. Prereq — refresh the OHIF template (when the runtime `app-config.js` predates this
+feature).** The serve-time renderer needs the `__CLARINET_DATASOURCES__` sentinel in the
+runtime `app-config.js`. An OHIF dir installed before the external-backend feature lacks it
+(the API then logs a warning and serves the config **unrendered**), so refresh it once on the
+first switch:
 
 ```bash
 sudo -u clarinet /opt/clarinet/venv/bin/clarinet ohif install --force-config
 ```
+
+> `--force-config` overwrites the runtime `app-config.js` with the packaged template — any
+> hand-edits to it (e.g. a customized `customizationService`) are lost; re-apply them after.
 
 **1. Stand up the Orthanc proxy** per §2 (`orthanc.json`, localhost-bound,
 `DicomWeb.Root = {base_path}/pacs-web/`) and §3 (`proxy.lua` + cache limits). Test it on a
@@ -202,12 +208,14 @@ staging stand first — this is reference config, not a turnkey artifact.
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-**3. Switch the Clarinet backend** — add to `/opt/clarinet/settings.custom.toml`:
+**3. Switch the Clarinet backend** — add the §1 settings to `/opt/clarinet/settings.custom.toml`
+(see §1 for the rationale). `dicomweb_enabled = false` is **recommended, not required** — the
+backend switches without it; it only un-mounts the now-unused builtin `/dicom-web` router:
 
 ```toml
 dicomweb_backend = "external"
 dicomweb_external_root = "/pacs-web"
-dicomweb_enabled = false
+dicomweb_enabled = false   # recommended (§1): un-mount the unused builtin /dicom-web
 ```
 
 **4. Restart the API** (workers do not need a restart for this):
@@ -236,7 +244,8 @@ images load, and a WADO-RS metadata `BulkDataURI` begins with `{base_path}/pacs-
 
 **Rollback (instant).** Set `dicomweb_backend = "builtin"` (or remove the three lines) and
 `sudo systemctl restart clarinet-api` — back to the builtin proxy. nginx/Orthanc may stay up;
-OHIF simply stops calling `/pacs-web`.
+OHIF simply stops calling `/pacs-web`. Users with an open OHIF tab should hard-refresh to drop
+a browser-cached `app-config.js`.
 
 ## Out of scope (see the design spec §8)
 
