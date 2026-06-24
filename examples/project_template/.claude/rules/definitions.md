@@ -100,7 +100,7 @@ segment_ct = RecordDef(
 | `role` (alias `role_name`) | Кто исполняет: `"doctor"`, `"auto"`, `"expert"`, или кастомная роль из `extra_roles` |
 | `min_records`, `max_records` | Сколько записей этого типа должно/может существовать на свой parent |
 | `files` | `list[FileRef(...)]` — связь с `FileDef` |
-| `data_schema` | Путь `"schemas/X.schema.json"` или inline `dict`. Путь — относительно `config_tasks_path` (то есть `plan/`) |
+| `data_schema` | Путь `"schemas/X.schema.json"` или inline `dict`. Путь — относительно `config_tasks_path` (то есть `plan/`). Общие под-схемы можно вынести в отдельный файл и подключать из любых схем через `$ref` — см. раздел `schemas` |
 | `slicer_script` | Путь к Slicer-скрипту: `"scripts/segment.py"` |
 | `slicer_result_validator` | Путь к валидатору: `"validators/segment_validator.py"` |
 | `slicer_context_hydrators` | `list[str]` — имена hydrator-функций, инжектирующих переменные в Slicer |
