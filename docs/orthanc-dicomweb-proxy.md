@@ -170,9 +170,82 @@ Notes:
 ## 5. Speed
 
 The win is Orthanc (C++) + serve-first caching; the OHIF data-source flags default to the
-fast settings for `external` (Task 2). Additionally consider: Orthanc transfer-syntax
+fast settings for `external` (see §1). Additionally consider: Orthanc transfer-syntax
 transcoding to a web-friendly syntax, and OHIF prefetch. The auth subrequest is cached, so it
 does not sit in the per-frame hot path.
+
+## 6. Operations — switching a running deployment
+
+Concrete sequence to move an **already-deployed** Clarinet instance from `builtin` to
+`external`. Paths below match the systemd deploy (`deploy/`): API unit `clarinet-api.service`,
+`WorkingDirectory=/opt/clarinet`, stand overrides in `/opt/clarinet/settings.custom.toml`
+(loaded over the project's `settings.toml`). Substitute `{base_path}` with the instance's
+`root_url` (e.g. `/liver_nir`, empty for a root deploy) and `HOST` with the public hostname,
+wherever they appear below. Steps 1–2 are one-time Orthanc/nginx setup — skip them if those are
+already in place; steps 0 and 3–5 are the per-instance switch.
+
+**0. Prereq — refresh the OHIF template (when the runtime `app-config.js` predates this
+feature).** The serve-time renderer needs the `__CLARINET_DATASOURCES__` sentinel in the
+runtime `app-config.js`. An OHIF dir installed before the external-backend feature lacks it
+(the API then logs a warning and serves the config **unrendered**), so refresh it once on the
+first switch:
+
+```bash
+sudo -u clarinet /opt/clarinet/venv/bin/clarinet ohif install --force-config
+```
+
+> `--force-config` overwrites the runtime `app-config.js` with the packaged template — any
+> hand-edits to it (e.g. a customized `customizationService`) are lost; re-apply them after.
+
+**1. Stand up the Orthanc proxy** per §2 (`orthanc.json`, localhost-bound,
+`DicomWeb.Root = {base_path}/pacs-web/`) and §3 (`proxy.lua` + cache limits). Test it on a
+staging stand first — this is reference config, not a turnkey artifact.
+
+**2. Add the nginx location** per §4 (`{base_path}/pacs-web/` + `auth_request` +
+`/_clarinet_authz` + `proxy_cache_path`), then reload:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**3. Switch the Clarinet backend** — add the §1 settings to `/opt/clarinet/settings.custom.toml`
+(see §1 for the rationale). `dicomweb_enabled = false` is **recommended, not required** — the
+backend switches without it; it only un-mounts the now-unused builtin `/dicom-web` router:
+
+```toml
+dicomweb_backend = "external"
+dicomweb_external_root = "/pacs-web"
+dicomweb_enabled = false   # recommended (§1): un-mount the unused builtin /dicom-web
+```
+
+**4. Restart the API** (workers do not need a restart for this):
+
+```bash
+sudo systemctl restart clarinet-api
+```
+
+`app-config.js` re-renders from the new settings on the next request — no `ohif install` re-run.
+
+**5. Verify.**
+
+```bash
+# OHIF now points at the external root:
+curl -s https://HOST{base_path}/ohif/app-config.js | grep -E 'qidoRoot|wadoRoot'
+#   → "{base_path}/pacs-web"
+
+# the proxied path requires a session (no cookie → 401):
+curl -s -o /dev/null -w '%{http_code}\n' https://HOST{base_path}/pacs-web/studies
+#   → 401
+```
+
+Then open a study in OHIF: QIDO/WADO requests go to `{base_path}/pacs-web/...` and return 200,
+images load, and a WADO-RS metadata `BulkDataURI` begins with `{base_path}/pacs-web/` (not
+`127.0.0.1:8042`).
+
+**Rollback (instant).** Set `dicomweb_backend = "builtin"` (or remove the three lines) and
+`sudo systemctl restart clarinet-api` — back to the builtin proxy. nginx/Orthanc may stay up;
+OHIF simply stops calling `/pacs-web`. Users with an open OHIF tab should hard-refresh to drop
+a browser-cached `app-config.js`.
 
 ## Out of scope (see the design spec §8)
 
