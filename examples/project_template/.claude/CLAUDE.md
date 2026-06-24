@@ -109,7 +109,7 @@ Rules этого проекта (автозагрузка по `paths` в frontm
 - `.claude/rules/definitions.md` — `FileDef`, `RecordDef`, паттерны путей, связи между разделами
 - `.claude/rules/workflows.md` — `@pipeline_task`, `TaskContext`, RecordFlow DSL
 - `.claude/rules/slicer.md` — hydrators + Slicer-скрипты + валидаторы (всё связано через injection vars)
-- `.claude/rules/schemas.md` — JSON Schema для record.data, conditional schemas, UI-хинты
+- `.claude/rules/schemas.md` — JSON Schema для record.data, conditional schemas, UI-хинты, общие `$defs` между файлами (`$ref`)
 - `.claude/rules/utils.md` — helper-модули, формат `.seg.nrrd`
 
 Rules фреймворка (полные reference-доки, лежат в самом репозитории clarinet — полезны как справочник):
