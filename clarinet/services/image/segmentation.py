@@ -269,6 +269,11 @@ class Segmentation(Image):
         of raising: each B component is matched to its winning A label via the
         correspondence engine, and its voxels are repainted with that label value.
 
+        Note:
+            With ``strategy=``, each distinct label value in ``other`` is treated
+            as one component (the correspondence engine keys on label values), so for
+            connected-component granularity pass an autolabeled ``Segmentation``.
+
         Args:
             other: Image or Segmentation whose ROIs to append.
             strategy: Optional ``MatchingStrategy`` (e.g.
@@ -406,7 +411,8 @@ class Segmentation(Image):
         if other.img.size == 1:
             return Segmentation(template=self)  # empty other → empty intersection
         other = self._align_other(other, resample=resample)  # type: ignore[assignment]
-        strategy = strategy or self._threshold(min_overlap, min_overlap_ratio)
+        if strategy is None:
+            strategy = self._threshold(min_overlap, min_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_IntersectionOp()(corr), self.img, other.img, relabel=False)
@@ -534,7 +540,8 @@ class Segmentation(Image):
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
         other = self._align_other(other, resample=resample)  # type: ignore[assignment]
-        strategy = strategy or self._threshold(min_overlap, min_overlap_ratio)
+        if strategy is None:
+            strategy = self._threshold(min_overlap, min_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_SymmetricDifferenceOp()(corr), self.img, other.img, relabel=True)

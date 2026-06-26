@@ -1500,6 +1500,36 @@ def test_difference_intersection_multi_component_per_edge_threshold() -> None:
 
 
 # ---------------------------------------------------------------------------
+# symmetric_difference component-level behavior (Fix 1 — reviewer)
+# ---------------------------------------------------------------------------
+
+
+def test_symmetric_difference_keeps_component_adjacent_to_match() -> None:
+    """Component-level symdiff keeps A2 even when it is physically adjacent to B.
+
+    The old union()-relabel approach merged A2 into the overlapping blob and then
+    dropped it; the new correspondence-engine approach keeps A2 because it has no
+    direct voxel overlap with B.
+
+    Layout (cols in a 1x8x1 array):
+      A1 = cols 1-2  (overlaps B at col 2)
+      A2 = cols 4-5  (no overlap with B; gap at col 3 keeps components separate)
+      B  = cols 2-3  (overlaps A1 at col 2; adjacent to A2 at col 3|4)
+    """
+    a = np.zeros((1, 8, 1), dtype=np.uint8)
+    a[0, 1:3, 0] = 1  # A1: cols 1-2 (overlaps B at col 2)
+    a[0, 4:6, 0] = 1  # A2: cols 4-5 (separate component; gap at col 3)
+    b = np.zeros((1, 8, 1), dtype=np.uint8)
+    b[0, 2:4, 0] = 1  # B: cols 2-3 (overlaps A1 at col 2; adjacent to A2 at col 3|4)
+    out = _seg(a).symmetric_difference(_seg(b))
+    assert not out.is_empty
+    # A2 (the unmatched, disagreeing component) must survive
+    assert int(out.img[0, 4, 0]) != 0 and int(out.img[0, 5, 0]) != 0
+    # col 2 was the A1<->B overlap — it is removed in matched pairs
+    assert int(out.img[0, 2, 0]) == 0
+
+
+# ---------------------------------------------------------------------------
 # append opt-in strategy (Task 7)
 # ---------------------------------------------------------------------------
 
@@ -1509,7 +1539,8 @@ def _two_label_self_and_bridging_other() -> tuple[Segmentation, Segmentation]:
     base[1:3, 1:3, 0] = 1  # self label A
     base[1:3, 7:9, 0] = 1  # self label B (separate)
     other = np.zeros((4, 10, 1), dtype=np.uint8)
-    other[1:3, 2:8, 0] = 1  # one ROI bridging both, more overlap on the left
+    other[1:3, 2:8, 0] = 1  # one ROI bridging both; equal overlap on each side (2 voxels each),
+    # winner is base label A (lowest a-label) — GreedyArgmax deterministic tie-break
     return _seg(base), _seg(other)
 
 
@@ -1524,3 +1555,6 @@ def test_append_strategy_resolves_to_winner() -> None:
     seg.append(other, strategy=GreedyArgmax(AbsoluteOverlap(), direction="b_to_a"))
     # bridging ROI merged into exactly one existing label, none added as new
     assert {int(v) for v in np.unique(seg.img)} <= {0, 1, 2}
+    # col 4, row 1 is inside the bridge ROI but not inside either base label — it must now
+    # carry one of the existing label values (1 or 2), proving the ROI was genuinely merged
+    assert int(seg.img[1, 4, 0]) in (1, 2)

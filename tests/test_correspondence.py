@@ -112,6 +112,20 @@ def test_build_graph_no_overlap_no_edges():
     assert len(g.components_a) == 1 and len(g.components_b) == 1
 
 
+def test_build_graph_centroid_distance_anisotropic_spacing():
+    # A: rows 0-1, col 1 -> centroid (0.5, 1.0, 0.0)
+    # B: rows 1-2, col 1 -> centroid (1.5, 1.0, 0.0); overlap at row 1, col 1 (1 voxel)
+    # axis-0 spacing = 2.0 -> physical delta = 1.0 * 2.0 = 2.0 mm
+    a = np.zeros((4, 4, 1), dtype=np.uint8)
+    b = np.zeros((4, 4, 1), dtype=np.uint8)
+    a[0:2, 1, 0] = 1
+    b[1:3, 1, 0] = 1
+    g = build_overlap_graph(a, b, spacing=(2.0, 1.0, 1.0))
+    assert len(g.edges) == 1
+    # centroid_a=(0.5,1,0), centroid_b=(1.5,1,0): diff=(1,0,0) -> physical=(2,0,0) -> dist=2.0
+    assert g.edges[0].centroid_distance == pytest.approx(2.0, abs=1e-6)
+
+
 def test_build_graph_centroid_containment_cshape():
     # C-shape whose center of mass lies OUTSIDE the component
     a = np.zeros((5, 5, 1), dtype=np.uint8)
