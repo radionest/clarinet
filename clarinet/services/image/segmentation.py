@@ -365,6 +365,12 @@ class Segmentation(Image):
             resample: If True, resample ``other`` onto this grid when they differ.
                 If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
+        Note:
+            Without ``strategy=``, ``min_overlap`` is checked per other-component
+            (largest single overlap), not the sum. Default (min_overlap=1) and
+            single-component cases match old behavior; raised thresholds with
+            fragmented overlap differ. Pass ``strategy=`` for full control.
+
         Returns:
             New Segmentation with only the kept labels.
         """
@@ -428,6 +434,12 @@ class Segmentation(Image):
                 the ratio check.
             resample: If True, resample ``other`` onto this grid when they differ.
                 If False (default), raises ``GeometryMismatchError`` on grid mismatch.
+
+        Note:
+            Without ``strategy=``, ``max_overlap`` is checked per other-component
+            (largest single overlap), not the sum. Default (max_overlap=0) and
+            single-component cases match old behavior; raised thresholds with
+            fragmented overlap differ. Pass ``strategy=`` for full control.
 
         Returns:
             New Segmentation with only the kept labels.

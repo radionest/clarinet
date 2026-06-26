@@ -727,11 +727,11 @@ class TestSegmentation:
         seg2.img = vol2
 
         # coverage 0.5 >= 0.1 → matched → removed from difference
-        result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.1)
+        result = seg1.difference(seg2, max_overlap_ratio=0.1)
         assert result.is_empty
 
         # coverage 0.5 < 0.8 → not matched → kept in difference
-        result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.8)
+        result = seg1.difference(seg2, max_overlap_ratio=0.8)
         assert not result.is_empty
 
     def test_add_operation(self) -> None:
@@ -1473,3 +1473,27 @@ def test_strategy_overrides_resolve_1_to_n() -> None:
     out = seg_a.difference(seg_b, strategy=GreedyArgmax(AbsoluteOverlap(), direction="a_to_b"))
     # A matched its larger-overlap partner and is dropped; the result is empty of A
     assert out.is_empty
+
+
+def test_difference_intersection_multi_component_per_edge_threshold() -> None:
+    """Per-edge threshold: one wide A overlaps two B-components (3 and 4 voxels, sum 7).
+
+    The default no-strategy path uses ThresholdMatch per edge (largest single-component
+    overlap = 4), not the summed overlap (7). This locks in the accepted behavior.
+    """
+    # One wide self-component A overlaps TWO separate other-components,
+    # with per-component overlaps 3 and 4 (sum 7). The default no-strategy
+    # path thresholds on the largest single overlap (4), not the sum (7).
+    a = np.zeros((1, 12, 1), dtype=np.uint8)
+    a[0, 0:9, 0] = 1  # A: one component, 9 voxels
+    b = np.zeros((1, 12, 1), dtype=np.uint8)
+    b[0, 0:3, 0] = 1  # B1 overlaps A by 3 voxels
+    b[0, 5:9, 0] = 1  # B2 overlaps A by 4 voxels (gap at cols 3,4 keeps B1/B2 separate)
+    seg_a, seg_b = _seg(a), _seg(b)
+    # max single-component overlap is 4 < max_overlap+1 = 6  ->  A is NOT matched
+    diff = seg_a.difference(seg_b, max_overlap=5)
+    assert not diff.is_empty  # A survives (old summed-overlap path would have removed it)
+    assert int(np.count_nonzero(diff.img)) == 9
+    # same fixture, intersection: max single overlap 4 < min_overlap 5  ->  no match -> empty
+    inter = seg_a.intersection(seg_b, min_overlap=5)
+    assert inter.is_empty
