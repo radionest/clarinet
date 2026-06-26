@@ -1612,6 +1612,32 @@ class RecordRepository(BaseRepository[Record]):
         rows = result.all()
         return {type_name: count for type_name, count in rows}  # noqa: C416
 
+    async def get_assigned_status_counts_by_user(self) -> dict[str, dict[str, int]]:
+        """Per assigned user, per status: ``{str(user_id): {status_value: count}}``.
+
+        Only records with a user assigned (``user_id IS NOT NULL``) are counted.
+        All statuses are returned; the caller selects the ones it surfaces.
+        """
+        query = (
+            select(col(Record.user_id), col(Record.status), func.count())
+            .where(col(Record.user_id).is_not(None))
+            .group_by(col(Record.user_id), col(Record.status))
+        )
+        result = await self.session.execute(query)
+        out: dict[str, dict[str, int]] = {}
+        for user_id, status, count in result.all():
+            out.setdefault(str(user_id), {})[status.value] = count
+        return out
+
+    async def count_unassigned_pending(self) -> int:
+        """Count of ``pending`` records with no user assigned (the claimable pool)."""
+        query = select(func.count()).where(
+            col(Record.user_id).is_(None),
+            col(Record.status) == RecordStatus.pending,
+        )
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
     async def get_filter_options(
         self, criteria: RecordSearchCriteria, user: User
     ) -> RecordFilterScope:
