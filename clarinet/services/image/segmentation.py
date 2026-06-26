@@ -419,9 +419,9 @@ class Segmentation(Image):
 
         A label is kept when it is *unmatched* under the strategy. Default strategy:
         ``ThresholdMatch(AbsoluteOverlap(), min_score=max_overlap + 1)`` — keeps labels
-        whose total voxel overlap is at most ``max_overlap``. When ``max_overlap_ratio``
-        is provided the ratio takes precedence: a label is removed iff
-        ``inter / size_a >= max_overlap_ratio`` (``Coverage("a")`` measure).
+        whose largest single-component overlap is at most ``max_overlap``. When
+        ``max_overlap_ratio`` is provided the ratio takes precedence: a label is
+        removed iff ``inter / size_a >= max_overlap_ratio`` (``Coverage("a")`` measure).
 
         Args:
             other: Segmentation to subtract.
