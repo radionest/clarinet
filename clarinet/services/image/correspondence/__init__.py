@@ -1,5 +1,15 @@
 """Pluggable component-correspondence engine (measure x matching x operation)."""
 
+from clarinet.services.image.correspondence.measures import (
+    AbsoluteOverlap,
+    CentroidContainment,
+    CentroidProximity,
+    Coverage,
+    Dice,
+    IoU,
+    OverlapCoefficient,
+    Weighted,
+)
 from clarinet.services.image.correspondence.model import (
     Component,
     Correspondence,
@@ -13,13 +23,21 @@ from clarinet.services.image.correspondence.model import (
 )
 
 __all__ = [
+    "AbsoluteOverlap",
+    "CentroidContainment",
+    "CentroidProximity",
     "Component",
     "Correspondence",
+    "Coverage",
+    "Dice",
+    "IoU",
     "KeepPlan",
     "MatchGroup",
     "MatchingStrategy",
     "Measure",
+    "OverlapCoefficient",
     "OverlapGraph",
     "PairStats",
     "SetOperation",
+    "Weighted",
 ]
