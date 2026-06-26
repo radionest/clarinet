@@ -98,7 +98,7 @@ def scaffold_agent_docs(
 
     dest.mkdir(parents=True, exist_ok=True)
     for md in sorted(src.glob("*.md")):
-        text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, str(docs_root))
+        text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root.as_posix())
         (dest / md.name).write_text(_with_header(text, header), encoding="utf-8")
         logger.info(f"Wrote {dest / md.name}")
     return dest
