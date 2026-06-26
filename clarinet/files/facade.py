@@ -172,9 +172,7 @@ class Files:
         mode = _template.RenderMode.STRICT if strict else _template.RenderMode.LENIENT
         return _template.render_template(pattern, fields, mode=mode)
 
-    async def checksums(
-        self, defs: list[FileDefinitionRead] | None = None
-    ) -> dict[str, str]:
+    async def checksums(self, defs: list[FileDefinitionRead] | None = None) -> dict[str, str]:
         """SHA256 of registered files, keyed by name (singular) / ``name:filename``
         (collections). Resolves each def at its own ``level``; missing files are
         omitted. Replaces both ``snapshot_checksums`` and ``compute_checksums``."""
@@ -203,9 +201,7 @@ class Files:
         return await _checksums.compute_file_checksum(path)
 
     @staticmethod
-    def checksums_changed(
-        old: dict[str, str] | None, new: dict[str, str]
-    ) -> set[str]:
+    def checksums_changed(old: dict[str, str] | None, new: dict[str, str]) -> set[str]:
         return _checksums.checksums_changed(old, new)
 
     @staticmethod

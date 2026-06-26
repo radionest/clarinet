@@ -40,9 +40,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from clarinet.exceptions.domain import AnonPathError
-from clarinet.models.base import DicomQueryLevel
-from clarinet.services.dicom.models import MODALITIES_SEPARATOR
-from clarinet.settings import settings
 from clarinet.files._anon import require_anon_or_raw
 from clarinet.files._template import (
     SUPPORTED_PLACEHOLDERS,
@@ -51,6 +48,9 @@ from clarinet.files._template import (
     render_template,
     validate_template,
 )
+from clarinet.models.base import DicomQueryLevel
+from clarinet.services.dicom.models import MODALITIES_SEPARATOR
+from clarinet.settings import settings
 
 if TYPE_CHECKING:
     from clarinet.models.patient import Patient, PatientInfo

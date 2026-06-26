@@ -142,3 +142,20 @@ def test_files_misc_classmethods():
 async def test_files_in_thread():
     from clarinet.files.facade import Files
     assert await Files.in_thread(lambda x: x + 1, 41) == 42
+
+
+def test_public_facade_import():
+    from clarinet.files import Files, AnonPathError
+    assert Files.__name__ == "Files"
+    assert issubclass(AnonPathError, Exception)
+
+
+def test_template_leaf_import_is_light():
+    import subprocess, sys
+    code = (
+        "import clarinet.files._template;"
+        "import sys;"
+        "leaked = [m for m in sys.modules if m == 'clarinet.files.facade'];"
+        "assert not leaked, sorted(m for m in sys.modules if m.startswith('clarinet.files'))"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
