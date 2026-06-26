@@ -129,11 +129,18 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
     | AdminRecordTypeEdit(_)
-    | AdminReports
-    | AdminQuartoReports
     | AdminWorkflow
     | AdminActivity -> True
     _ -> False
+  }
+}
+
+// Capability required to view a route, if any. These routes are NOT admin-gated;
+// a non-admin holding the capability may enter.
+pub fn requires_capability(route: Route) -> Option(String) {
+  case route {
+    AdminReports | AdminQuartoReports -> Some("reports")
+    _ -> None
   }
 }
 

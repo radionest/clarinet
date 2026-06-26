@@ -9,6 +9,13 @@ pub fn is_admin_user(user: User) -> Bool {
   user.is_superuser || list.contains(user.role_names, "admin")
 }
 
+/// Check whether a user holds a capability. Admins/superusers implicitly hold
+/// every capability (the server includes them too); the `is_admin_user` OR is a
+/// belt-and-suspenders guard so nav never vanishes if the field is empty.
+pub fn has_capability(user: User, capability: String) -> Bool {
+  is_admin_user(user) || list.contains(user.capabilities, capability)
+}
+
 /// Check if user has permission to act on a record
 pub fn has_record_permission(user: Option(User), record: Record) -> Bool {
   case user {
