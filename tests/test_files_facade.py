@@ -1,4 +1,7 @@
 import pytest
+from pathlib import Path
+from unittest.mock import MagicMock
+from clarinet.models.base import DicomQueryLevel
 
 
 @pytest.mark.asyncio
@@ -45,3 +48,42 @@ def test_resolver_build_working_dirs(monkeypatch):
     record.series = None; record.series_uid = None
     dirs = _resolver.build_working_dirs(record)
     assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
+
+
+def _record(monkeypatch, *, registry=None, level="SERIES"):
+    monkeypatch.setattr(
+        "clarinet.files._resolver.settings",
+        MagicMock(storage_path="/data", disk_path_template="{anon_patient_id}/{study_uid}/{series_uid}"),
+    )
+    r = MagicMock()
+    r.clarinet_storage_path = None
+    r.id = 7; r.user_id = "u1"; r.patient_id = "P1"
+    r.patient = MagicMock(id="P1", anon_id="CLARINET_1", auto_id=1)
+    r.study = MagicMock(study_uid="S", anon_uid="S"); r.study_uid = "S"
+    r.series = MagicMock(series_uid="SE", anon_uid="SE", modality="CT", series_number=1); r.series_uid = "SE"
+    r.record_type = MagicMock(level=level, file_registry=registry or [])
+    r.record_type.name = "seg"
+    r.data = {}
+    # make isinstance(r, RecordRead) true:
+    from clarinet.models.record import RecordRead
+    r.__class__ = RecordRead
+    return r
+
+
+def test_files_dir_and_dirs(monkeypatch):
+    from clarinet.files.facade import Files
+    f = Files(_record(monkeypatch))
+    assert f.dir() == Path("/data/CLARINET_1/S/SE")
+    assert f.dir(DicomQueryLevel.PATIENT) == Path("/data/CLARINET_1")
+    assert set(f.dirs()) == {DicomQueryLevel.PATIENT, DicomQueryLevel.STUDY, DicomQueryLevel.SERIES}
+
+
+def test_files_rejects_bad_type():
+    from clarinet.files.facade import Files
+    with pytest.raises(TypeError):
+        Files(object())
+
+
+def test_files_empty():
+    from clarinet.files.facade import Files
+    assert Files.empty().dirs() == {}
