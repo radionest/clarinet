@@ -12,8 +12,12 @@ from clarinet.api.app import app
 from clarinet.api.dependencies import get_report_registry
 from clarinet.models.report import ReportTemplate
 from clarinet.services.report_service import ReportRegistry
-from tests.conftest import create_authenticated_client, create_mock_superuser
-from tests.utils.urls import ADMIN_REPORTS
+from tests.conftest import (
+    create_authenticated_client,
+    create_mock_superuser,
+    create_mock_user_with_role,
+)
+from tests.utils.urls import ADMIN_REPORTS, ADMIN_STATS, AUTH_ME
 
 pytestmark = pytest.mark.asyncio
 
@@ -134,3 +138,63 @@ async def test_download_two_columns_csv(report_client: AsyncClient) -> None:
     lines = resp.content.decode("utf-8-sig").splitlines()
     assert lines[0] == "id,name"
     assert lines[1] == "1,alpha"
+
+
+@pytest_asyncio.fixture
+async def analyst_report_client(
+    test_session, test_settings, monkeypatch
+) -> AsyncGenerator[AsyncClient]:
+    """Non-admin 'analyst' client; analyst role maps to the reports capability."""
+    from clarinet.settings import settings
+
+    monkeypatch.setattr(settings, "role_capabilities", {"analyst": ["reports"]})
+    user = await create_mock_user_with_role(test_session, "analyst", email="analyst@test.com")
+    app.dependency_overrides[get_report_registry] = lambda: _make_registry()
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+    app.dependency_overrides.pop(get_report_registry, None)
+
+
+@pytest_asyncio.fixture
+async def plain_report_client(
+    test_session, test_settings, monkeypatch
+) -> AsyncGenerator[AsyncClient]:
+    """Non-admin user with no capability mapping — must be denied reports."""
+    from clarinet.settings import settings
+
+    monkeypatch.setattr(settings, "role_capabilities", {})
+    user = await create_mock_user_with_role(test_session, "doctor", email="plain@test.com")
+    app.dependency_overrides[get_report_registry] = lambda: _make_registry()
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+    app.dependency_overrides.pop(get_report_registry, None)
+
+
+async def test_analyst_can_list_reports(analyst_report_client: AsyncClient) -> None:
+    resp = await analyst_report_client.get(ADMIN_REPORTS)
+    assert resp.status_code == 200
+
+
+async def test_analyst_can_download_report(analyst_report_client: AsyncClient) -> None:
+    resp = await analyst_report_client.get(f"{ADMIN_REPORTS}/constant_one/download")
+    assert resp.status_code == 200
+
+
+async def test_analyst_denied_other_admin_endpoint(
+    analyst_report_client: AsyncClient,
+) -> None:
+    resp = await analyst_report_client.get(ADMIN_STATS)
+    assert resp.status_code == 403
+
+
+async def test_analyst_me_includes_reports_capability(
+    analyst_report_client: AsyncClient,
+) -> None:
+    resp = await analyst_report_client.get(AUTH_ME)
+    assert resp.status_code == 200
+    assert resp.json()["capabilities"] == ["reports"]
+
+
+async def test_plain_user_denied_reports(plain_report_client: AsyncClient) -> None:
+    resp = await plain_report_client.get(ADMIN_REPORTS)
+    assert resp.status_code == 403

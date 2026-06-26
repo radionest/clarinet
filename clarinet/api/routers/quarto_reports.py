@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
 
-from clarinet.api.dependencies import AdminUserDep, QuartoReportServiceDep
+from clarinet.api.dependencies import QuartoReportServiceDep, ReportsAccessDep
 from clarinet.api.routers.reports import _safe_filename
 from clarinet.models.quarto_report import (
     QuartoRenderRequest,
@@ -25,7 +25,7 @@ router = APIRouter(
 
 @router.get("", response_model=list[QuartoReportTemplate])
 async def list_quarto_reports(
-    _current_user: AdminUserDep,
+    _current_user: ReportsAccessDep,
     service: QuartoReportServiceDep,
 ) -> list[QuartoReportTemplate]:
     """List available Quarto report templates.
@@ -40,7 +40,7 @@ async def list_quarto_reports(
 async def render_quarto_report(
     name: str,
     body: QuartoRenderRequest,
-    _current_user: AdminUserDep,
+    _current_user: ReportsAccessDep,
     service: QuartoReportServiceDep,
 ) -> QuartoRenderState:
     """Start a background render and return the initial (pending) state.
@@ -55,7 +55,7 @@ async def render_quarto_report(
 async def get_quarto_render_status(
     name: str,
     render_id: str,
-    _current_user: AdminUserDep,
+    _current_user: ReportsAccessDep,
     service: QuartoReportServiceDep,
 ) -> QuartoRenderState:
     """Poll the status sidecar of a render (404 when the render is unknown)."""
@@ -66,7 +66,7 @@ async def get_quarto_render_status(
 async def download_quarto_render(
     name: str,
     render_id: str,
-    _current_user: AdminUserDep,
+    _current_user: ReportsAccessDep,
     service: QuartoReportServiceDep,
     report_format: QuartoReportFormat = Query(default=QuartoReportFormat.DOCX, alias="format"),
 ) -> FileResponse:
