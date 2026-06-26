@@ -207,3 +207,23 @@ class Files:
         old: dict[str, str] | None, new: dict[str, str]
     ) -> set[str]:
         return _checksums.checksums_changed(old, new)
+
+    @staticmethod
+    def origin_type(record: RecordRead, parent: RecordRead | None = None) -> str:
+        return _patterns.resolve_origin_type(record, parent)
+
+    @staticmethod
+    def display_anon_id(study_uid: str | None, study_anon_uid: str | None) -> str | None:
+        return _storage.compute_display_anon_id(study_uid, study_anon_uid)
+
+    @staticmethod
+    def validate_template(template: str) -> str:
+        return _template.validate_template(template)
+
+    @staticmethod
+    async def in_thread(fn: Any, *args: Any) -> Any:
+        return await _fs.run_in_fs_thread(fn, *args)
+
+    @staticmethod
+    def shutdown_io() -> None:
+        _fs.shutdown_fs_executor()

@@ -127,3 +127,18 @@ def test_files_working_dirs_classmethod(monkeypatch):
     patient = MagicMock(id="P1", anon_id="CLARINET_1", auto_id=1)
     dirs = Files.working_dirs(patient=patient, study=None, series=None, template="{anon_patient_id}/{study_uid}/{series_uid}")
     assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
+
+
+def test_files_misc_classmethods():
+    from clarinet.files.facade import Files
+    assert Files.validate_template("{patient_id}/{study_uid}/{series_uid}")
+    child = MagicMock(); child.record_type = MagicMock(); child.record_type.name = "c"
+    parent = MagicMock(); parent.record_type = MagicMock(); parent.record_type.name = "p"
+    assert Files.origin_type(child, parent) == "p"
+    assert Files.origin_type(child) == "c"
+
+
+@pytest.mark.asyncio
+async def test_files_in_thread():
+    from clarinet.files.facade import Files
+    assert await Files.in_thread(lambda x: x + 1, 41) == 42
