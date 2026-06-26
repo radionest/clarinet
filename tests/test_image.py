@@ -1438,6 +1438,31 @@ class TestSegmentMetadataRoundtrip:
         _, header = nrrd.read(str(out_path))
         assert not any(k.startswith("Segment") for k in header)  # no named segments survive
 
+    def test_symmetric_difference_drops_segment_names(self, tmp_path: Path) -> None:
+        """symmetric_difference relabels into fresh components — the source's
+        per-label names no longer map, so they must not ride along on save
+        (else a survivor inherits an unrelated name, cf. #397)."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[1:4, 1:4, 1:4] = 1  # mts: overlaps other -> matched -> dropped
+        data[6:9, 6:9, 6:9] = 2  # benign: no overlap -> kept, relabeled to 1
+        a = _make_seg(shape=shape, data=data)
+        a._nrrd_header = {
+            "Segment0_Name": "mts",
+            "Segment0_LabelValue": "1",
+            "Segment1_Name": "benign",
+            "Segment1_LabelValue": "2",
+        }
+        other_data = np.zeros(shape, dtype=np.uint8)
+        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the mts blob
+        other = _make_seg(shape=shape, data=other_data)
+
+        out_path = tmp_path / "symdiff.seg.nrrd"
+        a.symmetric_difference(other).save_as(out_path, FileType.NRRD)
+        out_data, header = nrrd.read(str(out_path))
+        assert {int(v) for v in np.unique(out_data) if v} == {1}  # only benign survives
+        assert not any(k.startswith("Segment") for k in header)  # stale names dropped
+
 
 # ---------------------------------------------------------------------------
 # Correspondence-engine adapter tests (Tasks 6)

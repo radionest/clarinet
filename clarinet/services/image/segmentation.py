@@ -545,6 +545,9 @@ class Segmentation(Image):
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_SymmetricDifferenceOp()(corr), self.img, other.img, relabel=True)
+        # relabel=True assigns fresh component indices — the source's named segments
+        # no longer map to them, so drop the segment metadata (mirrors union()).
+        out._nrrd_header = _strip_segment_metadata(out._nrrd_header)
         return out
 
     @staticmethod
