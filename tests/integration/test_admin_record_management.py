@@ -3,6 +3,7 @@
 import pytest
 import pytest_asyncio
 
+from clarinet.models.base import RecordStatus
 from tests.utils.factories import (
     make_patient,
     make_record_type,
@@ -11,7 +12,6 @@ from tests.utils.factories import (
     make_user,
     seed_record,
 )
-from clarinet.models.base import RecordStatus
 from tests.utils.urls import ADMIN_RECORD_STATUS, ADMIN_RECORD_USER, ADMIN_STATS
 
 
