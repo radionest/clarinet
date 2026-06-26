@@ -2,6 +2,7 @@
 Dependencies for FastAPI application with enhanced dependency injection.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 from urllib.parse import unquote
 from uuid import UUID
@@ -18,6 +19,7 @@ from clarinet.api.auth_config import (
 from clarinet.exceptions import ClarinetError
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import Record, User
+from clarinet.models.capability import Capability, resolve_capabilities
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.pipeline_definition_repository import PipelineDefinitionRepository
@@ -483,6 +485,28 @@ async def current_admin_user(
 
 
 AdminUserDep = Annotated[User, Depends(current_admin_user)]
+
+
+def require_capability(capability: str) -> Callable[[User], Awaitable[User]]:
+    """Build a dependency that admits a user holding ``capability``.
+
+    Superusers and the ``admin`` role implicitly hold every capability (see
+    ``resolve_capabilities``), so this is a strict generalization of
+    ``current_admin_user`` scoped to a single feature area.
+    """
+
+    async def _require(user: CurrentUserDep) -> User:
+        if capability in resolve_capabilities(user.role_names, user.is_superuser):
+            return user
+        raise HTTPException(
+            status_code=403,
+            detail=f"Missing required capability: {capability}",
+        )
+
+    return _require
+
+
+ReportsAccessDep = Annotated[User, Depends(require_capability(Capability.REPORTS))]
 
 
 async def authorize_record_access(
