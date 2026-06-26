@@ -247,7 +247,23 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
       use <- bool.lazy_guard(
         router.requires_admin_role(route) && is_non_admin,
-        fn() { redirect_to(router.Home) },
+        fn() { redirect_to(landing_route(model)) },
+      )
+
+      // Redirect users who lack the capability a route requires.
+      let lacks_capability = case router.requires_capability(route), model.user {
+        Some(cap), Some(user) -> !permissions.has_capability(user, cap)
+        Some(_), None -> True
+        None, _ -> False
+      }
+      use <- bool.lazy_guard(lacks_capability, fn() {
+        redirect_to(landing_route(model))
+      })
+
+      // Reports-only users bounce off the dashboard to their landing page.
+      use <- bool.lazy_guard(
+        route == router.Home && landing_route(model) != router.Home,
+        fn() { redirect_to(landing_route(model)) },
       )
 
       // Initialize page model for modular pages
@@ -276,8 +292,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let is_auth_page = route == router.Login || route == router.Register
           case router.requires_auth(route), new_model.user, is_auth_page {
             False, Some(_), True -> #(
-              store.set_route(new_model, router.Home),
-              modem.push(router.route_to_path(router.Home), option.None, option.None),
+              store.set_route(new_model, landing_route(new_model)),
+              modem.push(
+                router.route_to_path(landing_route(new_model)),
+                option.None,
+                option.None,
+              ),
             )
             _, _, _ -> {
               let needs_admin = router.requires_admin_role(route)
@@ -285,11 +305,23 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 Some(user) -> !permissions.is_admin_user(user)
                 None -> False
               }
-              case needs_admin && is_non_admin {
+              let lacks_capability = case
+                router.requires_capability(route),
+                new_model.user
+              {
+                Some(cap), Some(user) -> !permissions.has_capability(user, cap)
+                Some(_), None -> True
+                None, _ -> False
+              }
+              let must_redirect =
+                { needs_admin && is_non_admin }
+                || lacks_capability
+                || { route == router.Home && landing_route(new_model) != router.Home }
+              case must_redirect {
                 True -> #(
-                  store.set_route(new_model, router.Home),
+                  store.set_route(new_model, landing_route(new_model)),
                   modem.push(
-                    router.route_to_path(router.Home),
+                    router.route_to_path(landing_route(new_model)),
                     option.None,
                     option.None,
                   ),
@@ -976,6 +1008,21 @@ fn init_page(
   let model = store.Model(..model, page: wrap_page(page_model))
   let #(model, out_effs) = apply_out_msgs(model, out_msgs)
   #(model, effect.batch([effect.map(page_eff, wrap_msg), out_effs]))
+}
+
+/// Where to send a freshly-authenticated user. Non-admins who only hold the
+/// `reports` capability land on the reports page instead of the dashboard.
+fn landing_route(model: Model) -> router.Route {
+  case model.user {
+    Some(u) ->
+      case
+        !permissions.is_admin_user(u) && permissions.has_capability(u, "reports")
+      {
+        True -> router.AdminReports
+        False -> router.Home
+      }
+    None -> router.Home
+  }
 }
 
 fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
