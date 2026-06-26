@@ -404,9 +404,9 @@ class RecordRead(RecordBase):
         """
         if self.display_anon_id is not None:
             return self
-        from ..services.common.storage_paths import compute_display_anon_id
+        from clarinet.files import Files
 
-        self.display_anon_id = compute_display_anon_id(
+        self.display_anon_id = Files.display_anon_id(
             self.study_uid,
             self.study.anon_uid if self.study is not None else None,
         )
