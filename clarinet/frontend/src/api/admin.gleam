@@ -21,6 +21,25 @@ pub fn get_admin_stats() -> Promise(Result(AdminStats, ApiError)) {
   })
 }
 
+// Decoder for UserWorkload
+fn user_workload_decoder() -> decode.Decoder(models.UserWorkload) {
+  use user_id <- decode.field("user_id", decode.string)
+  use email <- decode.field("email", decode.string)
+  use inwork <- decode.field("inwork", decode.int)
+  use pending <- decode.field("pending", decode.int)
+  use blocked <- decode.field("blocked", decode.int)
+  use failed <- decode.field("failed", decode.int)
+
+  decode.success(models.UserWorkload(
+    user_id: user_id,
+    email: email,
+    inwork: inwork,
+    pending: pending,
+    blocked: blocked,
+    failed: failed,
+  ))
+}
+
 // Decoder for AdminStats
 pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
   use total_studies <- decode.field("total_studies", decode.int)
@@ -31,6 +50,11 @@ pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
     "records_by_status",
     decode.dict(decode.string, decode.int),
   )
+  use available_pending <- decode.field("available_pending", decode.int)
+  use workload_by_user <- decode.field(
+    "workload_by_user",
+    decode.list(user_workload_decoder()),
+  )
 
   decode.success(models.AdminStats(
     total_studies: total_studies,
@@ -38,6 +62,8 @@ pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
     total_users: total_users,
     total_patients: total_patients,
     records_by_status: records_by_status,
+    available_pending: available_pending,
+    workload_by_user: workload_by_user,
   ))
 }
 

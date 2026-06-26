@@ -262,6 +262,10 @@ pub type Key {
   AdminNoRoles
   AdminBadge
   AdminRecords
+  AdminWorkloadTitle
+  AdminWorkloadUser
+  AdminWorkloadTotal
+  AdminAvailablePending
   AdminNoRecords
   AdminSelectUser
   AdminSelectStatus
@@ -893,6 +897,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, AdminRecords -> "Записи"
     En, AdminNoRecords -> "No records found."
     Ru, AdminNoRecords -> "Записи не найдены."
+    En, AdminWorkloadTitle -> "Workload by user"
+    Ru, AdminWorkloadTitle -> "Загрузка по пользователям"
+    En, AdminWorkloadUser -> "User"
+    Ru, AdminWorkloadUser -> "Пользователь"
+    En, AdminWorkloadTotal -> "Total"
+    Ru, AdminWorkloadTotal -> "Всего"
+    En, AdminAvailablePending -> "Available pending"
+    Ru, AdminAvailablePending -> "Доступно (свободные)"
     En, AdminSelectUser -> "Select user..."
     Ru, AdminSelectUser -> "Выберите пользователя..."
     En, AdminSelectStatus -> "Select status..."

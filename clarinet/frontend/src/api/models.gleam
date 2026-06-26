@@ -369,6 +369,18 @@ pub type PacsStudyWithSeries {
   )
 }
 
+// Per-user assigned-record workload counts (admin dashboard)
+pub type UserWorkload {
+  UserWorkload(
+    user_id: String,
+    email: String,
+    inwork: Int,
+    pending: Int,
+    blocked: Int,
+    failed: Int,
+  )
+}
+
 // Admin dashboard statistics
 pub type AdminStats {
   AdminStats(
@@ -377,6 +389,8 @@ pub type AdminStats {
     total_users: Int,
     total_patients: Int,
     records_by_status: Dict(String, Int),
+    available_pending: Int,
+    workload_by_user: List(UserWorkload),
   )
 }
 
