@@ -1,3 +1,13 @@
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_checksum_missing_returns_none(tmp_path):
+    from clarinet.files._checksums import compute_file_checksum, checksums_changed
+    assert await compute_file_checksum(tmp_path / "nope.bin") is None
+    assert checksums_changed({"a": "1"}, {"a": "2", "b": "9"}) == {"a", "b"}
+
+
 def test_leaf_modules_import():
     from clarinet.files._template import render_template, validate_template, RenderMode
     from clarinet.files._anon import require_anon_or_raw
