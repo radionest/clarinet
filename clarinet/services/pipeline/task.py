@@ -145,12 +145,12 @@ async def _detect_file_changes(files: FileResolver, pre: dict[str, str | None]) 
     Returns:
         List of file definition names whose checksums changed.
     """
-    from clarinet.utils.file_checksums import compute_file_checksum
+    from clarinet.files import Files
 
     changed: list[str] = []
     for name, path in files.accessed_files.items():
         old = pre.get(name)
-        new = await compute_file_checksum(path) if path.is_file() else None
+        new = await Files.checksum(path) if path.is_file() else None
         if old != new:
             changed.append(name)
     return changed

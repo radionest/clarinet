@@ -61,9 +61,9 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
 
     # Idempotency: skip if file exists and is non-empty
     if output_path.is_file() and output_path.stat().st_size > 0:
-        from clarinet.utils.file_checksums import compute_file_checksum
+        from clarinet.files import Files
 
-        checksum = await compute_file_checksum(output_path)
+        checksum = await Files.checksum(output_path)
         logger.info(
             f"NIfTI already exists at {output_path} "
             f"(sha256={checksum[:12] if checksum else '?'}…), skipping conversion"
