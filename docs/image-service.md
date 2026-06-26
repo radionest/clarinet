@@ -133,7 +133,7 @@ All set operations are **label-based** (operate on connected-component labels), 
 
 #### Optional `strategy=` parameter
 
-All four named operations accept an optional `strategy: MatchingStrategy` keyword argument. When provided, it replaces the default `ThresholdMatch`-based matching with a fully configurable correspondence engine.
+The three matching-based operations (`intersection`, `difference`, `symmetric_difference`) accept an optional `strategy: MatchingStrategy` keyword argument (`union` is a plain binary OR with nothing to match). When provided, it replaces the default `ThresholdMatch`-based matching with a fully configurable correspondence engine.
 
 ```python
 from clarinet.services.image.correspondence import GreedyArgmax, AbsoluteOverlap, IoU
