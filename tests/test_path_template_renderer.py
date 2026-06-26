@@ -1,10 +1,10 @@
 """Tests for the unified type-aware path template renderer.
 
-The unified renderer (``clarinet.utils.path_template.render_template``) is the
+The unified renderer (``clarinet.files._template.render_template``) is the
 single source of truth for ``{placeholder}`` interpolation across the codebase:
 
-- ``_safe_render`` (storage_paths.py) — directory segments, STRICT mode.
-- ``resolve_pattern_from_dict`` (file_resolver.py) — file patterns, LENIENT mode.
+- ``_safe_render`` (_storage.py) — directory segments, STRICT mode.
+- ``render_template`` (LENIENT mode) — file patterns.
 - ``_resolve_custom_args`` (slicer/context.py) — Slicer args, STRICT + warn.
 
 These tests exercise the primitive directly; the three shim regression tests
@@ -18,14 +18,18 @@ from uuid import UUID
 
 import pytest
 
-from clarinet.services.common.file_resolver import resolve_pattern_from_dict
-from clarinet.services.common.storage_paths import _safe_render
-from clarinet.services.slicer.context import _resolve_custom_args
-from clarinet.utils.path_template import (
+from clarinet.files._storage import _safe_render
+from clarinet.files._template import (
     RenderMode,
     coerce_field_value,
     render_template,
 )
+from clarinet.services.slicer.context import _resolve_custom_args
+
+
+def _render_lenient(pattern: str, fields: dict) -> str:
+    """Render pattern in LENIENT mode (replaces the deleted file_resolver shim)."""
+    return render_template(pattern, fields, mode=RenderMode.LENIENT)
 
 # ── coerce_field_value ────────────────────────────────────────────────────────
 
@@ -220,27 +224,27 @@ class TestBackCompatShims:
         with pytest.raises(AnonPathError, match="unsafe rendered segment"):
             _safe_render("{x}", {"x": ""})
 
-    # ── resolve_pattern_from_dict ──
+    # ── render_template (LENIENT) — replaces the deleted file_resolver shim ──
 
     def test_resolve_pattern_simple(self):
-        assert resolve_pattern_from_dict("file_{id}.txt", {"id": 42}) == "file_42.txt"
+        assert _render_lenient("file_{id}.txt", {"id": 42}) == "file_42.txt"
 
     def test_resolve_pattern_dotted(self):
         assert (
-            resolve_pattern_from_dict("birads_{data.BIRADS_R}.txt", {"data": {"BIRADS_R": 4}})
+            _render_lenient("birads_{data.BIRADS_R}.txt", {"data": {"BIRADS_R": 4}})
             == "birads_4.txt"
         )
 
     def test_resolve_pattern_missing_returns_empty(self):
-        assert resolve_pattern_from_dict("file_{missing}.txt", {"id": 1}) == "file_.txt"
+        assert _render_lenient("file_{missing}.txt", {"id": 1}) == "file_.txt"
 
     def test_resolve_pattern_no_placeholders(self):
-        assert resolve_pattern_from_dict("static.nrrd", {"id": 1}) == "static.nrrd"
+        assert _render_lenient("static.nrrd", {"id": 1}) == "static.nrrd"
 
     def test_resolve_pattern_list_value_joined_sorted(self):
         # The user-visible fix at the file-pattern layer.
         assert (
-            resolve_pattern_from_dict(
+            _render_lenient(
                 "file_{data.modalities}.nrrd",
                 {"data": {"modalities": ["SR", "CT"]}},
             )

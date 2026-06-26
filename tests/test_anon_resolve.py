@@ -5,8 +5,8 @@ import re
 import pytest
 
 from clarinet.exceptions.domain import AnonPathError
+from clarinet.files._anon import require_anon_or_raw
 from clarinet.models.base import DicomQueryLevel
-from clarinet.utils.anon_resolve import require_anon_or_raw
 
 
 def test_anon_present_returned():

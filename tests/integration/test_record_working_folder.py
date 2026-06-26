@@ -19,12 +19,12 @@ import pytest
 import pytest_asyncio
 
 from clarinet.exceptions.domain import AnonPathError
+from clarinet.files import Files as FileRepository
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordRead, RecordType
 from clarinet.models.study import Series, Study
-from clarinet.repositories import FileRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.settings import settings
@@ -225,7 +225,7 @@ async def test_working_dir_series_level(
         / "ANON_STUDY_WF"
         / "ANON_SERIES_WF"
     )
-    assert FileRepository(record_read).working_dir == expected
+    assert FileRepository(record_read).dir() == expected
 
 
 @pytest.mark.asyncio
@@ -239,7 +239,7 @@ async def test_working_dir_study_level(test_session, patient_with_anon, study_wi
     )
 
     expected = Path(settings.storage_path) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF"
-    assert FileRepository(record_read).working_dir == expected
+    assert FileRepository(record_read).dir() == expected
 
 
 @pytest.mark.asyncio
@@ -252,7 +252,7 @@ async def test_working_dir_patient_level(test_session, patient_with_anon, rt_pat
     )
 
     expected = Path(settings.storage_path) / f"{settings.anon_id_prefix}_42"
-    assert FileRepository(record_read).working_dir == expected
+    assert FileRepository(record_read).dir() == expected
 
 
 @pytest.mark.asyncio
@@ -331,7 +331,7 @@ async def test_working_dir_uses_per_record_clarinet_storage_path_override(
     expected = (
         Path(custom_storage) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF" / "ANON_SERIES_WF"
     )
-    rendered = FileRepository(record_read).working_dir
+    rendered = FileRepository(record_read).dir()
     assert rendered == expected
     # Settings-level storage_path must NOT be used when override is set.
     assert not str(rendered).startswith(str(settings.storage_path))
@@ -352,7 +352,7 @@ async def test_working_dir_falls_back_to_settings_storage_path_when_override_non
     )
 
     assert record_read.clarinet_storage_path is None
-    rendered = FileRepository(record_read).working_dir
+    rendered = FileRepository(record_read).dir()
     assert str(rendered).startswith(str(settings.storage_path))
 
 
@@ -410,4 +410,4 @@ async def test_working_dir_respects_custom_disk_path_template(
     )
 
     expected = Path(settings.storage_path).joinpath(*expected_segments)
-    assert FileRepository(record_read).working_dir == expected
+    assert FileRepository(record_read).dir() == expected

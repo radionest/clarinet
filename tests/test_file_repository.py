@@ -1,9 +1,8 @@
-"""Unit tests for FileRepository.
+"""Unit tests for Files (ex-FileRepository).
 
 Covers construction from all four supported types (RecordRead, SeriesRead,
-StudyRead, PatientRead), the level-semantics of ``working_dir``, the
-RecordRead-only ``resolve_file`` method, and storage-path / template
-configuration.
+StudyRead, PatientRead), the level-semantics of ``dir()``, the
+``resolve`` method, and storage-path / template configuration.
 """
 
 from __future__ import annotations
@@ -15,12 +14,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from clarinet.exceptions.domain import AnonPathError
+from clarinet.files import Files as FileRepository
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.patient import PatientRead
 from clarinet.models.record import RecordRead
 from clarinet.models.study import SeriesRead, StudyRead
-from clarinet.repositories import FileRepository
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -128,75 +127,75 @@ def _make_record_mock(
 
 
 class TestFileRepositoryConstruction:
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_from_record_read_series_level(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         record = _make_record_mock(level=DicomQueryLevel.SERIES)
 
         repo = FileRepository(record)
-        assert repo.working_dir == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
-        dirs = repo.working_dirs_all()
+        assert repo.dir() == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
+        dirs = repo.dirs()
         assert DicomQueryLevel.PATIENT in dirs
         assert DicomQueryLevel.STUDY in dirs
         assert DicomQueryLevel.SERIES in dirs
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_from_record_read_study_level(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         record = _make_record_mock(level=DicomQueryLevel.STUDY)
 
         repo = FileRepository(record)
-        assert repo.working_dir == Path("/data/CLARINET_1/9.8.7.6.5")
+        assert repo.dir() == Path("/data/CLARINET_1/9.8.7.6.5")
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_from_record_read_patient_level(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         record = _make_record_mock(level=DicomQueryLevel.PATIENT)
 
         repo = FileRepository(record)
-        assert repo.working_dir == Path("/data/CLARINET_1")
-        dirs = repo.working_dirs_all()
+        assert repo.dir() == Path("/data/CLARINET_1")
+        dirs = repo.dirs()
         assert dirs == {DicomQueryLevel.PATIENT: Path("/data/CLARINET_1")}
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_from_series_read(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         series = _make_series_mock()
 
         repo = FileRepository(series)
-        assert repo.working_dir == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
-        dirs = repo.working_dirs_all()
+        assert repo.dir() == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
+        dirs = repo.dirs()
         assert set(dirs.keys()) == {
             DicomQueryLevel.PATIENT,
             DicomQueryLevel.STUDY,
             DicomQueryLevel.SERIES,
         }
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_from_study_read(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         study = _make_study_mock()
 
         repo = FileRepository(study)
-        assert repo.working_dir == Path("/data/CLARINET_1/9.8.7.6.5")
-        dirs = repo.working_dirs_all()
+        assert repo.dir() == Path("/data/CLARINET_1/9.8.7.6.5")
+        dirs = repo.dirs()
         assert set(dirs.keys()) == {DicomQueryLevel.PATIENT, DicomQueryLevel.STUDY}
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_from_patient_read(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         patient = _make_patient_mock()
 
         repo = FileRepository(patient)
-        assert repo.working_dir == Path("/data/CLARINET_1")
-        dirs = repo.working_dirs_all()
+        assert repo.dir() == Path("/data/CLARINET_1")
+        dirs = repo.dirs()
         assert dirs == {DicomQueryLevel.PATIENT: Path("/data/CLARINET_1")}
 
     def test_construct_rejects_unknown_type(self) -> None:
-        with pytest.raises(TypeError, match="FileRepository accepts"):
+        with pytest.raises(TypeError, match="Files accepts"):
             FileRepository(object())  # type: ignore[arg-type]
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_construct_record_fails_on_non_anonymized_series(
         self, mock_settings: MagicMock
     ) -> None:
@@ -218,7 +217,7 @@ class TestFileRepositoryConstruction:
 
 
 class TestFileRepositoryResolveFile:
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_resolve_file_with_file_definition(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/data"
         fd = FileDefinitionRead(
@@ -232,41 +231,43 @@ class TestFileRepositoryResolveFile:
         record = _make_record_mock(file_registry=[fd])
 
         repo = FileRepository(record)
-        path = repo.resolve_file(fd)
+        path = repo.resolve(fd)
         assert path == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/report.json")
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     @pytest.mark.parametrize(
         "factory",
         [_make_series_mock, _make_study_mock, _make_patient_mock],
     )
-    def test_resolve_file_rejects_non_record_inputs(
+    def test_resolve_with_file_def_on_non_record_inputs(
         self, mock_settings: MagicMock, factory
     ) -> None:
+        """Non-RecordRead entities have empty registry; resolve still works with explicit fd."""
         mock_settings.storage_path = "/data"
         entity = factory()
         fd = FileDefinitionRead(
             name="r", pattern="r.json", role=FileRole.OUTPUT, required=True, multiple=False
         )
         repo = FileRepository(entity)
-        with pytest.raises(TypeError, match="resolve_file requires RecordRead"):
-            repo.resolve_file(fd)
+        # Files.resolve() accepts an explicit FileDefinitionRead and uses it directly.
+        path = repo.resolve(fd)
+        assert path.name == "r.json"
 
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
 
 class TestFileRepositoryConfiguration:
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_clarinet_storage_path_override_applied(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/default"
         record = _make_record_mock(clarinet_storage_path="/custom")
 
         repo = FileRepository(record)
-        assert repo.working_dir.is_relative_to(Path("/custom"))
+        assert repo.dir().is_relative_to(Path("/custom"))
 
-    @patch("clarinet.services.common.storage_paths.settings")
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._storage.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_disk_path_template_custom_template_respected(
         self,
         mock_fr_settings: MagicMock,
@@ -285,9 +286,9 @@ class TestFileRepositoryConfiguration:
         series.study.patient.anon_id = None
 
         repo = FileRepository(series)
-        assert repo.working_dir == Path("/data/PAT001/1.2.3.4.5/1.2.3.4.5.6")
+        assert repo.dir() == Path("/data/PAT001/1.2.3.4.5/1.2.3.4.5.6")
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_anon_path_error_raises_in_strict_mode(self, mock_settings: MagicMock) -> None:
         """Series without anon_uid + default template → AnonPathError on __init__."""
         mock_settings.storage_path = "/data"
@@ -301,19 +302,21 @@ class TestFileRepositoryConfiguration:
 
 
 class TestFileRepositoryResolveWithFallback:
-    """Tests for ``FileRepository.resolve_with_fallback`` (Phase 2 helper)."""
+    """Tests for ``Files.for_reader`` (replacement for resolve_with_fallback)."""
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_anonymized_record_uses_strict_path(self, mock_settings: MagicMock) -> None:
-        """Anonymized record → strict FileRepository succeeds, no fallback."""
+        """Anonymized record → strict Files succeeds, no fallback."""
         mock_settings.storage_path = "/data"
         record = _make_record_mock(level=DicomQueryLevel.SERIES)
 
-        working_dirs, default_dir = FileRepository.resolve_with_fallback(record)
+        files = FileRepository.for_reader(record)
+        default_dir = files.dir()
+        working_dirs = files.dirs()
         assert default_dir == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
         assert default_dir == working_dirs[DicomQueryLevel.SERIES]
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_unanonymized_record_falls_back_to_raw(self, mock_settings: MagicMock) -> None:
         """Series without anon_uid → AnonPathError caught, fallback to raw UIDs."""
         mock_settings.storage_path = "/data"
@@ -321,12 +324,14 @@ class TestFileRepositoryResolveWithFallback:
         record.series.anon_uid = None
         record.series_anon_uid = None
 
-        working_dirs, default_dir = FileRepository.resolve_with_fallback(record)
+        files = FileRepository.for_reader(record)
+        default_dir = files.dir()
+        working_dirs = files.dirs()
         # Raw series_uid = "1.2.3.4.5.6" (vs anon "9.8.7.6.5.4" in strict mode)
         assert default_dir == Path("/data/CLARINET_1/9.8.7.6.5/1.2.3.4.5.6")
         assert default_dir == working_dirs[DicomQueryLevel.SERIES]
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     @pytest.mark.parametrize(
         "level",
         [DicomQueryLevel.PATIENT, DicomQueryLevel.STUDY, DicomQueryLevel.SERIES],
@@ -338,5 +343,7 @@ class TestFileRepositoryResolveWithFallback:
         mock_settings.storage_path = "/data"
         record = _make_record_mock(level=level)
 
-        working_dirs, default_dir = FileRepository.resolve_with_fallback(record)
+        files = FileRepository.for_reader(record)
+        default_dir = files.dir()
+        working_dirs = files.dirs()
         assert default_dir == working_dirs[level]

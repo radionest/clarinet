@@ -10,13 +10,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from clarinet.models.file_schema import FileDefinitionRead, FileRole
-from clarinet.utils.file_patterns import (
+from clarinet.files._patterns import (
     PLACEHOLDER_REGEX,
+    fields_from,
     glob_file_paths,
-    resolve_pattern,
-    resolve_record_field,
 )
+from clarinet.files._template import RenderMode, render_template
+from clarinet.models.file_schema import FileDefinitionRead, FileRole
+
+
+def _render_for(pattern: str, record: MagicMock, parent: MagicMock | None = None) -> str:
+    """Local helper replacing the deleted resolve_pattern(pattern, record, *parents)."""
+    return render_template(pattern, fields_from(record, parent), mode=RenderMode.LENIENT)
 
 
 @pytest.fixture
@@ -59,66 +64,76 @@ class TestPlaceholderRegex:
         assert matches == []
 
 
-class TestResolveRecordField:
-    """Tests for resolve_record_field function."""
+class TestFieldsFrom:
+    """Tests for fields_from — replacement for the deleted resolve_record_field."""
 
     def test_resolve_simple_field(self, mock_record: MagicMock) -> None:
-        """Test resolving simple record fields."""
-        assert resolve_record_field(mock_record, "id") == "42"
-        assert resolve_record_field(mock_record, "patient_id") == "patient-456"
-        assert resolve_record_field(mock_record, "study_uid") == "1.2.3.4.5"
+        """Simple top-level fields appear in the fields dict."""
+        f = fields_from(mock_record)
+        assert str(f["id"]) == "42"
+        assert f["patient_id"] == "patient-456"
+        assert f["study_uid"] == "1.2.3.4.5"
 
     def test_resolve_data_field(self, mock_record: MagicMock) -> None:
-        """Test resolving nested data fields."""
-        assert resolve_record_field(mock_record, "data.BIRADS_R") == "4"
-        assert resolve_record_field(mock_record, "data.confidence") == "0.95"
+        """Nested data fields are accessible via the data sub-dict."""
+        f = fields_from(mock_record)
+        assert str(f["data"]["BIRADS_R"]) == "4"
+        assert str(f["data"]["confidence"]) == "0.95"
 
     def test_resolve_record_type_field(self, mock_record: MagicMock) -> None:
-        """Test resolving record_type fields."""
-        assert resolve_record_field(mock_record, "record_type.name") == "ct-segmentation"
+        """record_type.name is accessible via the record_type sub-dict."""
+        f = fields_from(mock_record)
+        assert f["record_type"]["name"] == "ct-segmentation"
 
-    def test_resolve_missing_field(self) -> None:
-        """Test resolving non-existent field returns empty string."""
-        # Use a real object without the field instead of MagicMock
-        # (MagicMock auto-creates attributes)
+    def test_resolve_missing_field_renders_empty(self) -> None:
+        """A missing top-level field renders to empty string in LENIENT mode."""
+        record = MagicMock()
+        record.id = 42
+        record.user_id = None
+        record.patient_id = "P"
+        record.study_uid = None
+        record.series_uid = None
+        record.data = {}
+        record.record_type = MagicMock()
+        record.record_type.name = "t"
+        f = fields_from(record)
+        # {nonexistent} is not in the dict → renders to ""
+        result = render_template("{nonexistent}", f, mode=RenderMode.LENIENT)
+        assert result == ""
 
-        class FakeRecord:
-            id = 42
-
-        record = FakeRecord()
-        assert resolve_record_field(record, "nonexistent") == ""  # type: ignore[arg-type]
-
-    def test_resolve_missing_nested_field(self, mock_record: MagicMock) -> None:
-        """Test resolving non-existent nested field returns empty string."""
-        assert resolve_record_field(mock_record, "data.nonexistent") == ""
+    def test_resolve_missing_nested_data_field(self, mock_record: MagicMock) -> None:
+        """Missing nested data key renders to empty string."""
+        f = fields_from(mock_record)
+        result = render_template("{data.nonexistent}", f, mode=RenderMode.LENIENT)
+        assert result == ""
 
 
 class TestResolvePattern:
-    """Tests for resolve_pattern function."""
+    """Tests for the new render_for / _render_for helper (replaces resolve_pattern)."""
 
     def test_static_pattern(self, mock_record: MagicMock) -> None:
         """Test that static patterns are unchanged."""
-        result = resolve_pattern("master_model.nrrd", mock_record)
+        result = _render_for("master_model.nrrd", mock_record)
         assert result == "master_model.nrrd"
 
     def test_single_placeholder(self, mock_record: MagicMock) -> None:
         """Test pattern with single placeholder."""
-        result = resolve_pattern("result_{id}.json", mock_record)
+        result = _render_for("result_{id}.json", mock_record)
         assert result == "result_42.json"
 
     def test_multiple_placeholders(self, mock_record: MagicMock) -> None:
         """Test pattern with multiple placeholders."""
-        result = resolve_pattern("seg_{study_uid}_{id}.seg.nrrd", mock_record)
+        result = _render_for("seg_{study_uid}_{id}.seg.nrrd", mock_record)
         assert result == "seg_1.2.3.4.5_42.seg.nrrd"
 
     def test_data_placeholder(self, mock_record: MagicMock) -> None:
         """Test pattern with data field placeholder."""
-        result = resolve_pattern("birads_{data.BIRADS_R}.txt", mock_record)
+        result = _render_for("birads_{data.BIRADS_R}.txt", mock_record)
         assert result == "birads_4.txt"
 
     def test_record_type_placeholder(self, mock_record: MagicMock) -> None:
         """Test pattern with record_type field placeholder."""
-        result = resolve_pattern("{record_type.name}_output.nrrd", mock_record)
+        result = _render_for("{record_type.name}_output.nrrd", mock_record)
         assert result == "ct-segmentation_output.nrrd"
 
     def test_fallback_to_parent(self, mock_record: MagicMock) -> None:
@@ -127,16 +142,24 @@ class TestResolvePattern:
         child.user_id = None
         child.id = 99
         child.data = {}
+        child.patient_id = "P"
+        child.study_uid = "S"
+        child.series_uid = "SE"
+        child.record_type = MagicMock()
+        child.record_type.name = "child-type"
 
-        result = resolve_pattern("seg_{user_id}.nrrd", child, mock_record)
+        result = _render_for("seg_{user_id}.nrrd", child, mock_record)
         assert result == "seg_user-123.nrrd"
 
     def test_record_takes_precedence_over_parent(self, mock_record: MagicMock) -> None:
         """Test that record value is used when both record and parent have the field."""
         parent = MagicMock()
         parent.user_id = "parent-user"
+        parent.data = {}
+        parent.record_type = MagicMock()
+        parent.record_type.name = "parent-type"
 
-        result = resolve_pattern("seg_{user_id}.nrrd", mock_record, parent)
+        result = _render_for("seg_{user_id}.nrrd", mock_record, parent)
         assert result == "seg_user-123.nrrd"
 
     def test_no_parent_empty_field(self) -> None:
@@ -144,8 +167,14 @@ class TestResolvePattern:
         child = MagicMock()
         child.user_id = None
         child.id = 99
+        child.patient_id = "P"
+        child.study_uid = "S"
+        child.series_uid = "SE"
+        child.data = {}
+        child.record_type = MagicMock()
+        child.record_type.name = "child-type"
 
-        result = resolve_pattern("seg_{user_id}.nrrd", child)
+        result = _render_for("seg_{user_id}.nrrd", child)
         assert result == "seg_.nrrd"
 
 
@@ -157,10 +186,16 @@ class TestOriginType:
         child = MagicMock()
         child.record_type = MagicMock()
         child.record_type.name = "child-type"
+        child.user_id = None
+        child.id = 99
+        child.patient_id = "P"
+        child.study_uid = "S"
+        child.series_uid = "SE"
+        child.data = {}
 
         mock_record.record_type.name = "parent-type"
 
-        result = resolve_pattern("seg_{origin_type}.nrrd", child, mock_record)
+        result = _render_for("seg_{origin_type}.nrrd", child, mock_record)
         assert result == "seg_parent-type.nrrd"
 
     def test_origin_type_fallback_to_own(self) -> None:
@@ -168,8 +203,14 @@ class TestOriginType:
         record = MagicMock()
         record.record_type = MagicMock()
         record.record_type.name = "my-type"
+        record.user_id = None
+        record.id = 1
+        record.patient_id = "P"
+        record.study_uid = "S"
+        record.series_uid = "SE"
+        record.data = {}
 
-        result = resolve_pattern("seg_{origin_type}.nrrd", record)
+        result = _render_for("seg_{origin_type}.nrrd", record)
         assert result == "seg_my-type.nrrd"
 
     def test_origin_type_combined_with_regular(self, mock_record: MagicMock) -> None:
@@ -178,10 +219,15 @@ class TestOriginType:
         child.record_type = MagicMock()
         child.record_type.name = "child-type"
         child.user_id = "user-456"
+        child.id = 99
+        child.patient_id = "P"
+        child.study_uid = "S"
+        child.series_uid = "SE"
+        child.data = {}
 
         mock_record.record_type.name = "parent-type"
 
-        result = resolve_pattern(
+        result = _render_for(
             "segmentation_{origin_type}_{user_id}.seg.nrrd", child, mock_record
         )
         assert result == "segmentation_parent-type_user-456.seg.nrrd"
@@ -191,8 +237,14 @@ class TestOriginType:
         parent = MagicMock()
         parent.record_type = MagicMock()
         parent.record_type.name = "parent-type"
+        parent.user_id = "parent-user"
+        parent.id = 99
+        parent.patient_id = "P"
+        parent.study_uid = "S"
+        parent.series_uid = "SE"
+        parent.data = {}
 
-        result = resolve_pattern("{record_type.name}_output.nrrd", mock_record, parent)
+        result = _render_for("{record_type.name}_output.nrrd", mock_record, parent)
         assert result == "ct-segmentation_output.nrrd"
 
 
