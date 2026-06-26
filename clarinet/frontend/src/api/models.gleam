@@ -150,6 +150,7 @@ pub type User {
     is_superuser: Bool,
     is_verified: Bool,
     role_names: List(String),
+    capabilities: List(String),
   )
 }
 

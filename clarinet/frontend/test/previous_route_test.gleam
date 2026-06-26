@@ -19,6 +19,7 @@ fn make_user() -> models.User {
     is_superuser: False,
     is_verified: True,
     role_names: [],
+    capabilities: [],
   )
 }
 

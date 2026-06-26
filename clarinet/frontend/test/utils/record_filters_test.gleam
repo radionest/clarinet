@@ -62,6 +62,7 @@ fn make_user(id: String, email: String) -> User {
     is_superuser: False,
     is_verified: True,
     role_names: [],
+    capabilities: [],
   )
 }
 
