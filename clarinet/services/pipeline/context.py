@@ -178,7 +178,7 @@ class TaskContext:
     """Container for pipeline task context.
 
     Attributes:
-        files: Sync file path resolver.
+        files: Sync file path resolver for the task's own record.
         records: Async record query helper.
         client: Authenticated HTTP client.
         msg: The parsed pipeline message.
@@ -188,6 +188,17 @@ class TaskContext:
     records: RecordQuery
     client: ClarinetClient
     msg: PipelineMessage
+
+    def files_for(self, record: RecordRead) -> FileResolver:
+        """Build a resolver for *another* record you already hold.
+
+        ``files`` resolves the task's own record (``msg.record_id``); use
+        ``files_for`` to resolve files of a different ``RecordRead`` — a
+        parent, a reloaded copy, or a cross-patient record — without
+        reassembling the resolver by hand. For lookup-by-criteria use
+        ``records.file_path`` instead.
+        """
+        return FileResolver.from_record(record)
 
 
 async def build_task_context(msg: PipelineMessage, client: ClarinetClient) -> TaskContext:
