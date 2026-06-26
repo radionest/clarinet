@@ -126,3 +126,11 @@ class Files:
     @property
     def accessed(self) -> dict[str, Path]:
         return dict(self._accessed)
+
+    def render(self, pattern: str) -> str:
+        return _template.render_template(pattern, self._fields, mode=_template.RenderMode.LENIENT)
+
+    @staticmethod
+    def render_template(pattern: str, fields: dict[str, Any], *, strict: bool = False) -> str:
+        mode = _template.RenderMode.STRICT if strict else _template.RenderMode.LENIENT
+        return _template.render_template(pattern, fields, mode=mode)

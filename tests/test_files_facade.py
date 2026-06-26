@@ -95,3 +95,18 @@ def test_files_resolve(monkeypatch):
     f = Files(_record(monkeypatch, registry=[fd]))
     assert f.resolve("seg") == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
     assert f.accessed["seg"] == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
+
+
+def test_files_render_uses_unified_engine(monkeypatch):
+    from clarinet.files.facade import Files
+    rec = _record(monkeypatch)
+    rec.data = {"mods": ["SR", "CT"]}
+    f = Files(rec)
+    assert f.render("{data.mods}_{id}") == "CT_SR_7"  # type-aware list coercion
+
+
+def test_files_render_template_strict_raises():
+    from clarinet.files.facade import Files
+    with pytest.raises(KeyError):
+        Files.render_template("{missing}", {}, strict=True)
+    assert Files.render_template("{missing}", {}) == ""
