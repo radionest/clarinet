@@ -23,16 +23,28 @@ from clarinet.services.image.correspondence.model import (
     PairStats,
     SetOperation,
 )
+from clarinet.services.image.correspondence.operations import (
+    AppendMerge,
+    DeleteMatched,
+    Difference,
+    Intersection,
+    SymmetricDifference,
+    render,
+)
 
 __all__ = [
     "AbsoluteOverlap",
+    "AppendMerge",
     "CentroidContainment",
     "CentroidProximity",
     "Component",
     "Correspondence",
     "Coverage",
+    "DeleteMatched",
     "Dice",
+    "Difference",
     "GreedyArgmax",
+    "Intersection",
     "IoU",
     "KeepPlan",
     "MatchGroup",
@@ -42,8 +54,10 @@ __all__ = [
     "OverlapGraph",
     "PairStats",
     "SetOperation",
+    "SymmetricDifference",
     "ThresholdMatch",
     "Weighted",
     "build_overlap_graph",
     "correspond",
+    "render",
 ]

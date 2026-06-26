@@ -15,6 +15,7 @@ from clarinet.services.image.correspondence.measures import (
 from clarinet.services.image.correspondence.model import (
     Component,
     Correspondence,
+    KeepPlan,
     MatchGroup,
     OverlapGraph,
     PairStats,
@@ -181,3 +182,43 @@ def test_unmatched_both_sides():
     corr = ThresholdMatch(AbsoluteOverlap(), min_score=1.0)(g)
     assert corr.matches == ()
     assert corr.unmatched_a == (1,) and corr.unmatched_b == (2,)
+
+
+from clarinet.services.image.correspondence.operations import (  # noqa: E402
+    AppendMerge,
+    DeleteMatched,
+    Difference,
+    Intersection,
+    SymmetricDifference,
+    render,
+)
+
+
+def _corr(matches=(), ua=(), ub=()):
+    return Correspondence(matches=tuple(matches), unmatched_a=tuple(ua), unmatched_b=tuple(ub))
+
+
+def test_operations_plans():
+    c = _corr(matches=[MatchGroup((1,), (1,), 9.0)], ua=(2,), ub=(3,))
+    assert SymmetricDifference()(c) == KeepPlan(from_a=((2, 0),), from_b=((3, 0),))
+    assert Difference()(c) == KeepPlan(from_a=((2, 0),), from_b=())
+    assert Intersection()(c) == KeepPlan(from_a=((1, 0),), from_b=())
+    assert DeleteMatched(side="b")(c) == KeepPlan(from_a=(), from_b=((3, 0),))
+
+
+def test_append_merge_targets_winner_label():
+    c = _corr(matches=[MatchGroup((5,), (2, 3), 8.0)])
+    assert AppendMerge()(c) == KeepPlan(from_a=(), from_b=((2, 5), (3, 5)))
+
+
+def test_render_relabel_and_overlay():
+    a = np.zeros((1, 5, 1), dtype=np.uint8)
+    b = np.zeros((1, 5, 1), dtype=np.uint8)
+    a[0, 0, 0] = 7  # source label 7 in A
+    b[0, 4, 0] = 3  # source label 3 in B
+    # symmetric-difference style: relabel both to sequential, blank canvas
+    out = render(KeepPlan(from_a=((7, 0),), from_b=((3, 0),)), a, b, relabel=True)
+    assert sorted(int(v) for v in np.unique(out)) == [0, 1, 2]
+    # append style: overlay B onto a copy of A with an explicit target value
+    out2 = render(KeepPlan(from_a=(), from_b=((3, 7),)), a, b, base=a, relabel=False)
+    assert int(out2[0, 0, 0]) == 7 and int(out2[0, 4, 0]) == 7
