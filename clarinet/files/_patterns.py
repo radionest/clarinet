@@ -28,7 +28,11 @@ class _PatternedFile(Protocol):
     pattern: str
 
 
-PLACEHOLDER_REGEX = re.compile(r"\{([^}]+)\}")
+# Same placeholder grammar as ``_template.render_template`` so a collection's
+# glob wildcards and a singular file's render agree on what counts as a
+# placeholder — a name the renderer would reject (e.g. a leading digit) is not
+# silently wildcarded by glob while left literal by resolve/checksums.
+PLACEHOLDER_REGEX = re.compile(r"\{([a-zA-Z_][\w.]*)\}")
 
 
 def resolve_origin_type(record: RecordRead, parent: RecordRead | None = None) -> str:
@@ -74,6 +78,9 @@ def fields_from(record: RecordRead, parent: RecordRead | None = None) -> dict[st
     when the record's own value is missing/empty; ``origin_type`` uses the
     inverted virtual-field priority via :func:`resolve_origin_type`; the
     ``data`` sub-dict is parent-then-record merged for ``{data.FIELD}`` access.
+    That dict-merge means a present-but-empty ``record.data[FIELD]`` wins its key
+    and does NOT fall back to ``parent`` — unlike the scalar fields below, which
+    fall back when the record's own value is ``None`` / ``""``.
     Coercion (lists → ``"CT_SR"``) happens later in ``_template.render``.
     """
 
