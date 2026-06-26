@@ -1,9 +1,9 @@
 // Unit tests for back-navigation on the record execute page: NavigateBack,
 // DeleteResult, CompleteRecordResult and FormSubmitSuccess follow
-// shared.previous_route when set and fall back to the Records list (or stay
-// on the page for auto-return) when entered by direct URL. Effects are not
-// executed — only the returned OutMsg list is asserted (same approach as
-// unassign_user_test).
+// shared.previous_route when set and, on direct URL entry, fall back to the
+// admin-gated Records list for admins / Home for non-admins (or stay on the
+// page for auto-return). Effects are not executed — only the returned OutMsg
+// list is asserted (same approach as unassign_user_test).
 import api/models
 import api/types
 import cache
@@ -18,6 +18,26 @@ import router
 import shared
 import utils/load_status
 
+// Default fixture user is an admin: the record-execute page is auth-gated, so
+// a logged-out user never reaches it, and the direct-entry "Back" fallback is
+// admin-aware — only admins fall back to the admin-gated Records list, while
+// non-admins fall back to Home (see `back_target` in execute.gleam, #401).
+fn make_admin_user() -> models.User {
+  models.User(
+    id: "admin",
+    email: "admin@example.com",
+    is_active: True,
+    is_superuser: True,
+    is_verified: True,
+    role_names: [],
+    capabilities: [],
+  )
+}
+
+fn make_non_admin_user() -> models.User {
+  models.User(..make_admin_user(), id: "u1", is_superuser: False)
+}
+
 fn make_shared(previous_route: Option(router.Route)) -> shared.Shared {
   make_shared_with_cache(previous_route, cache.init())
 }
@@ -26,8 +46,16 @@ fn make_shared_with_cache(
   previous_route: Option(router.Route),
   c: cache.Model,
 ) -> shared.Shared {
+  make_shared_for_user(Some(make_admin_user()), previous_route, c)
+}
+
+fn make_shared_for_user(
+  user: Option(models.User),
+  previous_route: Option(router.Route),
+  c: cache.Model,
+) -> shared.Shared {
   shared.Shared(
-    user: None,
+    user: user,
     route: router.RecordDetail("42"),
     previous_route: previous_route,
     project_name: "",
@@ -101,6 +129,31 @@ pub fn navigate_back_falls_back_to_records_test() {
       make_shared(None),
     )
   out |> should.equal([shared.Navigate(router.Records(dict.new()))])
+}
+
+pub fn navigate_back_non_admin_falls_back_to_home_test() {
+  // The Records list is admin-gated, so a non-admin entering by direct URL
+  // falls back to Home instead (mirror of the admin case above).
+  let #(_model, _eff, out) =
+    execute.update(
+      make_execute_model("42"),
+      execute.NavigateBack,
+      make_shared_for_user(Some(make_non_admin_user()), None, cache.init()),
+    )
+  out |> should.equal([shared.Navigate(router.Home)])
+}
+
+pub fn navigate_back_logged_out_falls_back_to_home_test() {
+  // Defensive: a logged-out user shouldn't reach this auth-gated page, but
+  // `back_target`'s `None` user branch still falls back to Home rather than
+  // the admin-gated Records list.
+  let #(_model, _eff, out) =
+    execute.update(
+      make_execute_model("42"),
+      execute.NavigateBack,
+      make_shared_for_user(None, None, cache.init()),
+    )
+  out |> should.equal([shared.Navigate(router.Home)])
 }
 
 // --- CompleteRecordResult ---
