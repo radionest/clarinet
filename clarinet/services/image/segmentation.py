@@ -270,9 +270,12 @@ class Segmentation(Image):
         correspondence engine, and its voxels are repainted with that label value.
 
         Note:
-            With ``strategy=``, each distinct label value in ``other`` is treated
-            as one component (the correspondence engine keys on label values), so for
-            connected-component granularity pass an autolabeled ``Segmentation``.
+            The default path (no ``strategy=``) groups ``other`` by connected component
+            via ``label(other.img)``, so each blob is evaluated independently. With
+            ``strategy=``, the correspondence engine keys on label values instead: each
+            distinct label in ``other`` is treated as one unit. These coincide for an
+            autolabeled Segmentation (one component per label) but differ for a
+            multi-blob binary mask where all blobs share label 1.
 
         Args:
             other: Image or Segmentation whose ROIs to append.
@@ -414,6 +417,7 @@ class Segmentation(Image):
         if strategy is None:
             strategy = self._threshold(min_overlap, min_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+        # autolabel=False so render's labels survive the img setter (unlike union, which relabels to a binary mask)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_IntersectionOp()(corr), self.img, other.img, relabel=False)
         return out
@@ -488,6 +492,7 @@ class Segmentation(Image):
             else:
                 strategy = ThresholdMatch(AbsoluteOverlap(), min_score=float(max_overlap + 1))
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+        # autolabel=False so render's labels survive the img setter (unlike union, which relabels to a binary mask)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_DifferenceOp()(corr), self.img, other.img, relabel=False)
         return out
@@ -543,6 +548,7 @@ class Segmentation(Image):
         if strategy is None:
             strategy = self._threshold(min_overlap, min_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+        # autolabel=False so render's labels survive the img setter (unlike union, which relabels to a binary mask)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_SymmetricDifferenceOp()(corr), self.img, other.img, relabel=True)
         # relabel=True assigns fresh component indices — the source's named segments

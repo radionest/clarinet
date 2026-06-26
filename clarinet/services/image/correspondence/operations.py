@@ -67,6 +67,7 @@ def render(
     from ``b``. Returns uint8 when ``a`` is uint8.
     """
     out = np.zeros_like(a) if base is None else base.copy()
+    max_value = int(np.iinfo(out.dtype).max)
     next_label = int(out.max()) + 1
     for source, entries in ((a, plan.from_a), (b, plan.from_b)):
         for src_label, out_value in entries:
@@ -77,5 +78,10 @@ def render(
                 next_label += 1
             else:
                 value = int(src_label)
+            if value > max_value:
+                raise ValueError(
+                    f"render: label {value} exceeds the {out.dtype} maximum "
+                    f"({max_value}); too many components to relabel."
+                )
             out[source == src_label] = value
     return out

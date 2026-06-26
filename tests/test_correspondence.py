@@ -236,3 +236,12 @@ def test_render_relabel_and_overlay():
     # append style: overlay B onto a copy of A with an explicit target value
     out2 = render(KeepPlan(from_a=(), from_b=((3, 7),)), a, b, base=a, relabel=False)
     assert int(out2[0, 0, 0]) == 7 and int(out2[0, 4, 0]) == 7
+
+
+def test_render_raises_on_uint8_overflow():
+    a = np.zeros((1, 1, 1), dtype=np.uint8)
+    a[0, 0, 0] = 7
+    b = np.zeros((1, 1, 1), dtype=np.uint8)
+    base = np.full((1, 1, 1), 255, dtype=np.uint8)  # next_label starts at 256
+    with pytest.raises(ValueError, match="exceeds"):
+        render(KeepPlan(from_a=((7, 0),), from_b=()), a, b, base=base, relabel=True)

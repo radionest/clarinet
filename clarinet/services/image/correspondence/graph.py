@@ -14,16 +14,32 @@ from clarinet.services.image.correspondence.model import (
 
 
 def _components(labelmap: np.ndarray) -> dict[int, Component]:
-    """Per-label size and voxel-index centroid. O(N*L) -- fine for typical label counts."""
+    """Per-label voxel count and voxel-index centroid in a single pass.
+
+    O(ndim * N) via weighted bincount, independent of the label count -- the
+    previous per-label np.argwhere scan was O(L * N).
+    """
+    flat = labelmap.ravel()
+    sizes = np.bincount(flat)
+    n_labels = int(sizes.shape[0])
+    ndim = labelmap.ndim
+    coord_sums = np.zeros((ndim, n_labels), dtype=float)
+    for ax in range(ndim):
+        shape = [1] * ndim
+        shape[ax] = labelmap.shape[ax]
+        coord = np.broadcast_to(
+            np.arange(labelmap.shape[ax]).reshape(shape), labelmap.shape
+        ).ravel()
+        coord_sums[ax] = np.bincount(flat, weights=coord, minlength=n_labels)
     out: dict[int, Component] = {}
-    for lbl in np.unique(labelmap):
-        if lbl == 0:
+    for lbl in range(1, n_labels):
+        size = int(sizes[lbl])
+        if size == 0:
             continue
-        coords = np.argwhere(labelmap == lbl)
-        out[int(lbl)] = Component(
-            label=int(lbl),
-            size=int(coords.shape[0]),
-            centroid=tuple(float(x) for x in coords.mean(axis=0)),
+        out[lbl] = Component(
+            label=lbl,
+            size=size,
+            centroid=tuple(float(coord_sums[ax, lbl] / size) for ax in range(ndim)),
         )
     return out
 
