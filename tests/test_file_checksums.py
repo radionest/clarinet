@@ -12,10 +12,6 @@ import pytest
 from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
-from clarinet.utils.file_checksums import (
-    checksums_changed,
-    compute_file_checksum,
-)
 
 
 @pytest.fixture
@@ -46,7 +42,7 @@ def mock_record() -> MagicMock:
 
 
 class TestComputeFileChecksum:
-    """Tests for compute_file_checksum function."""
+    """Tests for Files.checksum function."""
 
     @pytest.mark.asyncio
     async def test_checksum_of_existing_file(self, tmp_path: Path) -> None:
@@ -54,14 +50,14 @@ class TestComputeFileChecksum:
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello world")
 
-        result = await compute_file_checksum(test_file)
+        result = await Files.checksum(test_file)
         assert result is not None
         assert len(result) == 64  # SHA256 hex length
 
     @pytest.mark.asyncio
     async def test_checksum_of_missing_file(self, tmp_path: Path) -> None:
         """Test computing checksum of a missing file returns None."""
-        result = await compute_file_checksum(tmp_path / "nonexistent.txt")
+        result = await Files.checksum(tmp_path / "nonexistent.txt")
         assert result is None
 
     @pytest.mark.asyncio
@@ -72,8 +68,8 @@ class TestComputeFileChecksum:
         file1.write_text("identical content")
         file2.write_text("identical content")
 
-        checksum1 = await compute_file_checksum(file1)
-        checksum2 = await compute_file_checksum(file2)
+        checksum1 = await Files.checksum(file1)
+        checksum2 = await Files.checksum(file2)
         assert checksum1 == checksum2
 
     @pytest.mark.asyncio
@@ -84,8 +80,8 @@ class TestComputeFileChecksum:
         file1.write_text("content A")
         file2.write_text("content B")
 
-        checksum1 = await compute_file_checksum(file1)
-        checksum2 = await compute_file_checksum(file2)
+        checksum1 = await Files.checksum(file1)
+        checksum2 = await Files.checksum(file2)
         assert checksum1 != checksum2
 
 
@@ -136,37 +132,37 @@ class TestComputeChecksums:
 
 
 class TestChecksumsChanged:
-    """Tests for checksums_changed function."""
+    """Tests for Files.checksums_changed function."""
 
     def test_detects_new_files(self) -> None:
         """Test detecting new files."""
         old: dict[str, str] = {}
         new = {"file1": "abc123"}
-        changed = checksums_changed(old, new)
+        changed = Files.checksums_changed(old, new)
         assert changed == {"file1"}
 
     def test_detects_changed_files(self) -> None:
         """Test detecting changed files."""
         old = {"file1": "abc123"}
         new = {"file1": "def456"}
-        changed = checksums_changed(old, new)
+        changed = Files.checksums_changed(old, new)
         assert changed == {"file1"}
 
     def test_no_changes(self) -> None:
         """Test no changes when checksums match."""
         old = {"file1": "abc123", "file2": "def456"}
         new = {"file1": "abc123", "file2": "def456"}
-        changed = checksums_changed(old, new)
+        changed = Files.checksums_changed(old, new)
         assert changed == set()
 
     def test_handles_none_old(self) -> None:
         """Test that None old checksums are treated as empty."""
-        changed = checksums_changed(None, {"file1": "abc123"})
+        changed = Files.checksums_changed(None, {"file1": "abc123"})
         assert changed == {"file1"}
 
     def test_mixed_changes(self) -> None:
         """Test mix of new, changed, and unchanged files."""
         old = {"unchanged": "aaa", "changed": "bbb"}
         new = {"unchanged": "aaa", "changed": "ccc", "new_file": "ddd"}
-        changed = checksums_changed(old, new)
+        changed = Files.checksums_changed(old, new)
         assert changed == {"changed", "new_file"}
