@@ -9,7 +9,7 @@ Lifecycle:
     - Started in ``app.py`` lifespan when ``dicom_retrieve_mode == "c-move"``
     - Stopped in the ``finally`` shutdown block
     - Module-level ``get_storage_scp()`` / ``shutdown_storage_scp()`` follow
-      the re-create-after-shutdown pattern (see ``clarinet/utils/fs.py``).
+      the re-create-after-shutdown pattern (see ``clarinet/files/_fs.py``).
 """
 
 from __future__ import annotations
