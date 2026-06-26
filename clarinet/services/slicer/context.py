@@ -16,15 +16,13 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
 from clarinet.models.record import RecordRead
-from clarinet.services.common.file_resolver import FileResolver
 from clarinet.services.slicer.context_hydration import hydrate_slicer_context
 from clarinet.settings import settings
-from clarinet.utils.file_patterns import resolve_origin_type
 from clarinet.utils.logger import logger
-from clarinet.utils.path_template import RenderMode, render_template
 
 
 def build_template_vars(record: RecordRead) -> dict[str, Any]:
@@ -86,7 +84,7 @@ def _resolve_custom_args(
     resolved: dict[str, str] = {}
     for key, template in args.items():
         try:
-            resolved[key] = render_template(template, format_vars, mode=RenderMode.STRICT)
+            resolved[key] = Files.render_template(template, format_vars, strict=True)
         except (KeyError, ValueError) as exc:
             logger.warning(f"Slicer arg '{key}': unresolved template '{template}' — {exc}")
     return resolved
@@ -165,9 +163,10 @@ def build_slicer_context(
     # Slicer is the UI layer for the radiologist — open a record even if
     # anonymization has not propagated yet (PACS still answers under the
     # raw UID in that window). Backend tasks must NOT mirror this — they
-    # use FileResolver.build_working_dirs in safe-by-default mode.
+    # use Files(...) in strict mode (default).
     context["record_id"] = record.id
-    working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
+    f = Files(record, parent=parent, fallback=True)
+    working_dirs = f.dirs()
     record_level = DicomQueryLevel(level) if isinstance(level, str) else level
     context["working_folder"] = str(working_dirs.get(record_level, ""))
 
@@ -195,19 +194,10 @@ def build_slicer_context(
 
     # -- Layer 2: File paths from file_registry --
     if file_registry:
-        fields = FileResolver.build_fields(record)
-        if parent is not None:
-            fields["origin_type"] = resolve_origin_type(record, parent)
-        resolver = FileResolver(
-            working_dirs=working_dirs,
-            record_type_level=record_level,
-            file_registry=file_registry,
-            fields=fields,
-        )
         unresolved: list[str] = []
         for fd in file_registry:
             try:
-                context[fd.name] = str(resolver.resolve(fd))
+                context[fd.name] = str(f.resolve(fd))
             except (KeyError, ValueError) as exc:
                 logger.warning(f"Slicer context: could not resolve file '{fd.name}' — {exc}")
                 unresolved.append(fd.name)
