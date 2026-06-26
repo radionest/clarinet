@@ -771,9 +771,9 @@ class TestResolveDcmAnonDir:
     ) -> None:
         from datetime import UTC, datetime
 
+        from clarinet.files._storage import build_context, render_working_folder
         from clarinet.models.base import DicomQueryLevel
         from clarinet.models.study import Series, Study
-        from clarinet.services.common.storage_paths import build_context, render_working_folder
         from tests.utils.factories import make_patient
 
         patient = make_patient("RESOLVE_PAT_01", "Resolve", auto_id=303)

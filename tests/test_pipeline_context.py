@@ -1,6 +1,6 @@
 """Unit tests for Pipeline TaskContext system.
 
-Tests FileResolver, RecordQuery, TaskContext, build_task_context, pipeline_task
+Tests Files, RecordQuery, TaskContext, build_task_context, pipeline_task
 decorator, sync wrappers, and auto_submit — no RabbitMQ, no DB.
 """
 
@@ -14,12 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from clarinet.exceptions.domain import AnonPathError, PipelineStepError
-from clarinet.files import Files
+from clarinet.files import Files, _patterns, _resolver
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.models.record import RecordRead
 from clarinet.models.study import SeriesRead, StudyRead
-from clarinet.services.common.file_resolver import FileResolver
 from clarinet.services.pipeline.context import (
     RecordQuery,
     TaskContext,
@@ -167,18 +166,18 @@ class TestResolvePatternFromDict:
         assert result == "static_name.nrrd"
 
 
-# ── FileResolver.build_working_dirs ─────────────────────────────────────────
+# ── build_working_dirs (Files(record)._dirs) ─────────────────────────────────
 
 
 class TestBuildWorkingDirs:
-    """Tests for FileResolver.build_working_dirs."""
+    """Tests for working-dir computation via Files(record)."""
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_series_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.SERIES)
 
-        dirs = FileResolver.build_working_dirs(record)
+        dirs = Files(record)._dirs
 
         assert DicomQueryLevel.PATIENT in dirs
         assert DicomQueryLevel.STUDY in dirs
@@ -187,20 +186,20 @@ class TestBuildWorkingDirs:
         assert dirs[DicomQueryLevel.STUDY] == Path("/data/CLARINET_1/9.8.7.6.5")
         assert dirs[DicomQueryLevel.SERIES] == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_study_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.STUDY)
         record.series = None
         record.series_uid = None
 
-        dirs = FileResolver.build_working_dirs(record)
+        dirs = Files(record)._dirs
 
         assert DicomQueryLevel.PATIENT in dirs
         assert DicomQueryLevel.STUDY in dirs
         assert DicomQueryLevel.SERIES not in dirs
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_patient_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.PATIENT)
@@ -209,94 +208,94 @@ class TestBuildWorkingDirs:
         record.study_uid = None
         record.series_uid = None
 
-        dirs = FileResolver.build_working_dirs(record)
+        dirs = Files(record)._dirs
 
         assert DicomQueryLevel.PATIENT in dirs
         assert DicomQueryLevel.STUDY not in dirs
         assert DicomQueryLevel.SERIES not in dirs
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_missing_patient_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
         record.patient.anon_id = None
 
         with pytest.raises(AnonPathError, match="Patient has no anon_id"):
-            FileResolver.build_working_dirs(record)
+            Files(record)
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_missing_patient_anon_with_fallback_uses_raw(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
         record.patient.anon_id = None
 
-        dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
+        dirs = Files(record, fallback=True)._dirs
 
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/PAT001")
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_missing_study_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
         record.study.anon_uid = None
 
         with pytest.raises(AnonPathError, match="Study has no anon_uid"):
-            FileResolver.build_working_dirs(record)
+            Files(record)
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_missing_series_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
         record.series.anon_uid = None
 
         with pytest.raises(AnonPathError, match="Series has no anon_uid"):
-            FileResolver.build_working_dirs(record)
+            Files(record)
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_custom_storage_path(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/default"
         record = _make_record_read()
         record.clarinet_storage_path = "/custom"
 
-        dirs = FileResolver.build_working_dirs(record)
+        dirs = Files(record)._dirs
 
         assert str(dirs[DicomQueryLevel.PATIENT]).startswith(str(Path("/custom")))
 
 
-# ── FileResolver.build_working_dirs_from_patient ───────────────────────────
+# ── build_working_dirs_from_patient (_resolver leaf) ───────────────────────
 
 
 class TestBuildWorkingDirsFromPatient:
-    """Tests for FileResolver.build_working_dirs_from_patient (Phase 1)."""
+    """Tests for _resolver.build_working_dirs_from_patient."""
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_returns_patient_only(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         patient = _make_patient()
 
-        dirs = FileResolver.build_working_dirs_from_patient(patient)
+        dirs = _resolver.build_working_dirs_from_patient(patient)
 
         assert dirs == {DicomQueryLevel.PATIENT: Path("/data/CLARINET_1")}
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_strict_mode_raises_on_unanon(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         patient = _make_patient(anon_id=None)
 
         with pytest.raises(AnonPathError, match="Patient has no anon_id"):
-            FileResolver.build_working_dirs_from_patient(patient)
+            _resolver.build_working_dirs_from_patient(patient)
 
 
-# ── FileResolver.build_fields ───────────────────────────────────────────────
+# ── fields_from (_patterns leaf / Files(record)._fields) ────────────────────
 
 
 class TestBuildFields:
-    """Tests for FileResolver.build_fields."""
+    """Tests for _patterns.fields_from (replaces FileResolver.build_fields)."""
 
     def test_extracts_basic_fields(self):
         record = _make_record_read(record_id=42, patient_id="P001")
-        fields = FileResolver.build_fields(record)
+        fields = _patterns.fields_from(record)
 
         assert fields["id"] == 42
         assert fields["patient_id"] == "P001"
@@ -306,20 +305,20 @@ class TestBuildFields:
 
     def test_flattens_data(self):
         record = _make_record_read(data={"BIRADS_R": 4, "side": "left"})
-        fields = FileResolver.build_fields(record)
+        fields = _patterns.fields_from(record)
 
         assert fields["data"]["BIRADS_R"] == 4
         assert fields["data"]["side"] == "left"
 
     def test_includes_record_type_name(self):
         record = _make_record_read()
-        fields = FileResolver.build_fields(record)
+        fields = _patterns.fields_from(record)
 
         assert fields["record_type"]["name"] == "ct-segmentation"
 
     def test_includes_origin_type(self):
         record = _make_record_read()
-        fields = FileResolver.build_fields(record)
+        fields = _patterns.fields_from(record)
 
         assert fields["origin_type"] == "ct-segmentation"
 
@@ -331,32 +330,17 @@ class TestFromRecord:
     """Tests for FileResolver.from_record() and TaskContext.files_for()."""
 
     @patch("clarinet.files._resolver.settings")
-    @patch("clarinet.services.common.file_resolver.settings")
-    def test_resolves_like_manual_construction(
-        self, mock_fr_settings: MagicMock, mock_files_settings: MagicMock
-    ):
-        mock_fr_settings.storage_path = "/data"
+    def test_resolves_like_manual_construction(self, mock_files_settings: MagicMock):
         mock_files_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg_{id}.nrrd")
         record = _make_record_read(record_id=7, file_registry=[fd])
 
         auto = Files(record)
-        manual = FileResolver(
-            working_dirs=FileResolver.build_working_dirs(record),
-            record_type_level=record.record_type.level,
-            file_registry=record.record_type.file_registry or [],
-            fields=FileResolver.build_fields(record),
-        )
 
-        assert auto.resolve("seg") == manual.resolve("seg")
         assert auto.resolve("seg") == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/seg_7.nrrd")
 
     @patch("clarinet.files._resolver.settings")
-    @patch("clarinet.services.common.file_resolver.settings")
-    def test_files_for_builds_for_another_record(
-        self, mock_fr_settings: MagicMock, mock_files_settings: MagicMock
-    ):
-        mock_fr_settings.storage_path = "/data"
+    def test_files_for_builds_for_another_record(self, mock_files_settings: MagicMock):
         mock_files_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg.nrrd")
         own = _make_record_read(record_id=1, file_registry=[fd])
@@ -389,13 +373,9 @@ class TestFromRecord:
         )
 
     @patch("clarinet.files._resolver.settings")
-    @patch("clarinet.services.common.file_resolver.settings")
-    def test_sync_files_for(
-        self, mock_fr_settings: MagicMock, mock_files_settings: MagicMock
-    ):
+    def test_sync_files_for(self, mock_files_settings: MagicMock):
         from clarinet.services.pipeline.sync_wrappers import SyncTaskContext
 
-        mock_fr_settings.storage_path = "/data"
         mock_files_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg.nrrd")
         own = _make_record_read(record_id=1, file_registry=[fd])
@@ -437,11 +417,11 @@ class TestFromRecord:
             resolver.resolve("anything")
 
 
-# ── FileResolver.dir ────────────────────────────────────────────────────────
+# ── Files.dir ───────────────────────────────────────────────────────────────
 
 
 class TestFileResolverDir:
-    """Tests for FileResolver.dir()."""
+    """Tests for Files.dir()."""
 
     def test_default_level(self):
         dirs = {
@@ -449,12 +429,9 @@ class TestFileResolverDir:
             DicomQueryLevel.STUDY: Path("/data/P1/S1"),
             DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1"),
         }
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = dirs
+        resolver._level = DicomQueryLevel.SERIES
         assert resolver.dir() == Path("/data/P1/S1/SE1")
 
     def test_explicit_level(self):
@@ -463,150 +440,118 @@ class TestFileResolverDir:
             DicomQueryLevel.STUDY: Path("/data/P1/S1"),
             DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1"),
         }
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = dirs
+        resolver._level = DicomQueryLevel.SERIES
         assert resolver.dir(DicomQueryLevel.PATIENT) == Path("/data/P1")
 
     def test_missing_level_raises(self):
         dirs = {DicomQueryLevel.PATIENT: Path("/data/P1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.PATIENT,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = dirs
+        resolver._level = DicomQueryLevel.PATIENT
         with pytest.raises(KeyError):
             resolver.dir(DicomQueryLevel.SERIES)
 
 
-# ── FileResolver.resolve ────────────────────────────────────────────────────
+# ── Files.resolve ───────────────────────────────────────────────────────────
 
 
 class TestFileResolverResolve:
-    """Tests for FileResolver.resolve()."""
+    """Tests for Files.resolve()."""
 
     def test_simple_pattern(self):
         fd = _make_file_def(pattern="seg.nrrd")
-        dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
         assert resolver.resolve(fd) == Path("/data/P1/S1/SE1/seg.nrrd")
 
     def test_pattern_with_placeholders(self):
         fd = _make_file_def(pattern="result_{id}.json")
-        dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={"id": 42},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
+        resolver._fields = {"id": 42}
         assert resolver.resolve(fd) == Path("/data/P1/S1/SE1/result_42.json")
 
     def test_overrides(self):
         fd = _make_file_def(pattern="result_{id}.json")
-        dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={"id": 42},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
+        resolver._fields = {"id": 42}
         assert resolver.resolve(fd, id=99) == Path("/data/P1/S1/SE1/result_99.json")
 
     def test_resolve_by_name(self):
         fd = _make_file_def(name="segmentation", pattern="seg.nrrd")
-        dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
         assert resolver.resolve("segmentation") == Path("/data/P1/S1/SE1/seg.nrrd")
 
     def test_cross_level_resolution(self):
         fd = _make_file_def(pattern="model.onnx", level=DicomQueryLevel.PATIENT)
-        dirs = {
+        resolver = Files.empty()
+        resolver._dirs = {
             DicomQueryLevel.PATIENT: Path("/data/P1"),
             DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1"),
         }
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={},
-        )
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
         assert resolver.resolve(fd) == Path("/data/P1/model.onnx")
 
     def test_unknown_name_raises(self):
-        dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1")}
+        resolver._level = DicomQueryLevel.SERIES
         with pytest.raises(KeyError):
             resolver.resolve("nonexistent")
 
 
-# ── FileResolver.exists ─────────────────────────────────────────────────────
+# ── Files.exists ────────────────────────────────────────────────────────────
 
 
 class TestFileResolverExists:
-    """Tests for FileResolver.exists()."""
+    """Tests for Files.exists()."""
 
     def test_exists_true(self, tmp_path: Path):
         (tmp_path / "seg.nrrd").touch()
         fd = _make_file_def(pattern="seg.nrrd")
-        dirs = {DicomQueryLevel.SERIES: tmp_path}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: tmp_path}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
         assert resolver.exists(fd) is True
 
     def test_exists_false(self, tmp_path: Path):
         fd = _make_file_def(pattern="seg.nrrd")
-        dirs = {DicomQueryLevel.SERIES: tmp_path}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: tmp_path}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
         assert resolver.exists(fd) is False
 
 
-# ── FileResolver.glob ────────────────────────────────────────────────────────
+# ── Files.glob ──────────────────────────────────────────────────────────────
 
 
 class TestFileResolverGlob:
-    """Tests for FileResolver.glob()."""
+    """Tests for Files.glob()."""
 
     def test_glob_multiple(self, tmp_path: Path):
         (tmp_path / "slice_001.dcm").touch()
         (tmp_path / "slice_002.dcm").touch()
         (tmp_path / "other.txt").touch()
         fd = _make_file_def(name="slices", pattern="slice_{n}.dcm", multiple=True)
-        dirs = {DicomQueryLevel.SERIES: tmp_path}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[fd],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.SERIES: tmp_path}
+        resolver._level = DicomQueryLevel.SERIES
+        resolver._registry = {fd.name: fd}
         result = resolver.glob(fd)
         assert len(result) == 2
         assert all("slice_" in p.name for p in result)
@@ -716,11 +661,7 @@ class TestBuildTaskContext:
 
     @pytest.mark.asyncio
     @patch("clarinet.files._resolver.settings")
-    @patch("clarinet.services.common.file_resolver.settings")
-    async def test_from_record_id(
-        self, mock_fr_settings: MagicMock, mock_files_settings: MagicMock
-    ):
-        mock_fr_settings.storage_path = "/data"
+    async def test_from_record_id(self, mock_files_settings: MagicMock):
         mock_files_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg.nrrd")
         record = MagicMock(spec=RecordRead)
@@ -1157,7 +1098,7 @@ class TestPipelineTaskDecorator:
 
 
 class TestFileDefPassThrough:
-    """Tests for FileDef (config primitive) pass-through in FileResolver."""
+    """Tests for FileDef (config primitive) pass-through in Files."""
 
     def test_resolve_filedef_bypasses_registry(self):
         """FileDef objects resolve correctly even with an empty registry."""
@@ -1168,17 +1109,13 @@ class TestFileDefPassThrough:
             level="PATIENT",
             name="master_model",
         )
-        dirs = {
+        resolver = Files.empty()
+        resolver._dirs = {
             DicomQueryLevel.PATIENT: Path("/data/P1"),
             DicomQueryLevel.STUDY: Path("/data/P1/S1"),
             DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1"),
         }
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.STUDY,
-            file_registry=[],  # empty — FileDef not in registry
-            fields={},
-        )
+        resolver._level = DicomQueryLevel.STUDY
 
         result = resolver.resolve(fd)
 
@@ -1195,18 +1132,14 @@ class TestFileDefPassThrough:
             level="PATIENT",
             name="master_model",
         )
-        dirs = {DicomQueryLevel.PATIENT: tmp_path}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.STUDY,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.PATIENT: tmp_path}
+        resolver._level = DicomQueryLevel.STUDY
 
         assert resolver.exists(fd) is True
 
     def test_filedef_tracks_accessed_files(self):
-        """FileDef objects are tracked in accessed_files by name."""
+        """FileDef objects are tracked in accessed by name."""
         from clarinet.config.primitives import FileDef
 
         fd = FileDef(
@@ -1214,18 +1147,14 @@ class TestFileDefPassThrough:
             level="PATIENT",
             name="master_model",
         )
-        dirs = {DicomQueryLevel.PATIENT: Path("/data/P1")}
-        resolver = FileResolver(
-            working_dirs=dirs,
-            record_type_level=DicomQueryLevel.STUDY,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = {DicomQueryLevel.PATIENT: Path("/data/P1")}
+        resolver._level = DicomQueryLevel.STUDY
 
         resolver.resolve(fd)
 
-        assert "master_model" in resolver.accessed_files
-        assert resolver.accessed_files["master_model"] == Path("/data/P1/master_model.seg.nii")
+        assert "master_model" in resolver.accessed
+        assert resolver.accessed["master_model"] == Path("/data/P1/master_model.seg.nii")
 
 
 class TestPipelineTaskIntegration:
@@ -1309,10 +1238,7 @@ class TestSyncRecordQuery:
         )
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.common.file_resolver.settings")
-    async def test_file_path_delegates(self, mock_settings: MagicMock):
-        mock_settings.storage_path = "/data"
-
+    async def test_file_path_delegates(self):
         mock_query = MagicMock(spec=RecordQuery)
         mock_query.file_path = AsyncMock(
             return_value=Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd")

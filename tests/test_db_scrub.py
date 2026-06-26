@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from clarinet.cli.anon_scrub import _parse_keep
+from clarinet.files._storage import build_context, render_working_folder
 from clarinet.models.auth import AccessToken
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.counter import AutoIdCounter
@@ -26,7 +27,6 @@ from clarinet.models.record import Record
 from clarinet.models.record_event import RecordEvent
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User
-from clarinet.services.common.storage_paths import build_context, render_working_folder
 from clarinet.services.db_scrub import (
     DbScrubber,
     PhiLeakError,

@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 
 from clarinet.exceptions.domain import PipelineStepError
+from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.common.file_resolver import FileResolver
 from clarinet.services.pipeline.context import RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.convert_series import (
@@ -32,12 +32,9 @@ def _build_ctx(
     for d in working_dirs.values():
         d.mkdir(parents=True, exist_ok=True)
 
-    files = FileResolver(
-        working_dirs=working_dirs,
-        record_type_level=DicomQueryLevel.SERIES,
-        file_registry=[],
-        fields={},
-    )
+    files = Files.empty()
+    files._dirs = working_dirs
+    files._level = DicomQueryLevel.SERIES
     client = AsyncMock()
     records = RecordQuery(client=client, files=files)
     msg = PipelineMessage(
@@ -204,10 +201,7 @@ class TestVolumeNiftiFileDef:
             DicomQueryLevel.STUDY: tmp_path / "patient" / "study",
             DicomQueryLevel.SERIES: series_dir,
         }
-        resolver = FileResolver(
-            working_dirs=working_dirs,
-            record_type_level=DicomQueryLevel.SERIES,
-            file_registry=[],
-            fields={},
-        )
+        resolver = Files.empty()
+        resolver._dirs = working_dirs
+        resolver._level = DicomQueryLevel.SERIES
         assert resolver.resolve(VOLUME_NIFTI) == series_dir / "volume.nii.gz"

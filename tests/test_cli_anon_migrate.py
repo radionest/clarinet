@@ -9,10 +9,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.cli.anon import _cleanup_empty_dirs, migrate_paths
+from clarinet.files._storage import build_context, render_working_folder
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import Record
 from clarinet.models.study import Series, Study
-from clarinet.services.common.storage_paths import build_context, render_working_folder
 from tests.utils.factories import make_patient, make_record_type
 from tests.utils.session import PassThroughSession
 

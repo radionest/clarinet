@@ -37,7 +37,7 @@ from clarinet.api.app import app
 from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import RecordRead, RecordType
-from clarinet.models.study import Series, SeriesRead, Study, StudyRead
+from clarinet.models.study import Series, Study, StudyRead
 from clarinet.services.pipeline import Pipeline, PipelineMessage, get_pipeline
 from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
 from clarinet.services.pipeline.context import TaskContext, build_task_context
