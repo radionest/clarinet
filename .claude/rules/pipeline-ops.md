@@ -100,8 +100,7 @@ compose paths through `Files(record)` and serve `null` on `AnonPathError`.
 
 `Files.working_dirs(patient=..., study=..., series=...)` is the stateless
 all-levels renderer used by the writer and CLI. For fallback semantics in
-reader-side tasks use `Files(record, fallback=True)` instead of the old
-`FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)`.
+reader-side tasks use `Files(record, fallback=True)`.
 
 ## Built-in Tasks
 
