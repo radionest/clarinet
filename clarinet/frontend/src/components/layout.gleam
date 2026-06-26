@@ -43,7 +43,15 @@ fn navbar(model: Model) -> Element(Msg) {
             nav_link(route: router.AdminActivity, text: t(i18n.NavActivity), current_route: model.route),
             nav_link(route: router.AdminDashboard(dict.new()), text: t(i18n.NavAdmin), current_route: model.route),
           ])
-        False -> html.text("")
+        False ->
+          case reports_only(model) {
+            True ->
+              element.fragment([
+                nav_link(route: router.AdminReports, text: t(i18n.NavReports), current_route: model.route),
+                nav_link(route: router.AdminQuartoReports, text: t(i18n.NavQuartoReports), current_route: model.route),
+              ])
+            False -> html.text("")
+          }
       },
       locale_switcher(model),
       user_menu(model),
@@ -162,6 +170,16 @@ fn locale_switcher(model: Model) -> Element(Msg) {
 fn is_admin(model: Model) -> Bool {
   case model.user {
     Some(user) -> permissions.is_admin_user(user)
+    None -> False
+  }
+}
+
+// Show the reports nav to a non-admin user who holds the reports capability.
+fn reports_only(model: Model) -> Bool {
+  case model.user {
+    Some(user) ->
+      !permissions.is_admin_user(user)
+      && permissions.has_capability(user, "reports")
     None -> False
   }
 }
