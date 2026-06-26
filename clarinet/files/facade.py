@@ -224,6 +224,11 @@ class Files:
         return _storage.compute_display_anon_id(study_uid, study_anon_uid)
 
     @staticmethod
+    def per_study_patient_id(study_uid: str) -> str:
+        """Deterministic per-study anonymized PatientID hash (per-study anon mode)."""
+        return _storage.per_study_patient_id(study_uid)
+
+    @staticmethod
     def validate_template(template: str) -> str:
         return _template.validate_template(template)
 

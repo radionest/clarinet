@@ -28,6 +28,7 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
+from clarinet.files import Files
 from clarinet.models import Record, RecordRead, User
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
@@ -83,9 +84,7 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         masked_id: str | None = record.display_anon_id
         masked_name: str | None = record.display_anon_id
     elif settings.anon_per_study_patient_id and record.study_uid is not None:
-        from clarinet.services.common.storage_paths import per_study_patient_id
-
-        masked_id = per_study_patient_id(record.study_uid)
+        masked_id = Files.per_study_patient_id(record.study_uid)
         masked_name = masked_id
     else:
         masked_id = record.patient.anon_id
