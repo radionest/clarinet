@@ -61,7 +61,7 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     """Drop paths whose resolved location escapes the sandbox directory.
 
     Both ``Path.resolve()`` calls hit the filesystem (symlink chasing), so
-    callers should run this through ``run_in_fs_thread``.
+    callers should run this through ``Files.in_thread``.
     """
     sandbox_resolved = sandbox.resolve()
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
@@ -77,13 +77,13 @@ def _missing_output_links(
     OUTPUT files appear on disk only after pipeline tasks or users produce
     them, so creation-time matching (``set_files``) never sees them — without
     this reconciliation no ``RecordFileLink`` would ever exist for outputs.
-    ``compute_checksums`` keys every found file by definition name (singular)
-    or ``"name:filename"`` (collections), so each key proves the file existed
-    on disk at scan time — no second filesystem scan is needed. Returns
-    name → filename for OUTPUT definitions that have no link yet; for
+    ``Files(record).checksums()`` keys every found file by definition name
+    (singular) or ``"name:filename"`` (collections), so each key proves the
+    file existed on disk at scan time — no second filesystem scan is needed.
+    Returns name → filename for OUTPUT definitions that have no link yet; for
     collections the lexicographically first file is stored, matching the
     download endpoint's pick. ``parent`` must mirror the fallback passed to
-    ``compute_checksums`` so the stored filename matches the scanned path.
+    ``Files`` so the stored filename matches the scanned path.
     """
     output_defs = {
         fd.name: fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
@@ -100,7 +100,7 @@ def _missing_output_links(
 
 
 def _stored_checksums(record: RecordRead) -> dict[str, str]:
-    """Checksums stored on file links, keyed to match ``compute_checksums``.
+    """Checksums stored on file links, keyed to match ``Files(record).checksums()``.
 
     Emits both ``name`` (singular definitions) and ``"name:filename"``
     (collections) for every link — the irrelevant key of the pair never
@@ -928,7 +928,9 @@ class RecordService:
         if file_def.multiple:
             candidates = await Files.in_thread(f.glob, file_def)
         else:
-            file_path = target_dir / Files.render_for(record_read, file_def.pattern, parent=parent_read)
+            file_path = target_dir / Files.render_for(
+                record_read, file_def.pattern, parent=parent_read
+            )
             if not await Files.in_thread(file_path.is_file):
                 return []
             candidates = [file_path]
@@ -1231,7 +1233,9 @@ class RecordService:
             parent_read = RecordRead.model_validate(parent)
 
         try:
-            new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(output_defs)
+            new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
+                output_defs
+            )
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
             return

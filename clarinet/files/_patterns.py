@@ -69,9 +69,8 @@ def glob_file_paths(
 def fields_from(record: RecordRead, parent: RecordRead | None = None) -> dict[str, Any]:
     """Canonical placeholder dict for a record.
 
-    Unifies the three legacy field sources (``FileResolver.build_fields``,
-    ``resolve_record_field``'s fallback chain, and the slicer / pipeline
-    manual ``origin_type`` patch). Scalar placeholders fall back to *parent*
+    Canonical placeholder dict used by ``Files.resolve``, ``Files.render_for``,
+    and the slicer / pipeline context. Scalar placeholders fall back to *parent*
     when the record's own value is missing/empty; ``origin_type`` uses the
     inverted virtual-field priority via :func:`resolve_origin_type`; the
     ``data`` sub-dict is parent-then-record merged for ``{data.FIELD}`` access.

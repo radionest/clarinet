@@ -17,14 +17,14 @@ paths:
    - `working_folder` — always
    - `study_uid` — for STUDY and SERIES level
    - `series_uid` — for SERIES level only
-2. **File paths from file_registry** (auto): each `FileDefinition.name` -> resolved absolute path via `FileResolver`
+2. **File paths from file_registry** (auto): each `FileDefinition.name` -> resolved absolute path via `Files`
 3. **`output_file`** (auto): first OUTPUT file from file_registry — convenience alias for scripts
 4. **Custom `slicer_script_args`** (template-resolved with all vars above)
 5. **Custom `slicer_result_validator_args`** (same)
 
 `build_slicer_context_async(record, session)` wraps the sync function and runs any `slicer_context_hydrators` registered on the record type.
 
-Uses `FileResolver` from `clarinet/services/common/file_resolver.py` (100% sync, no DB / pipeline / broker imports).
+Uses `Files` from `clarinet/files/` (100% sync, no DB / pipeline / broker imports).
 
 ### Script variable naming convention
 
@@ -39,7 +39,7 @@ Provides the placeholder set for custom Slicer-arg resolution (UX layer
 `series_uid`, `series_anon_uid`, `user_id`, `clarinet_storage_path`.
 
 Backend callers that want strict semantics resolve paths through
-`FileRepository` directly — it raises `AnonPathError` for
+`Files(record)` directly — it raises `AnonPathError` for
 non-anonymized records.
 
 ## Context Hydration (`context_hydration.py`)

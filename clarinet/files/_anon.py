@@ -1,9 +1,9 @@
 """Helper to resolve an anonymized identifier with optional raw-UID fallback.
 
 Centralizes the "anon -> fallback -> raise" pattern used by storage path
-rendering (``clarinet/services/common/storage_paths.py``), record-level
-template formatting (``clarinet/models/record.py::RecordRead``), and
-series-level template formatting (``clarinet/models/study.py::SeriesRead``).
+rendering (``clarinet/files/_storage.py``), record-level template
+formatting (``clarinet/models/record.py::RecordRead``), and series-level
+template formatting (``clarinet/models/study.py::SeriesRead``).
 
 Backend callers run with the default ``fallback_to_unanonymized=False``
 to surface the asymmetric-anonymization race instead of silently

@@ -160,7 +160,7 @@ class RecordBase(BaseModel):
     # Parent record link
     parent_record_id: int | None = None
 
-    # Anon UIDs — sibling-relationship snapshot used by FileRepository
+    # Anon UIDs — sibling-relationship snapshot used by Files
     # when the study/series relations are not eager-loaded.
     study_anon_uid: str | None = None
     series_anon_uid: str | None = None

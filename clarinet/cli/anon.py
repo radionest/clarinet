@@ -23,7 +23,7 @@ tree in bottom-up order:
 The DB is not touched — paths derive from Study/Patient/Series + RecordType.level.
 
 Supported placeholders for the ``--from``/``--to`` templates are listed in
-``SUPPORTED_PLACEHOLDERS`` in :mod:`clarinet.utils.path_template`.
+``SUPPORTED_PLACEHOLDERS`` in :mod:`clarinet.files._template`.
 """
 
 import argparse
@@ -216,10 +216,18 @@ def _render_old_new_dirs(
     """
     try:
         old_dir = Files.working_dirs(
-            patient=patient, study=study, series=series, storage_path=storage_path, template=from_template
+            patient=patient,
+            study=study,
+            series=series,
+            storage_path=storage_path,
+            template=from_template,
         )[level]
         new_dir = Files.working_dirs(
-            patient=patient, study=study, series=series, storage_path=storage_path, template=to_template
+            patient=patient,
+            study=study,
+            series=series,
+            storage_path=storage_path,
+            template=to_template,
         )[level]
     except AnonPathError as exc:
         logger.error(f"{label}: template render failed ({exc}); skipping.")

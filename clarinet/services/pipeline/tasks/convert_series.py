@@ -35,7 +35,7 @@ VOLUME_NIFTI = FileDef(
 """Canonical FileDef for the NIfTI output.
 
 Duplicated from project-level ``record_types.py`` to keep the domain task
-independent of any specific project configuration.  ``FileResolver`` uses
+independent of any specific project configuration.  ``Files.resolve`` uses
 ``pattern`` and ``level``, not object identity.
 """
 

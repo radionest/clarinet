@@ -34,7 +34,7 @@ def build_template_vars(record: RecordRead) -> dict[str, Any]:
     UX layer — falls back to raw UIDs when anonymization has not yet
     propagated, so the Slicer UI keeps rendering text for the doctor
     even on records that predate the anonymization run. Backend tasks
-    that need a strict anonymized path use ``FileRepository`` directly.
+    that need a strict anonymized path use ``Files(record)`` directly.
 
     Args:
         record: Fully-loaded record with relations.

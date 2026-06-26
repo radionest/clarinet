@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     # On-disk path template for working folders + anonymized output.
     # Exactly 3 '/'-separated segments → patient / study / series levels.
     # Supported placeholders are listed in
-    # ``clarinet.services.common.storage_paths.SUPPORTED_PLACEHOLDERS``.
+    # ``clarinet.files._template.SUPPORTED_PLACEHOLDERS``.
     # Default reproduces the legacy hard-coded layout.
     #
     # "Shape" settings — not part of the template itself, but baked into
@@ -171,7 +171,7 @@ class Settings(BaseSettings):
     def validate_disk_path_template_setting(cls, v: str) -> str:
         """Validate the 3-segment disk path template.
 
-        Delegates to ``clarinet.utils.path_template.validate_template`` —
+        Delegates to ``clarinet.files._template.validate_template`` —
         a stdlib-only helper that the migration CLI also uses, so
         settings-time and runtime-supplied templates share rules.
         """

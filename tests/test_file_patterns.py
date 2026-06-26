@@ -227,9 +227,7 @@ class TestOriginType:
 
         mock_record.record_type.name = "parent-type"
 
-        result = _render_for(
-            "segmentation_{origin_type}_{user_id}.seg.nrrd", child, mock_record
-        )
+        result = _render_for("segmentation_{origin_type}_{user_id}.seg.nrrd", child, mock_record)
         assert result == "segmentation_parent-type_user-456.seg.nrrd"
 
     def test_regular_fields_unaffected(self, mock_record: MagicMock) -> None:

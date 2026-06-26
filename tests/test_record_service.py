@@ -977,7 +977,6 @@ def _record_read_stub(
     )
 
 
-
 class TestMissingOutputLinks:
     """Derivation of missing OUTPUT file links from computed checksums."""
 

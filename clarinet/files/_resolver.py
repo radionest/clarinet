@@ -1,4 +1,4 @@
-"""Working-directory builders extracted from ``FileResolver``.
+"""Working-directory builders for ``Files`` (formerly ``FileResolver``).
 
 Module-level functions that compute per-DICOM-level working directories
 from a ``RecordRead``, ``SeriesRead``, ``StudyRead``, or ``PatientRead``.

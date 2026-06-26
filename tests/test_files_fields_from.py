@@ -1,13 +1,18 @@
 from unittest.mock import MagicMock
+
 from clarinet.files._patterns import fields_from
-from clarinet.files._template import render_template, RenderMode
+from clarinet.files._template import RenderMode, render_template
 
 
 def _rec(*, rid=1, user_id=None, rtype="seg", data=None):
     r = MagicMock()
-    r.id = rid; r.user_id = user_id
-    r.patient_id = "P1"; r.study_uid = "S"; r.series_uid = "SE"
-    r.record_type = MagicMock(name_attr=rtype); r.record_type.name = rtype
+    r.id = rid
+    r.user_id = user_id
+    r.patient_id = "P1"
+    r.study_uid = "S"
+    r.series_uid = "SE"
+    r.record_type = MagicMock(name_attr=rtype)
+    r.record_type.name = rtype
     r.data = data or {}
     return r
 

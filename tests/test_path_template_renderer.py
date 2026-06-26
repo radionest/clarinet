@@ -31,6 +31,7 @@ def _render_lenient(pattern: str, fields: dict) -> str:
     """Render pattern in LENIENT mode (replaces the deleted file_resolver shim)."""
     return render_template(pattern, fields, mode=RenderMode.LENIENT)
 
+
 # ── coerce_field_value ────────────────────────────────────────────────────────
 
 

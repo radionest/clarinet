@@ -18,7 +18,7 @@ Resources initialized in `lifespan()` and shut down in its `finally` block must 
 
 Pattern: shutdown the old resource, then immediately replace it with a fresh instance:
 ```python
-# clarinet/utils/fs.py — reference implementation
+# clarinet/files/_fs.py — reference implementation
 def shutdown_fs_executor() -> None:
     global _fs_executor
     _fs_executor.shutdown(wait=False)
@@ -100,16 +100,36 @@ Bootstrap uses `reconcile_config()` from `clarinet/utils/bootstrap.py` — dispa
 
 ## File path resolution
 
-`FileRepository` (`clarinet/repositories/file_repository.py`) is the
-sole authority for resolving on-disk paths. Models carry no path
-logic — use `FileRepository(record).working_dir` instead of any
-removed `working_folder` / `_get_working_folder` / `_format_path*`
-helpers. Strict by default (`AnonPathError` for not-yet-anonymized
-records); UX routers catch it and serve `null`; reader-side services
-that must tolerate the pre-anon flow use
-`FileRepository.resolve_with_fallback`. User-defined Slicer
-script args are resolved inside `build_slicer_context`
-(`clarinet/services/slicer/context.py` — UX fallback).
+`Files` (`clarinet/files/facade.py`, `from clarinet.files import Files`) is the
+sole public entry point for on-disk path resolution. Models carry no path logic.
+
+```python
+from clarinet.files import Files
+
+# Strict (raises AnonPathError for not-yet-anonymized records)
+f = Files(record)
+f.dir()               # working directory at record's level
+f.resolve("mask")     # absolute path for a FileDefinition name
+
+# Lenient — falls back to raw UIDs; use in UX layer / Slicer context
+f = Files(record, fallback=True)
+
+# Same lenient behavior in one call
+f = Files.for_reader(record)
+
+# Stateless all-levels renderer (AnonymizationService, CLI, tests)
+dirs = Files.working_dirs(patient=..., study=..., series=...)
+
+# Pattern-only render, no working-dir computation
+rendered = Files.render_for(record, pattern)
+
+# Checksums for registered files
+sums = await Files(record).checksums()
+single = await Files.checksum(path)
+```
+
+UX routers catch `AnonPathError` and serve `null`. The implementation is private
+behind `clarinet/files/_*`; never import those leaves directly.
 
 ## Service Layer Overview
 

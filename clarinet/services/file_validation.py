@@ -164,7 +164,10 @@ async def validate_record_files(
     f = Files.for_reader(record)
     working_dirs, directory = f.dirs(), f.dir()
     validator = FileValidator(input_defs)
-    result = cast(FileValidationResult, await Files.in_thread(validator.validate, record, directory, working_dirs, parent))
+    result = cast(
+        FileValidationResult,
+        await Files.in_thread(validator.validate, record, directory, working_dirs, parent),
+    )
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
         raise ValidationError(f"File validation failed: {errors}")

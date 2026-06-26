@@ -600,7 +600,9 @@ class TestRecordQuery:
         record.patient = _make_patient()
         record.study = _make_study()
         record.series = _make_series()
-        record.record_type = _make_record_type_read(level=DicomQueryLevel.SERIES, file_registry=[fd])
+        record.record_type = _make_record_type_read(
+            level=DicomQueryLevel.SERIES, file_registry=[fd]
+        )
 
         client = AsyncMock()
         client.find_records_advanced = AsyncMock(return_value=[record])
@@ -640,7 +642,9 @@ class TestRecordQuery:
         record.patient = _make_patient()
         record.study = _make_study()
         record.series = _make_series()
-        record.record_type = _make_record_type_read(level=DicomQueryLevel.SERIES, file_registry=[fd])
+        record.record_type = _make_record_type_read(
+            level=DicomQueryLevel.SERIES, file_registry=[fd]
+        )
 
         client = AsyncMock()
         client.find_records_advanced = AsyncMock(return_value=[record])
@@ -677,7 +681,9 @@ class TestBuildTaskContext:
         record.patient = _make_patient()
         record.study = _make_study()
         record.series = _make_series()
-        record.record_type = _make_record_type_read(level=DicomQueryLevel.SERIES, file_registry=[fd])
+        record.record_type = _make_record_type_read(
+            level=DicomQueryLevel.SERIES, file_registry=[fd]
+        )
 
         client = AsyncMock()
         client.get_record = AsyncMock(return_value=record)

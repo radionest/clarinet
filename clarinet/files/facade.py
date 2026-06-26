@@ -172,10 +172,11 @@ class Files:
     def render_for(record: RecordBase, pattern: str, *, parent: RecordBase | None = None) -> str:
         """Render *pattern* for a record WITHOUT building working dirs or hitting
         the entity-type gate. Use for pattern-only resolution that must tolerate
-        not-yet-anonymized records (no ``AnonPathError``) and duck-typed records.
-        Equivalent to the old ``resolve_pattern(pattern, record, parent)``."""
+        not-yet-anonymized records (no ``AnonPathError``) and duck-typed records."""
         return _template.render_template(
-            pattern, _patterns.fields_from(record, parent), mode=_template.RenderMode.LENIENT  # type: ignore[arg-type]
+            pattern,
+            _patterns.fields_from(record, parent),  # type: ignore[arg-type]
+            mode=_template.RenderMode.LENIENT,
         )
 
     @staticmethod

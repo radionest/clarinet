@@ -29,12 +29,12 @@ record_read = RecordRead.model_validate(record)
 record_read.radiant  # safe — all data is plain Pydantic fields
 ```
 
-### Path resolution lives in `FileRepository`
+### Path resolution lives in `Files`
 
 `*Read` models are dumb data containers with no path logic. Use
-`FileRepository(record).working_dir` / `resolve_file(...)`. Strict by default —
-`AnonPathError` for not-yet-anonymized records. Full contract (Slicer-arg
-rendering, `resolve_with_fallback`): `clarinet/CLAUDE.md` → "File path resolution".
+`Files(record).dir()` / `Files(record).resolve("def_name")`. Strict by default —
+`AnonPathError` for not-yet-anonymized records. Full contract (template rendering,
+fallback): `clarinet/CLAUDE.md` → "File path resolution".
 
 Always use `selectinload()` in repositories when fetching records for API responses:
 ```python

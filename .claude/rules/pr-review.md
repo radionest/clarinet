@@ -38,7 +38,7 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent — ex
 ## Pipeline and async execution (`clarinet/services/pipeline/`)
 
 - **P16.** New pipeline tasks use `@pipeline_task()` decorator (new style) or `@broker.task()` (old style) consistently — both return dict, check chain compatibility. See `.claude/rules/pipeline-ops.md`.
-- **P17.** Inside pipeline tasks: use `TaskContext` / `FileResolver` / `RecordQuery`, not ad-hoc DB queries or file lookups.
+- **P17.** Inside pipeline tasks: use `TaskContext` / `ctx.files` (`Files`) / `RecordQuery`, not ad-hoc DB queries or file lookups.
 - **P18.** `asyncio.gather` must not be applied to coroutines that share one `AsyncSession`.
 
 ## Tests
@@ -62,15 +62,14 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent — ex
 
 ## File path resolution
 
-- **P29.** File path resolution only through `FileRepository`
-  (`clarinet/repositories/file_repository.py`). Models are dumb data
-  containers — `.working_folder` / `_get_working_folder` /
+- **P29.** File path resolution only through `Files` (`from clarinet.files import Files`).
+  Models are dumb data containers — `.working_folder` / `_get_working_folder` /
   `_format_path*` / `_format_slicer_kwargs` /
   `slicer_*_args_formatted` no longer exist. User-defined Slicer args
   resolve inside `build_slicer_context` (layer 4/5, UX fallback).
   Reader-side services that need pre-anon fallback use
-  `FileRepository.resolve_with_fallback`, not ad-hoc `try/except` on
-  `AnonPathError`.
+  `Files(record, fallback=True)` or `Files.for_reader(record)`, not
+  ad-hoc `try/except` on `AnonPathError`.
 
 ## Path-scoped rules to re-read
 

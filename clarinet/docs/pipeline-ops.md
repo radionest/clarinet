@@ -71,18 +71,15 @@ the right queue.
 
 ## Anonymized UID contract
 
-Storage-path rendering lives in
-`clarinet.services.common.storage_paths` — one template engine
-(`build_context` + `render_working_folder` + `render_all_levels`)
-feeds the writer (`AnonymizationService._save_series_to_disk`), every
-reader (`DicomWebCache`, `prefetch_dicom_web`), CLI `anon migrate-paths`,
-`FileRepository` (the sole entry point for path resolution in
-services and routers), plus the pipeline `FileResolver.build_working_dirs*`
-(thin wrappers over `render_all_levels`). One rendering point means a
-custom `disk_path_template` produces the same path everywhere.
+Storage-path rendering lives in `clarinet/files/` — the single template
+engine (`_storage.render_all_levels`) feeds the writer
+(`AnonymizationService._save_series_to_disk`), every reader
+(`DicomWebCache`, `prefetch_dicom_web`), CLI `anon migrate-paths`, and
+the pipeline via `ctx.files` (`Files(record)` from `build_task_context`).
+One rendering point means a custom `disk_path_template` produces the same
+path everywhere.
 
-`FileResolver.build_working_dirs*` and the writer/reader helpers
-(`build_context` → `render_working_folder`) refuse to render a path
+`Files(record)` and the writer/reader helpers refuse to render a path
 against a raw UID. When `anon_uid` / `anon_id` is missing they raise
 `AnonPathError` (re-exported from `clarinet.exceptions`). The
 `RetryMiddleware` 4xx skip only fires for `ClarinetAPIError`, so an
@@ -96,13 +93,13 @@ a study from non-anon → anon mid-pipeline, and silently falling back
 to the raw UID made downstream tasks load files the writer no longer
 produces under that identifier. If the task genuinely needs to address
 the unanonymized layout — e.g. a UX-side preview generator — opt in
-explicitly with `FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)`.
+explicitly with `Files(record, fallback=True)`.
 
 `RecordRead` carries no `working_folder` field — path resolution lives
-in `FileRepository` (strict). Pipeline tasks reach the same path via
-`FileResolver.build_working_dirs(record)` directly (already wired into
-`ctx.files` by `build_task_context`); user-facing routers compose paths
-through `FileRepository` and serve `null` on `AnonPathError`.
+in `Files` (strict). Pipeline tasks reach the same path via `ctx.files`
+(already `Files(record)` wired by `build_task_context`); user-facing
+routers compose paths through `Files(record)` and serve `null` on
+`AnonPathError`.
 
 ## Built-in Tasks
 
