@@ -38,17 +38,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from clarinet.files import AnonPathError, Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.record_type import RecordType
 from clarinet.models.study import Series, Study
-from clarinet.services.common.storage_paths import (
-    AnonPathError,
-    build_context,
-    render_working_folder,
-    validate_template,
-)
 from clarinet.settings import settings
 from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import enable_verbose_console, logger
@@ -220,12 +215,12 @@ def _render_old_new_dirs(
     only renders.
     """
     try:
-        ctx_from = build_context(
-            patient=patient, study=study, series=series, template=from_template
-        )
-        ctx_to = build_context(patient=patient, study=study, series=series, template=to_template)
-        old_dir = render_working_folder(from_template, level, ctx_from, storage_path)
-        new_dir = render_working_folder(to_template, level, ctx_to, storage_path)
+        old_dir = Files.working_dirs(
+            patient=patient, study=study, series=series, storage_path=storage_path, template=from_template
+        )[level]
+        new_dir = Files.working_dirs(
+            patient=patient, study=study, series=series, storage_path=storage_path, template=to_template
+        )[level]
     except AnonPathError as exc:
         logger.error(f"{label}: template render failed ({exc}); skipping.")
         counters["failed"] += 1
@@ -407,8 +402,8 @@ async def migrate_paths(args: argparse.Namespace) -> None:
     if args.verbose:
         enable_verbose_console()
 
-    from_template = validate_template(args.from_template)
-    to_template = validate_template(args.to_template)
+    from_template = Files.validate_template(args.from_template)
+    to_template = Files.validate_template(args.to_template)
 
     if from_template == to_template:
         logger.info("--from and --to templates are identical; nothing to do.")
