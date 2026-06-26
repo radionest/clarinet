@@ -272,21 +272,27 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           case router.requires_auth(route), new_model.user, is_auth_page {
             False, Some(_), True -> #(
               store.set_route(new_model, landing_route(new_model)),
-              modem.push(
-                router.route_to_path(landing_route(new_model)),
-                option.None,
-                option.None,
-              ),
+              effect.batch([
+                modem.push(
+                  router.route_to_path(landing_route(new_model)),
+                  option.None,
+                  option.None,
+                ),
+                ensure_sse(new_model),
+              ]),
             )
             _, _, _ -> {
               case must_redirect(new_model, route) {
                 True -> #(
                   store.set_route(new_model, landing_route(new_model)),
-                  modem.push(
-                    router.route_to_path(landing_route(new_model)),
-                    option.None,
-                    option.None,
-                  ),
+                  effect.batch([
+                    modem.push(
+                      router.route_to_path(landing_route(new_model)),
+                      option.None,
+                      option.None,
+                    ),
+                    ensure_sse(new_model),
+                  ]),
                 )
                 False -> {
                   let #(new_model, page_init_eff) =

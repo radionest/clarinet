@@ -198,3 +198,10 @@ async def test_analyst_me_includes_reports_capability(
 async def test_plain_user_denied_reports(plain_report_client: AsyncClient) -> None:
     resp = await plain_report_client.get(ADMIN_REPORTS)
     assert resp.status_code == 403
+
+
+async def test_plain_user_denied_report_download(
+    plain_report_client: AsyncClient,
+) -> None:
+    resp = await plain_report_client.get(f"{ADMIN_REPORTS}/constant_one/download")
+    assert resp.status_code == 403

@@ -1112,7 +1112,7 @@ git commit -m "feat(frontend): show reports nav to capability-only users"
 
 - [ ] **Step 1: Update `clarinet/api/CLAUDE.md`** — in the Router Auth Levels table, change the `reports.py` row:
 
-```
+```text
 | `reports.py` | `ReportsAccessDep` | Capability-gated: superuser/`admin` OR a role mapped to `reports` in `settings.role_capabilities`. Same guard on `quarto_reports.py` |
 ```
 
