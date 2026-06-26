@@ -293,6 +293,11 @@ class Settings(BaseSettings):
 
     # Role settings
     extra_roles: list[str] = []
+    # Maps a role name to the capabilities it grants (e.g. {"analyst": ["reports"]}).
+    # Roles named here are auto-created at startup; capability values are
+    # validated against the known vocabulary (clarinet/models/capability.py).
+    # Env override: CLARINET_ROLE_CAPABILITIES as JSON.
+    role_capabilities: dict[str, list[str]] = {}
 
     # Admin user settings
     admin_username: str = "admin"

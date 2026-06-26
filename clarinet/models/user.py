@@ -78,11 +78,21 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
             return []
         return [r.name for r in (self.__dict__["roles"] or [])]
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def capabilities(self) -> list[str]:
+        # Effective capabilities derived from roles + settings mapping.
+        # Local import avoids any models/__init__ import-order coupling.
+        from clarinet.models.capability import resolve_capabilities
+
+        return resolve_capabilities(self.role_names, self.is_superuser)
+
 
 class UserRead(schemas.BaseUser[UUID]):
     """Pydantic model for reading user data without sensitive fields."""
 
     role_names: list[str] = PydanticField(default_factory=list)
+    capabilities: list[str] = PydanticField(default_factory=list)
 
     @field_serializer("email")
     @classmethod

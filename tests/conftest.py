@@ -297,6 +297,51 @@ async def create_mock_superuser(session: AsyncSession, email: str = "mock@test.c
     return user
 
 
+async def create_mock_user_with_role(
+    session: AsyncSession,
+    role_name: str,
+    email: str = "roled@test.com",
+    is_superuser: bool = False,
+) -> User:
+    """Create a user with one role, roles eagerly loaded then detached.
+
+    Mirrors ``create_mock_superuser`` but attaches a ``UserRole`` so
+    ``role_names`` / ``capabilities`` resolve in capability-gated endpoint tests.
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlmodel import select
+
+    from clarinet.models.user import User, UserRole, UserRolesLink
+    from clarinet.utils.auth import get_password_hash
+
+    if await session.get(UserRole, role_name) is None:
+        session.add(UserRole(name=role_name))
+        await session.commit()
+
+    user = User(
+        id=uuid4(),
+        email=email,
+        hashed_password=get_password_hash("mock"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=is_superuser,
+    )
+    session.add(user)
+    await session.commit()
+
+    user_id = user.id
+    session.add(UserRolesLink(user_id=user_id, role_name=role_name))
+    await session.commit()
+    session.expire_all()
+
+    result = await session.execute(
+        select(User).options(selectinload(User.roles)).where(User.id == user_id)
+    )
+    loaded = result.scalar_one()
+    session.expunge(loaded)
+    return loaded
+
+
 def setup_auth_overrides(
     mock_user: User,
     test_session: AsyncSession,

@@ -54,7 +54,21 @@ AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]
 
 - `get_user_role_names(user)` — extracts `{role.name for role in user.roles}` with try/except
 - `authorize_record_access` — checks superuser -> role_name match -> raises `AuthorizationError`
-- `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `reports.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
+- `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
+- `require_capability(name)` — dependency factory; admits a user whose effective
+  capabilities (`resolve_capabilities`, `clarinet/models/capability.py`) include
+  `name`. Superuser/`admin` implicitly hold every capability.
+- `ReportsAccessDep = Annotated[User, Depends(require_capability(Capability.REPORTS))]`
+  — used by `reports.py` and `quarto_reports.py`.
+
+Projects grant capabilities to roles in `settings.toml`:
+
+```toml
+[role_capabilities]
+analyst = ["reports"]
+```
+Roles named here are auto-created at startup; unknown capabilities fail-fast.
+
 - `mask_records(records, user)` — converts `Record` -> `RecordRead` + masks patient data for non-superusers
 
 ### Factory pattern for new repos/services

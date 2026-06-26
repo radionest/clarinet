@@ -27,14 +27,27 @@ from clarinet.utils.logger import logger
 async def add_default_user_roles() -> None:
     """Add default user roles to the database if they don't exist.
 
-    Creates built-in roles (doctor, auto, admin, expert, ordinator)
-    plus any project-specific roles from ``settings.extra_roles``.
-    Duplicates between the two lists are ignored.
+    Creates roles from three sources:
+    - Built-in roles: doctor, auto, admin, expert, ordinator
+    - ``settings.extra_roles``: project-specific role names
+    - Keys of ``settings.role_capabilities``: any role that appears as a key
+      in the capability mapping is also created automatically
+
+    ``settings.role_capabilities`` is validated first via
+    ``validate_role_capabilities``; a ``ConfigurationError`` is raised if the
+    mapping references an unknown capability.  Duplicates across the three
+    sources are silently ignored.
     """
+    from clarinet.models.capability import validate_role_capabilities
     from clarinet.settings import settings
 
+    # Fail fast on a typo'd capability before creating roles or hitting the DB.
+    validate_role_capabilities(settings.role_capabilities)
+
     default_roles = ["doctor", "auto", "admin", "expert", "ordinator"]
-    all_roles = list(dict.fromkeys(default_roles + settings.extra_roles))
+    all_roles = list(
+        dict.fromkeys(default_roles + settings.extra_roles + list(settings.role_capabilities))
+    )
 
     async with db_manager.get_async_session_context() as session:
         for role_name in all_roles:

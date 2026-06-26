@@ -33,17 +33,69 @@ fn navbar(model: Model) -> Element(Msg) {
       case is_admin(model) {
         True ->
           element.fragment([
-            nav_link(route: router.Records(dict.new()), text: t(i18n.NavRecords), current_route: model.route),
-            nav_link(route: router.Studies(dict.new()), text: t(i18n.NavStudies), current_route: model.route),
-            nav_link(route: router.Patients(dict.new()), text: t(i18n.NavPatients), current_route: model.route),
-            nav_link(route: router.AdminRecordTypes, text: t(i18n.NavRecordTypes), current_route: model.route),
-            nav_link(route: router.AdminReports, text: t(i18n.NavReports), current_route: model.route),
-            nav_link(route: router.AdminQuartoReports, text: t(i18n.NavQuartoReports), current_route: model.route),
-            nav_link(route: router.AdminWorkflow, text: t(i18n.NavWorkflow), current_route: model.route),
-            nav_link(route: router.AdminActivity, text: t(i18n.NavActivity), current_route: model.route),
-            nav_link(route: router.AdminDashboard(dict.new()), text: t(i18n.NavAdmin), current_route: model.route),
+            nav_link(
+              route: router.Records(dict.new()),
+              text: t(i18n.NavRecords),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.Studies(dict.new()),
+              text: t(i18n.NavStudies),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.Patients(dict.new()),
+              text: t(i18n.NavPatients),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.AdminRecordTypes,
+              text: t(i18n.NavRecordTypes),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.AdminReports,
+              text: t(i18n.NavReports),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.AdminQuartoReports,
+              text: t(i18n.NavQuartoReports),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.AdminWorkflow,
+              text: t(i18n.NavWorkflow),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.AdminActivity,
+              text: t(i18n.NavActivity),
+              current_route: model.route,
+            ),
+            nav_link(
+              route: router.AdminDashboard(dict.new()),
+              text: t(i18n.NavAdmin),
+              current_route: model.route,
+            ),
           ])
-        False -> html.text("")
+        False ->
+          case reports_only(model) {
+            True ->
+              element.fragment([
+                nav_link(
+                  route: router.AdminReports,
+                  text: t(i18n.NavReports),
+                  current_route: model.route,
+                ),
+                nav_link(
+                  route: router.AdminQuartoReports,
+                  text: t(i18n.NavQuartoReports),
+                  current_route: model.route,
+                ),
+              ])
+            False -> html.text("")
+          }
       },
       locale_switcher(model),
       user_menu(model),
@@ -141,7 +193,10 @@ fn footer(model: Model) -> Element(Msg) {
   html.footer([attribute.class("app-footer")], [
     html.div([attribute.class("container")], [
       html.p([], [
-        html.text(i18n.translate(model.locale, i18n.FooterCopyright(model.project_name, model.project_description))),
+        html.text(i18n.translate(
+          model.locale,
+          i18n.FooterCopyright(model.project_name, model.project_description),
+        )),
       ]),
     ]),
   ])
@@ -162,6 +217,14 @@ fn locale_switcher(model: Model) -> Element(Msg) {
 fn is_admin(model: Model) -> Bool {
   case model.user {
     Some(user) -> permissions.is_admin_user(user)
+    None -> False
+  }
+}
+
+// Show the reports nav to a non-admin user who holds the reports capability.
+fn reports_only(model: Model) -> Bool {
+  case model.user {
+    Some(user) -> permissions.is_reports_only(user)
     None -> False
   }
 }
