@@ -19,6 +19,7 @@ from clarinet.services.image import (
     coco_to_segmentation,
     conform_seg_to_grid,
 )
+from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import read_dicom_series
 
 # ---------------------------------------------------------------------------
@@ -710,7 +711,9 @@ class TestSegmentation:
         assert not result.is_empty
 
     def test_difference_with_ratio(self) -> None:
-        # Small ROI: 8 voxels, overlap 4 → ratio = 0.5
+        # Small ROI: 8 voxels, overlap 4 → coverage(a) = 4/8 = 0.5
+        # New semantics: when max_overlap_ratio is given, ratio wins (max_overlap ignored).
+        # A label is REMOVED iff coverage >= max_overlap_ratio.
         vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
         vol1[1:3, 1:3, 1:3] = 1  # 8 voxels
         vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
@@ -723,11 +726,11 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = vol2
 
-        # max_overlap=10 but ratio 0.5 > 0.1 → dropped
+        # coverage 0.5 >= 0.1 → matched → removed from difference
         result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.1)
         assert result.is_empty
 
-        # ratio threshold 0.8 → 0.5 < 0.8, so kept
+        # coverage 0.5 < 0.8 → not matched → kept in difference
         result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.8)
         assert not result.is_empty
 
@@ -1434,3 +1437,39 @@ class TestSegmentMetadataRoundtrip:
         a.union(other).save_as(out_path, FileType.NRRD)
         _, header = nrrd.read(str(out_path))
         assert not any(k.startswith("Segment") for k in header)  # no named segments survive
+
+
+# ---------------------------------------------------------------------------
+# Correspondence-engine adapter tests (Tasks 6)
+# ---------------------------------------------------------------------------
+
+
+def _seg(arr: np.ndarray) -> Segmentation:
+    """Build a Segmentation from a numpy array, auto-labeling components."""
+    s = Segmentation(autolabel=True)
+    s.img = arr.astype(np.uint8)
+    return s
+
+
+def test_intersection_backward_compatible() -> None:
+    """intersection(min_overlap=N) keeps A labels with >= N voxel overlap."""
+    a = np.zeros((8, 8, 1), dtype=np.uint8)
+    b = np.zeros((8, 8, 1), dtype=np.uint8)
+    a[1:4, 1:4, 0] = 1
+    b[2:3, 2:3, 0] = 1  # 1-voxel overlap
+    seg_a, seg_b = _seg(a), _seg(b)
+    assert not seg_a.intersection(seg_b, min_overlap=1).is_empty
+    assert seg_a.intersection(seg_b, min_overlap=5).is_empty
+
+
+def test_strategy_overrides_resolve_1_to_n() -> None:
+    """strategy= override resolves 1-to-N matches; difference keeps unmatched A only."""
+    a = np.zeros((4, 10, 1), dtype=np.uint8)
+    b = np.zeros((4, 10, 1), dtype=np.uint8)
+    a[1:3, 1:9, 0] = 1  # one wide A component
+    b[1:3, 1:5, 0] = 1  # B1 — larger overlap
+    b[1:3, 7:8, 0] = 1  # B2 — smaller overlap (separate component)
+    seg_a, seg_b = _seg(a), _seg(b)
+    out = seg_a.difference(seg_b, strategy=GreedyArgmax(AbsoluteOverlap(), direction="a_to_b"))
+    # A matched its larger-overlap partner and is dropped; the result is empty of A
+    assert out.is_empty
