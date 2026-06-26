@@ -118,3 +118,12 @@ async def test_files_checksums_omits_missing(monkeypatch):
     fd = MagicMock(); fd.name = "seg"; fd.pattern = "seg_{id}.nrrd"; fd.level = None; fd.multiple = False
     f = Files(_record(monkeypatch, registry=[fd]))
     assert await f.checksums() == {}  # file does not exist on disk → omitted
+
+
+def test_files_working_dirs_classmethod(monkeypatch):
+    from clarinet.files.facade import Files
+    monkeypatch.setattr("clarinet.files.facade.settings", MagicMock(storage_path="/data", disk_path_template="{anon_patient_id}/{study_uid}/{series_uid}"))
+    monkeypatch.setattr("clarinet.files._storage.settings", MagicMock(storage_path="/data", disk_path_template="{anon_patient_id}/{study_uid}/{series_uid}"))
+    patient = MagicMock(id="P1", anon_id="CLARINET_1", auto_id=1)
+    dirs = Files.working_dirs(patient=patient, study=None, series=None, template="{anon_patient_id}/{study_uid}/{series_uid}")
+    assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")

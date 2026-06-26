@@ -6,8 +6,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.files import _checksums, _fs, _patterns, _resolver, _template
+from clarinet.exceptions.domain import AnonPathError
+from clarinet.files import _checksums, _fs, _patterns, _resolver, _storage, _template
 from clarinet.models.base import DicomQueryLevel
+from clarinet.settings import settings
 
 if TYPE_CHECKING:
     from clarinet.config.primitives import FileDef
@@ -89,6 +91,41 @@ class Files:
         self._parent = None
         self._accessed = {}
         return self
+
+    @classmethod
+    def for_reader(cls, record: RecordRead) -> Files:
+        """Strict first; on ``AnonPathError`` rebuild with raw-UID fallback."""
+        try:
+            return cls(record)
+        except AnonPathError:
+            return cls(record, fallback=True)
+
+    @classmethod
+    def working_dirs(
+        cls,
+        *,
+        patient: Any,
+        study: Any,
+        series: Any,
+        storage_path: Path | None = None,
+        template: str | None = None,
+        fallback: bool = False,
+        anon_patient_id: str | None = None,
+        anon_study_uid: str | None = None,
+        anon_series_uid: str | None = None,
+    ) -> dict[DicomQueryLevel, Path]:
+        """Stateless all-levels renderer from explicit entities (caller indexes by level)."""
+        return _storage.render_all_levels(
+            patient=patient,
+            study=study,
+            series=series,
+            storage_path=storage_path or Path(settings.storage_path),
+            template=template,
+            fallback_to_unanonymized=fallback,
+            anon_patient_id=anon_patient_id,
+            anon_study_uid=anon_study_uid,
+            anon_series_uid=anon_series_uid,
+        )
 
     # ── working dirs ──
     def dir(self, level: DicomQueryLevel | None = None) -> Path:
