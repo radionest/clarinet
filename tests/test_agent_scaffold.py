@@ -2,13 +2,14 @@
 
 import argparse
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
 import clarinet
 from clarinet.cli.main import handle_agent_command
 from clarinet.exceptions.domain import AgentScaffoldError
+from clarinet.utils import agent_scaffold
 from clarinet.utils.agent_scaffold import agent_source_dir, scaffold_agent_docs
 
 MANAGED = Path(".claude") / "rules" / "clarinet"
@@ -138,9 +139,24 @@ def test_deep_docs_identical_to_rules_seeds() -> None:
 def test_written_deep_doc_links_resolve(tmp_path: Path) -> None:
     dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
     overview = (dest / "overview.md").read_text(encoding="utf-8")
-    deep_link_re = re.compile(r"(/[^\s`'\"]+/docs/[\w.-]+\.md)")
+    deep_link_re = re.compile(r"((?:[A-Za-z]:)?/[^\s`'\"]+/docs/[\w.-]+\.md)")
     matches = deep_link_re.findall(overview)
     deep_matches = [m for m in matches if any(m.endswith(f"{n}.md") for n in DEEP_DOCS)]
     assert deep_matches, "no substituted deep-doc link found in written overview.md"
     for link in deep_matches:
         assert Path(link).is_file(), f"written link does not resolve to a file: {link}"
+
+
+def test_written_links_use_forward_slashes_for_windows_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regress #419 on POSIX: a backslash docs root must still emit forward-slash links."""
+    real_src = agent_source_dir("claude")
+    win_docs = PureWindowsPath(r"C:\pkg\clarinet\docs")
+    monkeypatch.setattr(agent_scaffold, "agent_source_dir", lambda *_: real_src)
+    monkeypatch.setattr(agent_scaffold, "_package_docs_dir", lambda: win_docs)
+
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    overview = (dest / "overview.md").read_text(encoding="utf-8")
+    assert win_docs.as_posix() in overview  # "C:/pkg/clarinet/docs"
+    assert str(win_docs) not in overview  # not the "C:\\pkg\\..." backslash form
