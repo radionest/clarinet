@@ -26,23 +26,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from clarinet.exceptions.domain import PipelineStepError
-from clarinet.models.base import DicomQueryLevel, RecordStatus
-from clarinet.services.common.file_resolver import (
-    FileResolver,
-    resolve_pattern_from_dict,
-)
-from clarinet.utils.file_patterns import resolve_origin_type
+from clarinet.files import Files
+from clarinet.models.base import RecordStatus
+from clarinet.services.common.file_resolver import FileResolver
 from clarinet.utils.logger import logger
 
 # Backward-compat alias — older code spells the helper with a leading underscore.
-_resolve_pattern_from_dict = resolve_pattern_from_dict
+_resolve_pattern_from_dict = Files.render_template
 
 if TYPE_CHECKING:
     from clarinet.client import ClarinetClient
-    from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.record import RecordRead
 
     from .message import PipelineMessage
@@ -53,7 +49,6 @@ __all__ = [
     "RecordQuery",
     "TaskContext",
     "build_task_context",
-    "resolve_pattern_from_dict",
 ]
 
 
@@ -62,10 +57,10 @@ class RecordQuery:
 
     Args:
         client: Authenticated ``ClarinetClient``.
-        files: ``FileResolver`` for the current task context.
+        files: File resolver for the current task context.
     """
 
-    def __init__(self, client: ClarinetClient, files: FileResolver) -> None:
+    def __init__(self, client: ClarinetClient, files: Files) -> None:
         self._client = client
         self._files = files
 
@@ -147,30 +142,23 @@ class RecordQuery:
         record = records[0]
 
         # Check file_links first — if a link with matching name exists, use its filename
+        f = Files(record)
+        file_registry = record.record_type.file_registry or []
+        fd_map = {fd.name: fd for fd in file_registry}
         if record.file_links:
             for link in record.file_links:
                 if link.name == file:
-                    working_dirs = FileResolver.build_working_dirs(record)
-                    file_registry = record.record_type.file_registry or []
-                    fd_map = {fd.name: fd for fd in file_registry}
                     fd = fd_map.get(file)
                     level = (fd.level if fd else None) or record.record_type.level
-                    return working_dirs[level] / link.filename
+                    return f.dir(level) / link.filename
 
         # Fallback to pattern resolution
-        working_dirs = FileResolver.build_working_dirs(record)
-        fields = FileResolver.build_fields(record)
-        file_registry = record.record_type.file_registry or []
-        fd_map = {fd.name: fd for fd in file_registry}
         if file not in fd_map:
             raise PipelineStepError(
                 type_name,
                 f"File definition '{file}' not found in record type '{record.record_type.name}'",
             )
-        fd = fd_map[file]
-        level = fd.level or record.record_type.level
-        filename = resolve_pattern_from_dict(fd.pattern, fields)
-        return working_dirs[level] / filename
+        return f.resolve(fd_map[file])
 
 
 @dataclass
@@ -184,12 +172,12 @@ class TaskContext:
         msg: The parsed pipeline message.
     """
 
-    files: FileResolver
+    files: Files
     records: RecordQuery
     client: ClarinetClient
     msg: PipelineMessage
 
-    def files_for(self, record: RecordRead) -> FileResolver:
+    def files_for(self, record: RecordRead) -> Files:
         """Build a resolver for *another* record you already hold.
 
         ``files`` resolves the task's own record (``msg.record_id``); use
@@ -198,7 +186,7 @@ class TaskContext:
         reassembling the resolver by hand. For lookup-by-criteria use
         ``records.file_path`` instead.
         """
-        return FileResolver.from_record(record)
+        return Files(record)
 
 
 async def build_task_context(msg: PipelineMessage, client: ClarinetClient) -> TaskContext:
@@ -220,46 +208,30 @@ async def build_task_context(msg: PipelineMessage, client: ClarinetClient) -> Ta
     Returns:
         Fully initialised ``TaskContext``.
     """
-    working_dirs: dict[DicomQueryLevel, Path] = {}
-    file_registry: list[FileDefinitionRead] = []
-    fields: dict[str, Any] = {}
-    record_type_level = DicomQueryLevel.SERIES
-
     if msg.record_id is not None:
         record = await client.get_record(msg.record_id)
-        working_dirs = FileResolver.build_working_dirs(record)
-        fields = FileResolver.build_fields(record)
-        file_registry = record.record_type.file_registry or []
-        record_type_level = record.record_type.level
-
-        # Override origin_type from parent record when available
+        parent: RecordRead | None = None
         if record.parent_record_id is not None:
             try:
                 parent = await client.get_record(record.parent_record_id)
-                fields["origin_type"] = resolve_origin_type(record, parent)
             except Exception:
                 logger.debug(f"Could not load parent {record.parent_record_id} for origin_type")
-
+        files = Files(record, parent=parent)
         logger.debug(f"TaskContext built from record_id={msg.record_id}")
 
     elif msg.series_uid is not None:
         series = await client.get_series(msg.series_uid)
-        working_dirs = FileResolver.build_working_dirs_from_series(series)
+        files = Files(series)
         logger.debug(f"TaskContext built from series_uid={msg.series_uid}")
 
     elif msg.study_uid:
         study = await client.get_study(msg.study_uid)
-        working_dirs = FileResolver.build_working_dirs_from_study(study)
+        files = Files(study)
         logger.debug(f"TaskContext built from study_uid={msg.study_uid}")
 
     else:
+        files = Files.empty()
         logger.debug("TaskContext built with minimal empty context")
 
-    files = FileResolver(
-        working_dirs=working_dirs,
-        record_type_level=record_type_level,
-        file_registry=file_registry,
-        fields=fields,
-    )
     records = RecordQuery(client=client, files=files)
     return TaskContext(files=files, records=records, client=client, msg=msg)
