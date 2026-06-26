@@ -1,4 +1,4 @@
-"""Custom SQL reports — admin-only endpoints for listing and downloading."""
+"""Custom SQL reports — endpoints (reports capability) for list + download."""
 
 import re
 from datetime import UTC, datetime

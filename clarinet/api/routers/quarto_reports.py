@@ -1,4 +1,4 @@
-"""Quarto reports — admin-only endpoints: list, render (background), poll, download."""
+"""Quarto reports — endpoints (reports capability): list, render, poll, download."""
 
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
