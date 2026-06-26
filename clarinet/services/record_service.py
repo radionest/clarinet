@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
@@ -12,16 +12,13 @@ from clarinet.exceptions.domain import (
     RecordUniquePerUserError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
+from clarinet.files import Files
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
-from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.events.capture import emit_record_events, mark_pending_audit
 from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
-from clarinet.utils.file_checksums import checksums_changed, compute_checksums
-from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
-from clarinet.utils.fs import run_in_fs_thread
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -98,7 +95,7 @@ def _missing_output_links(
         fd = output_defs.get(name)
         if fd is None or name in linked or name in missing:
             continue
-        missing[name] = collection_file or resolve_pattern(fd.pattern, record, parent)
+        missing[name] = collection_file or Files(record, parent=parent).render(fd.pattern)
     return missing
 
 
@@ -765,15 +762,11 @@ class RecordService:
             else:
                 return [], {}
 
-        _, working_dir = FileRepository.resolve_with_fallback(record_read)
-        new_checksums = await compute_checksums(
-            record_read.record_type.file_registry or [],
-            record_read,
-            working_dir,
-            parent=parent_read,
+        new_checksums = await Files(record_read, parent=parent_read).checksums(
+            record_read.record_type.file_registry or []
         )
         old_checksums = _stored_checksums(record_read)
-        changed = checksums_changed(old_checksums, new_checksums)
+        changed = Files.checksums_changed(old_checksums, new_checksums)
 
         await self._register_output_links(record, record_read, new_checksums, parent_read)
 
@@ -886,7 +879,7 @@ class RecordService:
         files_removed = 0
         for p in paths_to_unlink:
             try:
-                await run_in_fs_thread(p.unlink)
+                await Files.in_thread(p.unlink)
             except FileNotFoundError:
                 continue
             except OSError as exc:
@@ -922,24 +915,25 @@ class RecordService:
 
         Records whose anonymized identifiers are missing fall back to raw
         UIDs (admin/UI-triggered cascade keeps working on legacy data —
-        cf. ``FileRepository.resolve_with_fallback``).
+        cf. ``Files.for_reader``).
         """
-        working_dirs, default_dir = FileRepository.resolve_with_fallback(record_read)
+        f = Files.for_reader(record_read)
+        working_dirs = f.dirs()
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
-            else default_dir
+            else f.dir()
         )
 
         if file_def.multiple:
-            candidates = await run_in_fs_thread(glob_file_paths, file_def, target_dir)
+            candidates = await Files.in_thread(f.glob, file_def)
         else:
-            file_path = target_dir / resolve_pattern(file_def.pattern, record_read, parent_read)
-            if not await run_in_fs_thread(file_path.is_file):
+            file_path = target_dir / Files(record_read, parent=parent_read).render(file_def.pattern)
+            if not await Files.in_thread(file_path.is_file):
                 return []
             candidates = [file_path]
 
-        return await run_in_fs_thread(_filter_in_sandbox, candidates, target_dir)
+        return cast(list[Path], await Files.in_thread(_filter_in_sandbox, candidates, target_dir))
 
     async def _collect_output_file_paths(
         self,
@@ -1034,7 +1028,7 @@ class RecordService:
         deleted_files: list[str] = []
         for p in paths:
             try:
-                await run_in_fs_thread(p.unlink)
+                await Files.in_thread(p.unlink)
             except FileNotFoundError:
                 continue
             deleted_files.append(p.name)
@@ -1236,11 +1230,8 @@ class RecordService:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
 
-        _, working_dir = FileRepository.resolve_with_fallback(record_read)
         try:
-            new_checksums = await compute_checksums(
-                output_defs, record_read, working_dir, parent=parent_read
-            )
+            new_checksums = await Files(record_read, parent=parent_read).checksums(output_defs)
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
             return
@@ -1249,7 +1240,7 @@ class RecordService:
 
         # A file without a link has no stored checksum, so any link to create
         # implies a non-empty changed set — safe to early-return here.
-        changed = checksums_changed(old_checksums, new_checksums)
+        changed = Files.checksums_changed(old_checksums, new_checksums)
         if not changed:
             return
 

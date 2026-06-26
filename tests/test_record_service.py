@@ -964,13 +964,54 @@ def _record_read_stub(
     file_links: list[RecordFileLinkRead],
     **fields: object,
 ) -> SimpleNamespace:
-    """Duck-typed RecordRead: honest ``hasattr`` (unlike MagicMock), so
-    unresolved pattern placeholders collapse to "" instead of a mock repr."""
+    """Duck-typed RecordRead stub for _missing_output_links / _stored_checksums tests.
+
+    Tests that call ``_missing_output_links`` patch ``Files`` via
+    ``_make_files_stub`` so the real ``Files.__init__`` (which requires a
+    DB-backed ``RecordRead``) is never invoked.
+    """
     return SimpleNamespace(
         record_type=SimpleNamespace(file_registry=file_registry),
         file_links=file_links,
         **fields,
     )
+
+
+def _make_files_stub(record: object, *, parent: object = None, **_kw: object) -> MagicMock:
+    """Construct a Files mock whose ``.render()`` uses the new template engine.
+
+    ``Files(record, parent=parent)`` in ``_missing_output_links`` needs to
+    render patterns against duck-typed ``SimpleNamespace`` stubs.  The real
+    ``Files.__init__`` requires a proper ``RecordRead`` with DICOM anon fields;
+    this stub bypasses it while preserving the same rendering semantics via the
+    new ``render_template`` engine.  We build a minimal fields dict directly
+    (mirrors the scalar-fallback logic in ``_patterns.fields_from``) so that
+    plain ``SimpleNamespace`` stubs with only test-relevant attributes work.
+    """
+    from clarinet.files._template import RenderMode, render_template
+
+    def _scalar(name: str) -> object:
+        value = getattr(record, name, None)
+        if value in (None, "") and parent is not None:
+            value = getattr(parent, name, None)
+        return value
+
+    fields = {
+        "id": getattr(record, "id", None),
+        "user_id": _scalar("user_id"),
+        "patient_id": _scalar("patient_id"),
+        "study_uid": _scalar("study_uid"),
+        "series_uid": _scalar("series_uid"),
+        "data": {
+            **(getattr(parent, "data", None) or {}),
+            **(getattr(record, "data", None) or {}),
+        },
+    }
+    mock = MagicMock()
+    mock.render.side_effect = lambda pattern: render_template(
+        pattern, fields, mode=RenderMode.LENIENT
+    )
+    return mock
 
 
 class TestMissingOutputLinks:
@@ -982,7 +1023,8 @@ class TestMissingOutputLinks:
             [],
         )
 
-        result = _missing_output_links(record, {"output_mask": "abc123"})
+        with patch("clarinet.services.record_service.Files", side_effect=_make_files_stub):
+            result = _missing_output_links(record, {"output_mask": "abc123"})
 
         assert result == {"output_mask": "mask.nii.gz"}
 
@@ -993,7 +1035,8 @@ class TestMissingOutputLinks:
             id=7,
         )
 
-        result = _missing_output_links(record, {"seg": "abc123"})
+        with patch("clarinet.services.record_service.Files", side_effect=_make_files_stub):
+            result = _missing_output_links(record, {"seg": "abc123"})
 
         assert result == {"seg": "seg_7.nrrd"}
 
@@ -1004,7 +1047,8 @@ class TestMissingOutputLinks:
         )
         parent = _record_read_stub([], [], user_id="u42")
 
-        result = _missing_output_links(record, {"seg": "abc123"}, parent)
+        with patch("clarinet.services.record_service.Files", side_effect=_make_files_stub):
+            result = _missing_output_links(record, {"seg": "abc123"}, parent)
 
         assert result == {"seg": "seg_u42.nrrd"}
 
@@ -1014,7 +1058,8 @@ class TestMissingOutputLinks:
             [],
         )
 
-        result = _missing_output_links(record, {"seg": "abc123"})
+        with patch("clarinet.services.record_service.Files", side_effect=_make_files_stub):
+            result = _missing_output_links(record, {"seg": "abc123"})
 
         assert result == {"seg": "seg_.nrrd"}
 
@@ -1028,6 +1073,7 @@ class TestMissingOutputLinks:
             [],
         )
 
+        # Collection keys ("masks:b.nii") make collection_file truthy — render is never called.
         result = _missing_output_links(record, {"masks:b.nii": "1", "masks:a.nii": "2"})
 
         assert result == {"masks": "a.nii"}
@@ -1041,6 +1087,8 @@ class TestMissingOutputLinks:
             [RecordFileLinkRead(name="output_mask", filename="mask.nii.gz", checksum="old")],
         )
 
+        # Both entries are skipped before render is called: output_mask is already linked,
+        # input_nifti has INPUT role — render is never invoked.
         result = _missing_output_links(record, {"output_mask": "abc123", "input_nifti": "def456"})
 
         assert result == {}
