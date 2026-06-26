@@ -421,7 +421,11 @@ fn stats_view(model: Model) -> Element(Msg) {
     fn() {
       case model.admin_stats {
         Some(stats) ->
-          element.fragment([overview_section(stats), status_section(stats)])
+          element.fragment([
+            overview_section(stats),
+            status_section(stats),
+            workload_section(stats),
+          ])
         None ->
           html.div([attribute.class("loading")], [
             html.p([], [html.text("Loading statistics...")]),
@@ -493,6 +497,78 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
         }),
     ),
   ])
+}
+
+fn workload_section(stats: models.AdminStats) -> Element(Msg) {
+  html.div([attribute.class("dashboard-section")], [
+    html.h3([], [html.text("Workload by user")]),
+    html.div([attribute.class("stats-grid")], [
+      admin_stat_card(
+        label: "Available pending",
+        count: stats.available_pending,
+        color: "blue",
+        route: Some(
+          router.Records(
+            dict.from_list([
+              #("status", "pending"),
+              #("user", record_filters.unassigned_user_value),
+            ]),
+          ),
+        ),
+      ),
+    ]),
+    html.div([attribute.class("table-responsive")], [
+      html.table([attribute.class("table")], [
+        html.thead([], [
+          html.tr([], [
+            html.th([], [html.text("User")]),
+            html.th([], [html.text("inwork")]),
+            html.th([], [html.text("pending")]),
+            html.th([], [html.text("blocked")]),
+            html.th([], [html.text("failed")]),
+            html.th([], [html.text("Total")]),
+          ]),
+        ]),
+        html.tbody([], list.map(stats.workload_by_user, workload_row)),
+      ]),
+    ]),
+  ])
+}
+
+fn workload_row(w: models.UserWorkload) -> Element(Msg) {
+  let total = w.inwork + w.pending + w.blocked + w.failed
+  html.tr([], [
+    html.td([], [html.text(w.email)]),
+    workload_cell(w.user_id, "inwork", w.inwork),
+    workload_cell(w.user_id, "pending", w.pending),
+    workload_cell(w.user_id, "blocked", w.blocked),
+    workload_cell(w.user_id, "failed", w.failed),
+    html.td([], [html.text(int.to_string(total))]),
+  ])
+}
+
+fn workload_cell(user_id: String, status_str: String, count: Int) -> Element(Msg) {
+  case count {
+    0 -> html.td([attribute.class("text-muted")], [html.text("0")])
+    _ ->
+      html.td([], [
+        html.a(
+          [
+            attribute.href(
+              router.route_to_href(
+                router.Records(
+                  dict.from_list([
+                    #("status", status_str),
+                    #("user", user_id),
+                  ]),
+                ),
+              ),
+            ),
+          ],
+          [html.text(int.to_string(count))],
+        ),
+      ])
+  }
 }
 
 fn roles_section(model: Model) -> Element(Msg) {
