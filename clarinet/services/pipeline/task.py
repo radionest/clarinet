@@ -26,7 +26,10 @@ import asyncio
 import functools
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from clarinet.files import Files
 
 from clarinet.client import ClarinetClient
 from clarinet.settings import settings
@@ -34,7 +37,7 @@ from clarinet.utils.logger import logger
 
 from .broker import get_broker_for
 from .chain import register_task
-from .context import FileResolver, build_task_context
+from .context import build_task_context
 from .message import PipelineMessage
 from .sync_wrappers import build_sync_context
 
@@ -84,7 +87,7 @@ def pipeline_task(
             )
             try:
                 ctx = await build_task_context(message, client)
-                pre_checksums = await ctx.files.snapshot_checksums()
+                pre_checksums = await ctx.files.checksums()
 
                 if is_async:
                     result = await fn(message, ctx)
@@ -135,12 +138,12 @@ def pipeline_task(
     return decorator
 
 
-async def _detect_file_changes(files: FileResolver, pre: dict[str, str | None]) -> list[str]:
+async def _detect_file_changes(files: Files, pre: dict[str, str]) -> list[str]:
     """Compare pre-task checksums with current state to detect file changes.
 
     Args:
-        files: FileResolver with access tracking from the completed task.
-        pre: Pre-task checksums from ``snapshot_checksums()``.
+        files: Files with access tracking from the completed task.
+        pre: Pre-task checksums from ``checksums()`` (missing files absent, not None).
 
     Returns:
         List of file definition names whose checksums changed.
@@ -148,8 +151,8 @@ async def _detect_file_changes(files: FileResolver, pre: dict[str, str | None]) 
     from clarinet.files import Files
 
     changed: list[str] = []
-    for name, path in files.accessed_files.items():
-        old = pre.get(name)
+    for name, path in files.accessed.items():
+        old: str | None = pre.get(name)
         new = await Files.checksum(path) if path.is_file() else None
         if old != new:
             changed.append(name)

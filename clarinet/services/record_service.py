@@ -95,7 +95,7 @@ def _missing_output_links(
         fd = output_defs.get(name)
         if fd is None or name in linked or name in missing:
             continue
-        missing[name] = collection_file or Files(record, parent=parent).render(fd.pattern)
+        missing[name] = collection_file or Files.render_for(record, fd.pattern, parent=parent)
     return missing
 
 
@@ -762,7 +762,7 @@ class RecordService:
             else:
                 return [], {}
 
-        new_checksums = await Files(record_read, parent=parent_read).checksums(
+        new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
             record_read.record_type.file_registry or []
         )
         old_checksums = _stored_checksums(record_read)
@@ -928,7 +928,7 @@ class RecordService:
         if file_def.multiple:
             candidates = await Files.in_thread(f.glob, file_def)
         else:
-            file_path = target_dir / Files(record_read, parent=parent_read).render(file_def.pattern)
+            file_path = target_dir / Files.render_for(record_read, file_def.pattern, parent=parent_read)
             if not await Files.in_thread(file_path.is_file):
                 return []
             candidates = [file_path]
@@ -1231,7 +1231,7 @@ class RecordService:
             parent_read = RecordRead.model_validate(parent)
 
         try:
-            new_checksums = await Files(record_read, parent=parent_read).checksums(output_defs)
+            new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(output_defs)
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
             return

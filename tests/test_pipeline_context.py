@@ -947,10 +947,10 @@ class TestPipelineTaskDecorator:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
 
-        # Mock context with files supporting snapshot_checksums and accessed_files
+        # Mock context with files supporting checksums and accessed
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1000,8 +1000,8 @@ class TestPipelineTaskDecorator:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1044,8 +1044,8 @@ class TestPipelineTaskDecorator:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1089,8 +1089,8 @@ class TestPipelineTaskDecorator:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1132,8 +1132,8 @@ class TestPipelineTaskDecorator:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1399,8 +1399,8 @@ class TestSyncHandlerDetection:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1443,8 +1443,8 @@ class TestSyncHandlerDetection:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1495,8 +1495,8 @@ class TestAutoSubmit:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1537,8 +1537,8 @@ class TestAutoSubmit:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1580,8 +1580,8 @@ class TestAutoSubmit:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1622,8 +1622,8 @@ class TestAutoSubmit:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
@@ -1665,8 +1665,8 @@ class TestAutoSubmit:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         mock_files = MagicMock()
-        mock_files.snapshot_checksums = AsyncMock(return_value={})
-        mock_files.accessed_files = {}
+        mock_files.checksums = AsyncMock(return_value={})
+        mock_files.accessed = {}
         mock_ctx = MagicMock()
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx

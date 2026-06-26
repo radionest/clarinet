@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, cast
 
 from clarinet.exceptions.domain import ValidationError
 from clarinet.files import Files
-from clarinet.files._patterns import fields_from
-from clarinet.files._template import RenderMode, render_template
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
 
@@ -101,7 +99,7 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in self._file_definitions:
-            resolved = render_template(file_def.pattern, fields_from(record, parent), mode=RenderMode.LENIENT)  # type: ignore[arg-type]
+            resolved = Files.render_for(record, file_def.pattern, parent=parent)
 
             # Level-aware directory resolution
             if file_def.level and working_dirs and file_def.level in working_dirs:

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from clarinet.config.primitives import FileDef
     from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.patient import PatientRead
-    from clarinet.models.record import RecordRead
+    from clarinet.models.record import RecordBase, RecordRead
     from clarinet.models.study import SeriesRead, StudyRead
 
     type FileDefArg = FileDefinitionRead | FileDef | str
@@ -93,12 +93,13 @@ class Files:
         return self
 
     @classmethod
-    def for_reader(cls, record: RecordRead) -> Files:
-        """Strict first; on ``AnonPathError`` rebuild with raw-UID fallback."""
+    def for_reader(cls, record: RecordRead, *, parent: RecordRead | None = None) -> Files:
+        """Strict first; on ``AnonPathError`` rebuild with raw-UID fallback. Optional
+        ``parent`` supplies pattern-field fallback (e.g. ``{user_id}``)."""
         try:
-            return cls(record)
+            return cls(record, parent=parent)
         except AnonPathError:
-            return cls(record, fallback=True)
+            return cls(record, parent=parent, fallback=True)
 
     @classmethod
     def working_dirs(
@@ -166,6 +167,16 @@ class Files:
 
     def render(self, pattern: str) -> str:
         return _template.render_template(pattern, self._fields, mode=_template.RenderMode.LENIENT)
+
+    @staticmethod
+    def render_for(record: RecordBase, pattern: str, *, parent: RecordBase | None = None) -> str:
+        """Render *pattern* for a record WITHOUT building working dirs or hitting
+        the entity-type gate. Use for pattern-only resolution that must tolerate
+        not-yet-anonymized records (no ``AnonPathError``) and duck-typed records.
+        Equivalent to the old ``resolve_pattern(pattern, record, parent)``."""
+        return _template.render_template(
+            pattern, _patterns.fields_from(record, parent), mode=_template.RenderMode.LENIENT  # type: ignore[arg-type]
+        )
 
     @staticmethod
     def render_template(pattern: str, fields: dict[str, Any], *, strict: bool = False) -> str:
