@@ -110,3 +110,11 @@ def test_files_render_template_strict_raises():
     with pytest.raises(KeyError):
         Files.render_template("{missing}", {}, strict=True)
     assert Files.render_template("{missing}", {}) == ""
+
+
+@pytest.mark.asyncio
+async def test_files_checksums_omits_missing(monkeypatch):
+    from clarinet.files.facade import Files
+    fd = MagicMock(); fd.name = "seg"; fd.pattern = "seg_{id}.nrrd"; fd.level = None; fd.multiple = False
+    f = Files(_record(monkeypatch, registry=[fd]))
+    assert await f.checksums() == {}  # file does not exist on disk → omitted

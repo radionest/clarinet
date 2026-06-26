@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.files import _patterns, _resolver, _template
+from clarinet.files import _checksums, _fs, _patterns, _resolver, _template
 from clarinet.models.base import DicomQueryLevel
 
 if TYPE_CHECKING:
@@ -134,3 +134,39 @@ class Files:
     def render_template(pattern: str, fields: dict[str, Any], *, strict: bool = False) -> str:
         mode = _template.RenderMode.STRICT if strict else _template.RenderMode.LENIENT
         return _template.render_template(pattern, fields, mode=mode)
+
+    async def checksums(
+        self, defs: list[FileDefinitionRead] | None = None
+    ) -> dict[str, str]:
+        """SHA256 of registered files, keyed by name (singular) / ``name:filename``
+        (collections). Resolves each def at its own ``level``; missing files are
+        omitted. Replaces both ``snapshot_checksums`` and ``compute_checksums``."""
+        targets = defs if defs is not None else list(self._registry.values())
+        out: dict[str, str] = {}
+        for fd in targets:
+            working_dir = self._dirs.get(fd.level or self._level)
+            if working_dir is None:
+                continue
+            if fd.multiple:
+                for p in await _fs.run_in_fs_thread(_patterns.glob_file_paths, fd, working_dir):
+                    c = await _checksums.compute_file_checksum(p)
+                    if c is not None:
+                        out[f"{fd.name}:{p.name}"] = c
+            else:
+                filename = _template.render_template(
+                    fd.pattern, self._fields, mode=_template.RenderMode.LENIENT
+                )
+                c = await _checksums.compute_file_checksum(working_dir / filename)
+                if c is not None:
+                    out[fd.name] = c
+        return out
+
+    @staticmethod
+    async def checksum(path: Path) -> str | None:
+        return await _checksums.compute_file_checksum(path)
+
+    @staticmethod
+    def checksums_changed(
+        old: dict[str, str] | None, new: dict[str, str]
+    ) -> set[str]:
+        return _checksums.checksums_changed(old, new)
