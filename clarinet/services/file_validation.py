@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from clarinet.exceptions.domain import ValidationError
+from clarinet.files import Files
+from clarinet.files._patterns import fields_from
+from clarinet.files._template import RenderMode, render_template
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
-from clarinet.repositories.file_repository import FileRepository
-from clarinet.utils.file_patterns import resolve_pattern
-from clarinet.utils.fs import run_in_fs_thread
 
 if TYPE_CHECKING:
     from clarinet.models.file_schema import FileDefinitionRead
@@ -101,7 +101,7 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in self._file_definitions:
-            resolved = resolve_pattern(file_def.pattern, record, parent)
+            resolved = render_template(file_def.pattern, fields_from(record, parent), mode=RenderMode.LENIENT)  # type: ignore[arg-type]
 
             # Level-aware directory resolution
             if file_def.level and working_dirs and file_def.level in working_dirs:
@@ -138,17 +138,16 @@ async def validate_record_files(
 ) -> FileValidationResult | None:
     """Validate input files for a record.
 
-    Accepts ``RecordRead`` (Pydantic) — ``FileRepository`` requires the
-    eager-loaded relationships (patient/study/series/record_type) that
-    are populated on ``RecordRead`` via ``RecordRead.model_validate(record)``.
+    Accepts ``RecordRead`` (Pydantic) with eager-loaded relationships
+    (patient/study/series/record_type).
 
     The blocking ``FileValidator.validate()`` call is offloaded to a
-    dedicated FS thread pool to avoid blocking the event loop.
+    dedicated FS thread pool via ``Files.in_thread`` to avoid blocking
+    the event loop.
 
-    For records that have not been anonymized yet,
-    ``FileRepository.resolve_with_fallback`` transparently falls back to
-    raw UIDs so validation still produces a verdict against the legacy
-    path.
+    For records that have not been anonymized yet, ``Files.for_reader``
+    transparently falls back to raw UIDs so validation still produces a
+    verdict against the legacy path.
 
     Args:
         record: RecordRead instance with all relations populated
@@ -164,9 +163,10 @@ async def validate_record_files(
     if not input_defs:
         return None
 
-    working_dirs, directory = FileRepository.resolve_with_fallback(record)
+    f = Files.for_reader(record)
+    working_dirs, directory = f.dirs(), f.dir()
     validator = FileValidator(input_defs)
-    result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)
+    result = cast(FileValidationResult, await Files.in_thread(validator.validate, record, directory, working_dirs, parent))
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
         raise ValidationError(f"File validation failed: {errors}")
