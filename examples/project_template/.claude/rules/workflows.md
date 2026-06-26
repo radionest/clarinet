@@ -108,6 +108,31 @@ ctx.files.exists(file_def) -> bool         # существует ли файл
 
 Принимает `FileDef`-объект (импортированный из `record_types.py`) или строку с именем.
 
+`ctx.files` резолвит файлы **собственной** записи таски (`msg.record_id`). Чтобы
+получить пути файлов **другой** записи, которая уже у вас на руках (родитель,
+перечитанная копия, запись другого пациента), используйте `ctx.files_for(record)`:
+
+```python
+parent = (await ctx.records.find("study-root", study_uid=msg.study_uid))[0]
+parent_files = ctx.files_for(parent)      # -> FileResolver
+mask = parent_files.resolve("liver_mask")
+```
+
+`ctx.files_for` есть и в `TaskContext` (async), и в `SyncTaskContext` (sync) —
+это обёртка над `FileResolver.from_record(record)`. Тот же фабричный метод
+доступен и вне таски (standalone-скрипты без `ctx`):
+
+```python
+from clarinet.services.common.file_resolver import FileResolver
+
+files = FileResolver.from_record(record)  # собирает working_dirs + file_registry из записи
+```
+
+`from_record` принимает только `RecordRead` (у `SeriesRead`/`StudyRead`/`PatientRead`
+нет file-registry — для них собирайте `FileResolver` вручную или берите рабочую
+директорию через `FileRepository`). Для поиска файла **по критериям** (а не по
+готовой записи) используйте `ctx.records.file_path(...)`.
+
 #### `ctx.records` — `RecordQuery`
 
 ```python
