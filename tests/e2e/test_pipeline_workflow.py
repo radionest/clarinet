@@ -36,8 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from clarinet.api.app import app
 from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel
-from clarinet.models.record import RecordType
-from clarinet.models.study import Series, Study
+from clarinet.models.record import RecordRead, RecordType
+from clarinet.models.study import Series, SeriesRead, Study, StudyRead
 from clarinet.services.pipeline import Pipeline, PipelineMessage, get_pipeline
 from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
 from clarinet.services.pipeline.context import TaskContext, build_task_context
@@ -258,12 +258,8 @@ def _make_mock_study(
     patient_id: str = "TEST_PAT001",
     study_uid: str = "1.2.3",
 ) -> MagicMock:
-    """Create a mock StudyRead-like object for build_task_context.
-
-    Pipeline tasks run in the backend safe-by-default mode, so the mock
-    must mirror a fully anonymized study (anon_uid / anon_id populated).
-    """
-    mock_study = MagicMock()
+    """Create a mock StudyRead-like object for build_task_context."""
+    mock_study = MagicMock(spec=StudyRead)
     mock_study.study_uid = study_uid
     mock_study.anon_uid = f"anon_{study_uid}"
     mock_study.date = None
@@ -687,7 +683,7 @@ class TestPipelineTaskDecorator:
 
             # Mock get_record to return a RecordRead-like object (fully
             # anonymized — pipeline tasks run in backend safe-by-default mode).
-            mock_record = MagicMock()
+            mock_record = MagicMock(spec=RecordRead)
             mock_record.id = 42
             mock_record.patient_id = "TEST_PAT001"
             mock_record.study_uid = "1.2.3"
@@ -700,6 +696,7 @@ class TestPipelineTaskDecorator:
             mock_record.data = {}
             mock_record.user_id = None
             mock_record.parent_record_id = None
+            mock_record.file_links = None
             mock_record.patient = MagicMock()
             mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
             mock_record.patient.auto_id = None
@@ -1622,7 +1619,7 @@ class TestTaskContextIntegration:
         """Test 43: TaskContext builds correctly from record_id."""
         mock_client = AsyncMock()
 
-        mock_record = MagicMock()
+        mock_record = MagicMock(spec=RecordRead)
         mock_record.id = 42
         mock_record.patient_id = "TEST_PAT001"
         mock_record.study_uid = "1.2.3"
@@ -1630,6 +1627,8 @@ class TestTaskContextIntegration:
         mock_record.user_id = None
         mock_record.data = {}
         mock_record.clarinet_storage_path = None
+        mock_record.parent_record_id = None
+        mock_record.file_links = None
         mock_record.record_type = MagicMock()
         mock_record.record_type.name = "test-type"
         mock_record.record_type.level = DicomQueryLevel.SERIES
@@ -1671,7 +1670,7 @@ class TestTaskContextIntegration:
         """Test 45: TaskContext provides RecordQuery for async queries."""
         mock_client = AsyncMock()
 
-        mock_record = MagicMock()
+        mock_record = MagicMock(spec=RecordRead)
         mock_record.id = 42
         mock_record.patient_id = "TEST_PAT001"
         mock_record.study_uid = "1.2.3"
@@ -1679,6 +1678,8 @@ class TestTaskContextIntegration:
         mock_record.user_id = None
         mock_record.data = {}
         mock_record.clarinet_storage_path = None
+        mock_record.parent_record_id = None
+        mock_record.file_links = None
         mock_record.record_type = MagicMock()
         mock_record.record_type.name = "test-type"
         mock_record.record_type.level = DicomQueryLevel.SERIES

@@ -10,7 +10,8 @@ import pytest
 
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.pipeline.context import FileResolver, RecordQuery, TaskContext
+from clarinet.services.common.file_resolver import FileResolver
+from clarinet.services.pipeline.context import RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.convert_series import (
     VOLUME_NIFTI,

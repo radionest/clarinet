@@ -45,7 +45,8 @@ from .chain import (
     register_task,
     sync_pipeline_definitions,
 )
-from .context import FileResolver, RecordQuery, TaskContext, build_task_context
+from clarinet.services.common.file_resolver import FileResolver
+from .context import RecordQuery, TaskContext, build_task_context
 from .fingerprint import (
     compute_fingerprint,
     queue_version_segment,

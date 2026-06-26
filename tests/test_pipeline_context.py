@@ -19,8 +19,8 @@ from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.models.record import RecordRead
 from clarinet.models.study import SeriesRead, StudyRead
+from clarinet.services.common.file_resolver import FileResolver
 from clarinet.services.pipeline.context import (
-    FileResolver,
     RecordQuery,
     TaskContext,
     _resolve_pattern_from_dict,
@@ -123,7 +123,7 @@ def _make_record_read(
     file_links: list[RecordFileLinkRead] | None = None,
     data: dict | None = None,
 ) -> MagicMock:
-    record = MagicMock()
+    record = MagicMock(spec=RecordRead)
     record.id = record_id
     record.patient_id = patient_id
     record.study_uid = study_uid
@@ -330,13 +330,17 @@ class TestBuildFields:
 class TestFromRecord:
     """Tests for FileResolver.from_record() and TaskContext.files_for()."""
 
+    @patch("clarinet.files._resolver.settings")
     @patch("clarinet.services.common.file_resolver.settings")
-    def test_resolves_like_manual_construction(self, mock_settings: MagicMock):
-        mock_settings.storage_path = "/data"
+    def test_resolves_like_manual_construction(
+        self, mock_fr_settings: MagicMock, mock_files_settings: MagicMock
+    ):
+        mock_fr_settings.storage_path = "/data"
+        mock_files_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg_{id}.nrrd")
         record = _make_record_read(record_id=7, file_registry=[fd])
 
-        auto = FileResolver.from_record(record)
+        auto = Files(record)
         manual = FileResolver(
             working_dirs=FileResolver.build_working_dirs(record),
             record_type_level=record.record_type.level,
@@ -371,7 +375,7 @@ class TestFromRecord:
         other.series = _make_series(series_uid="1.2.3.4.5.6", anon_uid="9.8.7.6.5.4")
         other.record_type = _make_record_type_read(level=DicomQueryLevel.SERIES, file_registry=[fd])
         ctx = TaskContext(
-            files=FileResolver.from_record(own),
+            files=Files(own),
             records=MagicMock(),
             client=MagicMock(),
             msg=MagicMock(),
@@ -410,7 +414,7 @@ class TestFromRecord:
         other.series = _make_series(series_uid="1.2.3.4.5.6", anon_uid="9.8.7.6.5.4")
         other.record_type = _make_record_type_read(level=DicomQueryLevel.SERIES, file_registry=[fd])
         ctx = SyncTaskContext(
-            files=FileResolver.from_record(own),
+            files=Files(own),
             records=MagicMock(),
             client=MagicMock(),
             msg=MagicMock(),
@@ -420,13 +424,13 @@ class TestFromRecord:
             "/data/CLARINET_OTHER/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd"
         )
 
-    @patch("clarinet.services.common.file_resolver.settings")
+    @patch("clarinet.files._resolver.settings")
     def test_record_without_file_registry(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
         record.record_type.file_registry = None  # exercise the `or []` guard
 
-        resolver = FileResolver.from_record(record)
+        resolver = Files(record)
 
         assert resolver.dir() == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
         with pytest.raises(KeyError):
@@ -618,7 +622,7 @@ class TestRecordQuery:
     async def test_find_delegates_to_client(self):
         client = AsyncMock()
         client.find_records_advanced = AsyncMock(return_value=[])
-        files = MagicMock(spec=FileResolver)
+        files = MagicMock(spec=Files)
         rq = RecordQuery(client=client, files=files)
 
         result = await rq.find("ct_seg", series_uid="1.2.3")
@@ -655,7 +659,7 @@ class TestRecordQuery:
 
         client = AsyncMock()
         client.find_records_advanced = AsyncMock(return_value=[record])
-        files = MagicMock(spec=FileResolver)
+        files = MagicMock(spec=Files)
         rq = RecordQuery(client=client, files=files)
 
         result = await rq.file_path("ct_seg", file="segmentation", series_uid="1.2.3")
@@ -666,7 +670,7 @@ class TestRecordQuery:
     async def test_file_path_no_record_raises(self):
         client = AsyncMock()
         client.find_records_advanced = AsyncMock(return_value=[])
-        files = MagicMock(spec=FileResolver)
+        files = MagicMock(spec=Files)
         rq = RecordQuery(client=client, files=files)
 
         with pytest.raises(PipelineStepError, match="No record found"):
@@ -695,7 +699,7 @@ class TestRecordQuery:
 
         client = AsyncMock()
         client.find_records_advanced = AsyncMock(return_value=[record])
-        files = MagicMock(spec=FileResolver)
+        files = MagicMock(spec=Files)
         rq = RecordQuery(client=client, files=files)
 
         result = await rq.file_path("ct_seg", file="segmentation", series_uid="1.2.3")

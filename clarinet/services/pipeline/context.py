@@ -2,12 +2,7 @@
 TaskContext system for pipeline tasks.
 
 Provides RecordQuery (async record lookup) and TaskContext (container) to
-eliminate boilerplate in pipeline tasks. The ``FileResolver`` class
-itself lives in ``clarinet.services.common.file_resolver`` so that
-non-pipeline callers (API routers, Slicer context builder, record
-service) can use it without dragging the broker / TaskIQ import chain.
-``FileResolver`` is re-exported here for backward-compat with existing
-``from clarinet.services.pipeline.context import FileResolver`` callers.
+eliminate boilerplate in pipeline tasks.
 
 Example:
     @pipeline_task()
@@ -31,7 +26,6 @@ from typing import TYPE_CHECKING
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.files import Files
 from clarinet.models.base import RecordStatus
-from clarinet.services.common.file_resolver import FileResolver
 from clarinet.utils.logger import logger
 
 # Backward-compat alias — older code spells the helper with a leading underscore.
@@ -45,7 +39,6 @@ if TYPE_CHECKING:
 
 
 __all__ = [
-    "FileResolver",
     "RecordQuery",
     "TaskContext",
     "build_task_context",

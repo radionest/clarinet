@@ -770,11 +770,15 @@ class TestMaskRecords:
         # The hash is computed by the RecordRead validator at construction time
         # (masking just reuses display_anon_id), so the record must be built
         # inside the settings patch.
-        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
-            sp_settings.anon_per_study_patient_id = True
-            sp_settings.anon_per_study_patient_id_hex_length = 8
-            sp_settings.anon_uid_salt = "test-salt"
-            sp_settings.anon_id_prefix = ""  # bare-hash backward-compat path
+        with (
+            patch("clarinet.services.common.storage_paths.settings") as sp_settings,
+            patch("clarinet.files._storage.settings") as fs_settings,
+        ):
+            for s in (sp_settings, fs_settings):
+                s.anon_per_study_patient_id = True
+                s.anon_per_study_patient_id_hex_length = 8
+                s.anon_uid_salt = "test-salt"
+                s.anon_id_prefix = ""  # bare-hash backward-compat path
             record = _make_record_read(
                 patient_id="REAL_PAT_001",
                 patient_name="Real Patient Name",
@@ -802,11 +806,15 @@ class TestMaskRecords:
     def test_per_study_mode_with_anon_id_prefix_prepends_prefix(self) -> None:
         """Per-study mode + non-empty anon_id_prefix: masked PatientID is f'{prefix}_{hash}'."""
         user = _make_user(is_superuser=False)
-        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
-            sp_settings.anon_per_study_patient_id = True
-            sp_settings.anon_per_study_patient_id_hex_length = 8
-            sp_settings.anon_uid_salt = "test-salt"
-            sp_settings.anon_id_prefix = "NIR_LIVER"
+        with (
+            patch("clarinet.services.common.storage_paths.settings") as sp_settings,
+            patch("clarinet.files._storage.settings") as fs_settings,
+        ):
+            for s in (sp_settings, fs_settings):
+                s.anon_per_study_patient_id = True
+                s.anon_per_study_patient_id_hex_length = 8
+                s.anon_uid_salt = "test-salt"
+                s.anon_id_prefix = "NIR_LIVER"
             record = _make_record_read(
                 patient_id="REAL_PAT_001",
                 patient_name="Real Patient Name",

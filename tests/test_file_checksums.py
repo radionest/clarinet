@@ -9,10 +9,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from clarinet.files import Files
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.utils.file_checksums import (
     checksums_changed,
-    compute_checksums,
     compute_file_checksum,
 )
 
@@ -89,7 +90,15 @@ class TestComputeFileChecksum:
 
 
 class TestComputeChecksums:
-    """Tests for compute_checksums function."""
+    """Tests for Files.checksums()."""
+
+    def _make_files(self, mock_record: MagicMock, base_dir: Path) -> Files:
+        f = Files.empty()
+        f._dirs = {DicomQueryLevel.SERIES: base_dir}
+        f._level = DicomQueryLevel.SERIES
+        f._registry = {fd.name: fd for fd in mock_record.record_type.file_registry}
+        f._fields = {}
+        return f
 
     @pytest.mark.asyncio
     async def test_computes_singular_file_checksums(
@@ -98,9 +107,7 @@ class TestComputeChecksums:
         """Test computing checksums for singular files."""
         (tmp_path / "result.nrrd").write_text("data")
 
-        checksums = await compute_checksums(
-            mock_record.record_type.file_registry, mock_record, tmp_path
-        )
+        checksums = await self._make_files(mock_record, tmp_path).checksums()
 
         assert "single_file" in checksums
         assert len(checksums["single_file"]) == 64
@@ -109,13 +116,11 @@ class TestComputeChecksums:
     async def test_computes_collection_file_checksums(
         self, mock_record: MagicMock, tmp_path: Path
     ) -> None:
-        """Test computing checksums for collection files."""
+        """Test computing checksums for collection files (glob → name:filename keys)."""
         (tmp_path / "seg_user-A.nrrd").write_text("data A")
         (tmp_path / "seg_user-B.nrrd").write_text("data B")
 
-        checksums = await compute_checksums(
-            mock_record.record_type.file_registry, mock_record, tmp_path
-        )
+        checksums = await self._make_files(mock_record, tmp_path).checksums()
 
         # Collection keys use "name:filename" format
         collection_keys = [k for k in checksums if k.startswith("user_segs:")]
@@ -123,11 +128,9 @@ class TestComputeChecksums:
 
     @pytest.mark.asyncio
     async def test_skips_missing_files(self, mock_record: MagicMock, tmp_path: Path) -> None:
-        """Test that missing files are skipped in checksums."""
+        """Test that missing files are omitted from checksums."""
         # Don't create any files
-        checksums = await compute_checksums(
-            mock_record.record_type.file_registry, mock_record, tmp_path
-        )
+        checksums = await self._make_files(mock_record, tmp_path).checksums()
 
         assert len(checksums) == 0
 

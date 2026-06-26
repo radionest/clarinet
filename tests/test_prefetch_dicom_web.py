@@ -12,7 +12,8 @@ from clarinet.client import ClarinetAPIError
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.dicom.models import RetrieveResult, SeriesResult
-from clarinet.services.pipeline.context import FileResolver, RecordQuery, TaskContext
+from clarinet.services.common.file_resolver import FileResolver
+from clarinet.services.pipeline.context import RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.cache_dicomweb import (
     _filter_series_to_fetch,
