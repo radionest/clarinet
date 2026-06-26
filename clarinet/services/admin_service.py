@@ -6,6 +6,7 @@ from clarinet.models.admin import (
     RecordTypeStatusCounts,
     RoleMatrixResponse,
     UserRoleInfo,
+    UserWorkload,
 )
 from clarinet.models.base import RecordStatus
 from clarinet.repositories.patient_repository import PatientRepository
@@ -55,12 +56,28 @@ class AdminService:
         """
         total_studies, total_records, total_users, total_patients = await self._get_total_counts()
         records_by_status = await self._get_records_by_status()
+        assigned = await self.record_repo.get_assigned_status_counts_by_user()
+        available_pending = await self.record_repo.count_unassigned_pending()
+        active_users = await self.user_repo.list_all(is_active=True)
+        workload_by_user = [
+            UserWorkload(
+                user_id=str(user.id),
+                email=user.email,
+                inwork=assigned.get(str(user.id), {}).get("inwork", 0),
+                pending=assigned.get(str(user.id), {}).get("pending", 0),
+                blocked=assigned.get(str(user.id), {}).get("blocked", 0),
+                failed=assigned.get(str(user.id), {}).get("failed", 0),
+            )
+            for user in sorted(active_users, key=lambda u: u.email)
+        ]
         return AdminStats(
             total_studies=total_studies,
             total_records=total_records,
             total_users=total_users,
             total_patients=total_patients,
             records_by_status=records_by_status,
+            available_pending=available_pending,
+            workload_by_user=workload_by_user,
         )
 
     async def get_record_type_stats(self) -> list[RecordTypeStats]:

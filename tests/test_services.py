@@ -27,7 +27,14 @@ from clarinet.services.admin_service import AdminService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.user_service import UserService
 from clarinet.utils.auth import get_password_hash, verify_password
-from tests.utils.factories import make_patient
+from tests.utils.factories import (
+    make_patient,
+    make_record_type,
+    make_series,
+    make_study,
+    make_user,
+    seed_record,
+)
 
 # ===================================================================
 # UserService
@@ -218,6 +225,59 @@ class TestAdminService:
         assert stats.total_studies >= 1
         assert stats.total_patients >= 1
         assert stats.total_users >= 1
+
+    @pytest.mark.asyncio
+    async def test_get_stats_workload_by_user(self, env):
+        session = env["session"]
+        pat = make_patient("WL_PAT", "Workload Patient")
+        session.add(pat)
+        await session.commit()
+        study = make_study("WL_PAT", "1.2.3.700")
+        session.add(study)
+        await session.commit()
+        series = make_series("1.2.3.700", "1.2.3.700.1", 1)
+        session.add(series)
+        await session.commit()
+        rt = make_record_type("wl-rt")
+        session.add(rt)
+        await session.commit()
+
+        u_busy = make_user(email="wl_busy@test.com", is_active=True)
+        u_idle = make_user(email="wl_idle@test.com", is_active=True)
+        u_off = make_user(email="wl_off@test.com", is_active=False)
+        session.add_all([u_busy, u_idle, u_off])
+        await session.commit()
+        for u in (u_busy, u_idle, u_off):
+            await session.refresh(u)
+
+        async def add(user_id, status):
+            await seed_record(
+                session,
+                patient_id="WL_PAT",
+                study_uid="1.2.3.700",
+                series_uid="1.2.3.700.1",
+                rt_name="wl-rt",
+                user_id=user_id,
+                status=status,
+            )
+
+        await add(u_busy.id, RecordStatus.inwork)
+        await add(u_busy.id, RecordStatus.failed)
+        await add(u_off.id, RecordStatus.inwork)  # inactive user → excluded
+        await add(None, RecordStatus.pending)  # available pool
+        await add(None, RecordStatus.pending)  # available pool
+
+        stats = await env["service"].get_stats()
+
+        assert stats.available_pending == 2
+        by_email = {w.email: w for w in stats.workload_by_user}
+        assert "wl_busy@test.com" in by_email
+        assert "wl_idle@test.com" in by_email  # active, zero-count row present
+        assert "wl_off@test.com" not in by_email  # deactivated excluded
+        assert by_email["wl_busy@test.com"].inwork == 1
+        assert by_email["wl_busy@test.com"].failed == 1
+        assert by_email["wl_busy@test.com"].pending == 0
+        assert by_email["wl_idle@test.com"].inwork == 0
 
     @pytest.mark.asyncio
     async def test_get_record_type_stats_empty(self, env):

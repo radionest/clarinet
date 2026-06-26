@@ -3,6 +3,17 @@
 from pydantic import BaseModel as PydanticBaseModel
 
 
+class UserWorkload(PydanticBaseModel):
+    """Assigned-record counts for one user, by active-workload status."""
+
+    user_id: str
+    email: str
+    inwork: int = 0
+    pending: int = 0
+    blocked: int = 0
+    failed: int = 0
+
+
 class AdminStats(PydanticBaseModel):
     """Aggregate system statistics for admin dashboard."""
 
@@ -11,6 +22,8 @@ class AdminStats(PydanticBaseModel):
     total_users: int
     total_patients: int
     records_by_status: dict[str, int]
+    available_pending: int = 0
+    workload_by_user: list[UserWorkload] = []
 
 
 class RecordTypeStatusCounts(PydanticBaseModel):
