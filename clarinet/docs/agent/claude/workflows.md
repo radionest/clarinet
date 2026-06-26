@@ -102,7 +102,7 @@ class PipelineMessage:
 #### `ctx.files` — `FileResolver`
 
 ```python
-ctx.files.resolve(file_def) -> Path        # путь к файлу (создаёт parent dirs)
+ctx.files.resolve(file_def) -> Path        # абсолютный путь к файлу
 ctx.files.exists(file_def) -> bool         # существует ли файл
 ```
 
@@ -113,9 +113,10 @@ ctx.files.exists(file_def) -> bool         # существует ли файл
 перечитанная копия, запись другого пациента), используйте `ctx.files_for(record)`:
 
 ```python
-parent = (await ctx.records.find("study-root", study_uid=msg.study_uid))[0]
-parent_files = ctx.files_for(parent)      # -> FileResolver
-mask = parent_files.resolve("liver_mask")
+parents = await ctx.records.find("study-root", study_uid=msg.study_uid)
+if parents:
+    parent_files = ctx.files_for(parents[0])  # -> FileResolver
+    mask = parent_files.resolve("liver_mask")
 ```
 
 `ctx.files_for` есть и в `TaskContext` (async), и в `SyncTaskContext` (sync) —
@@ -125,13 +126,20 @@ mask = parent_files.resolve("liver_mask")
 ```python
 from clarinet.services.common.file_resolver import FileResolver
 
-files = FileResolver.from_record(record)  # собирает working_dirs + file_registry из записи
+files = FileResolver.from_record(record)  # собирает все 4 аргумента конструктора из записи
 ```
 
 `from_record` принимает только `RecordRead` (у `SeriesRead`/`StudyRead`/`PatientRead`
 нет file-registry — для них собирайте `FileResolver` вручную или берите рабочую
 директорию через `FileRepository`). Для поиска файла **по критериям** (а не по
 готовой записи) используйте `ctx.records.file_path(...)`.
+
+`from_record` резолвит пути в строгом режиме (`build_working_dirs(record)` с
+`fallback_to_unanonymized=False`): для ещё не анонимизированной записи он бросит
+`AnonPathError`, и протолкнуть fallback через `from_record` нельзя. Если нужен
+доступ к неанонимизированной раскладке (UX-превью, миграционные скрипты) —
+стройте резолвер напрямую: `FileResolver.build_working_dirs(record,
+fallback_to_unanonymized=True)`.
 
 #### `ctx.records` — `RecordQuery`
 
