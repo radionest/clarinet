@@ -1,5 +1,6 @@
 """Pluggable component-correspondence engine (measure x matching x operation)."""
 
+from clarinet.services.image.correspondence.graph import build_overlap_graph, correspond
 from clarinet.services.image.correspondence.measures import (
     AbsoluteOverlap,
     CentroidContainment,
@@ -40,4 +41,6 @@ __all__ = [
     "PairStats",
     "SetOperation",
     "Weighted",
+    "build_overlap_graph",
+    "correspond",
 ]
