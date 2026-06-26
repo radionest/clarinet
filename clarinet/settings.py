@@ -175,7 +175,7 @@ class Settings(BaseSettings):
         a stdlib-only helper that the migration CLI also uses, so
         settings-time and runtime-supplied templates share rules.
         """
-        from clarinet.utils.path_template import validate_template
+        from clarinet.files._template import validate_template
 
         return validate_template(v)
 
