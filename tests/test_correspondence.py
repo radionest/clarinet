@@ -16,6 +16,7 @@ from clarinet.services.image.correspondence.model import (
     Component,
     Correspondence,
     MatchGroup,
+    OverlapGraph,
     PairStats,
 )
 
@@ -121,3 +122,62 @@ def test_build_graph_centroid_containment_cshape():
     e = next(x for x in g.edges if x.a == 1)
     assert e.a_centroid_in_b is True  # b fills the volume
     assert e.b_centroid_in_a is False  # b's centroid (2,2) is not on the bracket
+
+
+from clarinet.services.image.correspondence.matching import (  # noqa: E402
+    GreedyArgmax,
+    ThresholdMatch,
+)
+
+
+def _comp(label, size=10, centroid=(0.0, 0.0, 0.0)):
+    return Component(label=label, size=size, centroid=centroid)
+
+
+def _edge(a, b, inter, dist=0.0):
+    return PairStats(
+        a=a,
+        b=b,
+        inter=inter,
+        size_a=20,
+        size_b=20,
+        centroid_distance=dist,
+        a_centroid_in_b=False,
+        b_centroid_in_a=False,
+    )
+
+
+def _graph(a_labels, b_labels, edges):
+    return OverlapGraph(
+        components_a=tuple(_comp(x) for x in a_labels),
+        components_b=tuple(_comp(x) for x in b_labels),
+        edges=tuple(edges),
+        spacing=(1.0, 1.0, 1.0),
+    )
+
+
+def test_greedy_argmax_resolves_1_to_n_by_overlap():
+    g = _graph([1], [1, 2], [_edge(1, 1, 10), _edge(1, 2, 3)])
+    corr = GreedyArgmax(AbsoluteOverlap(), direction="a_to_b")(g)
+    assert corr.matches == (MatchGroup(a_labels=(1,), b_labels=(1,), score=10.0),)
+    assert corr.unmatched_b == (2,)  # smaller-overlap loser kept
+
+
+def test_measure_swap_changes_winner():
+    g = _graph([1], [1, 2], [_edge(1, 1, 10, dist=8.0), _edge(1, 2, 3, dist=1.0)])
+    corr = GreedyArgmax(CentroidProximity(d_max_mm=10.0), direction="a_to_b")(g)
+    assert corr.matches[0].b_labels == (2,)  # same matcher, different measure -> different winner
+
+
+def test_threshold_match_keeps_clusters_and_filters():
+    g = _graph([1, 2], [1], [_edge(1, 1, 10), _edge(2, 1, 1)])
+    corr = ThresholdMatch(AbsoluteOverlap(), min_score=5.0)(g)
+    assert corr.matches == (MatchGroup(a_labels=(1,), b_labels=(1,), score=10.0),)
+    assert corr.unmatched_a == (2,)  # below threshold -> unmatched
+
+
+def test_unmatched_both_sides():
+    g = _graph([1], [2], [])  # 1:0 and 0:1
+    corr = ThresholdMatch(AbsoluteOverlap(), min_score=1.0)(g)
+    assert corr.matches == ()
+    assert corr.unmatched_a == (1,) and corr.unmatched_b == (2,)
