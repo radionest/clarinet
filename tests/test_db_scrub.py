@@ -3,7 +3,7 @@
 Pure-function coverage for the schema-aware JSON scrub and the PHI audit, plus
 end-to-end :class:`DbScrubber` runs on the SQLite test engine (FK enforcement
 on) asserting the fixture deliverable: MRN gone everywhere, structural data and
-anon identifiers preserved, the ``FileRepository`` path still resolves, and the
+anon identifiers preserved, the ``clarinet.files`` path engine still resolves, and the
 audit stays green.
 """
 
@@ -330,7 +330,7 @@ async def test_scrub_db_end_to_end(test_session: AsyncSession) -> None:
     ).scalar_one()
     assert counter.last_value == 42
 
-    # FileRepository path engine still resolves to the anonymized layout.
+    # The clarinet.files._storage path engine still resolves to the anonymized layout.
     ctx = build_context(patient=patient, study=study, series=series, template=_DEFAULT_TEMPLATE)
     series_dir = render_working_folder(
         _DEFAULT_TEMPLATE, DicomQueryLevel.SERIES, ctx, Path("/storage")

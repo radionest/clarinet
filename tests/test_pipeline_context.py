@@ -1103,6 +1103,37 @@ class TestPipelineTaskDecorator:
         assert base_url.endswith("/api"), f"base_url should end with /api, got: {base_url}"
 
 
+@pytest.mark.asyncio
+async def test_detect_file_changes_keys_collections_and_skips_unchanged() -> None:
+    """``_detect_file_changes`` compares full pre/post checksum maps, so an
+    unchanged collection (members keyed ``name:filename``) is NOT reported, while
+    a changed/added/removed member — or a changed singular file — IS, by
+    file-definition name. Guards the old accessed-loop's collection false-positive.
+    """
+    from clarinet.services.pipeline.task import _detect_file_changes
+
+    files = MagicMock()
+    files.checksums = AsyncMock(
+        return_value={
+            "seg": "h-new",  # singular: changed
+            "frames:a.nrrd": "ha",  # collection member: unchanged
+            "frames:b.nrrd": "hb-new",  # collection member: added/changed
+            "masks:m.nrrd": "hm",  # unchanged collection (sole member)
+        }
+    )
+    pre = {
+        "seg": "h-old",  # changed
+        "frames:a.nrrd": "ha",  # unchanged
+        "frames:c.nrrd": "hc",  # removed
+        "masks:m.nrrd": "hm",  # unchanged → must NOT be reported
+    }
+
+    changed = await _detect_file_changes(files, pre)
+
+    # seg changed; frames has a member added (b) and removed (c); masks unchanged.
+    assert changed == ["frames", "seg"]
+
+
 class TestFileDefPassThrough:
     """Tests for FileDef (config primitive) pass-through in Files."""
 

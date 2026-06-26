@@ -233,7 +233,7 @@ async def hydrate_projection_for_update(
     if target_series_uid is None:
         return {}
 
-    # Build file paths following FileResolver.build_working_dirs convention
+    # Build file paths following the Files working-dir layout (disk_path_template)
     patient_dir = context.get("working_folder", "")
     projection_path = os.path.join(
         patient_dir,

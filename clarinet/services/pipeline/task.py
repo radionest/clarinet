@@ -139,21 +139,19 @@ def pipeline_task(
 
 
 async def _detect_file_changes(files: Files, pre: dict[str, str]) -> list[str]:
-    """Compare pre-task checksums with current state to detect file changes.
+    """Return file-definition names whose on-disk state changed during the task.
 
-    Args:
-        files: Files with access tracking from the completed task.
-        pre: Pre-task checksums from ``checksums()`` (missing files absent, not None).
-
-    Returns:
-        List of file definition names whose checksums changed.
+    ``pre`` and the freshly computed post-task map are both full-registry
+    ``Files.checksums()`` results — singular files keyed by ``name``, collection
+    (``multiple=True``) members keyed ``name:filename``, missing files absent.
+    A key whose checksum differs between the two maps (added, modified, or
+    removed) marks its file definition as changed; the leading ``name`` segment
+    is reported. Comparing the full maps — rather than only the per-name first
+    ``files.accessed`` entry — keeps collection members and deletions correct
+    (the old accessed-loop reported every collection def as changed because its
+    ``name`` key never appears in the ``name:filename``-keyed checksum map).
     """
-    from clarinet.files import Files
-
-    changed: list[str] = []
-    for name, path in files.accessed.items():
-        old: str | None = pre.get(name)
-        new = await Files.checksum(path) if path.is_file() else None
-        if old != new:
-            changed.append(name)
-    return changed
+    post = await files.checksums()
+    return sorted(
+        {key.split(":", 1)[0] for key in pre.keys() | post.keys() if pre.get(key) != post.get(key)}
+    )

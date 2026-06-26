@@ -281,6 +281,16 @@ Two honestly-named entry points (record-based `.render` / `.resolve`, dict-based
    for file definitions whose `level` ≠ the record's level; it corrects a latent
    resolve-vs-checksum directory mismatch.
 
+6. **Data-dict merge replaces per-key falsy fallback for `{data.FIELD}`.** The old
+   `resolve_pattern` treated `{data.FIELD}` like a scalar — a falsy `record.data[FIELD]`
+   (including a present-but-empty `""`) fell back to `parent.data[FIELD]`. `fields_from`
+   instead merges `{**(parent.data or {}), **(record.data or {})}`, so a present-but-empty
+   `record.data[FIELD]` now wins its key and does **not** fall back; only keys *absent*
+   from `record.data` are filled from the parent. This aligns `{data.FIELD}` with the
+   record-wins semantics used everywhere else `data` is read and diverges from the old
+   validation/checksum path only when a record carries an explicit empty value for a key
+   the parent fills — which no repo pattern relies on.
+
 No other behavior changes are intended. Regex strictness is safe: every real file/path
 pattern in the repo (`{id}`, `{patient_id}`, `{study_uid}`, `{series_anon_uid}`,
 `{study_anon_uid}`, `{user_id}`, `{data.FIELD}`) satisfies the stricter
