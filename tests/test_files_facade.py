@@ -19,3 +19,19 @@ def test_storage_render_all_levels_smoke(monkeypatch):
         storage_path=Path("/data"), template="{anon_patient_id}/{study_uid}/{series_uid}",
     )
     assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
+
+
+def test_resolver_build_working_dirs(monkeypatch):
+    from pathlib import Path
+    from unittest.mock import MagicMock
+    from clarinet.models.base import DicomQueryLevel
+    from clarinet.files import _resolver
+    monkeypatch.setattr("clarinet.files._resolver.settings", MagicMock(storage_path="/data", disk_path_template="{anon_patient_id}/{study_uid}/{series_uid}"))
+
+    record = MagicMock()
+    record.clarinet_storage_path = None
+    record.patient = MagicMock(id="P1", anon_id="CLARINET_1", auto_id=1)
+    record.study = None; record.study_uid = None
+    record.series = None; record.series_uid = None
+    dirs = _resolver.build_working_dirs(record)
+    assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
