@@ -39,6 +39,15 @@ def _centroid_inside(centroid: tuple[float, ...], labelmap: np.ndarray, label: i
 def build_overlap_graph(
     a: np.ndarray, b: np.ndarray, *, spacing: tuple[float, ...]
 ) -> OverlapGraph:
+    """Build the bipartite overlap graph between two labelmaps.
+
+    Emits one edge per OVERLAPPING (a-label, b-label) pair (inter > 0); disjoint
+    components produce no edge. Pair intersections are counted in a single pass via a
+    contingency key ``a*base + b`` (base = max b-label + 1, int64 to avoid uint8
+    overflow). ``centroid_distance`` is physical (mm): the voxel-index centroid delta
+    is scaled by ``spacing`` before the L2 norm. Containment flags index the other
+    labelmap at each rounded, bounds-checked centroid.
+    """
     comps_a = _components(a)
     comps_b = _components(b)
     spacing_arr = np.asarray(spacing, dtype=float)

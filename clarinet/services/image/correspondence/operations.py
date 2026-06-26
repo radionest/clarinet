@@ -57,6 +57,15 @@ def render(
     base: np.ndarray | None = None,
     relabel: bool = True,
 ) -> np.ndarray:
+    """Paint a KeepPlan onto an output mask.
+
+    Starts from a blank ``np.zeros_like(a)`` (or a copy of ``base`` to overlay). Each
+    ``(src_label, out_value)`` entry paints ``source == src_label`` with, in
+    precedence: ``out_value`` when non-zero (explicit target); else a fresh sequential
+    label when ``relabel`` (symmetric-difference style); else the original
+    ``src_label`` (identity-preserving). ``from_a`` entries read from ``a``, ``from_b``
+    from ``b``. Returns uint8 when ``a`` is uint8.
+    """
     out = np.zeros_like(a) if base is None else base.copy()
     next_label = int(out.max()) + 1
     for source, entries in ((a, plan.from_a), (b, plan.from_b)):
