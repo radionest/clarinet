@@ -87,3 +87,11 @@ def test_files_rejects_bad_type():
 def test_files_empty():
     from clarinet.files.facade import Files
     assert Files.empty().dirs() == {}
+
+
+def test_files_resolve(monkeypatch):
+    from clarinet.files.facade import Files
+    fd = MagicMock(name="fd"); fd.name = "seg"; fd.pattern = "seg_{id}.nrrd"; fd.level = None
+    f = Files(_record(monkeypatch, registry=[fd]))
+    assert f.resolve("seg") == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
+    assert f.accessed["seg"] == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")

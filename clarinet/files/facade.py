@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.files import _patterns, _resolver
+from clarinet.files import _patterns, _resolver, _template
 from clarinet.models.base import DicomQueryLevel
 
 if TYPE_CHECKING:
@@ -102,3 +102,27 @@ class Files:
         if isinstance(file_def, str):
             return self._registry[file_def]
         return file_def
+
+    def resolve(self, file_def: FileDefArg, **overrides: Any) -> Path:
+        fd = self._lookup(file_def)
+        working_dir = self._dirs[fd.level or self._level]
+        filename = _template.render_template(
+            fd.pattern, {**self._fields, **overrides}, mode=_template.RenderMode.LENIENT
+        )
+        path = working_dir / filename
+        self._accessed.setdefault(fd.name, path)
+        return path
+
+    def exists(self, file_def: FileDefArg, **overrides: Any) -> bool:
+        return self.resolve(file_def, **overrides).is_file()
+
+    def glob(self, file_def: FileDefArg) -> list[Path]:
+        fd = self._lookup(file_def)
+        working_dir = self._dirs[fd.level or self._level]
+        paths = _patterns.glob_file_paths(fd, working_dir)
+        self._accessed.setdefault(fd.name, paths[0] if paths else working_dir)
+        return paths
+
+    @property
+    def accessed(self) -> dict[str, Path]:
+        return dict(self._accessed)
