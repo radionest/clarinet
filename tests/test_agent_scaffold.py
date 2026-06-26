@@ -66,7 +66,7 @@ def test_init_writes_files_header_and_resolved_links(tmp_path: Path) -> None:
     assert overview.startswith("<!-- managed by clarinet v")
     # token fully substituted to an existing on-disk docs path
     assert "{{CLARINET_DOCS}}" not in overview
-    assert str(DOCS) in overview
+    assert DOCS.as_posix() in overview
     assert (DOCS / "recordflow-dsl.md").is_file()
 
 
