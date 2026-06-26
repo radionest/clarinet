@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from clarinet.api.dependencies import require_capability
+from clarinet.models.capability import Capability
 from clarinet.models.user import User, UserRole
 
 
@@ -18,14 +19,14 @@ async def test_allows_capability_holder(monkeypatch: pytest.MonkeyPatch) -> None
     from clarinet.settings import settings
 
     monkeypatch.setattr(settings, "role_capabilities", {"analyst": ["reports"]})
-    dep = require_capability("reports")
+    dep = require_capability(Capability.REPORTS)
     user = _user(False, ["analyst"])
     assert await dep(user) is user
 
 
 @pytest.mark.asyncio
 async def test_allows_superuser() -> None:
-    dep = require_capability("reports")
+    dep = require_capability(Capability.REPORTS)
     user = _user(True, [])
     assert await dep(user) is user
 
@@ -35,7 +36,7 @@ async def test_denies_non_holder(monkeypatch: pytest.MonkeyPatch) -> None:
     from clarinet.settings import settings
 
     monkeypatch.setattr(settings, "role_capabilities", {})
-    dep = require_capability("reports")
+    dep = require_capability(Capability.REPORTS)
     with pytest.raises(HTTPException) as exc:
         await dep(_user(False, ["doctor"]))
     assert exc.value.status_code == 403

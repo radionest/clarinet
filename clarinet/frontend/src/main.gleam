@@ -15,10 +15,6 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
-import utils/client_settings
-import utils/logger
-import utils/permissions
-import utils/storage as app_storage
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -26,9 +22,6 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
-import plinth/javascript/global
-import plinth/javascript/storage
-import preload
 import pages/admin as admin_page
 import pages/admin/activity as admin_activity_page
 import pages/admin/quarto_reports as admin_quarto_reports_page
@@ -50,10 +43,17 @@ import pages/series/detail as series_detail
 import pages/settings as settings_page
 import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
+import plinth/javascript/global
+import plinth/javascript/storage
+import preload
 import router.{type Route}
 import shared.{type OutMsg}
 import sse
 import store.{type Model, type Msg}
+import utils/client_settings
+import utils/logger
+import utils/permissions
+import utils/storage as app_storage
 
 // Initialize the application
 pub fn main() {
@@ -162,11 +162,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       logger.debug(
         "router",
         "OnRouteChange route: "
-        <> string.inspect(route)
-        <> ", checking_session: "
-        <> string.inspect(model.checking_session)
-        <> ", user: "
-        <> string.inspect(model.user),
+          <> string.inspect(route)
+          <> ", checking_session: "
+          <> string.inspect(model.checking_session)
+          <> ", user: "
+          <> string.inspect(model.user),
       )
       // Cleanup current page (e.g. slicer ping timer) + stop preload
       let page_cleanup = cleanup_current_page(model)
@@ -235,36 +235,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
       // Redirect from login/register if already authenticated
       let is_auth_page = route == router.Login || route == router.Register
-      use <- bool.lazy_guard(
-        is_auth_page && model.user != None,
-        fn() { redirect_to(router.Home) },
-      )
-
-      // Redirect non-admin user away from admin route
-      let is_non_admin = case model.user {
-        Some(user) -> !permissions.is_admin_user(user)
-        None -> False
-      }
-      use <- bool.lazy_guard(
-        router.requires_admin_role(route) && is_non_admin,
-        fn() { redirect_to(landing_route(model)) },
-      )
-
-      // Redirect users who lack the capability a route requires.
-      let lacks_capability = case router.requires_capability(route), model.user {
-        Some(cap), Some(user) -> !permissions.has_capability(user, cap)
-        Some(_), None -> True
-        None, _ -> False
-      }
-      use <- bool.lazy_guard(lacks_capability, fn() {
-        redirect_to(landing_route(model))
+      use <- bool.lazy_guard(is_auth_page && model.user != None, fn() {
+        redirect_to(router.Home)
       })
 
-      // Reports-only users bounce off the dashboard to their landing page.
-      use <- bool.lazy_guard(
-        route == router.Home && landing_route(model) != router.Home,
-        fn() { redirect_to(landing_route(model)) },
-      )
+      // Redirect away when the user lacks admin/capability for this route, or
+      // is a reports-only user landing on the dashboard.
+      use <- bool.lazy_guard(must_redirect(model, route), fn() {
+        redirect_to(landing_route(model))
+      })
 
       // Initialize page model for modular pages
       let #(new_model, page_init_eff) = init_page_for_route(new_model, route)
@@ -300,24 +279,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               ),
             )
             _, _, _ -> {
-              let needs_admin = router.requires_admin_role(route)
-              let is_non_admin = case new_model.user {
-                Some(user) -> !permissions.is_admin_user(user)
-                None -> False
-              }
-              let lacks_capability = case
-                router.requires_capability(route),
-                new_model.user
-              {
-                Some(cap), Some(user) -> !permissions.has_capability(user, cap)
-                Some(_), None -> True
-                None, _ -> False
-              }
-              let must_redirect =
-                { needs_admin && is_non_admin }
-                || lacks_capability
-                || { route == router.Home && landing_route(new_model) != router.Home }
-              case must_redirect {
+              case must_redirect(new_model, route) {
                 True -> #(
                   store.set_route(new_model, landing_route(new_model)),
                   modem.push(
@@ -329,7 +291,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 False -> {
                   let #(new_model, page_init_eff) =
                     init_page_for_route(new_model, route)
-                  #(new_model, effect.batch([page_init_eff, ensure_sse(new_model)]))
+                  #(
+                    new_model,
+                    effect.batch([page_init_eff, ensure_sse(new_model)]),
+                  )
                 }
               }
             }
@@ -341,7 +306,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           case router.requires_auth(model.route) {
             True -> #(
               store.set_route(new_model, router.Login),
-              modem.push(router.route_to_path(router.Login), option.None, option.None),
+              modem.push(
+                router.route_to_path(router.Login),
+                option.None,
+                option.None,
+              ),
             )
             False -> {
               let #(new_model, page_init_eff) =
@@ -357,7 +326,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.LoginMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.LoginPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.LoginPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { login.update(m, page_msg, s) },
         store.LoginPage,
         store.LoginMsg,
@@ -366,7 +340,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RegisterMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RegisterPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RegisterPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { register.update(m, page_msg, s) },
         store.RegisterPage,
         store.RegisterMsg,
@@ -392,7 +371,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let sse_cleanup = effect.map(sse.cleanup(model.sse), store.SseMsg)
       #(
         store.reset_for_logout(model),
-        effect.batch([logout_effect, clear_storage, preload_cleanup, sse_cleanup]),
+        effect.batch([
+          logout_effect,
+          clear_storage,
+          preload_cleanup,
+          sse_cleanup,
+        ]),
       )
     }
 
@@ -428,9 +412,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let eff = {
         use dispatch <- effect.from
         records.fail_record(record_id, reason)
-        |> promise.tap(fn(result) {
-          dispatch(store.FailRecordResult(result))
-        })
+        |> promise.tap(fn(result) { dispatch(store.FailRecordResult(result)) })
         Nil
       }
       #(
@@ -454,10 +436,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         store.Model(..model, cache: cache.put_record(model.cache, record))
         |> store.set_loading(False)
         |> store.set_success("Record marked as failed")
-      #(
-        new_model,
-        dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))),
-      )
+      #(new_model, dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))))
     }
 
     store.FailRecordResult(Error(err)) ->
@@ -473,7 +452,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.CloseModal -> {
       #(
-        store.Model(..model, modal_open: False, modal_content: store.NoModal, fail_reason: ""),
+        store.Model(
+          ..model,
+          modal_open: False,
+          modal_content: store.NoModal,
+          fail_reason: "",
+        ),
         effect.none(),
       )
     }
@@ -525,7 +509,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.AdminPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.AdminPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { admin_page.update(m, page_msg, s) },
         store.AdminPage,
         store.AdminMsg,
@@ -534,7 +523,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminReportsMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.AdminReportsPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.AdminReportsPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { admin_reports_page.update(m, page_msg, s) },
         store.AdminReportsPage,
         store.AdminReportsMsg,
@@ -543,7 +537,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminActivityMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.AdminActivityPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.AdminActivityPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { admin_activity_page.update(m, page_msg, s) },
         store.AdminActivityPage,
         store.AdminActivityMsg,
@@ -566,7 +565,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminWorkflowMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.AdminWorkflowPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.AdminWorkflowPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { admin_workflow_page.update(m, page_msg, s) },
         store.AdminWorkflowPage,
         store.AdminWorkflowMsg,
@@ -575,7 +579,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.SettingsMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.SettingsPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.SettingsPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { settings_page.update(m, page_msg, s) },
         store.SettingsPage,
         store.SettingsMsg,
@@ -585,7 +594,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.PatientsListMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.PatientsListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.PatientsListPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { patients_list.update(m, page_msg, s) },
         store.PatientsListPage,
         store.PatientsListMsg,
@@ -594,7 +608,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.PatientDetailMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.PatientDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.PatientDetailPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { patient_detail.update(m, page_msg, s) },
         store.PatientDetailPage,
         store.PatientDetailMsg,
@@ -603,7 +622,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.PatientNewMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.PatientNewPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.PatientNewPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { patient_new.update(m, page_msg, s) },
         store.PatientNewPage,
         store.PatientNewMsg,
@@ -613,7 +637,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordsListMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RecordsListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RecordsListPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { records_list.update(m, page_msg, s) },
         store.RecordsListPage,
         store.RecordsListMsg,
@@ -622,7 +651,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordExecuteMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RecordExecutePage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RecordExecutePage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { record_execute.update(m, page_msg, s) },
         store.RecordExecutePage,
         store.RecordExecuteMsg,
@@ -631,7 +665,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordNewMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RecordNewPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RecordNewPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { record_new.update(m, page_msg, s) },
         store.RecordNewPage,
         store.RecordNewMsg,
@@ -662,7 +701,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.StudiesListMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.StudiesListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.StudiesListPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { studies_list.update(m, page_msg, s) },
         store.StudiesListPage,
         store.StudiesListMsg,
@@ -671,7 +715,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.StudyDetailMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.StudyDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.StudyDetailPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { study_detail.update(m, page_msg, s) },
         store.StudyDetailPage,
         store.StudyDetailMsg,
@@ -680,7 +729,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.SeriesDetailMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.SeriesDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.SeriesDetailPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { series_detail.update(m, page_msg, s) },
         store.SeriesDetailPage,
         store.SeriesDetailMsg,
@@ -690,7 +744,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordTypesListMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RecordTypesListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RecordTypesListPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { record_types_list.update(m, page_msg, s) },
         store.RecordTypesListPage,
         store.RecordTypesListMsg,
@@ -699,7 +758,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordTypeDetailMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RecordTypeDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RecordTypeDetailPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { record_type_detail.update(m, page_msg, s) },
         store.RecordTypeDetailPage,
         store.RecordTypeDetailMsg,
@@ -708,7 +772,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordTypeEditMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.RecordTypeEditPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.RecordTypeEditPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { record_type_edit.update(m, page_msg, s) },
         store.RecordTypeEditPage,
         store.RecordTypeEditMsg,
@@ -718,7 +787,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.HomeMsg(page_msg) ->
       delegate_page_update(
         model,
-        fn(p) { case p { store.HomePage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(p) {
+          case p {
+            store.HomePage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
         fn(m, s) { home.update(m, page_msg, s) },
         store.HomePage,
         store.HomeMsg,
@@ -730,13 +804,19 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Locale
     store.SetLocale(new_locale) -> {
-      let save_effect = effect.from(fn(_dispatch) {
-        let _ = case storage.local() {
-          Ok(ls) -> storage.set_item(ls, "clarinet_locale", i18n.locale_to_string(new_locale))
-          Error(_) -> Error(Nil)
-        }
-        Nil
-      })
+      let save_effect =
+        effect.from(fn(_dispatch) {
+          let _ = case storage.local() {
+            Ok(ls) ->
+              storage.set_item(
+                ls,
+                "clarinet_locale",
+                i18n.locale_to_string(new_locale),
+              )
+            Error(_) -> Error(Nil)
+          }
+          Nil
+        })
       #(store.Model(..model, locale: new_locale), save_effect)
     }
 
@@ -752,7 +832,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 fn delegate_page_update(
   model: Model,
   get_page: fn(store.PageModel) -> Result(page_model, Nil),
-  do_update: fn(page_model, shared.Shared) -> #(page_model, Effect(page_msg), List(OutMsg)),
+  do_update: fn(page_model, shared.Shared) ->
+    #(page_model, Effect(page_msg), List(OutMsg)),
   wrap_page: fn(page_model) -> store.PageModel,
   wrap_msg: fn(page_msg) -> Msg,
 ) -> #(Model, Effect(Msg)) {
@@ -760,8 +841,7 @@ fn delegate_page_update(
     Ok(page_model) -> {
       let #(new_page, eff, out_msgs) =
         do_update(page_model, build_shared(model))
-      let model =
-        store.Model(..model, page: wrap_page(new_page))
+      let model = store.Model(..model, page: wrap_page(new_page))
       let #(model, out_effects) = apply_out_msgs(model, out_msgs)
       #(
         model,
@@ -829,11 +909,8 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
     True, False -> False
     False, False -> model.modal_open
   }
-  let model = store.Model(
-    ..model,
-    preload: preload_model,
-    modal_open: modal_open,
-  )
+  let model =
+    store.Model(..model, preload: preload_model, modal_open: modal_open)
   let out_effects =
     list.fold(out_msgs, [], fn(acc, out_msg) {
       case out_msg {
@@ -896,7 +973,9 @@ fn delegate_sse(model: Model, smsg: sse.Msg) -> #(Model, Effect(Msg)) {
         sse.SseTaskProgress(task, task_id, payload) ->
           case task {
             "preload" -> #(m, [
-              dispatch_msg(store.PreloadMsg(preload.ProgressPush(task_id, payload))),
+              dispatch_msg(
+                store.PreloadMsg(preload.ProgressPush(task_id, payload)),
+              ),
               ..effs
             ])
             // Quarto pushes only matter while the admin reports page is open.
@@ -1015,9 +1094,7 @@ fn init_page(
 fn landing_route(model: Model) -> router.Route {
   case model.user {
     Some(u) ->
-      case
-        !permissions.is_admin_user(u) && permissions.has_capability(u, "reports")
-      {
+      case permissions.is_reports_only(u) {
         True -> router.AdminReports
         False -> router.Home
       }
@@ -1025,44 +1102,131 @@ fn landing_route(model: Model) -> router.Route {
   }
 }
 
+/// Whether the current user must be redirected away from `route`: lacks admin
+/// for an admin route, lacks a required capability, or is a reports-only user
+/// sitting on the dashboard. Shared by OnRouteChange and session restore.
+fn must_redirect(model: Model, route: router.Route) -> Bool {
+  let is_non_admin = case model.user {
+    Some(user) -> !permissions.is_admin_user(user)
+    None -> False
+  }
+  let lacks_capability = case router.requires_capability(route), model.user {
+    Some(cap), Some(user) -> !permissions.has_capability(user, cap)
+    Some(_), None -> True
+    None, _ -> False
+  }
+  { router.requires_admin_role(route) && is_non_admin }
+  || lacks_capability
+  || { route == router.Home && landing_route(model) != router.Home }
+}
+
 fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
   case route {
-    router.Home ->
-      init_page(model, home.init, store.HomePage, store.HomeMsg)
+    router.Home -> init_page(model, home.init, store.HomePage, store.HomeMsg)
     router.Login ->
       init_page(model, login.init, store.LoginPage, store.LoginMsg)
     router.Register ->
       init_page(model, register.init, store.RegisterPage, store.RegisterMsg)
     router.AdminDashboard(filters) ->
-      init_page(model, admin_page.init(filters, _), store.AdminPage, store.AdminMsg)
+      init_page(
+        model,
+        admin_page.init(filters, _),
+        store.AdminPage,
+        store.AdminMsg,
+      )
     router.Patients(filters) ->
-      init_page(model, patients_list.init(filters, _), store.PatientsListPage, store.PatientsListMsg)
+      init_page(
+        model,
+        patients_list.init(filters, _),
+        store.PatientsListPage,
+        store.PatientsListMsg,
+      )
     router.PatientDetail(id) ->
-      init_page(model, patient_detail.init(id, _), store.PatientDetailPage, store.PatientDetailMsg)
+      init_page(
+        model,
+        patient_detail.init(id, _),
+        store.PatientDetailPage,
+        store.PatientDetailMsg,
+      )
     router.PatientNew ->
-      init_page(model, patient_new.init, store.PatientNewPage, store.PatientNewMsg)
+      init_page(
+        model,
+        patient_new.init,
+        store.PatientNewPage,
+        store.PatientNewMsg,
+      )
     router.Records(filters) ->
-      init_page(model, records_list.init(filters, _), store.RecordsListPage, store.RecordsListMsg)
+      init_page(
+        model,
+        records_list.init(filters, _),
+        store.RecordsListPage,
+        store.RecordsListMsg,
+      )
     router.RecordDetail(id) ->
-      init_page(model, record_execute.init(id, _), store.RecordExecutePage, store.RecordExecuteMsg)
+      init_page(
+        model,
+        record_execute.init(id, _),
+        store.RecordExecutePage,
+        store.RecordExecuteMsg,
+      )
     router.RecordNew ->
       init_page(model, record_new.init, store.RecordNewPage, store.RecordNewMsg)
     router.Studies(filters) ->
-      init_page(model, studies_list.init(filters, _), store.StudiesListPage, store.StudiesListMsg)
+      init_page(
+        model,
+        studies_list.init(filters, _),
+        store.StudiesListPage,
+        store.StudiesListMsg,
+      )
     router.StudyDetail(id) | router.StudyViewer(id) ->
-      init_page(model, study_detail.init(id, _), store.StudyDetailPage, store.StudyDetailMsg)
+      init_page(
+        model,
+        study_detail.init(id, _),
+        store.StudyDetailPage,
+        store.StudyDetailMsg,
+      )
     router.SeriesDetail(id) ->
-      init_page(model, series_detail.init(id, _), store.SeriesDetailPage, store.SeriesDetailMsg)
+      init_page(
+        model,
+        series_detail.init(id, _),
+        store.SeriesDetailPage,
+        store.SeriesDetailMsg,
+      )
     router.AdminRecordTypes ->
-      init_page(model, record_types_list.init, store.RecordTypesListPage, store.RecordTypesListMsg)
+      init_page(
+        model,
+        record_types_list.init,
+        store.RecordTypesListPage,
+        store.RecordTypesListMsg,
+      )
     router.AdminRecordTypeDetail(name) ->
-      init_page(model, record_type_detail.init(name, _), store.RecordTypeDetailPage, store.RecordTypeDetailMsg)
+      init_page(
+        model,
+        record_type_detail.init(name, _),
+        store.RecordTypeDetailPage,
+        store.RecordTypeDetailMsg,
+      )
     router.AdminRecordTypeEdit(name) ->
-      init_page(model, record_type_edit.init(name, _), store.RecordTypeEditPage, store.RecordTypeEditMsg)
+      init_page(
+        model,
+        record_type_edit.init(name, _),
+        store.RecordTypeEditPage,
+        store.RecordTypeEditMsg,
+      )
     router.AdminReports ->
-      init_page(model, admin_reports_page.init, store.AdminReportsPage, store.AdminReportsMsg)
+      init_page(
+        model,
+        admin_reports_page.init,
+        store.AdminReportsPage,
+        store.AdminReportsMsg,
+      )
     router.AdminActivity ->
-      init_page(model, admin_activity_page.init, store.AdminActivityPage, store.AdminActivityMsg)
+      init_page(
+        model,
+        admin_activity_page.init,
+        store.AdminActivityPage,
+        store.AdminActivityMsg,
+      )
     router.AdminQuartoReports ->
       init_page(
         model,
@@ -1071,29 +1235,42 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         store.AdminQuartoReportsMsg,
       )
     router.AdminWorkflow ->
-      init_page(model, admin_workflow_page.init, store.AdminWorkflowPage, store.AdminWorkflowMsg)
+      init_page(
+        model,
+        admin_workflow_page.init,
+        store.AdminWorkflowPage,
+        store.AdminWorkflowMsg,
+      )
     router.Settings ->
-      init_page(model, settings_page.init, store.SettingsPage, store.SettingsMsg)
+      init_page(
+        model,
+        settings_page.init,
+        store.SettingsPage,
+        store.SettingsMsg,
+      )
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
 
-fn apply_out_msgs(
-  model: Model,
-  msgs: List(OutMsg),
-) -> #(Model, Effect(Msg)) {
+fn apply_out_msgs(model: Model, msgs: List(OutMsg)) -> #(Model, Effect(Msg)) {
   let #(final_model, effs) =
     list.fold(msgs, #(model, []), fn(acc, out_msg) {
       let #(m, eff_list) = acc
       case out_msg {
-        shared.ShowSuccess(text) ->
-          #(store.set_success(m, text), eff_list)
-        shared.ShowError(text) ->
-          #(store.set_error(m, option.Some(text)), eff_list)
-        shared.Navigate(route) ->
-          #(m, [modem.push(router.route_to_path(route), router.route_to_query(route), option.None), ..eff_list])
-        shared.SetLoading(loading) ->
-          #(store.set_loading(m, loading), eff_list)
+        shared.ShowSuccess(text) -> #(store.set_success(m, text), eff_list)
+        shared.ShowError(text) -> #(
+          store.set_error(m, option.Some(text)),
+          eff_list,
+        )
+        shared.Navigate(route) -> #(m, [
+          modem.push(
+            router.route_to_path(route),
+            router.route_to_query(route),
+            option.None,
+          ),
+          ..eff_list
+        ])
+        shared.SetLoading(loading) -> #(store.set_loading(m, loading), eff_list)
         shared.CacheRecord(record) -> {
           let new_cache =
             cache.put_record(m.cache, record)
@@ -1104,59 +1281,92 @@ fn apply_out_msgs(
             ..eff_list
           ])
         }
-        shared.CacheStudy(study) ->
-          #(store.Model(..m, cache: cache.put_study(m.cache, study)), eff_list)
-        shared.CachePatient(patient) ->
-          #(store.Model(..m, cache: cache.put_patient(m.cache, patient)), eff_list)
-        shared.CacheRecordType(rt) ->
-          #(store.Model(..m, cache: cache.put_record_type(m.cache, rt)), eff_list)
-        shared.CacheSeries(s) ->
-          #(store.Model(..m, cache: cache.put_series(m.cache, s)), eff_list)
-        shared.FetchBucket(key) ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.FetchBucketMsg(key))), ..eff_list])
-        shared.FetchMoreBucket(key) ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.FetchMoreMsg(key))), ..eff_list])
-        shared.InvalidateBucket(key) ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.InvalidateBucketMsg(key))), ..eff_list])
-        shared.InvalidateAllRecordBuckets ->
-          #(m, [
-            dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)),
-            dispatch_msg(store.CacheMsg(cache.InvalidateFilterOptions)),
-            ..eff_list,
-          ])
-        shared.ReloadStudies ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadStudies)), ..eff_list])
-        shared.ReloadUsers ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadUsers)), ..eff_list])
-        shared.ReloadPatients ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatients)), ..eff_list])
-        shared.ReloadRecordTypes ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypes)), ..eff_list])
-        shared.ReloadRecordTypeStats ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypeStats)), ..eff_list])
-        shared.ReloadFilterOptions ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadFilterOptions)), ..eff_list])
-        shared.ReloadPatient(id) ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatientDetail(id))), ..eff_list])
-        shared.ReloadRecord(id) ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordDetail(id, m.user))), ..eff_list])
-        shared.ReloadSeries(uid) ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadSeriesDetail(uid))), ..eff_list])
-        shared.OpenDeleteConfirm(resource, id) ->
-          #(
-            store.Model(..m, modal_open: True, modal_content: store.ConfirmDelete(resource, id)),
-            eff_list,
-          )
-        shared.OpenFailPrompt(record_id) ->
-          #(
-            store.Model(
-              ..m,
-              modal_open: True,
-              modal_content: store.FailRecordPrompt(record_id),
-              fail_reason: "",
-            ),
-            eff_list,
-          )
+        shared.CacheStudy(study) -> #(
+          store.Model(..m, cache: cache.put_study(m.cache, study)),
+          eff_list,
+        )
+        shared.CachePatient(patient) -> #(
+          store.Model(..m, cache: cache.put_patient(m.cache, patient)),
+          eff_list,
+        )
+        shared.CacheRecordType(rt) -> #(
+          store.Model(..m, cache: cache.put_record_type(m.cache, rt)),
+          eff_list,
+        )
+        shared.CacheSeries(s) -> #(
+          store.Model(..m, cache: cache.put_series(m.cache, s)),
+          eff_list,
+        )
+        shared.FetchBucket(key) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.FetchBucketMsg(key))),
+          ..eff_list
+        ])
+        shared.FetchMoreBucket(key) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.FetchMoreMsg(key))),
+          ..eff_list
+        ])
+        shared.InvalidateBucket(key) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.InvalidateBucketMsg(key))),
+          ..eff_list
+        ])
+        shared.InvalidateAllRecordBuckets -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)),
+          dispatch_msg(store.CacheMsg(cache.InvalidateFilterOptions)),
+          ..eff_list
+        ])
+        shared.ReloadStudies -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadStudies)),
+          ..eff_list
+        ])
+        shared.ReloadUsers -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadUsers)),
+          ..eff_list
+        ])
+        shared.ReloadPatients -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadPatients)),
+          ..eff_list
+        ])
+        shared.ReloadRecordTypes -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadRecordTypes)),
+          ..eff_list
+        ])
+        shared.ReloadRecordTypeStats -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadRecordTypeStats)),
+          ..eff_list
+        ])
+        shared.ReloadFilterOptions -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadFilterOptions)),
+          ..eff_list
+        ])
+        shared.ReloadPatient(id) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadPatientDetail(id))),
+          ..eff_list
+        ])
+        shared.ReloadRecord(id) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadRecordDetail(id, m.user))),
+          ..eff_list
+        ])
+        shared.ReloadSeries(uid) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.LoadSeriesDetail(uid))),
+          ..eff_list
+        ])
+        shared.OpenDeleteConfirm(resource, id) -> #(
+          store.Model(
+            ..m,
+            modal_open: True,
+            modal_content: store.ConfirmDelete(resource, id),
+          ),
+          eff_list,
+        )
+        shared.OpenFailPrompt(record_id) -> #(
+          store.Model(
+            ..m,
+            modal_open: True,
+            modal_content: store.FailRecordPrompt(record_id),
+            fail_reason: "",
+          ),
+          eff_list,
+        )
         shared.OpenCreateRecordModal(args) -> {
           // Spawn an embedded record_new instance prefilled with the source
           // page context. Its init OutMsgs (e.g. ReloadRecordTypes) are
@@ -1170,24 +1380,25 @@ fn apply_out_msgs(
               modal_open: True,
               modal_content: store.CreateRecord(modal_model),
             )
-          #(
-            new_m,
-            [effect.map(modal_eff, store.RecordNewModalMsg), inner_eff, ..eff_list],
-          )
+          #(new_m, [
+            effect.map(modal_eff, store.RecordNewModalMsg),
+            inner_eff,
+            ..eff_list
+          ])
         }
-        shared.CloseRecordModal ->
-          #(
-            store.Model(..m, modal_open: False, modal_content: store.NoModal),
-            eff_list,
-          )
+        shared.CloseRecordModal -> #(
+          store.Model(..m, modal_open: False, modal_content: store.NoModal),
+          eff_list,
+        )
         shared.SetUser(user) -> {
           let m2 = store.set_user(m, user)
           #(m2, [ensure_sse(m2), ..eff_list])
         }
-        shared.Logout ->
-          #(m, [dispatch_msg(store.Logout), ..eff_list])
-        shared.StartPreload(viewer_url, study_uids) ->
-          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uids))), ..eff_list])
+        shared.Logout -> #(m, [dispatch_msg(store.Logout), ..eff_list])
+        shared.StartPreload(viewer_url, study_uids) -> #(m, [
+          dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uids))),
+          ..eff_list
+        ])
       }
     })
   #(final_model, effect.batch(list.reverse(effs)))
@@ -1204,16 +1415,16 @@ fn handle_api_error(
       logger.error(
         "auth",
         "session error - msg: "
-        <> msg
-        <> ", route: "
-        <> string.inspect(model.route)
-        <> ", user_id: "
-        <> case model.user {
+          <> msg
+          <> ", route: "
+          <> string.inspect(model.route)
+          <> ", user_id: "
+          <> case model.user {
           Some(user) -> user.id
           None -> "none"
         }
-        <> ", loading: "
-        <> string.inspect(model.loading),
+          <> ", loading: "
+          <> string.inspect(model.loading),
       )
       let new_model =
         model
@@ -1231,7 +1442,11 @@ fn handle_api_error(
         new_model,
         effect.batch([
           clear_storage,
-          modem.push(router.route_to_path(router.Login), option.None, option.None),
+          modem.push(
+            router.route_to_path(router.Login),
+            option.None,
+            option.None,
+          ),
         ]),
       )
     }
@@ -1258,10 +1473,8 @@ fn view_content(model: Model) -> Element(Msg) {
   let shared = build_shared(model)
 
   let content = case model.page {
-    store.HomePage(pm) ->
-      element.map(home.view(pm, shared), store.HomeMsg)
-    store.LoginPage(pm) ->
-      element.map(login.view(pm, shared), store.LoginMsg)
+    store.HomePage(pm) -> element.map(home.view(pm, shared), store.HomeMsg)
+    store.LoginPage(pm) -> element.map(login.view(pm, shared), store.LoginMsg)
     store.RegisterPage(pm) ->
       element.map(register.view(pm, shared), store.RegisterMsg)
     store.StudiesListPage(pm) ->
@@ -1287,7 +1500,10 @@ fn view_content(model: Model) -> Element(Msg) {
     store.RecordTypesListPage(pm) ->
       element.map(record_types_list.view(pm, shared), store.RecordTypesListMsg)
     store.RecordTypeDetailPage(pm) ->
-      element.map(record_type_detail.view(pm, shared), store.RecordTypeDetailMsg)
+      element.map(
+        record_type_detail.view(pm, shared),
+        store.RecordTypeDetailMsg,
+      )
     store.RecordTypeEditPage(pm) ->
       element.map(record_type_edit.view(pm, shared), store.RecordTypeEditMsg)
     store.AdminReportsPage(pm) ->
@@ -1380,10 +1596,9 @@ fn render_create_record_modal(
           html.div([attribute.class("modal-header")], [
             html.h3([attribute.class("modal-title")], [html.text("New Record")]),
           ]),
-          html.div(
-            [attribute.class("modal-body")],
-            [element.map(record_new.view(pm, shared), store.RecordNewModalMsg)],
-          ),
+          html.div([attribute.class("modal-body")], [
+            element.map(record_new.view(pm, shared), store.RecordNewModalMsg),
+          ]),
         ],
       ),
     ],

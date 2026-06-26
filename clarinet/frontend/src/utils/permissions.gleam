@@ -16,6 +16,16 @@ pub fn has_capability(user: User, capability: String) -> Bool {
   is_admin_user(user) || list.contains(user.capabilities, capability)
 }
 
+/// The capability string for the reports area. Single frontend source of
+/// truth; mirrors the backend `Capability.REPORTS`.
+pub const reports_capability = "reports"
+
+/// A non-admin user whose only access is the reports capability. Gates the
+/// reports-only landing page and trimmed navigation.
+pub fn is_reports_only(user: User) -> Bool {
+  !is_admin_user(user) && list.contains(user.capabilities, reports_capability)
+}
+
 /// Check if user has permission to act on a record
 pub fn has_record_permission(user: Option(User), record: Record) -> Bool {
   case user {

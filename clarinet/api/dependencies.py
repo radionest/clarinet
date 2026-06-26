@@ -487,7 +487,7 @@ async def current_admin_user(
 AdminUserDep = Annotated[User, Depends(current_admin_user)]
 
 
-def require_capability(capability: str) -> Callable[[User], Awaitable[User]]:
+def require_capability(capability: Capability) -> Callable[[User], Awaitable[User]]:
     """Build a dependency that admits a user holding ``capability``.
 
     Superusers and the ``admin`` role implicitly hold every capability (see
