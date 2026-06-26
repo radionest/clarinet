@@ -417,7 +417,7 @@ class Segmentation(Image):
         if strategy is None:
             strategy = self._threshold(min_overlap, min_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
-        # autolabel=False so render's labels survive the img setter (unlike union, which relabels to a binary mask)
+        # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_IntersectionOp()(corr), self.img, other.img, relabel=False)
         return out
@@ -492,7 +492,7 @@ class Segmentation(Image):
             else:
                 strategy = ThresholdMatch(AbsoluteOverlap(), min_score=float(max_overlap + 1))
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
-        # autolabel=False so render's labels survive the img setter (unlike union, which relabels to a binary mask)
+        # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_DifferenceOp()(corr), self.img, other.img, relabel=False)
         return out
@@ -548,7 +548,7 @@ class Segmentation(Image):
         if strategy is None:
             strategy = self._threshold(min_overlap, min_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
-        # autolabel=False so render's labels survive the img setter (unlike union, which relabels to a binary mask)
+        # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_SymmetricDifferenceOp()(corr), self.img, other.img, relabel=True)
         # relabel=True assigns fresh component indices — the source's named segments
