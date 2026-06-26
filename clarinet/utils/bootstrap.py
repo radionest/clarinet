@@ -31,10 +31,16 @@ async def add_default_user_roles() -> None:
     plus any project-specific roles from ``settings.extra_roles``.
     Duplicates between the two lists are ignored.
     """
+    from clarinet.models.capability import validate_role_capabilities
     from clarinet.settings import settings
 
+    # Fail fast on a typo'd capability before creating roles or hitting the DB.
+    validate_role_capabilities(settings.role_capabilities)
+
     default_roles = ["doctor", "auto", "admin", "expert", "ordinator"]
-    all_roles = list(dict.fromkeys(default_roles + settings.extra_roles))
+    all_roles = list(
+        dict.fromkeys(default_roles + settings.extra_roles + list(settings.role_capabilities))
+    )
 
     async with db_manager.get_async_session_context() as session:
         for role_name in all_roles:
