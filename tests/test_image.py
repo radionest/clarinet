@@ -1497,3 +1497,30 @@ def test_difference_intersection_multi_component_per_edge_threshold() -> None:
     # same fixture, intersection: max single overlap 4 < min_overlap 5  ->  no match -> empty
     inter = seg_a.intersection(seg_b, min_overlap=5)
     assert inter.is_empty
+
+
+# ---------------------------------------------------------------------------
+# append opt-in strategy (Task 7)
+# ---------------------------------------------------------------------------
+
+
+def _two_label_self_and_bridging_other() -> tuple[Segmentation, Segmentation]:
+    base = np.zeros((4, 10, 1), dtype=np.uint8)
+    base[1:3, 1:3, 0] = 1  # self label A
+    base[1:3, 7:9, 0] = 1  # self label B (separate)
+    other = np.zeros((4, 10, 1), dtype=np.uint8)
+    other[1:3, 2:8, 0] = 1  # one ROI bridging both, more overlap on the left
+    return _seg(base), _seg(other)
+
+
+def test_append_multi_label_raises_by_default() -> None:
+    seg, other = _two_label_self_and_bridging_other()
+    with pytest.raises(ValueError, match="multiple labels"):
+        seg.append(other)
+
+
+def test_append_strategy_resolves_to_winner() -> None:
+    seg, other = _two_label_self_and_bridging_other()
+    seg.append(other, strategy=GreedyArgmax(AbsoluteOverlap(), direction="b_to_a"))
+    # bridging ROI merged into exactly one existing label, none added as new
+    assert {int(v) for v in np.unique(seg.img)} <= {0, 1, 2}

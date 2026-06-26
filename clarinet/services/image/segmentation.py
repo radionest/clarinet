@@ -28,6 +28,9 @@ from clarinet.services.image.correspondence import (
     render,
 )
 from clarinet.services.image.correspondence import (
+    AppendMerge as _AppendMergeOp,
+)
+from clarinet.services.image.correspondence import (
     Difference as _DifferenceOp,
 )
 from clarinet.services.image.correspondence import (
@@ -248,23 +251,49 @@ class Segmentation(Image):
         # In-place ops leave _nrrd_header untouched: a label fully removed here is
         # pruned from the segment metadata on write (Image._save_nrrd reconciles it).
 
-    def append(self, other: Self | Image, *, resample: bool = False) -> None:
+    def append(
+        self,
+        other: Self | Image,
+        *,
+        strategy: MatchingStrategy | None = None,
+        resample: bool = False,
+    ) -> None:
         """Add ROIs from `other` that overlap with exactly one existing label.
 
         Each connected component in `other` is checked for overlap with this mask:
         - No overlap: skipped.
         - Overlaps one label: merged with that label value.
-        - Overlaps multiple labels: raises ValueError.
+        - Overlaps multiple labels: raises ValueError (unless ``strategy`` is set).
+
+        When ``strategy`` is provided, multi-label overlaps are resolved instead
+        of raising: each B component is matched to its winning A label via the
+        correspondence engine, and its voxels are repainted with that label value.
 
         Args:
             other: Image or Segmentation whose ROIs to append.
+            strategy: Optional ``MatchingStrategy`` (e.g.
+                ``GreedyArgmax(AbsoluteOverlap(), direction="b_to_a")``).
+                When given, resolves multi-label overlaps via the correspondence
+                engine rather than raising ``ValueError``.
             resample: If True, resample `other` onto this grid when they differ.
                 If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Raises:
-            ValueError: If an ROI in `other` overlaps multiple labels.
+            ValueError: If an ROI in `other` overlaps multiple labels and no
+                ``strategy`` is provided.
         """
         other = self._align_other(other, resample=resample)
+        if strategy is not None:
+            corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+            merged = render(
+                _AppendMergeOp()(corr), self.img, other.img, base=self.img, relabel=False
+            )
+            prev, self.autolabel = self.autolabel, False
+            try:
+                self.img = merged
+            finally:
+                self.autolabel = prev
+            return
         for region in regionprops(label(other.img)):
             coords = region.coords
             intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]
