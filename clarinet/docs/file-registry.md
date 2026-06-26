@@ -2,8 +2,8 @@
 paths:
   - "clarinet/models/file_schema.py"
   - "clarinet/repositories/file_definition_repository.py"
-  - "clarinet/utils/file_patterns.py"
-  - "clarinet/utils/file_checksums.py"
+  - "clarinet/files/_patterns.py"
+  - "clarinet/files/_checksums.py"
   - "clarinet/utils/file_registry_resolver.py"
 ---
 
