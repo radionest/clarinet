@@ -15,11 +15,11 @@ if TYPE_CHECKING:
     from clarinet.services.dicom.models import RetrieveResult
 
 from clarinet.exceptions.domain import AnonymizationFailedError
+from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
-from clarinet.services.common.storage_paths import build_context, render_working_folder
 from clarinet.services.dicom.anonymizer import (
     DicomAnonymizer,
     compute_per_study_patient_id,
@@ -399,21 +399,15 @@ class AnonymizationService:
         Returns:
             Always 0 (no send failures from disk save)
         """
-        ctx = build_context(
+        series_dir = Files.working_dirs(
             patient=patient,
             study=study,
             series=series,
-            template=settings.disk_path_template,
+            storage_path=Path(settings.storage_path),
             anon_patient_id=anon_patient_id,
             anon_study_uid=anon_study_uid,
             anon_series_uid=anon_series_uid,
-        )
-        series_dir = render_working_folder(
-            settings.disk_path_template,
-            DicomQueryLevel.SERIES,
-            ctx,
-            Path(settings.storage_path),
-        )
+        )[DicomQueryLevel.SERIES]
         output_path = series_dir / "dcm_anon"
         await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
         save_tasks = [

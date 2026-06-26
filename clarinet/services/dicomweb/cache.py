@@ -14,16 +14,11 @@ from cachetools import TTLCache
 from pydicom import Dataset
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from clarinet.files import AnonPathError, Files
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.common.storage_paths import (
-    AnonPathError,
-    build_context,
-    render_working_folder,
-)
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb.models import MemoryCachedSeries
-from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
@@ -202,18 +197,12 @@ class DicomWebCache:
                 return None
 
         try:
-            ctx = build_context(
+            series_dir = Files.working_dirs(
                 patient=patient,
                 study=study,
                 series=series,
-                template=settings.disk_path_template,
-            )
-            series_dir = render_working_folder(
-                settings.disk_path_template,
-                DicomQueryLevel.SERIES,
-                ctx,
-                self._storage_path,
-            )
+                storage_path=self._storage_path,
+            )[DicomQueryLevel.SERIES]
         except AnonPathError as exc:
             logger.warning(f"Cannot resolve dcm_anon dir for {study_uid}/{series_uid}: {exc}")
             self._dcm_anon_path_cache[cache_key] = None
