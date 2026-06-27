@@ -1227,11 +1227,21 @@ async def test_anonymize_disk_layout_custom_template(
         status="success", num_completed=1, instances={"1.2.5252.1.1.1": mock_ds}
     )
 
-    with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
-        new_callable=AsyncMock,
-        return_value=mock_retrieve_result,
+    with (
+        patch(
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+            new_callable=AsyncMock,
+            return_value=mock_retrieve_result,
+        ),
+        patch("clarinet.files._storage.settings") as storage_settings,
     ):
+        storage_settings.disk_path_template = anon_settings.disk_path_template
+        storage_settings.anon_per_study_patient_id = False
+        storage_settings.anon_uid_salt = anon_settings.anon_uid_salt
+        storage_settings.anon_per_study_patient_id_hex_length = (
+            anon_settings.anon_per_study_patient_id_hex_length
+        )
+        storage_settings.anon_id_prefix = anon_settings.anon_id_prefix
         response = await client.post(
             "/api/dicom/studies/1.2.5252.1/anonymize",
             json={"save_to_disk": True, "send_to_pacs": False},

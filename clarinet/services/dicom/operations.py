@@ -70,7 +70,7 @@ def _ds_modalities(ds: Dataset) -> str | None:
     separator) keeps the DB value byte-identical to the wire form, so
     DICOMweb re-serialisation is a free split. Filesystem path
     rendering converts to ``_`` separately — see
-    ``storage_paths._modalities_string``.
+    ``clarinet/files/_storage.py::_modalities_string``.
 
     Returns ``None`` on a non-iterable, non-string value rather than
     falling back to ``str(val)`` — the previous fallback wrote

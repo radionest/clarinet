@@ -45,19 +45,12 @@ from .chain import (
     register_task,
     sync_pipeline_definitions,
 )
-from .context import FileResolver, RecordQuery, TaskContext, build_task_context
+from .context import RecordQuery, TaskContext, build_task_context
 from .fingerprint import (
     compute_fingerprint,
     queue_version_segment,
     reset_fingerprint_cache,
 )
-
-# ``FileResolver`` is re-exported here for backward compatibility with
-# downstream projects that imported it as
-# ``from clarinet.services.pipeline import FileResolver``. New code should
-# use ``from clarinet.services.common.file_resolver import FileResolver``
-# — the canonical home — to avoid pulling the broker / TaskIQ machinery
-# into modules that only need path rendering.
 from .message import PipelineMessage, build_pipeline_message_from_record
 from .middleware import DeadLetterMiddleware, DLQPublisher
 from .sync_wrappers import SyncPipelineClient, SyncRecordQuery, SyncTaskContext
@@ -67,7 +60,6 @@ from .worker import get_worker_queues, load_task_modules, run_worker
 __all__ = [
     "DLQPublisher",
     "DeadLetterMiddleware",
-    "FileResolver",
     "Pipeline",
     "PipelineConfigError",
     "PipelineError",

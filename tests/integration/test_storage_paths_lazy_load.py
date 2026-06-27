@@ -12,9 +12,9 @@ import pytest
 from sqlalchemy.exc import MissingGreenlet
 from sqlmodel import select
 
+from clarinet.files._storage import _modalities_string, build_context
 from clarinet.models.patient import Patient
 from clarinet.models.study import Series, Study
-from clarinet.services.common.storage_paths import _modalities_string, build_context
 
 
 @pytest.mark.asyncio

@@ -964,12 +964,16 @@ def _record_read_stub(
     file_links: list[RecordFileLinkRead],
     **fields: object,
 ) -> SimpleNamespace:
-    """Duck-typed RecordRead: honest ``hasattr`` (unlike MagicMock), so
-    unresolved pattern placeholders collapse to "" instead of a mock repr."""
+    """Duck-typed RecordRead stub for _missing_output_links / _stored_checksums tests.
+
+    Provides the minimal duck-typed interface that ``Files.render_for`` (and the
+    underlying ``_patterns.fields_from``) requires: ``record_type.name``,
+    ``record_type.file_registry``, and all scalar pattern fields.
+    """
     return SimpleNamespace(
-        record_type=SimpleNamespace(file_registry=file_registry),
+        record_type=SimpleNamespace(name="test_type", file_registry=file_registry),
         file_links=file_links,
-        **fields,
+        **{"id": None, **fields},  # fields_from accesses record.id directly; callers override
     )
 
 
@@ -1018,6 +1022,28 @@ class TestMissingOutputLinks:
 
         assert result == {"seg": "seg_.nrrd"}
 
+    def test_no_anon_uid_does_not_raise(self) -> None:
+        """Files.render_for must not raise AnonPathError on a pre-anon record.
+
+        Regression: _missing_output_links used Files(record, parent=parent).render()
+        which eagerly built working_dirs and raised AnonPathError when the record
+        had no anon_uid. render_for bypasses dir-building entirely.
+        """
+        from clarinet.files import Files
+
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+            id=42,
+        )
+        # No anon_uid / anon_patient_id on the stub — simulates pre-anon record.
+        result = Files.render_for(record, "seg_{id}.nrrd")
+        assert result == "seg_42.nrrd"
+
+        # Also confirm _missing_output_links doesn't raise with the same stub.
+        missing = _missing_output_links(record, {"seg": "abc123"})
+        assert missing == {"seg": "seg_42.nrrd"}
+
     def test_collection_takes_first_sorted_file(self) -> None:
         record = _record_read_stub(
             [
@@ -1028,6 +1054,7 @@ class TestMissingOutputLinks:
             [],
         )
 
+        # Collection keys ("masks:b.nii") make collection_file truthy — render is never called.
         result = _missing_output_links(record, {"masks:b.nii": "1", "masks:a.nii": "2"})
 
         assert result == {"masks": "a.nii"}
@@ -1041,6 +1068,8 @@ class TestMissingOutputLinks:
             [RecordFileLinkRead(name="output_mask", filename="mask.nii.gz", checksum="old")],
         )
 
+        # Both entries are skipped before render is called: output_mask is already linked,
+        # input_nifti has INPUT role — render is never invoked.
         result = _missing_output_links(record, {"output_mask": "abc123", "input_nifti": "def456"})
 
         assert result == {}

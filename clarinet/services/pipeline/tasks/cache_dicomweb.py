@@ -84,23 +84,16 @@ def _has_dcm_anon(
     surface that may not be reachable from every host (e.g. the Windows
     DICOM worker).
     """
+    from clarinet.files import AnonPathError, Files
     from clarinet.models.base import DicomQueryLevel
-    from clarinet.services.common.storage_paths import (
-        AnonPathError,
-        build_context,
-        render_working_folder,
-    )
 
     try:
-        ctx = build_context(
+        series_dir = Files.working_dirs(
             patient=patient,
             study=study,
             series=series,
-            template=settings.disk_path_template,
-        )
-        series_dir = render_working_folder(
-            settings.disk_path_template, DicomQueryLevel.SERIES, ctx, storage_path
-        )
+            storage_path=storage_path,
+        )[DicomQueryLevel.SERIES]
     except AnonPathError as exc:
         # Race vs anonymization run: entity exists but anon_uid hasn't
         # propagated yet. Symmetric with `DicomWebCache._resolve_dcm_anon_dir`

@@ -98,17 +98,14 @@ The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking 
 
 ## Anonymization contract: backend vs UX paths
 
-Storage-path rendering itself lives in
-`clarinet.services.common.storage_paths` — the same template engine
-(`build_context` + `render_working_folder` + `render_all_levels` +
-`derive_anon_patient_id`) feeds the writer, every reader, the CLI
-migration tool, and the pipeline `FileResolver` (which is a thin
-wrapper over `render_all_levels`). One rendering point means a custom
-`disk_path_template` produces the same path everywhere — there is no
-writer / reader divergence to worry about. Routers/services call the
-path resolver through `FileRepository`
-(`clarinet/repositories/file_repository.py`), which is the only entry
-point — models carry no path logic.
+Storage-path rendering lives in `clarinet/files/` — the same template
+engine (`_storage.render_all_levels` + `_storage.derive_anon_patient_id`)
+feeds the writer, every reader, the CLI migration tool, and the pipeline
+via `Files(record)` (the public entry point). One rendering point means a
+custom `disk_path_template` produces the same path everywhere — there is no
+writer / reader divergence to worry about. Routers and services call the
+path resolver through `Files` (`from clarinet.files import Files`), which
+is the only public entry point — models carry no path logic.
 
 Studies may be anonymized mid-pipeline (PR #250 — asymmetric anonymization),
 so a `Record` created before the anonymization run carries
@@ -120,8 +117,8 @@ produces under that identifier.
 Resolvers therefore default to **safe-by-default** mode — when the
 anonymized identifier is missing they raise `AnonPathError`
 (`clarinet.exceptions.AnonPathError`) instead of returning the raw UID.
-UX call sites opt in to the legacy fallback via
-`fallback_to_unanonymized=True`.
+UX call sites opt in to the legacy fallback via `Files(record, fallback=True)`
+or `Files.for_reader(record)`.
 
 Backend (no fallback — default):
 - `AnonymizationService._save_series_to_disk` (the writer)
@@ -131,17 +128,17 @@ Backend (no fallback — default):
   catch pattern)
 - `clarinet anon migrate-paths` (per-record failures are logged and the
   CLI moves on)
-- `FileResolver.build_working_dirs*` / pipeline `build_task_context`
-- `FileRepository(record)` constructor (raises on missing anon —
+- `ctx.files` in pipeline tasks (`Files(record)` from `build_task_context`)
+- `Files(record)` constructor (raises on missing anon —
   routers catch and serve `null` for UX endpoints)
 
-UX (`fallback_to_unanonymized=True`):
+UX (`Files(record, fallback=True)` / `Files.for_reader(record)`):
 - `build_slicer_context` (Slicer is the UI layer — opens in-flight
   records on the raw UID when anonymization has not propagated yet)
 - `build_template_vars` in `slicer/context.py` (renders the same
   `{study_anon_uid}` placeholders for user-authored args)
-- `FileRepository.resolve_with_fallback` for backend services that must
-  tolerate the pre-anon flow: `validate_record_files`,
+- `Files.for_reader(record)` for backend services that must tolerate the
+  pre-anon flow: `validate_record_files`,
   `RecordService._collect_output_file_paths`,
   `RecordService.check_files`, cascade delete
 - `viewer.py` inline fallbacks for external viewer URIs
@@ -150,8 +147,7 @@ UX (`fallback_to_unanonymized=True`):
 path-resolution logic — `working_folder` / `slicer_*_args_formatted`
 fields and the `_format_path` / `_get_working_folder` /
 `_format_slicer_kwargs` helpers were removed. Routers compose paths
-explicitly via `FileRepository` (or `resolve_with_fallback`); the
-frontend no longer decodes a `working_folder` key.
+explicitly via `Files`; the frontend no longer decodes a `working_folder` key.
 
 If you add a new resolver call, pick the side first — the boolean lives
 in the call site, not in the entity.

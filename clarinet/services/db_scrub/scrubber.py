@@ -4,7 +4,7 @@
 anonymized fixture. It narrows the database to the requested patients, strips
 PHI from every relational column and JSON snapshot, rewrites the patient MRN to
 the deterministic ``anon_id`` — and preserves exactly the values
-``FileRepository`` needs to resolve the anonymized DICOM on the stand
+``Files`` needs to resolve the anonymized DICOM on the stand
 (``patient.auto_id``, ``study.anon_uid``, ``series.anon_uid``). A final audit
 scan fails the run if any captured name or MRN survives.
 
@@ -271,7 +271,7 @@ class DbScrubber:
         """Null the free-text columns outside ``record.data`` / user email.
 
         ``clarinet_storage_path`` is nulled because it embeds the old MRN;
-        ``FileRepository`` recomputes it from the preserved anon identifiers.
+        ``Files`` recomputes it from the preserved anon identifiers.
         """
         await self.session.execute(update(Study).values(study_description=None))
         await self.session.execute(update(Series).values(series_description=None))

@@ -21,7 +21,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `message.py` | PipelineMessage (Pydantic model) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, task-bound queue routing) |
 | `middleware.py` | RetryMiddleware, DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware, AuditMiddleware |
-| `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
+| `context.py` | TaskContext system: Files (sync), RecordQuery (async), build_task_context() |
 | `sync_wrappers.py` | SyncRecordQuery, SyncPipelineClient, SyncTaskContext — sync wrappers for thread-based tasks |
 | `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext, sync/async auto-detect |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |
@@ -200,9 +200,9 @@ projects need an alembic migration for the new table.
 
 ## TaskContext System
 
-`pipeline_task()` decorator provides `TaskContext` with: `files` (FileResolver), `records` (RecordQuery), `client` (ClarinetClient), `msg` (PipelineMessage). Sync tasks get `SyncTaskContext` with sync wrappers.
+`pipeline_task()` decorator provides `TaskContext` with: `files` (`Files`), `records` (RecordQuery), `client` (ClarinetClient), `msg` (PipelineMessage). Sync tasks get `SyncTaskContext` with sync wrappers.
 
-`ctx.files` resolves the task's own record. To resolve files of *another* record you already hold (parent, reloaded copy, cross-patient), use `ctx.files_for(record)` — sugar over `FileResolver.from_record(record)`, which also works in standalone scripts that have no `ctx`. For lookup-by-criteria use `ctx.records.file_path(...)` instead.
+`ctx.files` is a `Files(record)` instance for the task's own record. To resolve files of *another* record you already hold (parent, reloaded copy, cross-patient), use `ctx.files_for(record)` — returns `Files(record)`. For lookup-by-criteria use `ctx.records.file_path(...)` instead.
 
 `build_task_context(msg, client)` fallback: record_id → series_uid → study_uid → empty context.
 

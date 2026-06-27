@@ -99,7 +99,7 @@ class PipelineMessage:
 
 `TaskContext` (async) и `SyncTaskContext` (sync) дают доступ к:
 
-#### `ctx.files` — `FileResolver`
+#### `ctx.files` — `Files`
 
 ```python
 ctx.files.resolve(file_def) -> Path        # абсолютный путь к файлу

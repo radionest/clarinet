@@ -37,6 +37,7 @@ from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
 from clarinet.exceptions.domain import ConfigLoadError, RecordFlowError
+from clarinet.files import Files
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
 from clarinet.utils.admin import ensure_admin_exists
@@ -46,7 +47,6 @@ from clarinet.utils.bootstrap import (
 )
 from clarinet.utils.db_manager import db_manager
 from clarinet.utils.file_registry_resolver import load_project_file_registry
-from clarinet.utils.fs import shutdown_fs_executor
 from clarinet.utils.logger import logger
 
 
@@ -490,7 +490,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if settings.recordflow_enabled:
             await _shutdown_recordflow(app)
 
-        shutdown_fs_executor()
+        Files.shutdown_io()
 
         from clarinet.services.events.bus import set_event_bus
 

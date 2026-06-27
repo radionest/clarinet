@@ -1714,7 +1714,7 @@ def main() -> None:
         description=(
             "Move anonymized dcm_anon directories from one disk_path_template "
             "layout to another (no DB changes).\n\n"
-            "Supported placeholders (full reference in clarinet.utils.path_template):\n"
+            "Supported placeholders (full reference in clarinet.files._template):\n"
             "  {anon_patient_id}   anonymized patient identifier\n"
             "  {anon_study_uid}    anonymized study UID (or original if not set)\n"
             "  {anon_series_uid}   anonymized series UID (or original if not set)\n"
@@ -1786,7 +1786,7 @@ def main() -> None:
             "the result for surviving PHI.\n\n"
             "Operates on settings.database_* — restore a production copy into a "
             "throwaway scratch database BEFORE running. study.anon_uid / "
-            "series.anon_uid / patient.auto_id are preserved so FileRepository "
+            "series.anon_uid / patient.auto_id are preserved so Files "
             "still resolves the anonymized DICOM."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
