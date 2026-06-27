@@ -364,7 +364,9 @@ class TestRecordServiceTriggers:
             patch.object(service, "_sync_output_files", new_callable=AsyncMock),
         ):
             patched.model_validate.return_value = MagicMock()
-            await service.submit_data(1, data, RecordStatus.finished, user_id=admin_id, actor_id=None)
+            await service.submit_data(
+                1, data, RecordStatus.finished, user_id=admin_id, actor_id=None
+            )
 
         repo_mock.update_data.assert_awaited_once_with(
             1, data, new_status=RecordStatus.finished, reassign_to=None

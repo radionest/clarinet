@@ -217,7 +217,9 @@ class TestSharedEditingComputed:
         rt = await _seed_type(
             test_session, "computed-shared", shared_editing=True, unique_per_user=False
         )
-        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
         resp = await editor_client.get(f"{RECORDS_BASE}/{rec.id}")
         assert resp.status_code == 200
         assert resp.json()["shared_editing"] is True
@@ -227,7 +229,9 @@ class TestSharedEditingComputed:
         self, editor_client, owner_user, test_session, test_patient, test_study, test_series
     ):
         rt = await _seed_type(test_session, "computed-plain")
-        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
         resp = await editor_client.get(f"{RECORDS_BASE}/{rec.id}")
         assert resp.status_code == 200
         assert resp.json()["shared_editing"] is False
