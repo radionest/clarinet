@@ -511,6 +511,28 @@ def _parse_dicom_scp_arg(value: str) -> tuple[str, int]:
     return parts[0], port
 
 
+def _normalize_worker_queues(queues: list[str]) -> list[str]:
+    """Resolve ``--queues`` shorthands to the broker's actual (version-gated) names.
+
+    ``--queues quarto`` must map to ``settings.quarto_queue_name`` — the exact
+    name the API publishes to — not a bare ``{namespace}.quarto``. With
+    ``pipeline_version_check_enabled`` (default on) the real name carries a
+    fingerprint segment (``clarinet.<fp>.quarto``), so a worker bound to the bare
+    name sits on a different queue under the DIRECT exchange and silently
+    consumes nothing. Full names (already containing ``.``) and unknown
+    shorthands pass through unchanged (the latter as ``{namespace}.<name>``).
+    """
+    kind_queues = {
+        "default": settings.default_queue_name,
+        "gpu": settings.gpu_queue_name,
+        "dicom": settings.dicom_queue_name,
+        "quarto": settings.quarto_queue_name,
+        "dead_letter": settings.dlq_queue_name,
+    }
+    ns = settings.pipeline_task_namespace
+    return [q if "." in q else kind_queues.get(q, f"{ns}.{q}") for q in queues]
+
+
 async def _run_pipeline_worker(
     queues: list[str] | None,
     workers: int,
@@ -1868,13 +1890,7 @@ def main() -> None:
         else:
             admin_parser.print_help()
     elif args.command == "worker":
-        queues = args.queues
-        if queues:
-            # Normalize queue names: "gpu" -> "{namespace}.gpu" (current project)
-            from clarinet.settings import settings as _settings
-
-            ns = _settings.pipeline_task_namespace
-            queues = [q if "." in q else f"{ns}.{q}" for q in queues]
+        queues = _normalize_worker_queues(args.queues) if args.queues else None
         dicom_scp = _parse_dicom_scp_arg(args.dicom) if args.dicom else None
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(
