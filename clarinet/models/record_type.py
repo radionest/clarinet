@@ -189,6 +189,21 @@ class RecordTypeBase(SQLModel):
             validate_json_safe(v)
         return v
 
+    @model_validator(mode="after")
+    def _validate_shared_editing(self) -> "RecordTypeBase":
+        """``shared_editing`` requires ``unique_per_user=False``.
+
+        Ownership churn is contradictory with per-user uniqueness (an editor who
+        already owns a record of the type would 409 on the next edit). Enforced
+        on the model so API/TOML-mode mutations via ``RecordTypeCreate`` are
+        rejected too, not only at config load. (SQLModel skips validation on the
+        ``table=True`` model, so this binds the write paths — ``RecordTypeCreate``
+        bodies and config — which is where the invalid combo can enter.)
+        """
+        if self.shared_editing and self.unique_per_user:
+            raise ValueError("shared_editing requires unique_per_user=False")
+        return self
+
 
 class RecordType(RecordTypeBase, table=True):
     """Model representing a type of record that can be created.

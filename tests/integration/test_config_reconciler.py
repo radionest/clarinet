@@ -5,6 +5,7 @@ Uses real DB sessions and RecordType objects — no mocks.
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -179,14 +180,19 @@ async def test_editable_flags_change_triggers_update(
 
 @pytest.mark.asyncio
 async def test_shared_editing_change_triggers_update(test_session: AsyncSession) -> None:
-    """Toggling ``shared_editing`` between config versions is a diff."""
-    config_v1 = [_make_config("shared-diff-test", shared_editing=False)]
+    """Toggling ``shared_editing`` between config versions is a diff.
+
+    Both versions pin ``unique_per_user=False`` (the model invariant forbids
+    ``shared_editing=True`` with ``unique_per_user=True``), so ``shared_editing``
+    is the only field that differs between v1 and v2.
+    """
+    config_v1 = [_make_config("shared-diff-test", shared_editing=False, unique_per_user=False)]
     result = await reconcile_record_types(config_v1, test_session)
     assert "shared-diff-test" in result.created
 
     test_session.expire_all()  # drop cached attrs before the update pass
 
-    config_v2 = [_make_config("shared-diff-test", shared_editing=True)]
+    config_v2 = [_make_config("shared-diff-test", shared_editing=True, unique_per_user=False)]
     result = await reconcile_record_types(config_v2, test_session)
     assert "shared-diff-test" in result.updated
 
@@ -823,36 +829,66 @@ def test_reconciler_compares_all_record_type_fields() -> None:
     assert model_fields - set(_COMPARED_FIELDS) - intentionally_excluded == set()
 
 
+def test_recordtypecreate_rejects_shared_editing_with_unique_per_user() -> None:
+    """The ``shared_editing`` / ``unique_per_user`` invariant is enforced on the
+    model (``RecordTypeBase``), so every write path that builds a
+    ``RecordTypeCreate`` rejects the combo: config load AND the API
+    (``POST /types`` deserializes the body into ``RecordTypeCreate`` → 422),
+    not only the bootstrap config-load path.
+    """
+    with pytest.raises(ValidationError, match="unique_per_user"):
+        _make_config("shared-bad", shared_editing=True, unique_per_user=True)
+
+
 @pytest.mark.asyncio
-async def test_reconcile_config_rejects_shared_editing_with_unique_per_user(
+async def test_toml_config_load_fails_fast_on_shared_editing_invariant(
     test_session: AsyncSession,
 ) -> None:
-    """shared_editing=True + unique_per_user=True fails fast at load."""
+    """TOML mode must abort startup on the shared_editing/unique_per_user combo.
+
+    The per-file loop builds ``RecordTypeCreate(**props)`` inside a ``try`` whose
+    lenient ``except Exception`` would otherwise log-and-skip the model's
+    ValidationError, silently dropping the type (later references 404 at
+    runtime). The loop must convert it into a fatal ``ConfigurationError``.
+    """
+    from pathlib import Path
     from unittest.mock import AsyncMock, patch
 
     from clarinet.utils.bootstrap import reconcile_config
 
-    items = [_make_config("shared-bad", shared_editing=True, unique_per_user=True)]
+    bad_props = {
+        "name": "shared-bad",
+        "level": "SERIES",
+        "shared_editing": True,
+        "unique_per_user": True,
+    }
 
     with (
         patch(
-            "clarinet.config.python_loader.load_python_config",
-            new_callable=AsyncMock,
-            return_value=items,
+            "clarinet.utils.bootstrap.discover_config_files",
+            return_value=[Path("shared-bad.toml")],
         ),
-        patch("clarinet.utils.bootstrap.db_manager.get_async_session_context") as mock_ctx,
+        patch(
+            "clarinet.utils.bootstrap.load_project_file_registry",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "clarinet.utils.bootstrap.load_record_config",
+            new_callable=AsyncMock,
+            return_value=bad_props,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.resolve_task_files",
+            side_effect=lambda props, _reg: props,
+        ),
         patch("clarinet.settings.settings") as mock_settings,
     ):
-        mock_settings.config_mode = "python"
+        mock_settings.config_mode = "toml"
         mock_settings.config_tasks_path = "/fake/path"
         mock_settings.config_delete_orphans = False
 
-        ctx = AsyncMock()
-        ctx.__aenter__ = AsyncMock(return_value=test_session)
-        ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_ctx.return_value = ctx
-
-        with pytest.raises(ConfigurationError, match="requires unique_per_user=False"):
+        with pytest.raises(ConfigurationError, match="Invalid record type config"):
             await reconcile_config(folder="/fake/path")
 
 

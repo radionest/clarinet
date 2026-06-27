@@ -8,6 +8,7 @@ such as user roles and record types, during startup.
 from pathlib import Path
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
@@ -382,6 +383,14 @@ async def reconcile_config(
                 all_items.append(RecordTypeCreate(**props))
             except ConfigLoadError:
                 raise
+            except ValidationError as e:
+                # A record-type config that violates a model invariant (e.g.
+                # shared_editing + unique_per_user) must abort startup, not be
+                # swallowed by the lenient handler below — otherwise the type is
+                # silently dropped and later references 404 at runtime.
+                raise ConfigurationError(
+                    f"Invalid record type config '{config_path.name}': {e}"
+                ) from e
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 
@@ -432,19 +441,6 @@ async def reconcile_config(
                     + f"\nConfigured viewers: {sorted(configured_viewers)}.\n"
                     f"Enable them via [viewers.<name>] in settings.toml."
                 )
-
-        # shared_editing requires unique_per_user=False: ownership churn is
-        # contradictory with per-user uniqueness (an editor who already owns a
-        # record of the type would 409 on the next edit). Fail fast instead of
-        # surfacing a confusing runtime 409.
-        shared_unique = [
-            item.name for item in all_items if item.shared_editing and item.unique_per_user
-        ]
-        if shared_unique:
-            raise ConfigurationError(
-                "shared_editing requires unique_per_user=False; offending record types: "
-                f"{shared_unique}"
-            )
 
         # Validate decorator-registry references (data_validators,
         # slicer_context_hydrators). A typo used to surface only at runtime —
