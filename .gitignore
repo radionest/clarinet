@@ -73,6 +73,11 @@ REFACTOR.md
 
 # Dev notes (centralized storage via symlink)
 dev-notes
+
+# Superpowers session artifacts (plans, specs, SDD briefs/reports/diffs)
+.superpowers/
+docs/superpowers/
+
 # Claude Code local config (settings.local.json, worktrees, runtime dirs)
 # Exception: project infra shared via git — rules/, agents/, commands/, hooks/, settings.json
 .claude/*
