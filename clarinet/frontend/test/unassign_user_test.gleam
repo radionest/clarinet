@@ -63,6 +63,7 @@ fn make_record() -> models.Record {
     radiant: None,
     display_anon_id: None,
     is_editable: True,
+    shared_editing: False,
   )
 }
 

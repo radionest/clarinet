@@ -393,6 +393,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     decode.optional(decode.list(record_file_link_decoder())),
   )
   use is_editable <- decode.optional_field("is_editable", True, decode.bool)
+  use shared_editing <- decode.optional_field("shared_editing", False, decode.bool)
   use display_anon_id <- decode.optional_field(
     "display_anon_id",
     None,
@@ -436,6 +437,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     radiant: None,
     display_anon_id: display_anon_id,
     is_editable: is_editable,
+    shared_editing: shared_editing,
   ))
 }
 

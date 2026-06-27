@@ -33,6 +33,7 @@ pub fn has_record_permission(user: Option(User), record: Record) -> Bool {
       is_admin_user(u)
       || record.user_id == Some(u.id)
       || record.user_id == option.None
+      || record.shared_editing
     _ -> False
   }
 }
