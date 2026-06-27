@@ -821,3 +821,69 @@ def test_reconciler_compares_all_record_type_fields() -> None:
     }
     model_fields = set(RecordTypeCreate.model_fields)
     assert model_fields - set(_COMPARED_FIELDS) - intentionally_excluded == set()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_rejects_shared_editing_with_unique_per_user(
+    test_session: AsyncSession,
+) -> None:
+    """shared_editing=True + unique_per_user=True fails fast at load."""
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    items = [_make_config("shared-bad", shared_editing=True, unique_per_user=True)]
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch("clarinet.utils.bootstrap.db_manager.get_async_session_context") as mock_ctx,
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        with pytest.raises(ConfigurationError, match="requires unique_per_user=False"):
+            await reconcile_config(folder="/fake/path")
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_allows_shared_editing_without_unique_per_user(
+    test_session: AsyncSession,
+) -> None:
+    """shared_editing=True + unique_per_user=False reconciles cleanly."""
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    items = [_make_config("shared-ok", shared_editing=True, unique_per_user=False)]
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch("clarinet.utils.bootstrap.db_manager.get_async_session_context") as mock_ctx,
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        result = await reconcile_config(folder="/fake/path")
+        assert "shared-ok" in result.created

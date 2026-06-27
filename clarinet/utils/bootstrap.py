@@ -433,6 +433,19 @@ async def reconcile_config(
                     f"Enable them via [viewers.<name>] in settings.toml."
                 )
 
+        # shared_editing requires unique_per_user=False: ownership churn is
+        # contradictory with per-user uniqueness (an editor who already owns a
+        # record of the type would 409 on the next edit). Fail fast instead of
+        # surfacing a confusing runtime 409.
+        shared_unique = [
+            item.name for item in all_items if item.shared_editing and item.unique_per_user
+        ]
+        if shared_unique:
+            raise ConfigurationError(
+                "shared_editing requires unique_per_user=False; offending record types: "
+                f"{shared_unique}"
+            )
+
         # Validate decorator-registry references (data_validators,
         # slicer_context_hydrators). A typo used to surface only at runtime —
         # e.g. when the doctor opened the record in Slicer.
