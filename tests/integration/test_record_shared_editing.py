@@ -108,7 +108,9 @@ class TestSharedEditingAuthz:
         rt = await _seed_type(
             test_session, "shared-yes", shared_editing=True, unique_per_user=False
         )
-        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
         resp = await editor_client.patch(
             f"{RECORDS_BASE}/{rec.id}/data", json={"answer": "edited-by-other"}
         )
@@ -120,7 +122,9 @@ class TestSharedEditingAuthz:
         self, editor_client, owner_user, test_session, test_patient, test_study, test_series
     ):
         rt = await _seed_type(test_session, "shared-no", shared_editing=False)
-        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
         resp = await editor_client.patch(
             f"{RECORDS_BASE}/{rec.id}/data", json={"answer": "edited-by-other"}
         )
@@ -144,6 +148,60 @@ class TestSharedEditingAuthz:
         rt = await _seed_type(
             test_session, "shared-superuser", shared_editing=True, unique_per_user=False
         )
-        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
         resp = await client.patch(f"{RECORDS_BASE}/{rec.id}/data", json={"answer": "by-admin"})
         assert resp.status_code == 200
+
+
+class TestSharedEditingOwnershipTransfer:
+    """Each real-user data write reassigns ownership to the editor."""
+
+    @pytest.mark.asyncio
+    async def test_patch_data_transfers_ownership(
+        self,
+        editor_client,
+        editor_user,
+        owner_user,
+        test_session,
+        test_patient,
+        test_study,
+        test_series,
+    ):
+        rt = await _seed_type(
+            test_session, "transfer-patch", shared_editing=True, unique_per_user=False
+        )
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
+
+        resp = await editor_client.patch(
+            f"{RECORDS_BASE}/{rec.id}/data", json={"answer": "by-editor"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["user_id"] == str(editor_user.id)
+
+        events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
+        assert events.status_code == 200
+        vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
+        assert "shared_update" in vias
+
+    @pytest.mark.asyncio
+    async def test_no_spurious_transfer_for_current_owner(
+        self, editor_client, editor_user, test_session, test_patient, test_study, test_series
+    ):
+        rt = await _seed_type(
+            test_session, "transfer-owner", shared_editing=True, unique_per_user=False
+        )
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, editor_user
+        )
+
+        resp = await editor_client.patch(f"{RECORDS_BASE}/{rec.id}/data", json={"answer": "again"})
+        assert resp.status_code == 200
+        assert resp.json()["user_id"] == str(editor_user.id)
+
+        events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
+        vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
+        assert "shared_update" not in vias

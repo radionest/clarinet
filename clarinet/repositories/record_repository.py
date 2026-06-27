@@ -636,25 +636,32 @@ class RecordRepository(BaseRepository[Record]):
         record_id: int,
         data: RecordData,
         new_status: RecordStatus | None = None,
+        *,
+        reassign_to: UUID | None = None,
     ) -> tuple[Record, RecordStatus]:
-        """Update record data and optionally status.
+        """Update record data and optionally status / owner.
 
         Args:
-            record_id: Record ID
-            data: New record data
-            new_status: Optional new status to set
+            record_id: Record ID.
+            data: New record data.
+            new_status: Optional new status to set.
+            reassign_to: When set, reassign ``user_id`` to this user in the same
+                commit (used by shared_editing "last editor owns it"). Unlike
+                ``assign_user`` this has no status side effect.
 
         Returns:
-            Tuple of (record with relations loaded, old status)
+            Tuple of (record with relations loaded, old status).
 
         Raises:
-            RecordNotFoundError: If record doesn't exist
+            RecordNotFoundError: If record doesn't exist.
         """
         record = await self.get(record_id)
         old_status = record.status
         record.data = data
         if new_status is not None:
             record.status = new_status
+        if reassign_to is not None:
+            record.user_id = reassign_to
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 

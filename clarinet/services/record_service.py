@@ -457,6 +457,7 @@ class RecordService:
         Raises:
             RecordConstraintViolationError: If unique_per_user is violated on auto-assign.
         """
+        transfer_to: UUID | None = None
         if user_id is not None:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
@@ -469,11 +470,21 @@ class RecordService:
                     actor_id=actor_id,
                     new_value={"user_id": str(user_id), "via": "submit"},
                 )
+            elif record_check.record_type.shared_editing and record_check.user_id != user_id:
+                transfer_to = user_id
+                await self._record_event(
+                    record_id=record_id,
+                    kind="assigned",
+                    actor_id=actor_id,
+                    new_value={"user_id": str(user_id), "via": "shared_submit"},
+                )
             else:
                 await self.repo.ensure_user_assigned(record_id, user_id)
 
         self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
+        record, old_status = await self.repo.update_data(
+            record_id, data, new_status=new_status, reassign_to=transfer_to
+        )
         await self._record_event(
             record_id=record_id,
             kind="data_submitted",
@@ -530,11 +541,21 @@ class RecordService:
             RecordEditLockedError: If the record is finished and its type
                 locks submitted records for *acting_user*.
         """
-        if acting_user is not None and not acting_user.is_superuser:
+        transfer_to: UUID | None = None
+        if acting_user is not None:
             record = await self.repo.get_with_relations(record_id)
-            ensure_record_editable(record, acting_user)
+            if not acting_user.is_superuser:
+                ensure_record_editable(record, acting_user)
+            if record.record_type.shared_editing and record.user_id != acting_user.id:
+                transfer_to = acting_user.id
+                await self._record_event(
+                    record_id=record_id,
+                    kind="assigned",
+                    actor_id=actor_id,
+                    new_value={"user_id": str(acting_user.id), "via": "shared_update"},
+                )
         self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_data(record_id, data)
+        record, old_status = await self.repo.update_data(record_id, data, reassign_to=transfer_to)
         await self._record_event(
             record_id=record_id,
             kind="data_updated",
