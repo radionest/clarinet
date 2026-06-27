@@ -8,6 +8,7 @@
 | `segmentation.py` | `Segmentation(Image)` — labeled masks, morphology, set operations, ROI filtering |
 | `dicom_volume.py` | DICOM series → 3D numpy volume (used by `Image.read_dicom_series()`) |
 | `coco2nii.py` | COCO JSON polygon annotations → `Segmentation` |
+| `correspondence/` | Pluggable component-correspondence engine (measures x matching x set operations) backing the Segmentation set ops |
 
 ## Supported Formats
 

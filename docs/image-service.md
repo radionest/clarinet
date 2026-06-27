@@ -116,14 +116,33 @@ All set operations are **label-based** (operate on connected-component labels), 
 
 | Method | Semantics | Key Parameters |
 |---|---|---|
-| `a.intersection(b, *, min_overlap=1, min_overlap_ratio=None)` | Keep ROIs from `a` with sufficient overlap with `b` | `min_overlap`: min voxels (default 1). `min_overlap_ratio`: min fraction of label size. |
+| `a.intersection(b, *, min_overlap=1, min_overlap_ratio=None, strategy=None)` | Keep ROIs from `a` with sufficient overlap with `b` | `min_overlap`: min voxels (default 1). `min_overlap_ratio`: min fraction of label size. `strategy`: optional `MatchingStrategy` — see below. |
 | `a.union(b)` | Binary union — all nonzero from both, result is single-valued | — |
-| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction of label size. |
-| `a.symmetric_difference(b, *, min_overlap=1, min_overlap_ratio=None, max_overlap=0, max_overlap_ratio=None)` | `a.union(b).difference(a.intersection(b, ...))` | Passes params through to `intersection()` and `difference()`. |
+| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None, strategy=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction (now applied per component — see below). `strategy`: optional `MatchingStrategy`. |
+| `a.symmetric_difference(b, *, min_overlap=1, min_overlap_ratio=None, max_overlap=0, max_overlap_ratio=None, strategy=None)` | Component-level symmetric difference (unmatched A + unmatched B) | Same threshold params as `intersection`/`difference`. `strategy`: optional `MatchingStrategy`. |
 
 **Union flattening**: the result is always binary (values 0 or 1). With `autolabel=True`, connected regions become a single label. Separate regions get different labels.
 
 **Strict difference** (`max_overlap=0`, the default): drops any label with nonzero overlap. Use `max_overlap=N` to tolerate small overlaps.
+
+**`difference(max_overlap_ratio=...)`**: the ratio threshold is now applied and enforced (prior versions had an inert implementation). Setting `max_overlap_ratio=0.1` drops an A component only if its overlap with the largest single B component exceeds 10% of A's size.
+
+**`symmetric_difference` is component-level**: produces the union of unmatched A and unmatched B components. This is cleaner than the prior implementation which called `union().difference(intersection())` and could introduce re-labeling artifacts.
+
+**Per-edge overlap threshold (behavior note)**: for `intersection` and `difference`, the default no-`strategy` path evaluates the threshold against the **largest single B-component overlap**, not the summed overlap across all B components. This matches historical behavior for default thresholds (`min_overlap=1` / `max_overlap=0`) and for single-component overlaps. Consumers relying on raised thresholds with fragmented (multi-component) other masks should be aware: for example, two B components each overlapping A by 3 voxels (sum 6) do not trigger a `min_overlap=5` threshold — only the per-component max of 3 is tested.
+
+#### Optional `strategy=` parameter
+
+The three matching-based operations (`intersection`, `difference`, `symmetric_difference`) accept an optional `strategy: MatchingStrategy` keyword argument (`union` is a plain binary OR with nothing to match). When provided, it replaces the default `ThresholdMatch`-based matching with a fully configurable correspondence engine.
+
+```python
+from clarinet.services.image.correspondence import GreedyArgmax, AbsoluteOverlap, IoU
+
+# Resolve 1-to-N overlaps: each A picks its highest-IoU B partner
+result = seg_a.difference(seg_b, strategy=GreedyArgmax(IoU(), direction="a_to_b"))
+```
+
+Available measures: `IoU`, `Dice`, `Coverage`, `OverlapCoefficient`, `AbsoluteOverlap`, `CentroidProximity`.
 
 **Grid alignment (fail-fast)**: every set operation compares the two segmentations **by voxel index**, so both must occupy the same physical grid. By default a grid mismatch (different shape, origin, spacing, or direction — e.g. a Z-flipped projection vs. its doctor segmentation) raises `GeometryMismatchError` instead of silently producing wrong results. Pass `resample=True` to opt into automatic nearest-neighbour resampling of `other` onto the caller's grid. This mirrors ITK's "same physical space" guard plus an explicit `ResampleImageFilter`.
 
@@ -152,9 +171,20 @@ Because they delegate to the named methods, the operators also **raise `Geometry
 | Method | Behavior |
 |---|---|
 | `subtract(other, *, resample=False)` | Zeros out voxels where `other` is nonzero (voxel-level, not label-level). Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
-| `append(other, *, resample=False)` | Merges ROIs from `other` into matching labels. Raises `ValueError` if an ROI overlaps multiple labels. Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
+| `append(other, *, strategy=None, resample=False)` | Merges ROIs from `other` into matching labels. Default (no `strategy`): raises `ValueError` if an ROI overlaps multiple labels. With `strategy`: resolves overlaps via the correspondence engine — each B component is merged into its best matching A label. Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
 | `copy_from(other)` | Replaces voxel data entirely |
 | `separate_labels()` | Re-runs connected-component labeling |
+
+**`append` with `strategy=`**: pass a `MatchingStrategy` to resolve multi-label overlaps instead of raising. The B component's voxels are repainted with the matched A label value.
+
+```python
+from clarinet.services.image.correspondence import GreedyArgmax, AbsoluteOverlap
+
+# merge bridging ROIs into their best-matching existing label
+seg.append(other, strategy=GreedyArgmax(AbsoluteOverlap(), direction="b_to_a"))
+```
+
+Unmatched B components (no A partner found by the strategy) are silently dropped.
 
 ---
 

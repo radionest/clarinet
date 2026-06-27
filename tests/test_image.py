@@ -19,6 +19,7 @@ from clarinet.services.image import (
     coco_to_segmentation,
     conform_seg_to_grid,
 )
+from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import read_dicom_series
 
 # ---------------------------------------------------------------------------
@@ -796,7 +797,9 @@ class TestSegmentation:
         assert not result.is_empty
 
     def test_difference_with_ratio(self) -> None:
-        # Small ROI: 8 voxels, overlap 4 → ratio = 0.5
+        # Small ROI: 8 voxels, overlap 4 → coverage(a) = 4/8 = 0.5
+        # New semantics: when max_overlap_ratio is given, ratio wins (max_overlap ignored).
+        # A label is REMOVED iff coverage >= max_overlap_ratio.
         vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
         vol1[1:3, 1:3, 1:3] = 1  # 8 voxels
         vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
@@ -809,12 +812,12 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = vol2
 
-        # max_overlap=10 but ratio 0.5 > 0.1 → dropped
-        result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.1)
+        # coverage 0.5 >= 0.1 → matched → removed from difference
+        result = seg1.difference(seg2, max_overlap_ratio=0.1)
         assert result.is_empty
 
-        # ratio threshold 0.8 → 0.5 < 0.8, so kept
-        result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.8)
+        # coverage 0.5 < 0.8 → not matched → kept in difference
+        result = seg1.difference(seg2, max_overlap_ratio=0.8)
         assert not result.is_empty
 
     def test_add_operation(self) -> None:
@@ -1520,3 +1523,149 @@ class TestSegmentMetadataRoundtrip:
         a.union(other).save_as(out_path, FileType.NRRD)
         _, header = nrrd.read(str(out_path))
         assert not any(k.startswith("Segment") for k in header)  # no named segments survive
+
+    def test_symmetric_difference_drops_segment_names(self, tmp_path: Path) -> None:
+        """symmetric_difference relabels into fresh components — the source's
+        per-label names no longer map, so they must not ride along on save
+        (else a survivor inherits an unrelated name, cf. #397)."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[1:4, 1:4, 1:4] = 1  # mts: overlaps other -> matched -> dropped
+        data[6:9, 6:9, 6:9] = 2  # benign: no overlap -> kept, relabeled to 1
+        a = _make_seg(shape=shape, data=data)
+        a._nrrd_header = {
+            "Segment0_Name": "mts",
+            "Segment0_LabelValue": "1",
+            "Segment1_Name": "benign",
+            "Segment1_LabelValue": "2",
+        }
+        other_data = np.zeros(shape, dtype=np.uint8)
+        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the mts blob
+        other = _make_seg(shape=shape, data=other_data)
+
+        out_path = tmp_path / "symdiff.seg.nrrd"
+        a.symmetric_difference(other).save_as(out_path, FileType.NRRD)
+        out_data, header = nrrd.read(str(out_path))
+        assert {int(v) for v in np.unique(out_data) if v} == {1}  # only benign survives
+        assert not any(k.startswith("Segment") for k in header)  # stale names dropped
+
+
+# ---------------------------------------------------------------------------
+# Correspondence-engine adapter tests (Tasks 6)
+# ---------------------------------------------------------------------------
+
+
+def _seg(arr: np.ndarray) -> Segmentation:
+    """Build a Segmentation from a numpy array, auto-labeling components."""
+    s = Segmentation(autolabel=True)
+    s.img = arr.astype(np.uint8)
+    return s
+
+
+def test_intersection_backward_compatible() -> None:
+    """intersection(min_overlap=N) keeps A labels with >= N voxel overlap."""
+    a = np.zeros((8, 8, 1), dtype=np.uint8)
+    b = np.zeros((8, 8, 1), dtype=np.uint8)
+    a[1:4, 1:4, 0] = 1
+    b[2:3, 2:3, 0] = 1  # 1-voxel overlap
+    seg_a, seg_b = _seg(a), _seg(b)
+    assert not seg_a.intersection(seg_b, min_overlap=1).is_empty
+    assert seg_a.intersection(seg_b, min_overlap=5).is_empty
+
+
+def test_strategy_overrides_resolve_1_to_n() -> None:
+    """strategy= override resolves 1-to-N matches; difference keeps unmatched A only."""
+    a = np.zeros((4, 10, 1), dtype=np.uint8)
+    b = np.zeros((4, 10, 1), dtype=np.uint8)
+    a[1:3, 1:9, 0] = 1  # one wide A component
+    b[1:3, 1:5, 0] = 1  # B1 — larger overlap
+    b[1:3, 7:8, 0] = 1  # B2 — smaller overlap (separate component)
+    seg_a, seg_b = _seg(a), _seg(b)
+    out = seg_a.difference(seg_b, strategy=GreedyArgmax(AbsoluteOverlap(), direction="a_to_b"))
+    # A matched its larger-overlap partner and is dropped; the result is empty of A
+    assert out.is_empty
+
+
+def test_difference_intersection_multi_component_per_edge_threshold() -> None:
+    """Per-edge threshold: one wide A overlaps two B-components (3 and 4 voxels, sum 7).
+
+    The default no-strategy path uses ThresholdMatch per edge (largest single-component
+    overlap = 4), not the summed overlap (7). This locks in the accepted behavior.
+    """
+    # One wide self-component A overlaps TWO separate other-components,
+    # with per-component overlaps 3 and 4 (sum 7). The default no-strategy
+    # path thresholds on the largest single overlap (4), not the sum (7).
+    a = np.zeros((1, 12, 1), dtype=np.uint8)
+    a[0, 0:9, 0] = 1  # A: one component, 9 voxels
+    b = np.zeros((1, 12, 1), dtype=np.uint8)
+    b[0, 0:3, 0] = 1  # B1 overlaps A by 3 voxels
+    b[0, 5:9, 0] = 1  # B2 overlaps A by 4 voxels (gap at cols 3,4 keeps B1/B2 separate)
+    seg_a, seg_b = _seg(a), _seg(b)
+    # max single-component overlap is 4 < max_overlap+1 = 6  ->  A is NOT matched
+    diff = seg_a.difference(seg_b, max_overlap=5)
+    assert not diff.is_empty  # A survives (old summed-overlap path would have removed it)
+    assert int(np.count_nonzero(diff.img)) == 9
+    # same fixture, intersection: max single overlap 4 < min_overlap 5  ->  no match -> empty
+    inter = seg_a.intersection(seg_b, min_overlap=5)
+    assert inter.is_empty
+
+
+# ---------------------------------------------------------------------------
+# symmetric_difference component-level behavior (Fix 1 — reviewer)
+# ---------------------------------------------------------------------------
+
+
+def test_symmetric_difference_keeps_component_adjacent_to_match() -> None:
+    """Component-level symdiff keeps A2 even when it is physically adjacent to B.
+
+    The old union()-relabel approach merged A2 into the overlapping blob and then
+    dropped it; the new correspondence-engine approach keeps A2 because it has no
+    direct voxel overlap with B.
+
+    Layout (cols in a 1x8x1 array):
+      A1 = cols 1-2  (overlaps B at col 2)
+      A2 = cols 4-5  (no overlap with B; gap at col 3 keeps components separate)
+      B  = cols 2-3  (overlaps A1 at col 2; adjacent to A2 at col 3|4)
+    """
+    a = np.zeros((1, 8, 1), dtype=np.uint8)
+    a[0, 1:3, 0] = 1  # A1: cols 1-2 (overlaps B at col 2)
+    a[0, 4:6, 0] = 1  # A2: cols 4-5 (separate component; gap at col 3)
+    b = np.zeros((1, 8, 1), dtype=np.uint8)
+    b[0, 2:4, 0] = 1  # B: cols 2-3 (overlaps A1 at col 2; adjacent to A2 at col 3|4)
+    out = _seg(a).symmetric_difference(_seg(b))
+    assert not out.is_empty
+    # A2 (the unmatched, disagreeing component) must survive
+    assert int(out.img[0, 4, 0]) != 0 and int(out.img[0, 5, 0]) != 0
+    # col 2 was the A1<->B overlap — it is removed in matched pairs
+    assert int(out.img[0, 2, 0]) == 0
+
+
+# ---------------------------------------------------------------------------
+# append opt-in strategy (Task 7)
+# ---------------------------------------------------------------------------
+
+
+def _two_label_self_and_bridging_other() -> tuple[Segmentation, Segmentation]:
+    base = np.zeros((4, 10, 1), dtype=np.uint8)
+    base[1:3, 1:3, 0] = 1  # self label A
+    base[1:3, 7:9, 0] = 1  # self label B (separate)
+    other = np.zeros((4, 10, 1), dtype=np.uint8)
+    other[1:3, 2:8, 0] = 1  # one ROI bridging both; equal overlap on each side (2 voxels each),
+    # winner is base label A (lowest a-label) — GreedyArgmax deterministic tie-break
+    return _seg(base), _seg(other)
+
+
+def test_append_multi_label_raises_by_default() -> None:
+    seg, other = _two_label_self_and_bridging_other()
+    with pytest.raises(ValueError, match="multiple labels"):
+        seg.append(other)
+
+
+def test_append_strategy_resolves_to_winner() -> None:
+    seg, other = _two_label_self_and_bridging_other()
+    seg.append(other, strategy=GreedyArgmax(AbsoluteOverlap(), direction="b_to_a"))
+    # bridging ROI merged into exactly one existing label, none added as new
+    assert {int(v) for v in np.unique(seg.img)} <= {0, 1, 2}
+    # col 4, row 1 is inside the bridge ROI but not inside either base label — it must now
+    # carry one of the existing label values (1 or 2), proving the ROI was genuinely merged
+    assert int(seg.img[1, 4, 0]) in (1, 2)
