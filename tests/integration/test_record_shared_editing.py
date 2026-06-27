@@ -205,3 +205,29 @@ class TestSharedEditingOwnershipTransfer:
         events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
         vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
         assert "shared_update" not in vias
+
+
+class TestSharedEditingComputed:
+    """RecordRead.shared_editing mirrors the type flag for the frontend."""
+
+    @pytest.mark.asyncio
+    async def test_true_when_type_shared(
+        self, editor_client, owner_user, test_session, test_patient, test_study, test_series
+    ):
+        rt = await _seed_type(
+            test_session, "computed-shared", shared_editing=True, unique_per_user=False
+        )
+        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        resp = await editor_client.get(f"{RECORDS_BASE}/{rec.id}")
+        assert resp.status_code == 200
+        assert resp.json()["shared_editing"] is True
+
+    @pytest.mark.asyncio
+    async def test_false_by_default(
+        self, editor_client, owner_user, test_session, test_patient, test_study, test_series
+    ):
+        rt = await _seed_type(test_session, "computed-plain")
+        rec = await _seed_record(test_session, test_patient, test_study, test_series, rt, owner_user)
+        resp = await editor_client.get(f"{RECORDS_BASE}/{rec.id}")
+        assert resp.status_code == 200
+        assert resp.json()["shared_editing"] is False

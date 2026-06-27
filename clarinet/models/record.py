@@ -439,6 +439,12 @@ class RecordRead(RecordBase):
         """
         return is_record_editable(self.status, self.finished_at, self.record_type)
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def shared_editing(self) -> bool:
+        """Mirror RecordType.shared_editing for the frontend permission check."""
+        return self.record_type.shared_editing
+
 
 class RecordFind(SQLModel):
     """Criteria for filtering series by their records."""
