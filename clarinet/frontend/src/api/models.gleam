@@ -136,6 +136,7 @@ pub type Record {
     // Server-side verdict: may the submitted data still be changed by
     // non-superusers (RecordType.editable + edit_window_days)
     is_editable: Bool,
+    shared_editing: Bool,
   )
 }
 

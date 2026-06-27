@@ -8,6 +8,7 @@ such as user roles and record types, during startup.
 from pathlib import Path
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
@@ -382,6 +383,14 @@ async def reconcile_config(
                 all_items.append(RecordTypeCreate(**props))
             except ConfigLoadError:
                 raise
+            except ValidationError as e:
+                # A record-type config that violates a model invariant (e.g.
+                # shared_editing + unique_per_user) must abort startup, not be
+                # swallowed by the lenient handler below — otherwise the type is
+                # silently dropped and later references 404 at runtime.
+                raise ConfigurationError(
+                    f"Invalid record type config '{config_path.name}': {e}"
+                ) from e
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 

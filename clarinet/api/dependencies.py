@@ -555,10 +555,13 @@ async def authorize_mutable_record_access(
     record: AuthorizedRecordDep,
     user: CurrentUserDep,
 ) -> Record:
-    """Authorize mutation access: superuser, assigned user, or unassigned record."""
+    """Authorize mutation access: superuser, assigned user, unassigned record, or
+    any role-holder when the record type has ``shared_editing=True``."""
     if user.is_superuser:
         return record
     if record.user_id is None or record.user_id == user.id:
+        return record
+    if record.record_type.shared_editing:
         return record
     raise AuthorizationError("Insufficient permissions to modify this record")
 

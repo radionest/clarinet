@@ -174,6 +174,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     decode.optional(decode.string),
   )
   use is_editable <- decode.optional_field("is_editable", True, decode.bool)
+  use shared_editing <- decode.optional_field("shared_editing", False, decode.bool)
   use display_anon_id <- decode.optional_field(
     "display_anon_id",
     None,
@@ -213,5 +214,6 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     radiant: None,
     display_anon_id: display_anon_id,
     is_editable: is_editable,
+    shared_editing: shared_editing,
   ))
 }

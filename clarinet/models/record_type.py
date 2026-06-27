@@ -157,6 +157,19 @@ class RecordTypeBase(SQLModel):
         ),
     )
 
+    # See ``mask_patient_data`` above for the rationale on ``server_default`` and
+    # the dialect-aware ``sql_expression.false()`` literal.
+    shared_editing: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": sql_expression.false()},
+        description=(
+            "Whether any user who can access this type (holds its role_name) may "
+            "edit any record of this type, not only the owner/unassigned. Each data "
+            "edit reassigns ownership (record.user_id) to the editing user. Requires "
+            "unique_per_user=False."
+        ),
+    )
+
     viewer_mode: ViewerMode = Field(
         default=ViewerMode.SINGLE_SERIES,
         sa_column=Column(String(20), server_default="single_series", nullable=False),
@@ -175,6 +188,21 @@ class RecordTypeBase(SQLModel):
         if v is not None:
             validate_json_safe(v)
         return v
+
+    @model_validator(mode="after")
+    def _validate_shared_editing(self) -> "RecordTypeBase":
+        """``shared_editing`` requires ``unique_per_user=False``.
+
+        Ownership churn is contradictory with per-user uniqueness (an editor who
+        already owns a record of the type would 409 on the next edit). Enforced
+        on the model so API/TOML-mode mutations via ``RecordTypeCreate`` are
+        rejected too, not only at config load. (SQLModel skips validation on the
+        ``table=True`` model, so this binds the write paths — ``RecordTypeCreate``
+        bodies and config — which is where the invalid combo can enter.)
+        """
+        if self.shared_editing and self.unique_per_user:
+            raise ValueError("shared_editing requires unique_per_user=False")
+        return self
 
 
 class RecordType(RecordTypeBase, table=True):

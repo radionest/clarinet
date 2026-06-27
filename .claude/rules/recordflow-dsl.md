@@ -67,6 +67,8 @@ matching flows, including flows without a status trigger (those match any status
   multiple times for the same record. This covers `.do_task` / `.call` / prefill jobs, and
   especially `.add_record()` / `.create_record()`: guard duplicate creation via RecordType
   constraints (`max_records`, `unique_per_user`) or an existence check in a `.call()`.
+  `shared_editing=True` lets any role-holder edit any record of the type — each edit reassigns
+  ownership to the editor (requires `unique_per_user=False`).
 - Mutual hard-invalidation loops (A's `on_status('pending')` hard-invalidates B while B's
   hard-invalidates A — or sibling records of one type invalidating each other) are a flow
   configuration error. The engine cuts such cycles at runtime: a record already mid-cascade is
