@@ -157,6 +157,19 @@ class RecordTypeBase(SQLModel):
         ),
     )
 
+    # See ``mask_patient_data`` above for the rationale on ``server_default`` and
+    # the dialect-aware ``sql_expression.false()`` literal.
+    shared_editing: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": sql_expression.false()},
+        description=(
+            "Whether any user who can access this type (holds its role_name) may "
+            "edit any record of this type, not only the owner/unassigned. Each data "
+            "edit reassigns ownership (record.user_id) to the editing user. Requires "
+            "unique_per_user=False."
+        ),
+    )
+
     viewer_mode: ViewerMode = Field(
         default=ViewerMode.SINGLE_SERIES,
         sa_column=Column(String(20), server_default="single_series", nullable=False),
