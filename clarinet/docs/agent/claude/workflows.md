@@ -123,8 +123,12 @@ if parents:
 ```
 
 `ctx.files_for` есть и в `TaskContext` (async), и в `SyncTaskContext` (sync) — это
-обёртка над конструктором `Files(record)`. Тот же фасад доступен и вне таски
-(standalone-скрипты без `ctx`):
+обёртка над конструктором `Files(record)` **без `parent`**. Сам `ctx.files`
+фреймворк строит как `Files(record, parent=parent)`, поэтому плейсхолдеры с
+fallback на родителя (`{user_id}`, `{origin_type}`, merge `{data.FIELD}`) у
+`ctx.files_for` могут резолвиться иначе — если parent-fallback нужен, постройте
+фасад сами: `Files(record, parent=parent_record)`. Тот же фасад доступен и вне
+таски (standalone-скрипты без `ctx`):
 
 ```python
 from clarinet.files import Files
@@ -132,13 +136,16 @@ from clarinet.files import Files
 files = Files(record)  # резолвер по записи (file-registry + working dirs)
 ```
 
-`Files(...)` принимает `RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead`,
-но file-registry (а значит и `.resolve(file_def)`) есть только у `RecordRead`; для
-остальных доступен `.dir()` — рабочая папка соответствующего уровня. Для поиска
-файла **по критериям** (а не по готовой записи) используйте `ctx.records.file_path(...)`.
+`Files(...)` принимает `RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead`.
+File-registry (а значит резолвинг по строке-имени, `resolve("mask")`) есть только
+у `RecordRead`; `resolve(file_def)` с самим `FileDef`-объектом и `.dir()` работают
+для любой сущности, чей уровень известен. Для поиска файла **по критериям**
+(а не по готовой записи) используйте `ctx.records.file_path(...)`.
 
-`Files(record)` резолвит пути в строгом режиме: для ещё не анонимизированной записи
-он бросит `AnonPathError`. Если нужен доступ к неанонимизированной раскладке
+`Files(record)` работает в строгом режиме: для ещё не анонимизированной записи
+`AnonPathError` бросается уже **при создании** фасада (в конструкторе, не в
+`.resolve()`) — оборачивать в try/except нужно сам вызов `Files(record)`. Если
+нужен доступ к неанонимизированной раскладке
 (UX-превью, миграционные скрипты), стройте фасад в lenient-режиме —
 `Files(record, fallback=True)` либо `Files.for_reader(record)` (пробует строгий
 режим, при `AnonPathError` пересобирает с fallback на сырые UID).
