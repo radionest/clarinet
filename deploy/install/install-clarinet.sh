@@ -208,6 +208,12 @@ install_systemd() {
         systemctl enable clarinet-worker@quarto
         systemctl restart clarinet-worker@quarto
         log "Quarto worker started (clarinet-worker@quarto)"
+    else
+        # Bare redeploy (no Quarto toolchain): tear down a worker left by a
+        # previous Quarto-enabled deploy. A stale instance would keep a (now
+        # version-mismatched) consumer registered and silently re-orphan renders.
+        # --now also stops it; ignore failure when it was never enabled.
+        systemctl disable --now clarinet-worker@quarto 2>/dev/null || true
     fi
     log "Systemd services started"
 }

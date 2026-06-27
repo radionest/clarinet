@@ -519,8 +519,10 @@ def _normalize_worker_queues(queues: list[str]) -> list[str]:
     ``pipeline_version_check_enabled`` (default on) the real name carries a
     fingerprint segment (``clarinet.<fp>.quarto``), so a worker bound to the bare
     name sits on a different queue under the DIRECT exchange and silently
-    consumes nothing. Full names (already containing ``.``) and unknown
-    shorthands pass through unchanged (the latter as ``{namespace}.<name>``).
+    consumes nothing. Full names (already containing ``.``) pass through
+    unchanged. An unknown bare shorthand can only be guessed as the unversioned
+    ``{namespace}.<name>``, which may not match the producer — pass it through
+    but warn, so the operator switches to a known kind or a full queue name.
     """
     kind_queues = {
         "default": settings.default_queue_name,
@@ -530,7 +532,20 @@ def _normalize_worker_queues(queues: list[str]) -> list[str]:
         "dead_letter": settings.dlq_queue_name,
     }
     ns = settings.pipeline_task_namespace
-    return [q if "." in q else kind_queues.get(q, f"{ns}.{q}") for q in queues]
+    resolved: list[str] = []
+    for q in queues:
+        if "." in q:
+            resolved.append(q)
+        elif q in kind_queues:
+            resolved.append(kind_queues[q])
+        else:
+            logger.warning(
+                f"Unknown worker queue shorthand '{q}'; using unversioned "
+                f"'{ns}.{q}', which may not match the queue the API publishes to. "
+                f"Use a known kind (default/gpu/dicom/quarto) or a full queue name."
+            )
+            resolved.append(f"{ns}.{q}")
+    return resolved
 
 
 async def _run_pipeline_worker(
