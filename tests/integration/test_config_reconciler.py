@@ -178,6 +178,25 @@ async def test_editable_flags_change_triggers_update(
 
 
 @pytest.mark.asyncio
+async def test_shared_editing_change_triggers_update(test_session: AsyncSession) -> None:
+    """Toggling ``shared_editing`` between config versions is a diff."""
+    config_v1 = [_make_config("shared-diff-test", shared_editing=False)]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert "shared-diff-test" in result.created
+
+    test_session.expire_all()  # drop cached attrs before the update pass
+
+    config_v2 = [_make_config("shared-diff-test", shared_editing=True)]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert "shared-diff-test" in result.updated
+
+    test_session.expire_all()
+    stmt = select(RecordType).where(RecordType.name == "shared-diff-test")
+    row = (await test_session.execute(stmt)).scalars().first()
+    assert row.shared_editing is True
+
+
+@pytest.mark.asyncio
 async def test_orphan_detection(
     test_session: AsyncSession,
     seed_record_type: RecordType,

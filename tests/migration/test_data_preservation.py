@@ -6,9 +6,10 @@ Uses batch_alter_table for SQLite compatibility.
 """
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+
+from alembic import command
 
 from .conftest import get_table_names, init_bare_alembic, write_migration_script
 

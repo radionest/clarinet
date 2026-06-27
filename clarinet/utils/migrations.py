@@ -4,13 +4,13 @@ import asyncio
 from pathlib import Path
 from textwrap import dedent
 
-from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import Script, ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from alembic import command
 from clarinet.exceptions import MigrationError
 from clarinet.settings import settings
 from clarinet.utils.db_manager import get_async_database_url

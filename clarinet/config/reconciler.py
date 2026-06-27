@@ -45,6 +45,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "inherit_user_from_parent",
     "editable",
     "edit_window_days",
+    "shared_editing",
     "viewer_mode",
     "allowed_viewers",
 )
