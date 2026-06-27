@@ -34,6 +34,9 @@ def test_quarto_reports_page_loads(auth_page: Page, base_url: str, path_prefix: 
     expect(auth_page.get_by_role("heading", name="Quarto Reports")).to_be_visible()
 
 
+# This test deliberately polls for up to 300s (cold Jupyter kernel on a slow
+# VM); the global ``timeout = 30`` in pyproject.toml would otherwise abort it.
+@pytest.mark.timeout(360)
 def test_quarto_render_to_docx(auth_page: Page, base_url: str, path_prefix: str):
     """Full flow: click Render DOCX → background render → download a non-empty file."""
     _open_quarto_page(auth_page, base_url, path_prefix)

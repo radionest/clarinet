@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from clarinet.cli.main import _normalize_worker_queues
 from clarinet.exceptions.domain import PipelineConfigError
 from clarinet.services.pipeline.broker import reset_brokers
 from clarinet.services.pipeline.chain import (
@@ -357,6 +358,40 @@ class TestWorkerQueues:
         assert DICOM_QUEUE in queues
         assert QUARTO_QUEUE in queues
         assert len(queues) == 4
+
+
+class TestNormalizeWorkerQueues:
+    """`clarinet worker --queues <kind>` must resolve to the version-gated names."""
+
+    def test_kind_shorthand_resolves_to_versioned_queue(self, monkeypatch):
+        """Gate on: a bare kind maps to the fingerprinted name the API uses."""
+        from clarinet.services.pipeline.fingerprint import queue_version_segment
+
+        monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+        ns = settings.pipeline_task_namespace
+        # Reconstruct the expected name from the fingerprint module independently
+        # of settings.quarto_queue_name, so the assert is not tautological.
+        seg = queue_version_segment()
+        assert _normalize_worker_queues(["quarto"]) == [f"{ns}.{seg}.quarto"]
+        assert _normalize_worker_queues(["default"]) == [f"{ns}.{seg}.default"]
+        # the legacy bare "{ns}.quarto" would orphan the worker on a dead queue
+        assert _normalize_worker_queues(["quarto"]) != [f"{ns}.quarto"]
+
+    def test_kind_shorthand_unversioned_when_gate_off(self, monkeypatch):
+        """Gate off: the shorthand still equals the (now unversioned) producer name."""
+        monkeypatch.setattr(settings, "pipeline_version_check_enabled", False)
+        ns = settings.pipeline_task_namespace
+        assert _normalize_worker_queues(["quarto"]) == [settings.quarto_queue_name]
+        assert _normalize_worker_queues(["quarto"]) == [f"{ns}.quarto"]
+
+    def test_full_name_passes_through(self):
+        """An explicit fully-qualified queue name is left untouched."""
+        assert _normalize_worker_queues(["liver.123abc.quarto"]) == ["liver.123abc.quarto"]
+
+    def test_unknown_shorthand_falls_back_to_namespace_prefix(self):
+        """An unknown bare token keeps the legacy {namespace}.<token> shape."""
+        ns = settings.pipeline_task_namespace
+        assert _normalize_worker_queues(["custom"]) == [f"{ns}.custom"]
 
 
 # ─── RecordFlow PipelineAction integration ───────────────────────────────────
