@@ -616,7 +616,7 @@ wheels = [
 
 [[package]]
 name = "clarinet"
-version = "0.10.15"
+version = "0.10.16"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

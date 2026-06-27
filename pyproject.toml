@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clarinet"
-version = "0.10.15"
+version = "0.10.16"
 description = "Clarinet — an imaging-centric framework for clinical research"
 readme = "README.md"
 authors = [
