@@ -470,7 +470,11 @@ class RecordService:
                     actor_id=actor_id,
                     new_value={"user_id": str(user_id), "via": "submit"},
                 )
-            elif record_check.record_type.shared_editing and record_check.user_id != user_id:
+            elif (
+                record_check.record_type.shared_editing
+                and record_check.user_id != user_id
+                and actor_id is not None
+            ):
                 transfer_to = user_id
                 await self._record_event(
                     record_id=record_id,
@@ -546,7 +550,11 @@ class RecordService:
             record = await self.repo.get_with_relations(record_id)
             if not acting_user.is_superuser:
                 ensure_record_editable(record, acting_user)
-            if record.record_type.shared_editing and record.user_id != acting_user.id:
+            if (
+                record.record_type.shared_editing
+                and record.user_id != acting_user.id
+                and actor_id is not None
+            ):
                 transfer_to = acting_user.id
                 await self._record_event(
                     record_id=record_id,

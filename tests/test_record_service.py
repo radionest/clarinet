@@ -319,6 +319,58 @@ class TestRecordServiceTriggers:
         )
 
     @pytest.mark.asyncio
+    async def test_update_data_no_transfer_for_service_token(self) -> None:
+        """Service-token writes (acting_user present, actor_id=None) must not transfer ownership."""
+        admin_id = uuid4()
+        other_owner = uuid4()
+        data = {"field": "value"}
+        fetched = MagicMock()
+        fetched.record_type.shared_editing = True
+        fetched.user_id = other_owner  # owned by someone else
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.pending
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = fetched
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
+        service = RecordService(repo_mock, AsyncMock())
+        acting_user = SimpleNamespace(is_superuser=True, id=admin_id)
+
+        with patch("clarinet.services.record_service.RecordRead") as patched:
+            patched.model_validate.return_value = MagicMock()
+            await service.update_data(1, data, acting_user=acting_user, actor_id=None)
+
+        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
+
+    @pytest.mark.asyncio
+    async def test_submit_data_no_transfer_for_service_token(self) -> None:
+        """Service-token submits (user_id present, actor_id=None) must not transfer ownership."""
+        admin_id = uuid4()
+        other_owner = uuid4()
+        data = {"field": "value"}
+        check = MagicMock()
+        check.user_id = other_owner  # owned by someone else
+        check.record_type.shared_editing = True
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.finished
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_record_type.return_value = check
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
+        service = RecordService(repo_mock, AsyncMock())
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+        ):
+            patched.model_validate.return_value = MagicMock()
+            await service.submit_data(1, data, RecordStatus.finished, user_id=admin_id, actor_id=None)
+
+        repo_mock.update_data.assert_awaited_once_with(
+            1, data, new_status=RecordStatus.finished, reassign_to=None
+        )
+
+    @pytest.mark.asyncio
     async def test_notify_file_change_fires_file_change_trigger(self) -> None:
         """Test notify_file_change fires file-change trigger."""
         record_mock = MagicMock()
