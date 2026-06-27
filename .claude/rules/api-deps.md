@@ -54,6 +54,7 @@ AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]
 
 - `get_user_role_names(user)` — extracts `{role.name for role in user.roles}` with try/except
 - `authorize_record_access` — checks superuser -> role_name match -> raises `AuthorizationError`
+- `authorize_mutable_record_access` (`MutableRecordDep`) — additionally bypasses the owner check when `record.record_type.shared_editing` is `True`; any role-holder may then mutate the record regardless of `user_id`
 - `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
 - `require_capability(name)` — dependency factory; admits a user whose effective
   capabilities (`resolve_capabilities`, `clarinet/models/capability.py`) include
