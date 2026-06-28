@@ -36,7 +36,7 @@ A deployed stand with the nir_liver project (see `deploy/` —
 (`make vm-bake DICOM=...`). Then provision the DICOM pipeline once:
 
 ```bash
-tests/workflow/setup_stand.sh clarinet@<vm-ip> ~/.ssh/clarinet-vm [known_hosts]
+docs/testing/prototype-nir_liver/setup_stand.sh clarinet@<vm-ip> ~/.ssh/clarinet-vm [known_hosts]
 ```
 
 This enables the DICOM worker, sets C-GET retrieve mode, and registers the
@@ -53,7 +53,7 @@ STAND_ADMIN_PASSWORD=<admin password> \
 STAND_SSH_TARGET=clarinet@<vm-ip> \
 STAND_SSH_KEY=~/.ssh/clarinet-vm \
 STAND_KNOWN_HOSTS=~/.local/share/clarinet-deploy/known_hosts \
-uv run pytest tests/workflow/ -v
+uv run pytest docs/testing/prototype-nir_liver/ -v
 ```
 
 `STAND_URL` is the project root (no `/api`). When the VM is on a libvirt NAT

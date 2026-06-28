@@ -20,7 +20,7 @@ Run (against the local tunnelled stand):
     STAND_SSH_TARGET=clarinet@<stand-ip> \\
     STAND_SSH_KEY=~/.ssh/clarinet-vm \\
     STAND_KNOWN_HOSTS=~/.local/share/clarinet-deploy/known_hosts \\
-    uv run pytest tests/workflow/ -v
+    uv run pytest docs/testing/prototype-nir_liver/ -v
 """
 
 from __future__ import annotations

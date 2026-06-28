@@ -109,6 +109,7 @@ class Stand:
             ["ssh", *self._ssh_base(), self.ssh_target, command],
             capture_output=True,
             text=True,
+            timeout=120,
         )
         if cp.returncode != 0:
             raise StandError(f"ssh failed ({cp.returncode}): {command}\n{cp.stderr}")
@@ -119,6 +120,7 @@ class Stand:
             ["scp", *self._ssh_base(), local, f"{self.ssh_target}:{remote}"],
             capture_output=True,
             text=True,
+            timeout=120,
         )
         if cp.returncode != 0:
             raise StandError(f"scp failed ({cp.returncode}): {local} → {remote}\n{cp.stderr}")
@@ -278,6 +280,7 @@ class Stand:
         dir → anonymised copies in Orthanc. All best-effort: a clean stand
         simply finds nothing to delete.
         """
+        anon_id = self._patient_anon_id(patient_id)  # capture before the patient is deleted
         for _ in range(40):  # records form a forest, not one tree — loop until empty
             recs = self.find(patient_id=patient_id)
             if not recs:
@@ -287,11 +290,20 @@ class Stand:
         self._req("DELETE", f"/studies/{study_uid}")
         self._req("DELETE", f"/patients/{patient_id}")
         self.ssh(f"rm -rf {STORAGE_ROOT}/{patient_id}")
-        self._purge_anon_studies(patient_id)
+        if anon_id:
+            self._purge_anon_studies(anon_id)
 
-    def _purge_anon_studies(self, patient_id: str) -> None:
+    def _patient_anon_id(self, patient_id: str) -> str | None:
+        """This patient's derived anon PatientID (``<prefix>_<auto_id>``), or None
+        if the patient does not exist yet (first run)."""
+        r = self._req("GET", f"/patients/{patient_id}")
+        return r.json().get("anon_id") if r.status_code == 200 else None
+
+    def _purge_anon_studies(self, anon_id: str) -> None:
         # Anonymised copies (anon_send_to_pacs=true) land back in Orthanc under
-        # a derived anon PatientID — drop them so reruns don't accumulate.
+        # this patient's derived anon PatientID — drop only those so reruns don't
+        # accumulate. Match the exact ID, not the project-wide prefix: a shared
+        # PACS may also hold other patients' anon studies under the same prefix.
         script = (
             "import json,urllib.request,base64;"
             f"auth=base64.b64encode(b'{self.pacs_auth}').decode();"
@@ -300,7 +312,7 @@ class Stand:
             "headers={'Authorization':'Basic '+auth,'Content-Type':'application/json'}));"
             f"sids=json.load(req('GET','{self.pacs_http}/studies'));"
             "[req('DELETE',f'" + self.pacs_http + "/studies/'+s) for s in sids "
-            "if (lambda t: t.get('PatientID','').startswith('NIR_LIVER'))("
+            f"if (lambda t: t.get('PatientID','')=='{anon_id}')("
             "json.load(req('GET',f'" + self.pacs_http + "/studies/'+s))['PatientMainDicomTags'])]"
         )
         with contextlib.suppress(StandError):  # cleanup is best-effort
