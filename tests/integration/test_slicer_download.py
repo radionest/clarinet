@@ -15,12 +15,12 @@ from urllib.error import HTTPError
 import pydicom
 import pytest
 import uvicorn
+from dimsechord import DicomCache
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.slicer.helper import SlicerHelper
 
 STUDY_UID = "1.2.826.0.1.3680043.8.498.5551111"
@@ -58,7 +58,7 @@ def _make_dicom_dataset(sop_uid: str) -> Dataset:
     return ds
 
 
-def _build_test_app(cache: DicomWebCache) -> FastAPI:
+def _build_test_app(cache: DicomCache) -> FastAPI:
     """Build a minimal FastAPI app with just the archive endpoint (no lifespan)."""
     import tempfile
 
@@ -77,7 +77,7 @@ def _build_test_app(cache: DicomWebCache) -> FastAPI:
         if cookie != _VALID_TOKEN:
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})  # type: ignore[return-value]
 
-        cached = cache._get_from_memory(study_uid, series_uid)
+        cached = cache.get_series_from_memory(study_uid, series_uid)
         if cached is None:
             return JSONResponse(status_code=404, content={"detail": "Not found"})  # type: ignore[return-value]
 
@@ -95,12 +95,12 @@ def _build_test_app(cache: DicomWebCache) -> FastAPI:
 
 
 @pytest.fixture
-def dicomweb_cache(tmp_path: Path) -> DicomWebCache:
+def dicomweb_cache(tmp_path: Path) -> DicomCache:
     cache_dir = tmp_path / "dicomweb_cache"
     cache_dir.mkdir()
-    cache = DicomWebCache(base_dir=cache_dir, memory_ttl_minutes=30, memory_max_entries=50)
+    cache = DicomCache(base_dir=cache_dir, memory_ttl_minutes=30, memory_max_entries=50)
     instances = {uid: _make_dicom_dataset(uid) for uid in SOP_UIDS}
-    cache._put_to_memory(STUDY_UID, SERIES_UID, instances, disk_persisted=True)
+    cache.put_series_to_memory(STUDY_UID, SERIES_UID, instances, disk_persisted=True)
     return cache
 
 
@@ -141,7 +141,7 @@ class _TestServer:
 
 
 @pytest.fixture
-def live_server(dicomweb_cache: DicomWebCache) -> Generator[str]:
+def live_server(dicomweb_cache: DicomCache) -> Generator[str]:
     """Start a minimal HTTP server and yield its base URL."""
     test_app = _build_test_app(dicomweb_cache)
     server = _TestServer(test_app)

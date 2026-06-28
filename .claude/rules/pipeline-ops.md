@@ -73,7 +73,7 @@ the right queue.
 
 Storage-path rendering lives in `clarinet/files/` — one template engine
 (`_storage.render_all_levels`, surfaced as `Files.working_dirs(...)`)
-feeds the writer (`AnonymizationService`), every reader (`DicomWebCache`,
+feeds the writer (`AnonymizationService`), every reader (`CacheFiller`,
 `prefetch_dicom_web`), CLI `anon migrate-paths`, plus the pipeline's
 `ctx.files` (`Files(record)` from `build_task_context`). One rendering
 point means a custom `disk_path_template` produces the same path everywhere.

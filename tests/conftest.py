@@ -2,7 +2,6 @@
 
 import os
 from collections.abc import AsyncGenerator
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -749,22 +748,6 @@ async def clarinet_client(test_session, test_settings):
         await client.close()
 
     app.dependency_overrides.clear()
-
-
-def create_disk_series(
-    cache_dir: Path, study_uid: str, series_uid: str, cached_at: float, file_size: int = 1024
-) -> Path:
-    """Create a fake cached series on disk with a .cached_at marker and a dummy file."""
-    series_dir = cache_dir / study_uid / series_uid
-    series_dir.mkdir(parents=True, exist_ok=True)
-
-    marker = series_dir / ".cached_at"
-    marker.write_text(str(cached_at))
-
-    dummy = series_dir / "1.2.3.dcm"
-    dummy.write_bytes(b"\x00" * file_size)
-
-    return series_dir
 
 
 @pytest.fixture

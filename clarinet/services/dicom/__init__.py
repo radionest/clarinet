@@ -1,27 +1,28 @@
-"""DICOM client for query-retrieve operations."""
+"""DICOM client for query-retrieve operations. Core models live in dimsechord."""
 
-from pynetdicom import _config as _pynetdicom_config
-
-from clarinet.services.dicom.anonymizer import DicomAnonymizer
-from clarinet.services.dicom.client import DicomClient
-from clarinet.services.dicom.models import (
-    AnonymizationResult,
-    AnonymizeStudyRequest,
-    BackgroundAnonymizationStatus,
+from dimsechord import (
     BatchStoreResult,
+    DicomClient,
     DicomNode,
     ImageQuery,
     ImageResult,
-    PacsImportRequest,
-    PacsStudyWithSeries,
     QueryRetrieveLevel,
     RetrieveResult,
     SeriesQuery,
     SeriesResult,
-    SkippedSeriesInfo,
-    StorageMode,
     StudyQuery,
     StudyResult,
+)
+from pynetdicom import _config as _pynetdicom_config
+
+from clarinet.services.dicom.anonymizer import DicomAnonymizer
+from clarinet.services.dicom.models import (
+    AnonymizationResult,
+    AnonymizeStudyRequest,
+    BackgroundAnonymizationStatus,
+    PacsImportRequest,
+    PacsStudyWithSeries,
+    SkippedSeriesInfo,
 )
 from clarinet.services.dicom.series_filter import (
     SeriesFilter,
@@ -30,6 +31,7 @@ from clarinet.services.dicom.series_filter import (
 )
 from clarinet.settings import settings
 
+# Process-wide pynetdicom identifier logging toggle (independent of dimsechord).
 _pynetdicom_config.LOG_RESPONSE_IDENTIFIERS = settings.dicom_log_identifiers
 _pynetdicom_config.LOG_REQUEST_IDENTIFIERS = settings.dicom_log_identifiers
 
@@ -53,7 +55,6 @@ __all__ = [
     "SeriesQuery",
     "SeriesResult",
     "SkippedSeriesInfo",
-    "StorageMode",
     "StudyQuery",
     "StudyResult",
 ]

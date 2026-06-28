@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from dimsechord import (
+    DicomClient,
     DicomNode,
     ImageQuery,
     MemoryCachedSeries,
@@ -20,7 +21,6 @@ from dimsechord import (
 )
 from pydicom import Dataset
 
-from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicomweb.filler import CacheFiller
 from clarinet.services.events.bus import get_event_bus
 from clarinet.services.events.models import TaskProgressEvent

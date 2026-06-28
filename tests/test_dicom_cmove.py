@@ -1,11 +1,9 @@
-"""Unit tests for C-MOVE self-retrieval: StorageSCP, dispatch."""
+"""Unit tests for the C-MOVE Storage SCP session lifecycle."""
 
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from clarinet.services.dicom.models import QueryRetrieveLevel, StorageMode
 from clarinet.services.dicom.scp import StorageSCP
 
 # ===========================================================================
@@ -127,71 +125,3 @@ class TestSingleton:
         shutdown_storage_scp()
         scp2 = get_storage_scp()
         assert scp1 is not scp2
-
-
-# ===========================================================================
-# _retrieve() dispatch
-# ===========================================================================
-
-
-class TestRetrieveDispatch:
-    """Tests that _retrieve() dispatches to C-GET or C-MOVE based on settings."""
-
-    @pytest.mark.asyncio
-    async def test_cget_mode_calls_get_study(self):
-        from clarinet.services.dicom.client import DicomClient
-        from clarinet.services.dicom.models import DicomNode
-
-        client = DicomClient(calling_aet="TEST")
-        peer = DicomNode(aet="ORTHANC", host="localhost", port=4242)
-
-        mock_result = MagicMock()
-        mock_result.num_completed = 5
-        mock_result.num_failed = 0
-
-        with (
-            patch.object(client._operations, "get_study", return_value=mock_result) as mock_get,
-            patch("clarinet.services.dicom.client.settings") as mock_settings,
-        ):
-            mock_settings.dicom_retrieve_mode = "c-get"
-            result = await client._retrieve(
-                study_uid="1.2.3",
-                peer=peer,
-                level=QueryRetrieveLevel.STUDY,
-                mode=StorageMode.MEMORY,
-            )
-            mock_get.assert_called_once()
-            assert result is mock_result
-
-    @pytest.mark.asyncio
-    async def test_cmove_mode_calls_retrieve_via_move(self):
-        from clarinet.services.dicom.client import DicomClient
-        from clarinet.services.dicom.models import DicomNode
-
-        client = DicomClient(calling_aet="TEST")
-        peer = DicomNode(aet="ORTHANC", host="localhost", port=4242)
-
-        mock_result = MagicMock()
-        mock_result.num_completed = 5
-        mock_result.num_failed = 0
-
-        mock_scp = MagicMock()
-
-        with (
-            patch.object(
-                client._operations, "retrieve_via_move", return_value=mock_result
-            ) as mock_move,
-            patch("clarinet.services.dicom.client.settings") as mock_settings,
-            patch("clarinet.services.dicom.scp.get_storage_scp", return_value=mock_scp),
-        ):
-            mock_settings.dicom_retrieve_mode = "c-move"
-            mock_settings.dicom_aet = "TEST"
-            mock_settings.dicom_cmove_timeout = 300.0
-            result = await client._retrieve(
-                study_uid="1.2.3",
-                peer=peer,
-                level=QueryRetrieveLevel.STUDY,
-                mode=StorageMode.MEMORY,
-            )
-            mock_move.assert_called_once()
-            assert result is mock_result

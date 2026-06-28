@@ -401,12 +401,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
 
-    # Initialize DICOM association semaphore (façade client still serves QIDO/anon
-    # until Task 9 — keep its cap; ADD dimsechord's process-global cap alongside).
-    from clarinet.services.dicom.operations import DicomOperations
-
-    DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)
-
     from dimsechord import (
         AssociationPool,
         DicomCache,

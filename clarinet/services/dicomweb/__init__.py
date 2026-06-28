@@ -11,6 +11,7 @@ import pydicom.config as _pydicom_config
 _pydicom_config.convert_wrong_length_to_UN = True
 
 from dimsechord import (  # noqa: E402
+    MemoryCachedSeries,
     build_multipart_response,
     convert_datasets_to_dicom_json,
     dataset_to_dicom_json,
@@ -20,13 +21,10 @@ from dimsechord import (  # noqa: E402
     study_result_to_dicom_json,
 )
 
-from clarinet.services.dicomweb.cache import DicomWebCache  # noqa: E402
 from clarinet.services.dicomweb.cleanup import DicomWebCacheCleanupService  # noqa: E402
-from clarinet.services.dicomweb.models import MemoryCachedSeries  # noqa: E402
 from clarinet.services.dicomweb.service import DicomWebProxyService  # noqa: E402
 
 __all__ = [
-    "DicomWebCache",
     "DicomWebCacheCleanupService",
     "DicomWebProxyService",
     "MemoryCachedSeries",

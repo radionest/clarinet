@@ -244,7 +244,8 @@ def build_anonymization_service(client: ClarinetClient) -> AnonymizationService:
     Single point of configuration for the worker/orchestrator path; reused by
     ``create_anonymization_service`` (raw) and ``_build_orchestrator``.
     """
-    from clarinet.services.dicom.client import DicomClient
+    from dimsechord import DicomClient
+
     from clarinet.services.dicom.models import DicomNode
     from clarinet.services.dicom.repo_adapters import (
         PatientRepoAdapter,

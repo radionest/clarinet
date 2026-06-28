@@ -126,7 +126,7 @@ async def test_anonymize_study_success(client, test_session, mock_anon_settings)
     )
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         return_value=mock_retrieve_result,
     ):
@@ -251,7 +251,7 @@ async def test_anonymize_study_filters_sr_series(client, test_session, mock_anon
     )
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         return_value=mock_retrieve_result,
     ):
@@ -331,7 +331,7 @@ async def test_anonymize_pacs_retrieval_failure(client, test_session, mock_anon_
     anon_settings.anon_failure_threshold = 1.0  # Allow partial failure for resilience test
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         side_effect=_get_series_side_effect,
     ):
@@ -405,7 +405,7 @@ async def test_anonymize_instance_failure(client, test_session, mock_anon_settin
 
     with (
         patch(
-            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+            "dimsechord.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
@@ -474,12 +474,12 @@ async def test_anonymize_send_to_pacs_failure_resilient(
 
     with (
         patch(
-            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+            "dimsechord.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
         patch(
-            "clarinet.services.dicom.client.DicomClient.store_instances_batch",
+            "dimsechord.DicomClient.store_instances_batch",
             new_callable=AsyncMock,
             side_effect=Exception("C-STORE failed"),
         ),
@@ -546,7 +546,7 @@ async def test_anonymize_save_to_disk_error_graceful(
 
     with (
         patch(
-            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+            "dimsechord.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
@@ -734,12 +734,12 @@ async def test_anonymize_batch_cstore_partial_failure(
 
     with (
         patch(
-            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+            "dimsechord.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
         patch(
-            "clarinet.services.dicom.client.DicomClient.store_instances_batch",
+            "dimsechord.DicomClient.store_instances_batch",
             new_callable=AsyncMock,
             return_value=mock_batch_result,
         ),
@@ -945,7 +945,7 @@ async def test_anonymize_no_record_sync_falls_back_to_raw(
     )
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         return_value=mock_retrieve_result,
     ):
@@ -1003,7 +1003,7 @@ async def test_anonymize_per_study_mode_writes_hash_into_dicom(
     )
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         return_value=mock_retrieve_result,
     ):
@@ -1076,7 +1076,7 @@ async def test_anonymize_default_mode_returns_patient_anon_id(
     )
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         return_value=mock_retrieve_result,
     ):
@@ -1147,7 +1147,7 @@ async def test_anonymize_disk_layout_default_template(
     )
 
     with patch(
-        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        "dimsechord.DicomClient.get_series_to_memory",
         new_callable=AsyncMock,
         return_value=mock_retrieve_result,
     ):
@@ -1229,7 +1229,7 @@ async def test_anonymize_disk_layout_custom_template(
 
     with (
         patch(
-            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+            "dimsechord.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),

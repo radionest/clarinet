@@ -30,7 +30,7 @@ Startup sequence:
 4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
 5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB
 6. Session cleanup service start (if `session_cleanup_enabled`)
-7. DICOMweb cache init (if `dicomweb_enabled`) → `app.state.dicomweb_cache`; cleanup service → `app.state.dicomweb_cleanup`
+7. DICOMweb cache init (if `dicomweb_enabled`) → `app.state.dicomweb_filler`; cleanup service → `app.state.dicomweb_cleanup`
 
 Any `ConfigLoadError` from steps 1c/2/2b/4/5 (a broken plan/ `.py` file) is converted to
 `StartupError(component="Config")` — the server refuses to start instead of running without

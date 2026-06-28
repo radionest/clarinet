@@ -333,6 +333,23 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Slicer operation failed"},
         )
 
+    from dimsechord import AssociationError
+
+    @app.exception_handler(AssociationError)
+    async def handle_dicom_association_error(_: Request, exc: AssociationError) -> JSONResponse:
+        """Convert dimsechord AssociationError (PACS unreachable / rejected) to 409.
+
+        Preserves the contract of the former in-process DICOM façade, which raised
+        ``CONFLICT`` on association failure. dimsechord is a transport library and
+        raises its own ``AssociationError`` instead, so the transport→HTTP mapping
+        is rehomed here.
+        """
+        logger.warning(f"DICOM association failed: {exc}")
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc) if str(exc) else "Failed to establish DICOM association"},
+        )
+
     @app.exception_handler(PipelineError)
     async def handle_pipeline_error(_: Request, exc: PipelineError) -> JSONResponse:
         """Convert PipelineError to 500 response."""

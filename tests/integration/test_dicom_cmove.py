@@ -16,7 +16,6 @@ import contextlib
 import os
 import socket
 import subprocess
-from pathlib import Path
 
 import pytest
 import requests
@@ -207,32 +206,14 @@ async def test_cmove_series_to_memory(
     storage_scp: StorageSCP,
 ) -> None:
     """C-MOVE retrieves a series and SCP collects instances in memory."""
-    from clarinet.services.dicom.models import (
-        AssociationConfig,
-        QueryRetrieveLevel,
-        RetrieveRequest,
-        StorageConfig,
-        StorageMode,
-    )
-
-    config = AssociationConfig(
-        calling_aet=CALLING_AET,
-        called_aet=PACS_AET,
-        peer_host=PACS_HOST,
-        peer_port=PACS_PORT,
-    )
-    request = RetrieveRequest(
-        level=QueryRetrieveLevel.SERIES,
-        study_instance_uid=small_mr_study.study_instance_uid,
-        series_instance_uid=mr_series.series_instance_uid,
-    )
-    storage = StorageConfig(mode=StorageMode.MEMORY)
-
-    from clarinet.services.dicom.operations import DicomOperations
-
-    ops = DicomOperations(calling_aet=CALLING_AET)
-    result = await asyncio.to_thread(
-        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+    result = await move_with_retry(
+        dicom_client,
+        storage_scp,
+        small_mr_study.study_instance_uid,
+        mr_series.series_instance_uid,
+        orthanc_node,
+        CALLING_AET,
+        timeout=120.0,
     )
 
     assert result.instances, "No instances received via C-MOVE"
@@ -240,49 +221,6 @@ async def test_cmove_series_to_memory(
     # Cross-check: instance count should match series instance count from C-FIND
     if mr_series.number_of_series_related_instances:
         assert len(result.instances) == mr_series.number_of_series_related_instances
-
-
-@pytest.mark.dicom
-@pytest.mark.asyncio
-async def test_cmove_study_to_disk(
-    dicom_client: DicomClient,
-    orthanc_node: DicomNode,
-    small_mr_study: StudyResult,
-    storage_scp: StorageSCP,
-    tmp_path: Path,
-) -> None:
-    """C-MOVE retrieves a study and writes .dcm files to disk."""
-    from clarinet.services.dicom.models import (
-        AssociationConfig,
-        QueryRetrieveLevel,
-        RetrieveRequest,
-        StorageConfig,
-        StorageMode,
-    )
-
-    config = AssociationConfig(
-        calling_aet=CALLING_AET,
-        called_aet=PACS_AET,
-        peer_host=PACS_HOST,
-        peer_port=PACS_PORT,
-    )
-    request = RetrieveRequest(
-        level=QueryRetrieveLevel.STUDY,
-        study_instance_uid=small_mr_study.study_instance_uid,
-    )
-    output_dir = tmp_path / "cmove_study"
-    storage = StorageConfig(mode=StorageMode.DISK, output_dir=output_dir)
-
-    from clarinet.services.dicom.operations import DicomOperations
-
-    ops = DicomOperations(calling_aet=CALLING_AET)
-    result = await asyncio.to_thread(
-        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
-    )
-
-    assert result.num_completed > 0
-    dcm_files = list(output_dir.glob("*.dcm"))
-    assert len(dcm_files) == result.num_completed
 
 
 @pytest.mark.dicom
@@ -304,31 +242,14 @@ async def test_cmove_matches_cget(
     cget_uids = set(cget_result.instances.keys())
 
     # C-MOVE
-    from clarinet.services.dicom.models import (
-        AssociationConfig,
-        QueryRetrieveLevel,
-        RetrieveRequest,
-        StorageConfig,
-        StorageMode,
-    )
-    from clarinet.services.dicom.operations import DicomOperations
-
-    config = AssociationConfig(
-        calling_aet=CALLING_AET,
-        called_aet=PACS_AET,
-        peer_host=PACS_HOST,
-        peer_port=PACS_PORT,
-    )
-    request = RetrieveRequest(
-        level=QueryRetrieveLevel.SERIES,
-        study_instance_uid=small_mr_study.study_instance_uid,
-        series_instance_uid=mr_series.series_instance_uid,
-    )
-    storage = StorageConfig(mode=StorageMode.MEMORY)
-
-    ops = DicomOperations(calling_aet=CALLING_AET)
-    cmove_result = await asyncio.to_thread(
-        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+    cmove_result = await move_with_retry(
+        dicom_client,
+        storage_scp,
+        small_mr_study.study_instance_uid,
+        mr_series.series_instance_uid,
+        orthanc_node,
+        CALLING_AET,
+        timeout=120.0,
     )
     cmove_uids = set(cmove_result.instances.keys())
 

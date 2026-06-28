@@ -791,65 +791,62 @@ async def test_move_series_unknown_destination(
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_find_studies_unreachable_peer() -> None:
-    """C-FIND against an unreachable host raises HTTPException(409)."""
-    from fastapi import HTTPException
+    """C-FIND against an unreachable host raises AssociationError (mapped to 409 by the API)."""
+    from dimsechord import AssociationError
 
     client = DicomClient(calling_aet=CALLING_AET)
     fake_node = DicomNode(aet="FAKE", host="192.168.122.254", port=9999)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AssociationError):
         await client.find_studies(StudyQuery(), fake_node, timeout=3)
-    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_get_study_unreachable_peer(tmp_path: Path) -> None:
-    """C-GET against an unreachable host raises HTTPException(409)."""
-    from fastapi import HTTPException
+    """C-GET against an unreachable host raises AssociationError (mapped to 409 by the API)."""
+    from dimsechord import AssociationError
 
     client = DicomClient(calling_aet=CALLING_AET)
     fake_node = DicomNode(aet="FAKE", host="192.168.122.254", port=9999)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AssociationError):
         await client.get_study(
             study_uid="1.2.3.FAKE",
             peer=fake_node,
             output_dir=tmp_path,
             timeout=3,
         )
-    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_move_study_unreachable_peer(tmp_path: Path) -> None:
-    """C-MOVE study to an unreachable host raises HTTPException(409)."""
-    from fastapi import HTTPException
+    """C-MOVE study to an unreachable host raises AssociationError (mapped to 409 by the API)."""
+    from dimsechord import AssociationError
 
     client = DicomClient(calling_aet=CALLING_AET)
     fake_node = DicomNode(aet="FAKE", host="192.168.122.254", port=9999)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AssociationError):
         await client.move_study(
             study_uid="1.2.3.FAKE",
             peer=fake_node,
             destination_aet="ANYWHERE",
             timeout=3,
         )
-    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_move_series_unreachable_peer(tmp_path: Path) -> None:
-    """C-MOVE series to an unreachable host raises HTTPException(409)."""
-    from fastapi import HTTPException
+    """C-MOVE series to an unreachable host raises AssociationError (mapped to 409 by the API)."""
+    from dimsechord import AssociationError
 
     client = DicomClient(calling_aet=CALLING_AET)
     fake_node = DicomNode(aet="FAKE", host="192.168.122.254", port=9999)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AssociationError):
         await client.move_series(
             study_uid="1.2.3.FAKE",
             series_uid="1.2.3.4.FAKE",
@@ -857,7 +854,6 @@ async def test_move_series_unreachable_peer(tmp_path: Path) -> None:
             destination_aet="ANYWHERE",
             timeout=3,
         )
-    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.dicom

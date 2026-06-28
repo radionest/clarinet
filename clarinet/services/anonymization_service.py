@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dimsechord import DicomClient
 from pydicom import Dataset
 
 if TYPE_CHECKING:
@@ -25,7 +26,6 @@ from clarinet.services.dicom.anonymizer import (
     compute_per_study_patient_id,
     find_invalid_vr_values,
 )
-from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import AnonymizationResult, DicomNode, SkippedSeriesInfo
 from clarinet.services.dicom.series_filter import SeriesFilter, SeriesFilterCriteria
 from clarinet.settings import settings

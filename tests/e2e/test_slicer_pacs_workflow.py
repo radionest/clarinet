@@ -704,41 +704,33 @@ class TestBackendCmoveThenSlicer:
         storage_scp: Any,
         tmp_path: Path,
     ) -> None:
-        """C-MOVE retrieves series to disk, then Slicer loads the .dcm files.
+        """C-MOVE retrieves a series to memory; the harness writes the .dcm files
+        and Slicer loads them from disk.
 
         Requires Slicer to share the harness filesystem (see
         ``_slicer_shares_filesystem``) — it loads the C-MOVE'd files by their
         on-disk path.
         """
-        from clarinet.services.dicom.models import (
-            AssociationConfig,
-            QueryRetrieveLevel,
-            RetrieveRequest,
-            StorageConfig,
-            StorageMode,
-        )
-        from clarinet.services.dicom.operations import DicomOperations
+        from clarinet.services.dicom import DicomClient, DicomNode
 
-        # 1. Backend C-MOVE: retrieve series to disk
-        config = AssociationConfig(
-            calling_aet=CALLING_AET,
-            called_aet=PACS_AET,
-            peer_host=PACS_HOST,
-            peer_port=PACS_PORT,
-        )
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.SERIES,
-            study_instance_uid=pacs_study_uid,
-            series_instance_uid=pacs_series_uid,
-        )
-        output_dir = tmp_path / "cmove_for_slicer"
-        storage = StorageConfig(mode=StorageMode.DISK, output_dir=output_dir)
-
-        ops = DicomOperations(calling_aet=CALLING_AET)
-        result = await asyncio.to_thread(
-            move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+        # 1. Backend C-MOVE-to-self into memory, then persist the .dcm files for Slicer
+        client = DicomClient(calling_aet=CALLING_AET)
+        peer = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
+        result = await move_with_retry(
+            client,
+            storage_scp,
+            pacs_study_uid,
+            pacs_series_uid,
+            peer,
+            CALLING_AET,
+            timeout=120.0,
         )
         assert result.num_completed > 0, "C-MOVE retrieved 0 instances"
+
+        output_dir = tmp_path / "cmove_for_slicer"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for sop_uid, ds in result.instances.items():
+            ds.save_as(str(output_dir / f"{sop_uid}.dcm"), enforce_file_format=True)
         dcm_files = list(output_dir.glob("*.dcm"))
         assert len(dcm_files) > 0
 
