@@ -164,6 +164,7 @@ class AnonymizationService:
                 series_uid=series_uid,
                 peer=self.pacs,
                 destination_aet=settings.dicom_aet,
+                timeout=settings.dicom_cmove_timeout,
             )
             # The C-MOVE final response carries the completed sub-operation count;
             # set it as expected so the SCP can signal completion for instances

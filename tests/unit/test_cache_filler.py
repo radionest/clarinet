@@ -32,13 +32,6 @@ def _ds2(study: str, series: str, sop: str) -> Dataset:
     return d
 
 
-def _mcs(n: int, study: str = "ST", series: str = "S") -> MagicMock:
-    """A MemoryCachedSeries-like mock with ``n`` sized instances."""
-    m = MagicMock()
-    m.instances = {str(i): _ds2(study, series, str(i)) for i in range(n)}
-    return m
-
-
 def _make_filler(
     *,
     cache: MagicMock | None = None,
@@ -139,29 +132,44 @@ async def test_ensure_series_memory_hit_skips_anon_and_engine(monkeypatch, tmp_p
     engine.ensure_series.assert_not_awaited()
 
 
-# --- ensure_study: per-series loop (default c-get, the must-have) --------
+# --- ensure_study: default c-get takes the single study-level path -------
 
 
 @pytest.mark.asyncio
-async def test_ensure_study_default_loops_per_series_and_aggregates_progress(monkeypatch, tmp_path):
+async def test_ensure_study_default_cget_single_study_association(monkeypatch, tmp_path):
+    """Default ``c-get`` pulls the whole study in ONE study-level C-GET, not N
+    per-series associations — behavioural parity with the pre-refactor
+    ``DicomWebCache.ensure_study_cached`` (a single study-level C-GET for all
+    modes, to avoid PACS association overload on large studies)."""
     cache = MagicMock()
     cache.get_series_from_memory.return_value = None
+    cache.load_series_from_disk.return_value = None
+    cache.put_series_to_memory.side_effect = lambda study, series, instances, **kw: MagicMock(
+        instances=instances
+    )
     engine = MagicMock()
-    series_objs = {"S1": _mcs(2), "S2": _mcs(3)}
-    engine.ensure_series = AsyncMock(side_effect=lambda study, ser: series_objs[ser])
+    engine.ensure_series = AsyncMock()
+    client = MagicMock()
+    cget = MagicMock()
+    cget.instances = {"a": _ds2("ST", "S1", "a"), "b": _ds2("ST", "S2", "b")}
+    cget.num_completed = 2
+    cget.status = 0x0000
+    client.get_study_to_memory = AsyncMock(return_value=cget)
 
-    filler = _make_filler(cache=cache, engine=engine, mode="c-get")
+    filler = _make_filler(cache=cache, engine=engine, client=client, mode="c-get")
     monkeypatch.setattr(filler, "_resolve_dcm_anon_dir", AsyncMock(return_value=None))
 
-    progress: list[tuple[int, int | None]] = []
-    result = await filler.ensure_study(
-        "ST", ["S1", "S2"], on_progress=lambda r, t: progress.append((r, t))
-    )
+    progress_cb = MagicMock()
+    result = await filler.ensure_study("ST", ["S1", "S2"], on_progress=progress_cb)
 
+    # ONE study-level association; progress forwarded; no per-series ensure_series loop.
+    client.get_study_to_memory.assert_awaited_once()
+    assert client.get_study_to_memory.await_args.kwargs["on_progress"] is progress_cb
+    engine.ensure_series.assert_not_awaited()
     assert set(result) == {"S1", "S2"}
-    assert engine.ensure_series.await_count == 2
-    # Aggregate instance counts: after S1 -> 2, after S2 -> 2 + 3 = 5
-    assert progress == [(2, None), (5, None)]
+    # Two series put to memory, one tee per instance.
+    assert cache.put_series_to_memory.call_count == 2
+    assert cache.schedule_tee.call_count == 2
 
 
 # --- ensure_study: c-get-study (single study-level C-GET with progress) --

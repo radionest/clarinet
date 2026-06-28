@@ -121,38 +121,24 @@ class CacheFiller:
     ) -> dict[str, MemoryCachedSeries]:
         """Ensure all requested series of a study are cached.
 
-        Branches on ``retrieve_mode`` so the study-level modes keep a single PACS
-        association (the reason they exist — large studies / PACS that reject
-        per-series associations):
+        Every retrieve mode keeps a single PACS association for the whole study
+        (the reason these study-level retrievals exist — large studies / PACS
+        that reject per-series associations):
 
-        - ``c-get-study``: one study-level C-GET (``get_study_to_memory`` carrying
-          real per-instance progress), grouped by series and tee'd to disk.
+        - ``c-get`` (default) / ``c-get-study``: one study-level C-GET
+          (``get_study_to_memory`` carrying real per-instance progress), grouped
+          by series and tee'd to disk.
         - ``c-move`` / ``c-move-study``: drive ``engine.stream_study`` over the
           still-missing series, counting arrivals for progress.
-        - ``c-get`` (default): per-series ``ensure_series`` loop.
 
         Every branch first resolves memory -> dcm_anon -> disk per series, so an
         anonymized series is served locally and never re-fetched (raw) from the
         PACS.
         """
-        if self._mode == "c-get-study":
+        if self._mode in ("c-get", "c-get-study"):
             return await self._ensure_study_cget(study_uid, series_uids, on_progress)
-        if self._mode in ("c-move", "c-move-study"):
-            return await self._ensure_study_cmove(study_uid, series_uids, on_progress)
-        return await self._ensure_study_per_series(study_uid, series_uids, on_progress)
-
-    async def _ensure_study_per_series(
-        self,
-        study_uid: str,
-        series_uids: list[str],
-        on_progress: Callable[[int, int | None], None] | None,
-    ) -> dict[str, MemoryCachedSeries]:
-        result: dict[str, MemoryCachedSeries] = {}
-        for series_uid in series_uids:
-            result[series_uid] = await self.ensure_series(study_uid, series_uid)
-            if on_progress is not None:
-                on_progress(sum(len(v.instances) for v in result.values()), None)
-        return result
+        # c-move / c-move-study
+        return await self._ensure_study_cmove(study_uid, series_uids, on_progress)
 
     async def _ensure_study_cget(
         self,

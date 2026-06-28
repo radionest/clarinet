@@ -285,6 +285,7 @@ async def test_retrieve_series_cmove_mode_collects_from_scp_session() -> None:
         series_uid="1.2.3.4.5.6",
         peer=service.pacs,
         destination_aet="CLARINET",
+        timeout=5.0,
     )
     # Session key convention and expected-count wiring
     scp.register_session.assert_called_once_with("1.2.3.4.5/1.2.3.4.5.6")

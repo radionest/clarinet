@@ -57,7 +57,6 @@ Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 from clarinet.services.dicom import (
     DicomClient, DicomNode, StudyQuery, SeriesQuery,
     PacsImportRequest, PacsStudyWithSeries, RetrieveResult,
-    StorageMode,
 )
 from clarinet.settings import settings
 
