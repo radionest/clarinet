@@ -73,7 +73,9 @@ class AnonymizationService:
         """Retrieve series from PACS with retry on incomplete results.
 
         Retries when PACS returns fewer instances than expected (transient
-        failures under concurrent load). Uses exponential backoff.
+        failures under concurrent load). Uses exponential backoff. Honours
+        ``settings.dicom_retrieve_mode`` — C-GET by default, C-MOVE-to-self
+        when set to ``c-move``/``c-move-study`` (see ``_move_series_to_memory``).
 
         Args:
             study_uid: Study Instance UID
@@ -86,18 +88,27 @@ class AnonymizationService:
         retries = max_retries if max_retries is not None else settings.dicom_cget_max_retries
         expected = series.instance_count  # may be None
 
+        # Honour retrieve-mode: c-get* pulls to memory directly; c-move* issues a
+        # C-MOVE-to-self and collects the instances from the local Storage SCP
+        # (still in memory). Default (c-get) keeps the original retrieval path.
+        move_to_self = settings.dicom_retrieve_mode in ("c-move", "c-move-study")
+        verb = "C-MOVE" if move_to_self else "C-GET"
+
         for attempt in range(1, retries + 1):
             try:
-                result = await self.dicom_client.get_series_to_memory(
-                    study_uid=study_uid,
-                    series_uid=series.series_uid,
-                    peer=self.pacs,
-                )
+                if move_to_self:
+                    result = await self._move_series_to_memory(study_uid, series.series_uid)
+                else:
+                    result = await self.dicom_client.get_series_to_memory(
+                        study_uid=study_uid,
+                        series_uid=series.series_uid,
+                        peer=self.pacs,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception(
-                    f"C-GET failed for series {series.series_uid} (attempt {attempt}/{retries})"
+                    f"{verb} failed for series {series.series_uid} (attempt {attempt}/{retries})"
                 )
                 if attempt < retries:
                     await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
@@ -110,15 +121,64 @@ class AnonymizationService:
                 return result
 
             logger.warning(
-                f"Incomplete C-GET for series {series.series_uid}: "
+                f"Incomplete {verb} for series {series.series_uid}: "
                 f"got {received}/{expected or '?'} instances "
                 f"(attempt {attempt}/{retries})"
             )
             if attempt < retries:
                 await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
 
-        logger.error(f"All {retries} C-GET attempts failed for series {series.series_uid}")
+        logger.error(f"All {retries} {verb} attempts failed for series {series.series_uid}")
         return None
+
+    async def _move_series_to_memory(self, study_uid: str, series_uid: str) -> RetrieveResult:
+        """Retrieve one series to memory via C-MOVE-to-self.
+
+        Used when ``settings.dicom_retrieve_mode`` is ``c-move``/``c-move-study``:
+        register a session on the local Storage SCP, issue a C-MOVE with our own
+        AET as the destination so the PACS streams the instances back to us via
+        C-STORE, wait for them to arrive, then collect the received datasets from
+        the session — all in memory, no disk side effects.
+
+        The session key (``"{study}/{series}"``) and the populated
+        ``RetrieveResult`` mirror the historical in-client C-MOVE path, so the
+        behaviour is unchanged from the previous façade.
+
+        Raises:
+            RuntimeError: If the local Storage SCP is not running.
+        """
+        from clarinet.services.dicom.scp import get_storage_scp
+
+        scp = get_storage_scp()
+        if not scp.is_running:
+            raise RuntimeError(
+                "Storage SCP not running — c-move retrieve-mode requires a running SCP. "
+                "Set dicom_retrieve_mode='c-get' or start the server/worker with a Storage SCP."
+            )
+
+        key = f"{study_uid}/{series_uid}"
+        scp.register_session(key)
+        try:
+            result = await self.dicom_client.move_series(
+                study_uid=study_uid,
+                series_uid=series_uid,
+                peer=self.pacs,
+                destination_aet=settings.dicom_aet,
+            )
+            # The C-MOVE final response carries the completed sub-operation count;
+            # set it as expected so the SCP can signal completion for instances
+            # that have already arrived, then wait for any still in flight.
+            scp.set_expected(key, result.num_completed)
+            await asyncio.to_thread(scp.wait_for_completion, key, settings.dicom_cmove_timeout)
+            finished = scp.finish_session(key)
+        except BaseException:
+            scp.finish_session(key)
+            raise
+
+        if finished is not None:
+            result.instances = finished.instances
+            result.num_completed = finished.received_count
+        return result
 
     async def anonymize_study(
         self,

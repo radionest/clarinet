@@ -234,3 +234,61 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
 
     assert result.instances_anonymized == 1
     assert result.instances_failed == 0
+
+
+@pytest.mark.asyncio
+async def test_retrieve_series_cmove_mode_collects_from_scp_session() -> None:
+    """In c-move mode, _retrieve_series issues C-MOVE-to-self and reads the SCP session."""
+    from clarinet.services.dicom.models import RetrieveResult
+
+    series = MagicMock()
+    series.series_uid = "1.2.3.4.5.6"
+    series.instance_count = 1
+
+    ds = Dataset()
+    finished = MagicMock()
+    finished.instances = {"1.2.3.100": ds}
+    finished.received_count = 1
+
+    scp = MagicMock()
+    scp.is_running = True
+    scp.finish_session = MagicMock(return_value=finished)
+
+    move_result = RetrieveResult(status="success", num_completed=1)
+    dicom_client = AsyncMock()
+    dicom_client.move_series = AsyncMock(return_value=move_result)
+
+    service = AnonymizationService(
+        study_repo=AsyncMock(),
+        patient_repo=AsyncMock(),
+        series_repo=AsyncMock(),
+        dicom_client=dicom_client,
+        pacs=MagicMock(),
+    )
+
+    with (
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.scp.get_storage_scp", return_value=scp),
+    ):
+        mock_settings.dicom_retrieve_mode = "c-move"
+        mock_settings.dicom_aet = "CLARINET"
+        mock_settings.dicom_cmove_timeout = 5.0
+        mock_settings.dicom_cget_max_retries = 1
+        mock_settings.dicom_cget_retry_backoff = 0.0
+
+        result = await service._retrieve_series("1.2.3.4.5", series)
+
+    # C-MOVE-to-self path was used (no silent C-GET degradation)
+    dicom_client.get_series_to_memory.assert_not_called()
+    dicom_client.move_series.assert_awaited_once_with(
+        study_uid="1.2.3.4.5",
+        series_uid="1.2.3.4.5.6",
+        peer=service.pacs,
+        destination_aet="CLARINET",
+    )
+    # Session key convention and expected-count wiring
+    scp.register_session.assert_called_once_with("1.2.3.4.5/1.2.3.4.5.6")
+    scp.set_expected.assert_called_once_with("1.2.3.4.5/1.2.3.4.5.6", 1)
+    # Instances are taken from the Storage SCP session, in memory
+    assert result is move_result
+    assert result.instances == {"1.2.3.100": ds}
