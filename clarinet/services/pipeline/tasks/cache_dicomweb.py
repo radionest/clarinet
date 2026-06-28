@@ -1,10 +1,11 @@
 """Built-in pipeline task: prefetch a study into the DICOMweb disk cache.
 
 Warms the dimsechord ``DicomCache`` so OHIF serves a study without a fresh
-PACS retrieve on its first request. Each missing series is pulled through
-dimsechord's ``PullEngine`` (C-GET by default; C-MOVE when the worker runs
-in ``c-move`` mode with a Storage SCP), which tees every instance to
-``{storage_path}/dicomweb_cache/{study_uid}/{series_uid}/`` and records it
+PACS retrieve on its first request. Missing series are pulled through
+dimsechord's ``PullEngine`` (C-GET by default; C-MOVE when the worker runs in
+``c-move`` mode with a Storage SCP) — one study-level retrieval when the whole
+study is cold, otherwise per-series — teeing every instance to
+``{storage_path}/dicomweb_cache/{study_uid}/{series_uid}/`` and recording it
 in the shared SQLite index (``dicomweb_cache/index.db``) the API reads.
 
 Runs in the worker process, separate from the API server. The cache and
@@ -242,8 +243,11 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
     Windows workers (where ``5432`` is firewalled) can run this task.
 
     Retrieval goes through dimsechord's ``DicomCache`` + ``PullEngine`` (built
-    per invocation, torn down at the end): each ``engine.ensure_series`` tees
-    the series to disk and the SQLite index the API process reads.
+    per invocation, torn down at the end), teeing every instance to disk and
+    the SQLite index the API process reads. A fully-cold study is pulled in ONE
+    study-level C-GET/C-MOVE (``engine.stream_study``); a partial miss falls
+    back to a per-series ``engine.ensure_series`` loop so already-cached series
+    are never re-retrieved.
 
     Raises:
         PipelineStepError: If ``study_uid`` is missing or the retrieve returns
@@ -319,19 +323,29 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
             f"anon_skipped={skipped_anon})"
         )
 
-        # 3. Pull each missing series through the engine — it tees every
-        # instance to disk + the SQLite index the API reads. Per-series so
-        # already-cached series (filtered above) are never re-retrieved.
+        # 3. Retrieve the missing series through the engine — it tees every
+        # instance to disk + the SQLite index the API reads.
+        #
+        # Whole study cold (nothing cached, nothing anon-covered): ONE
+        # study-level C-GET/C-MOVE via ``stream_study`` instead of N per-series
+        # associations — ``iter_study`` issues a single study-level retrieval
+        # and ``schedule_tee``s every dataset to disk + the index, matching the
+        # API ``CacheFiller`` path. A partial miss keeps the per-series loop so
+        # already-covered series (filtered above) are never re-retrieved.
         engine = _build_engine(cache, pacs)
         total_completed = 0
         failed_series: list[str] = []
-        for series_uid in series_to_fetch:
-            cached = await engine.ensure_series(msg.study_uid, series_uid)
-            count = len(cached.instances)
-            if count == 0:
-                failed_series.append(series_uid)
-                continue
-            total_completed += count
+        if len(series_to_fetch) == len(series_uids):
+            async for _ds in engine.stream_study(msg.study_uid, series_to_fetch):
+                total_completed += 1
+        else:
+            for series_uid in series_to_fetch:
+                cached = await engine.ensure_series(msg.study_uid, series_uid)
+                count = len(cached.instances)
+                if count == 0:
+                    failed_series.append(series_uid)
+                    continue
+                total_completed += count
 
         # Drain background tee writes so disk + index are durable before we
         # report success (engine tees are scheduled on a thread pool).
@@ -341,7 +355,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
             raise PipelineStepError(
                 "prefetch_dicom_web",
                 f"Retrieved 0 instances for study {msg.study_uid} "
-                f"(all {len(failed_series)} series returned nothing)",
+                f"(tried {len(series_to_fetch)} series)",
             )
         if failed_series:
             logger.error(

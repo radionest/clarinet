@@ -88,6 +88,9 @@ class CacheFiller:
         self._preload_progress: TTLCache[str, dict[str, Any]] = TTLCache(
             maxsize=512, ttl=preload_progress_ttl_seconds
         )
+        # Per-study lock so concurrent same-study OHIF preloads don't each open
+        # a full-study C-GET association (bounded by the live study-uid set).
+        self._study_cget_locks: dict[str, asyncio.Lock] = {}
 
     @staticmethod
     def _key(study_uid: str, series_uid: str) -> str:
@@ -150,26 +153,37 @@ class CacheFiller:
         if not missing:
             return result
 
-        cget = await self._client.get_study_to_memory(
-            study_uid=study_uid, peer=self._pacs, on_progress=on_progress
-        )
-        if cget.num_completed == 0:
-            raise RuntimeError(
-                f"Study C-GET returned 0 instances for study {study_uid} (status: {cget.status})"
-            )
+        # Serialize study-level C-GETs per study so concurrent same-study OHIF
+        # preloads don't each open a full-study association. The waiter that
+        # acquires the lock second re-checks the cache (double-checked locking)
+        # and serves from memory/disk instead of re-fetching.
+        lock = self._study_cget_locks.setdefault(study_uid, asyncio.Lock())
+        async with lock:
+            result, missing = await self._collect_local(study_uid, series_uids)
+            if not missing:
+                return result
 
-        requested = set(series_uids)
-        for ser_uid, instances in self._group_by_series(cget.instances).items():
-            # A series already resolved locally (memory/dcm_anon/disk) must not be
-            # overwritten by its raw PACS copy — that would leak non-anonymized data.
-            if ser_uid in result:
-                continue
-            entry = self._cache.put_series_to_memory(study_uid, ser_uid, instances)
-            for sop_uid, ds in instances.items():
-                self._cache.schedule_tee(study_uid, ser_uid, sop_uid, ds)
-            if ser_uid in requested:
-                result[ser_uid] = entry
-        return result
+            cget = await self._client.get_study_to_memory(
+                study_uid=study_uid, peer=self._pacs, on_progress=on_progress
+            )
+            if cget.num_completed == 0:
+                raise RuntimeError(
+                    f"Study C-GET returned 0 instances for study {study_uid} "
+                    f"(status: {cget.status})"
+                )
+
+            requested = set(series_uids)
+            for ser_uid, instances in self._group_by_series(cget.instances).items():
+                # A series already resolved locally (memory/dcm_anon/disk) must not be
+                # overwritten by its raw PACS copy — that would leak non-anonymized data.
+                if ser_uid in result:
+                    continue
+                entry = self._cache.put_series_to_memory(study_uid, ser_uid, instances)
+                for sop_uid, ds in instances.items():
+                    self._cache.schedule_tee(study_uid, ser_uid, sop_uid, ds)
+                if ser_uid in requested:
+                    result[ser_uid] = entry
+            return result
 
     async def _ensure_study_cmove(
         self,
@@ -287,7 +301,7 @@ class CacheFiller:
 
     async def shutdown(self) -> None:
         await asyncio.to_thread(self._cache.flush_pending_writes)
-        self._cache.shutdown()
+        await asyncio.to_thread(self._cache.shutdown)
 
     # --- dcm_anon machinery (moved from cache.py, rewired to this adapter) -
 

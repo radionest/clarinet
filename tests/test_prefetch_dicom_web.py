@@ -109,23 +109,39 @@ class _FakeEngine:
     Records which series were asked for and tees the planned instances into
     the *real* cache the task built (matching the engine's disk+index tee), so
     tests assert on ``cache.series_cached`` exactly like production.
+
+    ``ensure_series`` is the partial-miss path (one association per series);
+    ``stream_study`` is the cold-study path — ONE study-level association that
+    streams + tees every series, mirroring ``PullEngine.iter_study``.
     """
 
     def __init__(self, cache: DicomCache, plan: dict[str, list[str]]) -> None:
         self._cache = cache
         self._plan = plan  # series_uid -> list of sop_uids "retrieved" from PACS
         self.calls: list[str] = []
+        self.study_calls: list[list[str]] = []
 
-    async def ensure_series(self, study_uid: str, series_uid: str):
-        self.calls.append(series_uid)
+    def _tee(self, study_uid: str, series_uid: str) -> dict:
         instances = {}
         for sop_uid in self._plan.get(series_uid, []):
             ds = _make_dataset(series_uid, sop_uid, study_uid)
             self._cache.write_instance(study_uid, series_uid, sop_uid, ds)
             instances[sop_uid] = ds
+        return instances
+
+    async def ensure_series(self, study_uid: str, series_uid: str):
+        self.calls.append(series_uid)
+        instances = self._tee(study_uid, series_uid)
         return self._cache.put_series_to_memory(
             study_uid, series_uid, instances, disk_persisted=True
         )
+
+    async def stream_study(self, study_uid: str, series_uids: list[str]):
+        # ONE study-level association covering all requested series.
+        self.study_calls.append(list(series_uids))
+        for series_uid in series_uids:
+            for ds in self._tee(study_uid, series_uid).values():
+                yield ds
 
 
 def _patch_engine(monkeypatch: pytest.MonkeyPatch, plan: dict[str, list[str]]) -> dict[str, object]:
@@ -644,13 +660,21 @@ class TestPrefetchDicomWebImpl:
             await _prefetch_dicom_web_impl(msg, ctx)
 
         engine = holder["engine"]
-        assert engine.calls == ["SER1"]  # type: ignore[attr-defined]
+        # Whole study cold → one study-level association, not a per-series call.
+        assert engine.study_calls == [["SER1"]]  # type: ignore[attr-defined]
+        assert engine.calls == []  # type: ignore[attr-defined]
         # The fetched series landed in the shared SQLite index.
         assert _series_cached(tmp_path, "STUDY1", "SER1")
 
     @pytest.mark.asyncio
-    async def test_all_missing_fetches_every_series(self, tmp_path: Path, monkeypatch):
-        """When all series are missing, each is pulled via ``engine.ensure_series``."""
+    async def test_all_missing_fetches_in_one_study_association(self, tmp_path: Path, monkeypatch):
+        """A fully-cold study is pulled in ONE study-level association.
+
+        Every discovered series is missing → the task takes the ``stream_study``
+        branch (a single study-level C-GET/C-MOVE) rather than N per-series
+        ``ensure_series`` calls — behavioural parity with the pre-refactor base
+        (one study-level C-GET avoids N PACS associations).
+        """
         monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
 
         ctx = _build_ctx(tmp_path)
@@ -669,7 +693,9 @@ class TestPrefetchDicomWebImpl:
             await _prefetch_dicom_web_impl(msg, ctx)
 
         engine = holder["engine"]
-        assert engine.calls == ["SER1", "SER2"]  # type: ignore[attr-defined]
+        # ONE study-level association covering both series; no per-series loop.
+        assert engine.study_calls == [["SER1", "SER2"]]  # type: ignore[attr-defined]
+        assert engine.calls == []  # type: ignore[attr-defined]
         assert _series_cached(tmp_path, "STUDY1", "SER1")
         assert _series_cached(tmp_path, "STUDY1", "SER2")
 
@@ -710,7 +736,7 @@ class TestPrefetchDicomWebImpl:
 
         mock_client = AsyncMock()
         mock_client.find_series = AsyncMock(return_value=[_series_result("SER1")])
-        # Empty plan → engine.ensure_series returns 0 instances.
+        # Empty plan → the study-level stream yields no instances.
         _patch_engine(monkeypatch, plan={})
 
         with (
