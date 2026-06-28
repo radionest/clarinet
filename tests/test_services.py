@@ -16,7 +16,7 @@ from clarinet.exceptions.domain import (
 from clarinet.models.base import RecordStatus
 from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
 from clarinet.models.study import Study
-from clarinet.models.user import User, UserCreate, UserRole, UserUpdate
+from clarinet.models.user import User, UserCreate, UserRole, UserRolesLink, UserUpdate
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.record_repository import RecordRepository
@@ -278,6 +278,65 @@ class TestAdminService:
         assert by_email["wl_busy@test.com"].failed == 1
         assert by_email["wl_busy@test.com"].pending == 0
         assert by_email["wl_idle@test.com"].inwork == 0
+
+    @pytest.mark.asyncio
+    async def test_get_stats_finished_and_available(self, env):
+        session = env["session"]
+        pat = make_patient("FA_PAT", "Finished/Available Patient")
+        session.add(pat)
+        await session.commit()
+        study = make_study("FA_PAT", "1.2.3.800")
+        session.add(study)
+        await session.commit()
+        series = make_series("1.2.3.800", "1.2.3.800.1", 1)
+        session.add(series)
+        await session.commit()
+
+        # Two roles, each backing its own record type.
+        session.add_all([UserRole(name="fa-role"), UserRole(name="other-role")])
+        await session.commit()
+        session.add_all(
+            [
+                make_record_type("fa-rt", role_name="fa-role"),
+                make_record_type("other-rt", role_name="other-role"),
+            ]
+        )
+        await session.commit()
+
+        # Regular user holds only fa-role; superuser holds no role.
+        u_role = make_user(email="fa_role@test.com", is_active=True)
+        u_super = make_user(email="fa_super@test.com", is_active=True, is_superuser=True)
+        session.add_all([u_role, u_super])
+        await session.commit()
+        session.add(UserRolesLink(user_id=u_role.id, role_name="fa-role"))
+        await session.commit()
+
+        async def add(rt_name, user_id, status):
+            await seed_record(
+                session,
+                patient_id="FA_PAT",
+                study_uid="1.2.3.800",
+                series_uid="1.2.3.800.1",
+                rt_name=rt_name,
+                user_id=user_id,
+                status=status,
+            )
+
+        # Claimable pool: 3 fa-role + 2 other-role, unassigned + pending.
+        for _ in range(3):
+            await add("fa-rt", None, RecordStatus.pending)
+        for _ in range(2):
+            await add("other-rt", None, RecordStatus.pending)
+        # One finished record assigned to the regular user.
+        await add("fa-rt", u_role.id, RecordStatus.finished)
+
+        stats = await env["service"].get_stats()
+        by_email = {w.email: w for w in stats.workload_by_user}
+
+        assert by_email["fa_role@test.com"].finished == 1
+        assert by_email["fa_role@test.com"].available == 3  # fa-role pool only
+        assert by_email["fa_super@test.com"].available == 5  # whole pool
+        assert by_email["fa_super@test.com"].finished == 0
 
     @pytest.mark.asyncio
     async def test_get_record_type_stats_empty(self, env):

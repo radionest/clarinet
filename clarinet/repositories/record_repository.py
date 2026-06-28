@@ -1645,6 +1645,27 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         return result.scalar() or 0
 
+    async def count_unassigned_pending_by_role(self) -> dict[str | None, int]:
+        """Claimable pool grouped by ``RecordType.role_name``.
+
+        Counts ``pending`` records with no user assigned, bucketed by the
+        record type's role. The ``None`` bucket (types without a role) is
+        RBAC-visible to superusers only.
+        """
+        query = (
+            select(col(RecordType.role_name), func.count())
+            .select_from(Record)
+            .join(RecordType, col(Record.record_type_name) == col(RecordType.name))
+            .where(
+                col(Record.user_id).is_(None),
+                col(Record.status) == RecordStatus.pending,
+            )
+            .group_by(col(RecordType.role_name))
+        )
+        result = await self.session.execute(query)
+        rows = result.all()
+        return {role_name: count for role_name, count in rows}  # noqa: C416
+
     async def get_filter_options(
         self, criteria: RecordSearchCriteria, user: User
     ) -> RecordFilterScope:

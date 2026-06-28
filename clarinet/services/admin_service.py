@@ -58,7 +58,8 @@ class AdminService:
         records_by_status = await self._get_records_by_status()
         assigned = await self.record_repo.get_assigned_status_counts_by_user()
         available_pending = await self.record_repo.count_unassigned_pending()
-        active_users = await self.user_repo.list_all(is_active=True)
+        pool_by_role = await self.record_repo.count_unassigned_pending_by_role()
+        active_users = await self.user_repo.list_active_with_roles()
         workload_by_user = [
             UserWorkload(
                 user_id=str(user.id),
@@ -67,6 +68,12 @@ class AdminService:
                 pending=assigned.get(str(user.id), {}).get("pending", 0),
                 blocked=assigned.get(str(user.id), {}).get("blocked", 0),
                 failed=assigned.get(str(user.id), {}).get("failed", 0),
+                finished=assigned.get(str(user.id), {}).get("finished", 0),
+                available=(
+                    available_pending
+                    if user.is_superuser
+                    else sum(pool_by_role.get(role.name, 0) for role in user.roles)
+                ),
             )
             for user in sorted(active_users, key=lambda u: u.email)
         ]

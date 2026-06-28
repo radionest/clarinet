@@ -12,6 +12,8 @@ class UserWorkload(PydanticBaseModel):
     pending: int = 0
     blocked: int = 0
     failed: int = 0
+    finished: int = 0
+    available: int = 0
 
 
 class AdminStats(PydanticBaseModel):
