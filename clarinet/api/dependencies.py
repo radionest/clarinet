@@ -35,7 +35,8 @@ from clarinet.services.admin_service import AdminService
 from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom import DicomClient
 from clarinet.services.dicom.models import DicomNode
-from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
+from clarinet.services.dicomweb import DicomWebProxyService
+from clarinet.services.dicomweb.filler import CacheFiller
 from clarinet.services.quarto_report_service import QuartoReportRegistry, QuartoReportService
 from clarinet.services.record_service import RecordService
 from clarinet.services.record_type_service import RecordTypeService
@@ -342,10 +343,10 @@ PacsNodeDep = Annotated[DicomNode, Depends(get_pacs_node)]
 # DICOMweb proxy dependencies
 
 
-def get_dicomweb_cache(request: Request) -> DicomWebCache:
-    """Get singleton DICOMweb cache from app state."""
-    cache: DicomWebCache = request.app.state.dicomweb_cache
-    return cache
+def get_dicomweb_filler(request: Request) -> CacheFiller:
+    """Get the singleton DICOMweb cache filler from app state."""
+    filler: CacheFiller = request.app.state.dicomweb_filler
+    return filler
 
 
 def get_dicomweb_proxy_service(
@@ -353,12 +354,11 @@ def get_dicomweb_proxy_service(
     client: DicomClientDep,
     pacs: PacsNodeDep,
 ) -> DicomWebProxyService:
-    """Get DICOMweb proxy service instance with singleton cache."""
-    cache = get_dicomweb_cache(request)
-    return DicomWebProxyService(client=client, pacs=pacs, cache=cache)
+    """Get DICOMweb proxy service instance with the singleton cache filler."""
+    return DicomWebProxyService(client=client, pacs=pacs, filler=get_dicomweb_filler(request))
 
 
-DicomWebCacheDep = Annotated[DicomWebCache, Depends(get_dicomweb_cache)]
+DicomWebFillerDep = Annotated[CacheFiller, Depends(get_dicomweb_filler)]
 DicomWebProxyServiceDep = Annotated[DicomWebProxyService, Depends(get_dicomweb_proxy_service)]
 
 

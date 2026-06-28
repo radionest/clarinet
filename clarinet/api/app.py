@@ -401,13 +401,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
 
-    # Initialize DICOM association semaphore
+    # Initialize DICOM association semaphore (façade client still serves QIDO/anon
+    # until Task 9 — keep its cap; ADD dimsechord's process-global cap alongside).
     from clarinet.services.dicom.operations import DicomOperations
 
     DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)
 
-    # Start Storage SCP for C-MOVE mode
-    if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
+    from dimsechord import (
+        AssociationPool,
+        DicomCache,
+        DicomClient,
+        DicomNode,
+        PullEngine,
+    )
+
+    DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
+
+    pacs = DicomNode(aet=settings.pacs_aet, host=settings.pacs_host, port=settings.pacs_port)
+    move_mode = settings.dicom_retrieve_mode in ("c-move", "c-move-study")
+
+    # Start Storage SCP for C-MOVE mode (move-to-self target)
+    if move_mode:
         from clarinet.services.dicom.scp import get_storage_scp
 
         scp = get_storage_scp()
@@ -422,29 +436,64 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             f"(AET: {settings.dicom_aet}, mode: c-move)"
         )
 
-    # Initialize DICOMweb cache singleton
+    # Initialize DICOMweb cache filler (dimsechord DicomCache + mode-based PullEngine)
     if settings.dicomweb_enabled:
-        from clarinet.services.dicomweb.cache import DicomWebCache
+        from clarinet.services.dicomweb.filler import CacheFiller
 
         cache_dir = Path(settings.storage_path) / "dicomweb_cache"
-        app.state.dicomweb_cache = DicomWebCache(
+        cache = DicomCache(
             base_dir=cache_dir,
+            index_path=cache_dir / "index.db",
             ttl_hours=settings.dicomweb_cache_ttl_hours,
             max_size_gb=settings.dicomweb_cache_max_size_gb,
             memory_ttl_minutes=settings.dicomweb_memory_cache_ttl_minutes,
             memory_max_entries=settings.dicomweb_memory_cache_max_entries,
-            storage_path=Path(settings.storage_path),
             disk_write_concurrency=settings.dicomweb_disk_write_concurrency,
-            session_factory=db_manager.async_session_factory,
-            dcm_anon_path_cache_max_entries=(settings.dicomweb_dcm_anon_path_cache_max_entries),
-            dcm_anon_path_cache_ttl_seconds=(settings.dicomweb_dcm_anon_path_cache_ttl_seconds),
         )
-        logger.info("DICOMweb cache initialized (two-tier: memory + disk)")
+        fill_client = DicomClient(calling_aet=settings.dicom_aet, max_pdu=settings.dicom_max_pdu)
+        if move_mode:
+            pool = AssociationPool(
+                [settings.dicom_aet],
+                per_aet_cap=settings.dicom_max_concurrent_associations,
+            )
+            engine = PullEngine(
+                pool,
+                app.state.storage_scp,
+                cache,
+                pacs,
+                max_pdu=settings.dicom_max_pdu,
+                cmove_timeout=settings.dicom_cmove_timeout,
+            )
+        else:
+            engine = PullEngine.via_cget(
+                cache,
+                pacs,
+                calling_aet=settings.dicom_aet,
+                max_pdu=settings.dicom_max_pdu,
+                cget_timeout=settings.dicom_cmove_timeout,
+            )
+        app.state.dicomweb_filler = CacheFiller(
+            cache=cache,
+            engine=engine,
+            client=fill_client,
+            pacs=pacs,
+            retrieve_mode=settings.dicom_retrieve_mode,
+            session_factory=db_manager.async_session_factory,
+            storage_path=Path(settings.storage_path),
+            dcm_anon_path_cache_max_entries=settings.dicomweb_dcm_anon_path_cache_max_entries,
+            dcm_anon_path_cache_ttl_seconds=settings.dicomweb_dcm_anon_path_cache_ttl_seconds,
+        )
+        logger.info(
+            "DICOMweb cache initialized "
+            f"(dimsechord SQLite index, mode={settings.dicom_retrieve_mode})"
+        )
 
         if settings.dicomweb_cache_cleanup_enabled:
             from clarinet.services.dicomweb.cleanup import DicomWebCacheCleanupService
 
-            app.state.dicomweb_cleanup = DicomWebCacheCleanupService(cache=app.state.dicomweb_cache)
+            app.state.dicomweb_cleanup = DicomWebCacheCleanupService(
+                filler=app.state.dicomweb_filler
+            )
             await app.state.dicomweb_cleanup.start()
 
     if settings.sse_enabled:
@@ -471,9 +520,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if hasattr(app.state, "dicomweb_cleanup"):
             await app.state.dicomweb_cleanup.stop()
 
-        # Shutdown DICOMweb cache (flush pending disk writes)
-        if settings.dicomweb_enabled and hasattr(app.state, "dicomweb_cache"):
-            await app.state.dicomweb_cache.shutdown()
+        # Shutdown DICOMweb cache filler (flush pending disk writes)
+        if settings.dicomweb_enabled and hasattr(app.state, "dicomweb_filler"):
+            await app.state.dicomweb_filler.shutdown()
 
         if settings.session_cleanup_enabled:
             await session_cleanup_service.stop()

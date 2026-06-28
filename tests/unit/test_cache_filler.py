@@ -285,6 +285,48 @@ async def test_read_instance_and_build_zip_delegate_to_cache(tmp_path):
     cache.build_series_zip.assert_called_once_with("cached", out)
 
 
+@pytest.mark.asyncio
+async def test_read_instance_prefers_dcm_anon_over_disk_index(monkeypatch, tmp_path):
+    """PHI guard: a dcm_anon instance is served over a disk-index entry.
+
+    A series evicted from memory between ``ensure_series`` and ``read_instance``
+    must re-serve the *anonymized* SOP, never a raw copy tee'd to the disk index
+    under the same UID.
+    """
+    cache = MagicMock()
+    cache.read_instance.return_value = _ds("RAW")  # what the disk index would serve
+    filler = _make_filler(cache=cache, session_factory=MagicMock(), storage_path=tmp_path)
+
+    anon_dir = tmp_path / "dcm_anon"
+    anon_dir.mkdir()
+    anon_ds = _ds("ANON")
+    monkeypatch.setattr(filler, "_resolve_dcm_anon_dir", AsyncMock(return_value=anon_dir))
+    monkeypatch.setattr(filler, "_read_single_dcm", lambda d, sop: anon_ds)
+
+    result = await filler.read_instance("ST", "SE", "ANON")
+
+    assert result is anon_ds
+    cache.read_instance.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_read_instance_falls_back_to_disk_index_when_anon_misses(monkeypatch, tmp_path):
+    """dcm_anon dir resolved but the SOP file is absent → the disk index serves it."""
+    cache = MagicMock()
+    cache.read_instance.return_value = _ds("DISK")
+    filler = _make_filler(cache=cache, session_factory=MagicMock(), storage_path=tmp_path)
+
+    anon_dir = tmp_path / "dcm_anon"
+    anon_dir.mkdir()
+    monkeypatch.setattr(filler, "_resolve_dcm_anon_dir", AsyncMock(return_value=anon_dir))
+    monkeypatch.setattr(filler, "_read_single_dcm", lambda d, sop: None)
+
+    result = await filler.read_instance("ST", "SE", "MISSING")
+
+    assert str(result.SOPInstanceUID) == "DISK"
+    cache.read_instance.assert_called_once_with("ST", "SE", "MISSING")
+
+
 def test_evict_methods_delegate_to_cache(tmp_path):
     cache = MagicMock()
     cache.evict_expired.return_value = 3

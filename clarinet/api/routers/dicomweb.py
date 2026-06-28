@@ -14,10 +14,8 @@ from pydantic import BaseModel, Field
 
 from clarinet.api.dependencies import (
     CurrentUserDep,
-    DicomClientDep,
-    DicomWebCacheDep,
+    DicomWebFillerDep,
     DicomWebProxyServiceDep,
-    PacsNodeDep,
 )
 from clarinet.utils.dicom import parse_frame_numbers
 from clarinet.utils.logger import logger
@@ -191,19 +189,17 @@ async def download_series_archive(
     study_uid: str,
     series_uid: str,
     _user: CurrentUserDep,
-    cache: DicomWebCacheDep,
-    client: DicomClientDep,
-    pacs: PacsNodeDep,
+    filler: DicomWebFillerDep,
 ) -> StreamingResponse:
     """Download a DICOM series as a ZIP archive.
 
     Ensures the series is cached in memory (fetching from PACS if needed),
     then builds a ZIP from in-memory datasets.
     """
-    cached = await cache.ensure_series_cached(study_uid, series_uid, client, pacs)
+    cached = await filler.ensure_series(study_uid, series_uid)
 
     spooled = tempfile.SpooledTemporaryFile(max_size=50 * 1024 * 1024)  # noqa: SIM115
-    count = await asyncio.to_thread(cache.build_series_zip, cached, spooled)
+    count = await asyncio.to_thread(filler.build_series_zip, cached, spooled)
     spooled.seek(0)
 
     logger.info(f"Serving ZIP archive for series {series_uid} ({count} instances)")

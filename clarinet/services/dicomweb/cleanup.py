@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 
-from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicomweb.filler import CacheFiller
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
@@ -17,16 +17,16 @@ class DicomWebCacheCleanupService:
 
     def __init__(
         self,
-        cache: DicomWebCache,
+        filler: CacheFiller,
         cleanup_interval: int | None = None,
     ):
         """Initialize the cleanup service.
 
         Args:
-            cache: The DicomWebCache instance to clean
+            filler: The CacheFiller whose disk tier (dimsechord index) to clean
             cleanup_interval: Interval between cleanups in seconds
         """
-        self._cache = cache
+        self._filler = filler
         self.cleanup_interval = cleanup_interval or settings.dicomweb_cache_cleanup_interval
         self.is_running = False
         self._task: asyncio.Task[None] | None = None
@@ -81,8 +81,8 @@ class DicomWebCacheCleanupService:
         Returns:
             Tuple of (expired_count, size_evicted_count)
         """
-        expired = self._cache.evict_expired()
-        by_size = self._cache.evict_by_size()
+        expired = self._filler.evict_expired()
+        by_size = self._filler.evict_by_size()
         return expired, by_size
 
     async def cleanup_once(self) -> tuple[int, int]:

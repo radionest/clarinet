@@ -253,7 +253,31 @@ class CacheFiller:
     # --- single-instance / archive ---------------------------------------
 
     async def read_instance(self, study_uid: str, series_uid: str, sop_uid: str) -> Dataset | None:
-        return self._cache.read_instance(study_uid, series_uid, sop_uid)
+        """Read a single instance: dcm_anon first, then the dimsechord disk index.
+
+        The dcm_anon priority is a PHI guard: a series evicted from memory between
+        ``ensure_series`` and ``read_instance`` must re-serve the *anonymized*
+        instance, never a raw PACS copy that may have been tee'd to the disk index
+        under the same SOP UID.
+        """
+        anon_dir = await self._resolve_dcm_anon_dir(study_uid, series_uid)
+        if anon_dir is not None:
+            ds = await asyncio.to_thread(self._read_single_dcm, anon_dir, sop_uid)
+            if ds is not None:
+                return ds
+        return await asyncio.to_thread(self._cache.read_instance, study_uid, series_uid, sop_uid)
+
+    @staticmethod
+    def _read_single_dcm(anon_dir: Path, sop_uid: str) -> Dataset | None:
+        """Read one ``{sop_uid}.dcm`` from a dir; None when missing or unreadable."""
+        path = anon_dir / f"{sop_uid}.dcm"
+        if not path.exists():
+            return None
+        try:
+            return pydicom.dcmread(path)
+        except Exception as e:
+            logger.warning(f"Failed to read DICOM instance {path}: {e}")
+            return None
 
     def build_series_zip(self, cached: MemoryCachedSeries, output: IO[bytes]) -> int:
         return self._cache.build_series_zip(cached, output)

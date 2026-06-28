@@ -6,6 +6,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from dimsechord import (
+    DicomNode,
+    ImageQuery,
+    MemoryCachedSeries,
+    SeriesQuery,
+    StudyQuery,
     build_multipart_response,
     convert_datasets_to_dicom_json,
     extract_frames_from_dataset,
@@ -16,14 +21,7 @@ from dimsechord import (
 from pydicom import Dataset
 
 from clarinet.services.dicom.client import DicomClient
-from clarinet.services.dicom.models import (
-    DicomNode,
-    ImageQuery,
-    SeriesQuery,
-    StudyQuery,
-)
-from clarinet.services.dicomweb.cache import DicomWebCache
-from clarinet.services.dicomweb.models import MemoryCachedSeries
+from clarinet.services.dicomweb.filler import CacheFiller
 from clarinet.services.events.bus import get_event_bus
 from clarinet.services.events.models import TaskProgressEvent
 from clarinet.utils.logger import logger
@@ -66,18 +64,18 @@ class DicomWebProxyService:
         self,
         client: DicomClient,
         pacs: DicomNode,
-        cache: DicomWebCache,
+        filler: CacheFiller,
     ):
         """Initialize the proxy service.
 
         Args:
-            client: DICOM client for Q/R operations
+            client: DICOM client for QIDO (C-FIND) Q/R operations
             pacs: Target PACS node configuration
-            cache: Two-tier cache for retrieved series
+            filler: Cache filler (dimsechord cache + pull engine + dcm_anon tier)
         """
         self._client = client
         self._pacs = pacs
-        self._cache = cache
+        self._filler = filler
         self._preload_tasks: set[asyncio.Task[None]] = set()
 
     async def search_studies(self, params: dict[str, str]) -> list[dict[str, Any]]:
@@ -166,12 +164,7 @@ class DicomWebProxyService:
         Returns:
             List of DICOM JSON metadata objects
         """
-        cached = await self._cache.ensure_series_cached(
-            study_uid=study_uid,
-            series_uid=series_uid,
-            client=self._client,
-            pacs=self._pacs,
-        )
+        cached = await self._filler.ensure_series(study_uid, series_uid)
 
         metadata = await asyncio.to_thread(
             convert_datasets_to_dicom_json, list(cached.instances.values()), base_url
@@ -201,12 +194,7 @@ class DicomWebProxyService:
             return []
 
         # Single study-level C-GET instead of N per-series C-GETs
-        cached_map = await self._cache.ensure_study_cached(
-            study_uid=study_uid,
-            series_uids=series_uids,
-            client=self._client,
-            pacs=self._pacs,
-        )
+        cached_map = await self._filler.ensure_study(study_uid, series_uids)
 
         all_metadata = await asyncio.to_thread(
             _build_study_metadata, cached_map, series_uids, base_url
@@ -242,12 +230,7 @@ class DicomWebProxyService:
         Raises:
             FileNotFoundError: If the instance is not found in cache
         """
-        cached = await self._cache.ensure_series_cached(
-            study_uid=study_uid,
-            series_uid=series_uid,
-            client=self._client,
-            pacs=self._pacs,
-        )
+        cached = await self._filler.ensure_series(study_uid, series_uid)
 
         ds = cached.instances.get(instance_uid)
 
@@ -293,7 +276,7 @@ class DicomWebProxyService:
         Returns a task_id that can be used to poll progress.
         """
         task_id = f"preload_{uuid4().hex[:12]}"
-        self._cache.set_preload_progress(task_id, {"status": "starting", "received": 0})
+        self._filler.set_preload_progress(task_id, {"status": "starting", "received": 0})
         task = asyncio.create_task(self._preload_worker(study_uids, task_id, user_id))
         self._preload_tasks.add(task)
         task.add_done_callback(self._preload_tasks.discard)
@@ -307,7 +290,7 @@ class DicomWebProxyService:
         Fail-fast: an error on study N leaves studies 1..N-1 warm in cache and
         reports status="error" — a retry resumes faster, no partial-success state.
         """
-        progress = self._cache.get_preload_progress(task_id)
+        progress = self._filler.get_preload_progress(task_id)
         if progress is None:
             return
 
@@ -325,7 +308,7 @@ class DicomWebProxyService:
                 return
             last_push = now
             bus = get_event_bus()
-            snapshot = self._cache.get_preload_progress(task_id)
+            snapshot = self._filler.get_preload_progress(task_id)
             if bus is not None and snapshot is not None:
                 bus.publish_threadsafe(
                     TaskProgressEvent(
@@ -367,28 +350,24 @@ class DicomWebProxyService:
                     )
                     _publish()
 
-                cached_map = await self._cache.ensure_study_cached(
-                    study_uid,
-                    series_uids,
-                    self._client,
-                    self._pacs,
-                    on_progress=on_progress,
+                cached_map = await self._filler.ensure_study(
+                    study_uid, series_uids, on_progress=on_progress
                 )
                 total_received += sum(len(e.instances) for e in cached_map.values())
             progress.update(status="ready", received=total_received, total=total_received)
             _publish(force=True)
         except Exception as e:
             logger.error(f"Preload failed (task {task_id}): {e}")
-            self._cache.set_preload_progress(task_id, {"status": "error", "error": str(e)})
+            self._filler.set_preload_progress(task_id, {"status": "error", "error": str(e)})
             _publish(force=True)
 
     def get_preload_progress(self, task_id: str) -> dict[str, Any] | None:
-        return self._cache.get_preload_progress(task_id)
+        return self._filler.get_preload_progress(task_id)
 
     async def _read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
     ) -> Dataset | None:
-        """Fallback: read a single instance from disk cache.
+        """Fallback: read a single instance (dcm_anon first, then disk index).
 
         Args:
             study_uid: Study Instance UID
@@ -396,6 +375,6 @@ class DicomWebProxyService:
             instance_uid: SOP Instance UID
 
         Returns:
-            pydicom Dataset or None if not found on disk
+            pydicom Dataset or None if not found
         """
-        return await self._cache.read_instance_from_disk(study_uid, series_uid, instance_uid)
+        return await self._filler.read_instance(study_uid, series_uid, instance_uid)

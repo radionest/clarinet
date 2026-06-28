@@ -27,16 +27,16 @@ def progress_store() -> dict[str, dict[str, Any]]:
 
 
 @pytest.fixture
-def mock_cache(progress_store: dict[str, dict[str, Any]]) -> MagicMock:
-    """Cache mock with a dict-backed preload progress store."""
-    cache = MagicMock()
-    cache.get_preload_progress.side_effect = progress_store.get
-    cache.set_preload_progress.side_effect = progress_store.__setitem__
-    return cache
+def mock_filler(progress_store: dict[str, dict[str, Any]]) -> MagicMock:
+    """CacheFiller mock with a dict-backed preload progress store."""
+    filler = MagicMock()
+    filler.get_preload_progress.side_effect = progress_store.get
+    filler.set_preload_progress.side_effect = progress_store.__setitem__
+    return filler
 
 
-def _make_service(mock_cache: MagicMock, mock_client: MagicMock) -> DicomWebProxyService:
-    return DicomWebProxyService(client=mock_client, pacs=MagicMock(), cache=mock_cache)
+def _make_service(mock_filler: MagicMock, mock_client: MagicMock) -> DicomWebProxyService:
+    return DicomWebProxyService(client=mock_client, pacs=MagicMock(), filler=mock_filler)
 
 
 class TestPreloadWorker:
@@ -45,7 +45,7 @@ class TestPreloadWorker:
     @pytest.mark.asyncio
     async def test_multi_study_aggregates_progress(
         self,
-        mock_cache: MagicMock,
+        mock_filler: MagicMock,
         progress_store: dict[str, dict[str, Any]],
     ) -> None:
         """Two studies x 3 instances: received is monotonic, study fields track each study."""
@@ -58,11 +58,9 @@ class TestPreloadWorker:
             side_effect=lambda query, peer: [_make_series_result(f"{query.study_instance_uid}_s1")]
         )
 
-        async def fake_ensure_study_cached(
+        async def fake_ensure_study(
             study_uid: str,
             series_uids: list[str],
-            client: Any,
-            pacs: Any,
             on_progress: Any = None,
         ) -> dict[str, MagicMock]:
             for i in range(1, 4):
@@ -70,8 +68,8 @@ class TestPreloadWorker:
                 snapshots.append(dict(progress_store[task_id]))
             return {series_uids[0]: _make_cached_entry(3)}
 
-        mock_cache.ensure_study_cached = AsyncMock(side_effect=fake_ensure_study_cached)
-        service = _make_service(mock_cache, mock_client)
+        mock_filler.ensure_study = AsyncMock(side_effect=fake_ensure_study)
+        service = _make_service(mock_filler, mock_client)
 
         await service._preload_worker(["study1", "study2"], task_id)
 
@@ -90,7 +88,7 @@ class TestPreloadWorker:
     @pytest.mark.asyncio
     async def test_fail_fast_on_second_study(
         self,
-        mock_cache: MagicMock,
+        mock_filler: MagicMock,
         progress_store: dict[str, dict[str, Any]],
     ) -> None:
         """An error on study 2 reports status=error; study 1 stays cached (no rollback)."""
@@ -111,8 +109,8 @@ class TestPreloadWorker:
                 raise RuntimeError("C-GET failed")
             return {"study1_s1": _make_cached_entry(2)}
 
-        mock_cache.ensure_study_cached = AsyncMock(side_effect=fail_on_second)
-        service = _make_service(mock_cache, mock_client)
+        mock_filler.ensure_study = AsyncMock(side_effect=fail_on_second)
+        service = _make_service(mock_filler, mock_client)
 
         await service._preload_worker(["study1", "study2"], task_id)
 
@@ -124,7 +122,7 @@ class TestPreloadWorker:
     @pytest.mark.asyncio
     async def test_studies_without_series_reach_ready_zero(
         self,
-        mock_cache: MagicMock,
+        mock_filler: MagicMock,
         progress_store: dict[str, dict[str, Any]],
     ) -> None:
         """Studies with no series are skipped; terminal status is ready/0."""
@@ -133,8 +131,8 @@ class TestPreloadWorker:
 
         mock_client = MagicMock()
         mock_client.find_series = AsyncMock(return_value=[])
-        mock_cache.ensure_study_cached = AsyncMock()
-        service = _make_service(mock_cache, mock_client)
+        mock_filler.ensure_study = AsyncMock()
+        service = _make_service(mock_filler, mock_client)
 
         await service._preload_worker(["study1", "study2"], task_id)
 
@@ -142,17 +140,17 @@ class TestPreloadWorker:
         assert final["status"] == "ready"
         assert final["received"] == 0
         assert final["total"] == 0
-        mock_cache.ensure_study_cached.assert_not_called()
+        mock_filler.ensure_study.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_missing_progress_entry_returns_silently(
         self,
-        mock_cache: MagicMock,
+        mock_filler: MagicMock,
     ) -> None:
         """A task_id without a progress entry (TTL-evicted) aborts the worker."""
         mock_client = MagicMock()
         mock_client.find_series = AsyncMock()
-        service = _make_service(mock_cache, mock_client)
+        service = _make_service(mock_filler, mock_client)
 
         await service._preload_worker(["study1"], "unknown_task")
 
@@ -161,13 +159,13 @@ class TestPreloadWorker:
     @pytest.mark.asyncio
     async def test_start_preload_registers_task(
         self,
-        mock_cache: MagicMock,
+        mock_filler: MagicMock,
         progress_store: dict[str, dict[str, Any]],
     ) -> None:
         """start_preload seeds a 'starting' entry and spawns the worker."""
         mock_client = MagicMock()
         mock_client.find_series = AsyncMock(return_value=[])
-        service = _make_service(mock_cache, mock_client)
+        service = _make_service(mock_filler, mock_client)
 
         task_id = await service.start_preload(["study1"])
 
