@@ -1,11 +1,9 @@
 """Unit tests for C-MOVE self-retrieval: StorageSCP, dispatch."""
 
-import threading
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydicom import Dataset
 
 from clarinet.services.dicom.models import QueryRetrieveLevel, StorageMode
 from clarinet.services.dicom.scp import StorageSCP
@@ -22,6 +20,7 @@ class TestStorageSCPSessions:
         scp = StorageSCP()
         session = scp.register_session("study1/series1")
         assert session is not None
+        assert hasattr(session, "done") and hasattr(session, "instances")
         finished = scp.finish_session("study1/series1")
         assert finished is session
 
@@ -40,8 +39,7 @@ class TestStorageSCPSessions:
         scp = StorageSCP()
         session = scp.register_session("s/")
         # Simulate 3 instances already received
-        with scp._lock:
-            session.received_count = 3
+        session.received_count = 3
         scp.set_expected("s/", 3)
         assert session.done.is_set()
         scp.finish_session("s/")
@@ -49,8 +47,7 @@ class TestStorageSCPSessions:
     def test_set_expected_does_not_signal_if_not_enough(self):
         scp = StorageSCP()
         session = scp.register_session("s/")
-        with scp._lock:
-            session.received_count = 1
+        session.received_count = 1
         scp.set_expected("s/", 3)
         assert not session.done.is_set()
         scp.finish_session("s/")
@@ -87,97 +84,8 @@ class TestStorageSCPSessions:
         assert not scp.is_running
 
 
-# ===========================================================================
-# StorageSCP — C-STORE handler
-# ===========================================================================
-
-
-class TestStorageSCPHandler:
-    """Tests for the _handle_store and _find_session methods."""
-
-    def _make_event(self, study_uid: str, series_uid: str, sop_uid: str) -> MagicMock:
-        """Create a mock pynetdicom C-STORE event."""
-        ds = Dataset()
-        ds.StudyInstanceUID = study_uid
-        ds.SeriesInstanceUID = series_uid
-        ds.SOPInstanceUID = sop_uid
-        event = MagicMock()
-        event.dataset = ds
-        event.file_meta = Dataset()
-        return event
-
-    def test_handle_store_deposits_to_series_session(self):
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/4.5.6")
-        event = self._make_event("1.2.3", "4.5.6", "7.8.9")
-        status = scp._handle_store(event)
-        assert status == 0x0000
-        assert "7.8.9" in session.instances
-        assert session.received_count == 1
-        scp.finish_session("1.2.3/4.5.6")
-
-    def test_handle_store_deposits_to_study_session(self):
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/")
-        event = self._make_event("1.2.3", "any.series", "7.8.9")
-        status = scp._handle_store(event)
-        assert status == 0x0000
-        assert "7.8.9" in session.instances
-        scp.finish_session("1.2.3/")
-
-    def test_handle_store_series_key_preferred_over_study(self):
-        scp = StorageSCP()
-        study_session = scp.register_session("1.2.3/")
-        series_session = scp.register_session("1.2.3/4.5.6")
-        event = self._make_event("1.2.3", "4.5.6", "7.8.9")
-        scp._handle_store(event)
-        # Should go to series-level session, not study-level
-        assert "7.8.9" in series_session.instances
-        assert "7.8.9" not in study_session.instances
-        scp.finish_session("1.2.3/")
-        scp.finish_session("1.2.3/4.5.6")
-
-    def test_handle_store_unregistered_accepted(self):
-        """Unregistered datasets are accepted (return 0x0000) but not stored."""
-        scp = StorageSCP()
-        event = self._make_event("unknown", "unknown", "7.8.9")
-        status = scp._handle_store(event)
-        assert status == 0x0000
-
-    def test_handle_store_signals_done_on_expected(self):
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/4.5.6")
-        scp.set_expected("1.2.3/4.5.6", 2)
-        event1 = self._make_event("1.2.3", "4.5.6", "sop1")
-        event2 = self._make_event("1.2.3", "4.5.6", "sop2")
-        scp._handle_store(event1)
-        assert not session.done.is_set()
-        scp._handle_store(event2)
-        assert session.done.is_set()
-        scp.finish_session("1.2.3/4.5.6")
-
-    def test_concurrent_stores_thread_safe(self):
-        """Multiple threads calling _handle_store don't corrupt session."""
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/")
-        n = 50
-        scp.set_expected("1.2.3/", n)
-
-        def store_one(i: int):
-            event = self._make_event("1.2.3", "ser", f"sop.{i}")
-            scp._handle_store(event)
-
-        threads = [threading.Thread(target=store_one, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert session.received_count == n
-        assert len(session.instances) == n
-        assert session.done.is_set()
-        scp.finish_session("1.2.3/")
-
+# C-STORE handler routing is dimsechord's responsibility; end-to-end C-MOVE
+# is covered by the PACS-gated integration suite (tests/e2e/).
 
 # ===========================================================================
 # StorageSCP — stop clears sessions
