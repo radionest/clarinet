@@ -4,7 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from clarinet.models import User, UserRole
 from clarinet.repositories.base import BaseRepository
@@ -122,6 +122,18 @@ class UserRepository(BaseRepository[User]):
             .options(selectinload(User.roles))  # type: ignore[arg-type]
             .offset(skip)
             .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_active_with_roles(self) -> list[User]:
+        """All active users with roles eagerly loaded, unbounded.
+
+        Like ``get_all_with_roles`` but filtered to active users and without
+        pagination — the admin workload table must list every active user.
+        """
+        stmt = (
+            select(User).where(col(User.is_active).is_(True)).options(selectinload(User.roles))  # type: ignore[arg-type]
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

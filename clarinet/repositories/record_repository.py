@@ -1645,6 +1645,45 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         return result.scalar() or 0
 
+    async def count_available_pending_for_user(
+        self, user_id: UUID, role_names: list[str] | None
+    ) -> int:
+        """Count records a user could claim right now.
+
+        Counts ``pending``, unassigned records whose ``RecordType`` the user
+        may act on, excluding the user's own ``unique_per_user`` conflicts.
+        This mirrors ``claim-next`` eligibility (role-scoped and
+        ``unique_per_user``-aware), so the admin-dashboard figure matches what
+        the user can actually take from the pool.
+
+        Args:
+            user_id: User whose claimable pool is counted; drives the
+                ``unique_per_user`` violation filter.
+            role_names: Restrict to record types in these roles. An empty list
+                yields ``0`` (a role-less regular user claims nothing).
+                ``None`` applies no role restriction — the whole pool,
+                including the role-less bucket (superusers).
+
+        Returns:
+            Number of claimable records.
+        """
+        if role_names is not None and not role_names:
+            return 0
+        query = (
+            select(func.count())
+            .select_from(Record)
+            .join(RecordType, col(Record.record_type_name) == col(RecordType.name))
+            .where(
+                col(Record.user_id).is_(None),
+                col(Record.status) == RecordStatus.pending,
+                _unique_per_user_violation_filter(user_id),
+            )
+        )
+        if role_names is not None:
+            query = query.where(col(RecordType.role_name).in_(role_names))
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
     async def get_filter_options(
         self, criteria: RecordSearchCriteria, user: User
     ) -> RecordFilterScope:

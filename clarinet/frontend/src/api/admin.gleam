@@ -29,6 +29,8 @@ fn user_workload_decoder() -> decode.Decoder(models.UserWorkload) {
   use pending <- decode.field("pending", decode.int)
   use blocked <- decode.field("blocked", decode.int)
   use failed <- decode.field("failed", decode.int)
+  use finished <- decode.field("finished", decode.int)
+  use available <- decode.field("available", decode.int)
 
   decode.success(models.UserWorkload(
     user_id: user_id,
@@ -37,6 +39,8 @@ fn user_workload_decoder() -> decode.Decoder(models.UserWorkload) {
     pending: pending,
     blocked: blocked,
     failed: failed,
+    finished: finished,
+    available: available,
   ))
 }
 

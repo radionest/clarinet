@@ -265,6 +265,9 @@ pub type Key {
   AdminWorkloadTitle
   AdminWorkloadUser
   AdminWorkloadTotal
+  AdminWorkloadTotalHint
+  AdminWorkloadAvailable
+  AdminWorkloadAvailableHint
   AdminAvailablePending
   AdminNoRecords
   AdminSelectUser
@@ -903,6 +906,16 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, AdminWorkloadUser -> "Пользователь"
     En, AdminWorkloadTotal -> "Total"
     Ru, AdminWorkloadTotal -> "Всего"
+    En, AdminWorkloadTotalHint ->
+      "Active workload: in work + pending + blocked + failed"
+    Ru, AdminWorkloadTotalHint ->
+      "Активная нагрузка: в работе + ожидание + заблокировано + ошибки"
+    En, AdminWorkloadAvailable -> "Claimable"
+    Ru, AdminWorkloadAvailable -> "Можно взять"
+    En, AdminWorkloadAvailableHint ->
+      "Records this user can claim now; users sharing a role overlap — do not sum this column"
+    Ru, AdminWorkloadAvailableHint ->
+      "Записи, которые пользователь может взять сейчас; у носителей одной роли пул общий — не суммируйте столбец"
     En, AdminAvailablePending -> "Available pending"
     Ru, AdminAvailablePending -> "Доступно (свободные)"
     En, AdminSelectUser -> "Select user..."
