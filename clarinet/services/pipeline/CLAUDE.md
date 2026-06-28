@@ -163,7 +163,7 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 
 Located in `tasks/` — auto-imported when broker starts:
 - `convert_series_to_nifti` (queue `settings.dicom_queue_name`) — downloads DICOM via C-GET, converts to NIfTI with correct affine/spacing. Requires `msg.series_uid`. Idempotent (skips if output exists). Output: `VOLUME_NIFTI` FileDef, level=SERIES.
-- `prefetch_dicom_web` (queue `settings.dicom_queue_name`) — prefetches a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Requires `msg.study_uid`. Bypasses the API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload knob: `skip_if_anon` (default `True`).
+- `prefetch_dicom_web` (queue `settings.dicom_queue_name`) — prefetches a study into the DICOMweb disk cache via dimsechord's `PullEngine` (C-GET by default, C-MOVE in c-move worker mode), teeing each series to `{storage_path}/dicomweb_cache/{study}/{series}/` + the shared SQLite index. Builds its own `DicomCache`+engine per invocation (no `app.state`), matching the API `CacheFiller` layout. Requires `msg.study_uid`. Bypasses the API memory tier. Idempotent (skips already-indexed series via `cache.series_cached` or a `dcm_anon/` copy). Payload knob: `skip_if_anon` (default `True`).
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).
 

@@ -1,14 +1,17 @@
 """Built-in pipeline task: prefetch a study into the DICOMweb disk cache.
 
-Performs a direct C-GET against PACS and stores files under
-``{storage_path}/dicomweb_cache/{study_uid}/{series_uid}/`` with a
-``.cached_at`` marker so ``DicomWebCache._load_from_disk`` will treat
-them as a valid cache hit on the next OHIF request.
+Warms the dimsechord ``DicomCache`` so OHIF serves a study without a fresh
+PACS retrieve on its first request. Each missing series is pulled through
+dimsechord's ``PullEngine`` (C-GET by default; C-MOVE when the worker runs
+in ``c-move`` mode with a Storage SCP), which tees every instance to
+``{storage_path}/dicomweb_cache/{study_uid}/{series_uid}/`` and records it
+in the shared SQLite index (``dicomweb_cache/index.db``) the API reads.
 
-Bypasses the in-memory tier of ``DicomWebCache`` on purpose: the worker
-runs in a separate process from the API server, and routing prefetches
-through ``POST /dicom-web/preload`` would inflate the API server's
-RAM (memory tier holds whole datasets keyed by SOPInstanceUID).
+Runs in the worker process, separate from the API server. The cache and
+engine are built per task invocation from ``settings`` (no ``app.state``)
+and torn down at the end so the worker never exits mid-write. The cache
+layout mirrors the API's ``CacheFiller`` (``clarinet/api/app.py`` lifespan)
+exactly — otherwise the warmed files would be invisible to the proxy.
 
 Triggered from RecordFlow via ``do_task``::
 
@@ -22,14 +25,8 @@ Triggered from RecordFlow via ``do_task``::
 from __future__ import annotations
 
 import asyncio
-import shutil
-import tempfile
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-import pydicom
-from pydicom.errors import InvalidDicomError
 
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.services.pipeline.context import TaskContext
@@ -39,23 +36,80 @@ from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
+    from dimsechord import DicomCache, DicomNode, PullEngine
+
     from clarinet.client import ClarinetClient
     from clarinet.models.patient import PatientInfo
     from clarinet.models.study import SeriesBase, StudyBase
 
 
-def _has_disk_cache(cache_base: Path, study_uid: str, series_uid: str) -> bool:
-    """Check whether a series has a disk cache entry.
+def _build_cache(storage_path: Path) -> DicomCache:
+    """Build a ``DicomCache`` whose layout matches the API's ``CacheFiller``.
 
-    Mirrors ``DicomWebCache._load_from_disk``: a ``.cached_at`` marker
-    plus at least one ``*.dcm`` file. No TTL check — DICOM data on the
-    PACS is immutable, and disk cache lifecycle is managed by
-    ``DicomWebCacheCleanupService``.
+    Mirrors ``clarinet.api.app`` lifespan verbatim — same ``base_dir``,
+    ``index_path`` and TTL/size knobs — so series warmed by the worker are
+    visible to the DICOMweb proxy reading the same ``dicomweb_cache/index.db``.
     """
-    series_dir = cache_base / study_uid / series_uid
-    if not (series_dir / ".cached_at").exists():
-        return False
-    return any(series_dir.glob("*.dcm"))
+    from dimsechord import DicomCache
+
+    cache_dir = storage_path / "dicomweb_cache"
+    return DicomCache(
+        base_dir=cache_dir,
+        index_path=cache_dir / "index.db",
+        ttl_hours=settings.dicomweb_cache_ttl_hours,
+        max_size_gb=settings.dicomweb_cache_max_size_gb,
+        memory_ttl_minutes=settings.dicomweb_memory_cache_ttl_minutes,
+        memory_max_entries=settings.dicomweb_memory_cache_max_entries,
+        disk_write_concurrency=settings.dicomweb_disk_write_concurrency,
+    )
+
+
+def _build_engine(cache: DicomCache, pacs: DicomNode) -> PullEngine:
+    """Build a mode-based ``PullEngine`` mirroring the API lifespan.
+
+    Default (``c-get`` / ``c-get-study``) uses ``PullEngine.via_cget`` — no
+    pool or SCP needed. ``c-move`` / ``c-move-study`` drives move-to-self
+    through this worker's process-global Storage SCP, started by
+    ``run_worker(start_scp=True)`` when the worker is launched with
+    ``--dicom AET:PORT`` (which also forces ``dicom_retrieve_mode=c-move``).
+    Without a running SCP the engine has nowhere to receive instances, so a
+    missing SCP is a hard error rather than a silent C-MOVE stall.
+
+    Raises:
+        PipelineStepError: c-move mode requested but no Storage SCP is running
+            in this worker process.
+    """
+    from dimsechord import AssociationPool, PullEngine
+
+    if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
+        from clarinet.services.dicom.scp import get_storage_scp
+
+        scp = get_storage_scp()
+        if not scp.is_running:
+            raise PipelineStepError(
+                "prefetch_dicom_web",
+                "c-move retrieve mode needs a running Storage SCP — start the worker "
+                "with `--dicom AET:PORT` so move-to-self has a destination",
+            )
+        pool = AssociationPool(
+            [settings.dicom_aet],
+            per_aet_cap=settings.dicom_max_concurrent_associations,
+        )
+        return PullEngine(
+            pool,
+            scp,
+            cache,
+            pacs,
+            max_pdu=settings.dicom_max_pdu,
+            cmove_timeout=settings.dicom_cmove_timeout,
+        )
+    return PullEngine.via_cget(
+        cache,
+        pacs,
+        calling_aet=settings.dicom_aet,
+        max_pdu=settings.dicom_max_pdu,
+        cget_timeout=settings.dicom_cmove_timeout,
+    )
 
 
 def _has_dcm_anon(
@@ -68,21 +122,19 @@ def _has_dcm_anon(
 
     Renders ``settings.disk_path_template`` from pre-loaded entities to
     compute the expected ``dcm_anon`` directory — same logic
-    ``DicomWebCache._resolve_dcm_anon_dir`` uses. Stricter than the cache
+    ``CacheFiller._resolve_dcm_anon_dir`` uses. Stricter than the cache
     reader: requires at least one ``*.dcm`` file inside, so an empty
     ``dcm_anon/`` left by a failed anonymization run does not cause us to
     skip a genuinely needed prefetch.
 
-    Synchronous — only does template rendering and a filesystem probe,
-    matching the shape of ``_has_disk_cache``. Callers offload it to a
-    worker thread via ``asyncio.to_thread`` so the event loop stays
-    responsive when scanning many series.
+    Synchronous — only does template rendering and a filesystem probe.
+    Callers offload it to a worker thread via ``asyncio.to_thread`` so the
+    event loop stays responsive when scanning many series.
 
     Callers must pre-load Patient/Study/Series via the API
-    (``ctx.client.get_study()``) — this function performs no I/O beyond
-    the filesystem probe, keeping the worker off the Postgres network
-    surface that may not be reachable from every host (e.g. the Windows
-    DICOM worker).
+    (``ctx.client.get_study()``) — this function performs no I/O beyond the
+    filesystem probe, keeping the worker off the Postgres network surface
+    that may not be reachable from every host (e.g. the Windows DICOM worker).
     """
     from clarinet.files import AnonPathError, Files
     from clarinet.models.base import DicomQueryLevel
@@ -96,7 +148,7 @@ def _has_dcm_anon(
         )[DicomQueryLevel.SERIES]
     except AnonPathError as exc:
         # Race vs anonymization run: entity exists but anon_uid hasn't
-        # propagated yet. Symmetric with `DicomWebCache._resolve_dcm_anon_dir`
+        # propagated yet. Symmetric with `CacheFiller._resolve_dcm_anon_dir`
         # (returns None silently) — we degrade to "no anon copy here, fetch
         # it via C-GET", which is the safe default.
         logger.debug(
@@ -109,102 +161,32 @@ def _has_dcm_anon(
     return dcm_anon.is_dir() and any(dcm_anon.glob("*.dcm"))
 
 
-def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[str, int]:
-    """Move retrieved DICOM files into ``dicomweb_cache`` structure.
-
-    Reads only ``SeriesInstanceUID`` and ``SOPInstanceUID`` (no pixel
-    data), then moves the file via ``shutil.move`` — ``os.rename`` on
-    the same filesystem (guaranteed because ``tmp_dir`` is created
-    inside ``cache_base``).
-
-    Publication is atomic from the OHIF reader's point of view: for each
-    series that receives at least one new file, the previous ``.cached_at``
-    marker is removed *first*, then pre-existing ``*.dcm`` files are
-    unlinked, then fresh files are moved in, and finally a new marker is
-    written. This guarantees the API process never sees a series whose
-    marker is present but whose directory contains a mix of stale and
-    fresh instances mid-write.
-
-    Returns:
-        Mapping ``series_uid → instance count`` for the series that
-        actually received files.
-    """
-    grouped: dict[str, int] = {}
-    cleaned_series: set[str] = set()
-    for dcm_path in tmp_dir.rglob("*.dcm"):
-        try:
-            ds = pydicom.dcmread(
-                dcm_path,
-                stop_before_pixels=True,
-                specific_tags=["SeriesInstanceUID", "SOPInstanceUID"],
-            )
-        except (InvalidDicomError, OSError, AttributeError) as exc:
-            logger.warning(f"Skipping unreadable retrieved DICOM {dcm_path}: {exc}")
-            continue
-
-        # Tags may be absent even after a successful read — pydicom's
-        # specific_tags hint is best-effort, not a presence guarantee.
-        series_uid_attr = getattr(ds, "SeriesInstanceUID", None)
-        sop_uid_attr = getattr(ds, "SOPInstanceUID", None)
-        if not series_uid_attr or not sop_uid_attr:
-            logger.warning(
-                f"Skipping retrieved DICOM with missing UIDs: {dcm_path} "
-                f"(SeriesInstanceUID={series_uid_attr!r}, "
-                f"SOPInstanceUID={sop_uid_attr!r})"
-            )
-            continue
-
-        series_uid = str(series_uid_attr)
-        sop_uid = str(sop_uid_attr)
-        target_dir = cache_base / study_uid / series_uid
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        # Clear stale state from a previous cache entry before writing
-        # the first new instance for this series. Marker is removed
-        # first so the API reader never sees a present marker pointing
-        # at a mix of stale and fresh *.dcm files during the publish.
-        if series_uid not in cleaned_series:
-            (target_dir / ".cached_at").unlink(missing_ok=True)
-            for stale in target_dir.glob("*.dcm"):
-                stale.unlink(missing_ok=True)
-            cleaned_series.add(series_uid)
-
-        target_path = target_dir / f"{sop_uid}.dcm"
-        shutil.move(str(dcm_path), str(target_path))
-        grouped[series_uid] = grouped.get(series_uid, 0) + 1
-
-    now = str(time.time())
-    for series_uid in grouped:
-        (cache_base / study_uid / series_uid / ".cached_at").write_text(now)
-
-    return grouped
-
-
 async def _filter_series_to_fetch(
     series_uids: list[str],
     storage_path: Path,
-    cache_base: Path,
+    cache: DicomCache,
     study_uid: str,
     skip_if_anon: bool,
     client: ClarinetClient,
 ) -> tuple[list[str], int, int]:
     """Partition series list into fetch / skip_cached / skip_anon.
 
-    Filesystem scans run in worker threads. The dcm_anon shortcut needs
+    The disk check is the dimsechord SQLite index (``cache.series_cached``):
+    a series with at least one indexed instance is already warm. Index and
+    filesystem probes run in worker threads. The dcm_anon shortcut needs
     Patient/Study/Series metadata to render the storage template — one
-    ``client.get_study()`` HTTP call loads them all and feeds the
-    per-series fan-out, replacing what used to be N*3 direct DB queries.
+    ``client.get_study()`` HTTP call loads them all and feeds the per-series
+    fan-out, keeping the worker off the Postgres network surface.
 
     Degradation paths (all safe — fall back to "fetch everything"):
       * ``skip_if_anon`` is False → API call skipped entirely.
-      * ``client.get_study`` returns 404 → legitimate race vs C-FIND on
-        PACS, where series can arrive before the API row exists. The
-        dcm_anon shortcut is bypassed; other ``ClarinetAPIError``
-        statuses re-raise so retry/DLQ surfaces them.
-      * A series listed by C-FIND is missing from ``study_read.series``
-        (e.g. PACS reported a series the API hasn't imported yet) →
-        that series goes to fetch, matching the previous "DB lookup
-        returned None" path.
+      * ``client.get_study`` returns 404 → legitimate race vs C-FIND on PACS,
+        where series can arrive before the API row exists. The dcm_anon
+        shortcut is bypassed; other ``ClarinetAPIError`` statuses re-raise so
+        retry/DLQ surfaces them.
+      * A series listed by C-FIND is missing from ``study_read.series`` (e.g.
+        PACS reported a series the API hasn't imported yet) → that series goes
+        to fetch.
 
     Returns:
         Tuple of ``(series_to_fetch, skipped_cached, skipped_anon)``.
@@ -220,23 +202,22 @@ async def _filter_series_to_fetch(
             patient = study_read.patient
             series_map = {s.series_uid: s for s in study_read.series if s.series_uid}
         except ClarinetAPIError as exc:
-            # Only the 404 race is benign. Auth misconfig (401/403),
-            # 5xx, and httpx-wrapped transport failures must propagate
-            # to RetryMiddleware → DLQ — silently re-fetching the whole
-            # study on every failure would hide config drift behind
-            # gigabytes of redundant PACS traffic.
+            # Only the 404 race is benign. Auth misconfig (401/403), 5xx, and
+            # httpx-wrapped transport failures must propagate to RetryMiddleware
+            # → DLQ — silently re-fetching the whole study on every failure
+            # would hide config drift behind gigabytes of redundant PACS traffic.
             if exc.status_code != 404:
                 raise
             logger.debug(
                 f"prefetch_dicom_web: study {study_uid} not in API yet "
-                f"({exc}); skipping dcm_anon check, will C-GET all series"
+                f"({exc}); skipping dcm_anon check, will retrieve all series"
             )
 
     series_to_fetch: list[str] = []
     skipped_cached = 0
     skipped_anon = 0
     for series_uid in series_uids:
-        if await asyncio.to_thread(_has_disk_cache, cache_base, study_uid, series_uid):
+        if await asyncio.to_thread(cache.series_cached, study_uid, series_uid):
             skipped_cached += 1
             continue
         if skip_if_anon and study_read is not None and patient is not None:
@@ -253,16 +234,20 @@ async def _filter_series_to_fetch(
 async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Core prefetch logic — testable without TaskIQ broker.
 
-    This task writes files to a storage-wide cache directory rather than
-    a record's working folder, so ``ctx.files`` / ``ctx.records`` stay
-    unused. ``ctx.client`` IS used: ``_filter_series_to_fetch`` fetches
-    Study metadata via the API to decide which series can be skipped via
-    the ``dcm_anon`` shortcut. This keeps the worker off Postgres — a
-    deliberate choice so Windows workers (where ``5432`` is firewalled)
-    can run this task without ``WinError 1225``.
+    This task writes files to a storage-wide cache directory rather than a
+    record's working folder, so ``ctx.files`` / ``ctx.records`` stay unused.
+    ``ctx.client`` IS used: ``_filter_series_to_fetch`` fetches Study metadata
+    via the API to decide which series can be skipped via the ``dcm_anon``
+    shortcut. This keeps the worker off Postgres — a deliberate choice so
+    Windows workers (where ``5432`` is firewalled) can run this task.
+
+    Retrieval goes through dimsechord's ``DicomCache`` + ``PullEngine`` (built
+    per invocation, torn down at the end): each ``engine.ensure_series`` tees
+    the series to disk and the SQLite index the API process reads.
 
     Raises:
-        PipelineStepError: If ``study_uid`` is missing or C-GET returns 0 instances.
+        PipelineStepError: If ``study_uid`` is missing or the retrieve returns
+            0 instances across every series.
     """
     if not msg.study_uid:
         raise PipelineStepError(
@@ -305,116 +290,100 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         logger.info(f"prefetch_dicom_web: no series found for study {msg.study_uid}, nothing to do")
         return
 
-    # 2. Decide which series need prefetching. Filesystem scans run off
-    # the event loop — large deployments may have thousands of patient
-    # directories to walk for the dcm_anon check.
     storage_path = Path(settings.storage_path)
-    cache_base = storage_path / "dicomweb_cache"
 
-    series_to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
-        series_uids=series_uids,
-        storage_path=storage_path,
-        cache_base=cache_base,
-        study_uid=msg.study_uid,
-        skip_if_anon=skip_if_anon,
-        client=ctx.client,
-    )
-
-    if not series_to_fetch:
-        logger.info(
-            f"prefetch_dicom_web: study {msg.study_uid} fully covered "
-            f"(disk={skipped_cached}, dcm_anon={skipped_anon}), skipping C-GET"
+    # 2. Build the index cache (matches the API's CacheFiller layout) and
+    # decide which series still need pulling. The cache owns a SQLite
+    # connection + a tee thread pool, so it is always torn down below.
+    cache = _build_cache(storage_path)
+    try:
+        series_to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
+            series_uids=series_uids,
+            storage_path=storage_path,
+            cache=cache,
+            study_uid=msg.study_uid,
+            skip_if_anon=skip_if_anon,
+            client=ctx.client,
         )
-        return
 
-    logger.info(
-        f"prefetch_dicom_web: study {msg.study_uid} — fetching {len(series_to_fetch)}/"
-        f"{len(series_uids)} series (disk_skipped={skipped_cached}, "
-        f"anon_skipped={skipped_anon})"
-    )
-
-    # 3. C-GET to a temp dir, then organize into the cache layout.
-    # The temp dir is created *inside* cache_base so shutil.move in
-    # _organize_to_cache can use atomic os.rename (same filesystem).
-    # With /tmp on a different mount (Docker, NFS), move would fall back
-    # to copy2+unlink — non-atomic, and a concurrent OHIF request could
-    # read a partially-written DICOM. The ".prefetch-" prefix keeps the
-    # temp dir invisible to DicomWebCacheCleanupService, which looks for
-    # ".cached_at" markers.
-    cache_base.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=cache_base, prefix=".prefetch-") as tmp:
-        tmp_path = Path(tmp)
-
-        # If everything is missing, one study-level C-GET avoids N associations.
-        # Otherwise, fall back to per-series retrieval to avoid downloading
-        # series that are already cached.
-        if len(series_to_fetch) == len(series_uids):
-            result = await client.get_study(
-                study_uid=msg.study_uid,
-                peer=pacs,
-                output_dir=tmp_path,
+        if not series_to_fetch:
+            logger.info(
+                f"prefetch_dicom_web: study {msg.study_uid} fully covered "
+                f"(disk={skipped_cached}, dcm_anon={skipped_anon}), skipping retrieve"
             )
-            if result.num_completed == 0:
-                raise PipelineStepError(
-                    "prefetch_dicom_web",
-                    f"Study C-GET returned 0 instances for study {msg.study_uid}",
-                )
-            total_completed = result.num_completed
-        else:
-            total_completed = 0
-            failed_series: list[str] = []
-            for series_uid in series_to_fetch:
-                result = await client.get_series(
-                    study_uid=msg.study_uid,
-                    series_uid=series_uid,
-                    peer=pacs,
-                    output_dir=tmp_path,
-                )
-                if result.num_completed == 0:
-                    failed_series.append(series_uid)
-                    continue
-                total_completed += result.num_completed
+            return
 
-            if total_completed == 0:
-                raise PipelineStepError(
-                    "prefetch_dicom_web",
-                    f"Per-series C-GET retrieved 0 instances for study {msg.study_uid} "
-                    f"(all {len(failed_series)} series failed)",
-                )
-            if failed_series:
-                logger.error(
-                    f"prefetch_dicom_web: partial failure for study {msg.study_uid} — "
-                    f"{len(failed_series)}/{len(series_to_fetch)} series returned 0 "
-                    f"instances: {failed_series}"
-                )
+        logger.info(
+            f"prefetch_dicom_web: study {msg.study_uid} — fetching {len(series_to_fetch)}/"
+            f"{len(series_uids)} series (disk_skipped={skipped_cached}, "
+            f"anon_skipped={skipped_anon})"
+        )
 
-        grouped = await asyncio.to_thread(_organize_to_cache, tmp_path, cache_base, msg.study_uid)
+        # 3. Pull each missing series through the engine — it tees every
+        # instance to disk + the SQLite index the API reads. Per-series so
+        # already-cached series (filtered above) are never re-retrieved.
+        engine = _build_engine(cache, pacs)
+        total_completed = 0
+        failed_series: list[str] = []
+        for series_uid in series_to_fetch:
+            cached = await engine.ensure_series(msg.study_uid, series_uid)
+            count = len(cached.instances)
+            if count == 0:
+                failed_series.append(series_uid)
+                continue
+            total_completed += count
 
-    logger.info(
-        f"prefetch_dicom_web: cached study {msg.study_uid} — "
-        f"{total_completed} instances across {len(grouped)} series"
-    )
+        # Drain background tee writes so disk + index are durable before we
+        # report success (engine tees are scheduled on a thread pool).
+        await asyncio.to_thread(cache.flush_pending_writes)
+
+        if total_completed == 0:
+            raise PipelineStepError(
+                "prefetch_dicom_web",
+                f"Retrieved 0 instances for study {msg.study_uid} "
+                f"(all {len(failed_series)} series returned nothing)",
+            )
+        if failed_series:
+            logger.error(
+                f"prefetch_dicom_web: partial failure for study {msg.study_uid} — "
+                f"{len(failed_series)}/{len(series_to_fetch)} series returned 0 "
+                f"instances: {failed_series}"
+            )
+
+        logger.info(
+            f"prefetch_dicom_web: cached study {msg.study_uid} — "
+            f"{total_completed} instances across "
+            f"{len(series_to_fetch) - len(failed_series)} series"
+        )
+    finally:
+        # shutdown() does executor.shutdown(wait=True) + closes the SQLite
+        # connection; run it off the loop so a slow drain can't stall other
+        # concurrent worker tasks sharing this event loop.
+        await asyncio.to_thread(cache.shutdown)
 
 
 @pipeline_task(queue=settings.dicom_queue_name)
 async def prefetch_dicom_web(msg: PipelineMessage, ctx: TaskContext) -> None:
-    """Prefetch a study into the DICOMweb disk cache via direct C-GET.
+    """Prefetch a study into the DICOMweb disk cache via dimsechord's engine.
 
-    Writes files directly to ``{storage_path}/dicomweb_cache/{study}/{series}/``
-    so OHIF picks them up on its next request without further C-GET.
-    Skips the in-memory tier to avoid RAM bloat on the API server.
+    Pulls each missing series through ``PullEngine`` (C-GET by default,
+    C-MOVE in c-move worker mode), which tees instances to
+    ``{storage_path}/dicomweb_cache/{study}/{series}/`` and the shared SQLite
+    index, so OHIF picks them up on its next request without a further PACS
+    retrieve.
 
-    Idempotent: skips series that already have a valid disk cache entry
-    (``.cached_at`` marker within TTL). Skips series available in
-    ``dcm_anon/`` when ``skip_if_anon`` is ``True`` (default), since the
-    DICOMweb proxy reads them directly from there.
+    Idempotent: skips series already present in the disk index
+    (``cache.series_cached``). Skips series available in ``dcm_anon/`` when
+    ``skip_if_anon`` is ``True`` (default), since the DICOMweb proxy reads
+    them directly from there.
 
     Payload (passed via ``do_task(prefetch_dicom_web, **kwargs)``):
         skip_if_anon (bool, default ``True``):
-            Skip series whose ``dcm_anon/`` copy exists. Set to ``False``
-            to force a fresh C-GET regardless of anonymized files.
+            Skip series whose ``dcm_anon/`` copy exists. Set to ``False`` to
+            force a fresh retrieve regardless of anonymized files.
 
     Raises:
-        PipelineStepError: If ``study_uid`` is missing or C-GET fails entirely.
+        PipelineStepError: If ``study_uid`` is missing or the retrieve fails
+            entirely.
     """
     await _prefetch_dicom_web_impl(msg, ctx)
