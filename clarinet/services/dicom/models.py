@@ -1,10 +1,20 @@
-"""Pydantic models for DICOM client operations."""
+"""DICOM domain models for Clarinet. Core DICOM models are re-exported from dimsechord."""
 
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from dimsechord import BatchStoreResult as BatchStoreResult
+from dimsechord import DicomNode as DicomNode
+from dimsechord import ImageQuery as ImageQuery
+from dimsechord import ImageResult as ImageResult
+from dimsechord import QueryRetrieveLevel as QueryRetrieveLevel
+from dimsechord import RetrieveResult as RetrieveResult
+from dimsechord import SeriesQuery as SeriesQuery
+from dimsechord import SeriesResult as SeriesResult
+from dimsechord import StudyQuery as StudyQuery
+from dimsechord import StudyResult as StudyResult
+from pydantic import BaseModel, ConfigDict, Field
 
 #: Separator used to join multi-value ``ModalitiesInStudy`` into a single
 #: string for ``Study.modalities_in_study`` / ``StudyResult.modalities_in_study``.
@@ -20,89 +30,8 @@ from pydantic import BaseModel, Field
 #: ``_``-separated for filesystem safety (see ``_modalities_string``).
 MODALITIES_SEPARATOR = "\\"
 
-
-class QueryRetrieveLevel(str, Enum):
-    """DICOM Query/Retrieve levels."""
-
-    PATIENT = "PATIENT"
-    STUDY = "STUDY"
-    SERIES = "SERIES"
-    IMAGE = "IMAGE"
-
-
-class StudyQuery(BaseModel):
-    """Query parameters for C-FIND at study level."""
-
-    patient_id: str | None = None
-    patient_name: str | None = None
-    study_instance_uid: str | None = None
-    study_date: str | None = None
-    study_description: str | None = None
-    accession_number: str | None = None
-    modality: str | None = None
-
-
-class SeriesQuery(BaseModel):
-    """Query parameters for C-FIND at series level."""
-
-    study_instance_uid: str
-    series_instance_uid: str | None = None
-    series_number: str | None = None
-    modality: str | None = None
-    series_description: str | None = None
-
-
-class ImageQuery(BaseModel):
-    """Query parameters for C-FIND at image level."""
-
-    study_instance_uid: str
-    series_instance_uid: str
-    sop_instance_uid: str | None = None
-    instance_number: str | None = None
-
-
-class StudyResult(BaseModel):
-    """Study-level C-FIND result."""
-
-    patient_id: str | None = None
-    patient_name: str | None = None
-    study_instance_uid: str
-    study_date: str | None = None
-    study_time: str | None = None
-    study_description: str | None = None
-    accession_number: str | None = None
-    modalities_in_study: str | None = Field(
-        default=None,
-        description=(
-            "Modalities of the study, DICOM-standard '\\'-joined "
-            "(e.g. 'CT\\SR'). See MODALITIES_SEPARATOR."
-        ),
-    )
-    number_of_study_related_series: int | None = None
-    number_of_study_related_instances: int | None = None
-
-
-class SeriesResult(BaseModel):
-    """Series-level C-FIND result."""
-
-    study_instance_uid: str
-    series_instance_uid: str
-    series_number: int | None = None
-    modality: str | None = None
-    series_description: str | None = None
-    number_of_series_related_instances: int | None = None
-
-
-class ImageResult(BaseModel):
-    """Image-level C-FIND result."""
-
-    study_instance_uid: str
-    series_instance_uid: str
-    sop_instance_uid: str
-    sop_class_uid: str | None = None
-    instance_number: int | None = None
-    rows: int | None = None
-    columns: int | None = None
+# --- internal DICOM models (NOT on dimsechord surface; consumed by operations.py/handlers.py/client.py) ---
+# TODO(phase3): delete with operations.py/handlers.py/scp.py
 
 
 class RetrieveRequest(BaseModel):
@@ -146,16 +75,18 @@ class StorageConfig(BaseModel):
     destination_port: int | None = None  # For FORWARD mode
 
 
-class RetrieveResult(BaseModel):
-    """Result of C-GET or C-MOVE operation."""
+class AssociationConfig(BaseModel):
+    """Configuration for DICOM association."""
 
-    status: str
-    num_remaining: int = 0
-    num_completed: int = 0
-    num_failed: int = 0
-    num_warning: int = 0
-    failed_sop_instances: list[str] = Field(default_factory=list)
-    instances: dict[str, Any] = Field(default_factory=dict)  # For C-GET with memory mode
+    calling_aet: str
+    called_aet: str
+    peer_host: str
+    peer_port: int
+    max_pdu: int = 16384
+    timeout: float = 30.0
+
+
+# --- domain models below (pydantic, Clarinet-only) ---
 
 
 class SkippedSeriesInfo(BaseModel):
@@ -199,24 +130,10 @@ class BackgroundAnonymizationStatus(BaseModel):
     study_uid: str
 
 
-class BatchStoreResult(BaseModel):
-    """Result of a batch C-STORE operation (one association, multiple datasets)."""
-
-    total_sent: int = 0
-    total_failed: int = 0
-    failed_sop_uids: list[str] = Field(default_factory=list)
-
-
-class DicomNode(BaseModel):
-    """DICOM node configuration."""
-
-    aet: str
-    host: str
-    port: int
-
-
 class PacsStudyWithSeries(BaseModel):
     """StudyResult enriched with series list and local DB existence flag."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     study: StudyResult
     series: list[SeriesResult] = Field(default_factory=list)
@@ -228,14 +145,3 @@ class PacsImportRequest(BaseModel):
 
     study_instance_uid: str
     patient_id: str
-
-
-class AssociationConfig(BaseModel):
-    """Configuration for DICOM association."""
-
-    calling_aet: str
-    called_aet: str
-    peer_host: str
-    peer_port: int
-    max_pdu: int = 16384
-    timeout: float = 30.0
