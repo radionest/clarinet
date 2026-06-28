@@ -379,6 +379,8 @@ pub type UserWorkload {
     pending: Int,
     blocked: Int,
     failed: Int,
+    finished: Int,
+    available: Int,
   )
 }
 

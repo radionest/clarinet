@@ -265,6 +265,7 @@ pub type Key {
   AdminWorkloadTitle
   AdminWorkloadUser
   AdminWorkloadTotal
+  AdminWorkloadAvailable
   AdminAvailablePending
   AdminNoRecords
   AdminSelectUser
@@ -903,6 +904,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, AdminWorkloadUser -> "Пользователь"
     En, AdminWorkloadTotal -> "Total"
     Ru, AdminWorkloadTotal -> "Всего"
+    En, AdminWorkloadAvailable -> "Available"
+    Ru, AdminWorkloadAvailable -> "Доступно"
     En, AdminAvailablePending -> "Available pending"
     Ru, AdminAvailablePending -> "Доступно (свободные)"
     En, AdminSelectUser -> "Select user..."
