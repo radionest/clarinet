@@ -534,13 +534,17 @@ fn workload_section(stats: models.AdminStats, shared: Shared) -> Element(Msg) {
             html.th([], [
               html.text(shared.translate(status.to_i18n_key(types.Failed))),
             ]),
-            html.th([], [html.text(shared.translate(i18n.AdminWorkloadTotal))]),
+            html.th(
+              [attribute.title(shared.translate(i18n.AdminWorkloadTotalHint))],
+              [html.text(shared.translate(i18n.AdminWorkloadTotal))],
+            ),
             html.th([], [
               html.text(shared.translate(status.to_i18n_key(types.Finished))),
             ]),
-            html.th([], [
-              html.text(shared.translate(i18n.AdminWorkloadAvailable)),
-            ]),
+            html.th(
+              [attribute.title(shared.translate(i18n.AdminWorkloadAvailableHint))],
+              [html.text(shared.translate(i18n.AdminWorkloadAvailable))],
+            ),
           ]),
         ]),
         html.tbody([], list.map(stats.workload_by_user, workload_row)),

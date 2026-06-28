@@ -60,6 +60,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `count_by_type_and_context(name, patient_id, study_uid, series_uid, level)` | Count records matching type at the given DicomQueryLevel context (PATIENT → patient_id, STUDY → study_uid, SERIES → series_uid) |
 | `count_user_records_for_context(user_id, name, patient_id, study_uid, series_uid, level)` | Count user's records for unique-per-user constraint at given DicomQueryLevel |
 | `get_available_type_counts(user_id)` | Dict of available RecordType -> count (batch-loaded to avoid N+1) |
+| `count_available_pending_for_user(user_id, role_names)` | Count of claimable records (pending + unassigned, role-scoped, `unique_per_user`-aware via `_unique_per_user_violation_filter`). `role_names=None` → whole pool (superuser); `[]` → 0. Powers the admin-dashboard `Claimable` column |
 | `get_status_counts()` | Global status counts |
 | `get_per_type_status_counts()` | Status counts per type |
 | `get_per_type_unique_users()` | Unique user count per type |

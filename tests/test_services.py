@@ -295,10 +295,13 @@ class TestAdminService:
         # Two roles, each backing its own record type.
         session.add_all([UserRole(name="fa-role"), UserRole(name="other-role")])
         await session.commit()
+        # Non-unique types: this test covers role-scoping, not unique_per_user
+        # (make_record_type defaults unique_per_user=True). The unique-per-user
+        # exclusion is verified in test_available_excludes_unique_per_user_conflicts.
         session.add_all(
             [
-                make_record_type("fa-rt", role_name="fa-role"),
-                make_record_type("other-rt", role_name="other-role"),
+                make_record_type("fa-rt", role_name="fa-role", unique_per_user=False),
+                make_record_type("other-rt", role_name="other-role", unique_per_user=False),
             ]
         )
         await session.commit()
@@ -337,6 +340,64 @@ class TestAdminService:
         assert by_email["fa_role@test.com"].available == 3  # fa-role pool only
         assert by_email["fa_super@test.com"].available == 5  # whole pool
         assert by_email["fa_super@test.com"].finished == 0
+
+    @pytest.mark.asyncio
+    async def test_available_excludes_unique_per_user_conflicts(self, env):
+        session = env["session"]
+        pat = make_patient("UQ_PAT", "Unique-per-user Patient")
+        session.add(pat)
+        await session.commit()
+        study = make_study("UQ_PAT", "1.2.3.901")
+        session.add(study)
+        await session.commit()
+        # Two SERIES contexts under the same study.
+        session.add_all(
+            [
+                make_series("1.2.3.901", "1.2.3.901.1", 1),
+                make_series("1.2.3.901", "1.2.3.901.2", 2),
+            ]
+        )
+        await session.commit()
+
+        session.add(UserRole(name="uq-role"))
+        await session.commit()
+        # SERIES-level (make_record_type default) unique_per_user type.
+        session.add(make_record_type("uq-rt", role_name="uq-role", unique_per_user=True))
+        await session.commit()
+
+        u_role = make_user(email="uq_role@test.com", is_active=True)
+        u_super = make_user(email="uq_super@test.com", is_active=True, is_superuser=True)
+        session.add_all([u_role, u_super])
+        await session.commit()
+        session.add(UserRolesLink(user_id=u_role.id, role_name="uq-role"))
+        await session.commit()
+
+        async def add(series_uid, user_id, status):
+            await seed_record(
+                session,
+                patient_id="UQ_PAT",
+                study_uid="1.2.3.901",
+                series_uid=series_uid,
+                rt_name="uq-rt",
+                user_id=user_id,
+                status=status,
+            )
+
+        # Series .1: u_role already holds a uq-rt record → its 2 unassigned
+        # pending records are NOT claimable by u_role (unique_per_user conflict).
+        await add("1.2.3.901.1", u_role.id, RecordStatus.inwork)
+        await add("1.2.3.901.1", None, RecordStatus.pending)
+        await add("1.2.3.901.1", None, RecordStatus.pending)
+        # Series .2: no u_role record → its unassigned pending record is claimable.
+        await add("1.2.3.901.2", None, RecordStatus.pending)
+
+        stats = await env["service"].get_stats()
+        by_email = {w.email: w for w in stats.workload_by_user}
+
+        # Only series .2 is claimable for u_role; series .1 is blocked.
+        assert by_email["uq_role@test.com"].available == 1
+        # Superuser holds no records, so no conflicts: whole unassigned pool (3).
+        assert by_email["uq_super@test.com"].available == 3
 
     @pytest.mark.asyncio
     async def test_get_record_type_stats_empty(self, env):
