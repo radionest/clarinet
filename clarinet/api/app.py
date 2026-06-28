@@ -425,11 +425,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         from clarinet.services.dicom.scp import get_storage_scp
 
         scp = get_storage_scp()
-        scp.start(
-            aet=settings.dicom_aet,
-            port=settings.dicom_port,
-            ip=settings.dicom_ip,
-        )
+        scp.start(settings.dicom_aet, settings.dicom_port, settings.dicom_ip)
         app.state.storage_scp = scp
         logger.info(
             f"Storage SCP started on port {settings.dicom_port} "

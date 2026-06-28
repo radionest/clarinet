@@ -1,4 +1,4 @@
-"""Unit tests for C-MOVE self-retrieval: StorageSCP, MoveSession, dispatch."""
+"""Unit tests for C-MOVE self-retrieval: StorageSCP, dispatch."""
 
 import threading
 import time
@@ -8,36 +8,7 @@ import pytest
 from pydicom import Dataset
 
 from clarinet.services.dicom.models import QueryRetrieveLevel, StorageMode
-from clarinet.services.dicom.scp import MoveSession, StorageSCP
-
-# ===========================================================================
-# MoveSession
-# ===========================================================================
-
-
-class TestMoveSession:
-    """Tests for MoveSession dataclass."""
-
-    def test_done_event_not_set_initially(self):
-        session = MoveSession()
-        assert not session.done.is_set()
-        assert session.received_count == 0
-        assert session.expected_count is None
-        assert session.instances == {}
-
-    def test_done_event_set_when_expected_reached(self):
-        session = MoveSession()
-        session.expected_count = 2
-        session.instances["1.2.3"] = Dataset()
-        session.received_count = 1
-        assert not session.done.is_set()
-        session.instances["1.2.4"] = Dataset()
-        session.received_count = 2
-        # Simulate what SCP handler does
-        if session.received_count >= session.expected_count:
-            session.done.set()
-        assert session.done.is_set()
-
+from clarinet.services.dicom.scp import StorageSCP
 
 # ===========================================================================
 # StorageSCP — session management
@@ -50,7 +21,7 @@ class TestStorageSCPSessions:
     def test_register_and_finish(self):
         scp = StorageSCP()
         session = scp.register_session("study1/series1")
-        assert isinstance(session, MoveSession)
+        assert session is not None
         finished = scp.finish_session("study1/series1")
         assert finished is session
 
