@@ -1,43 +1,10 @@
-"""Unit tests for C-MOVE self-retrieval: StorageSCP, MoveSession, dispatch."""
+"""Unit tests for the C-MOVE Storage SCP session lifecycle."""
 
-import threading
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
-from pydicom import Dataset
 
-from clarinet.services.dicom.models import QueryRetrieveLevel, StorageMode
-from clarinet.services.dicom.scp import MoveSession, StorageSCP
-
-# ===========================================================================
-# MoveSession
-# ===========================================================================
-
-
-class TestMoveSession:
-    """Tests for MoveSession dataclass."""
-
-    def test_done_event_not_set_initially(self):
-        session = MoveSession()
-        assert not session.done.is_set()
-        assert session.received_count == 0
-        assert session.expected_count is None
-        assert session.instances == {}
-
-    def test_done_event_set_when_expected_reached(self):
-        session = MoveSession()
-        session.expected_count = 2
-        session.instances["1.2.3"] = Dataset()
-        session.received_count = 1
-        assert not session.done.is_set()
-        session.instances["1.2.4"] = Dataset()
-        session.received_count = 2
-        # Simulate what SCP handler does
-        if session.received_count >= session.expected_count:
-            session.done.set()
-        assert session.done.is_set()
-
+from clarinet.services.dicom.scp import StorageSCP
 
 # ===========================================================================
 # StorageSCP — session management
@@ -50,7 +17,8 @@ class TestStorageSCPSessions:
     def test_register_and_finish(self):
         scp = StorageSCP()
         session = scp.register_session("study1/series1")
-        assert isinstance(session, MoveSession)
+        assert session is not None
+        assert hasattr(session, "done") and hasattr(session, "instances")
         finished = scp.finish_session("study1/series1")
         assert finished is session
 
@@ -69,8 +37,7 @@ class TestStorageSCPSessions:
         scp = StorageSCP()
         session = scp.register_session("s/")
         # Simulate 3 instances already received
-        with scp._lock:
-            session.received_count = 3
+        session.received_count = 3
         scp.set_expected("s/", 3)
         assert session.done.is_set()
         scp.finish_session("s/")
@@ -78,8 +45,7 @@ class TestStorageSCPSessions:
     def test_set_expected_does_not_signal_if_not_enough(self):
         scp = StorageSCP()
         session = scp.register_session("s/")
-        with scp._lock:
-            session.received_count = 1
+        session.received_count = 1
         scp.set_expected("s/", 3)
         assert not session.done.is_set()
         scp.finish_session("s/")
@@ -116,97 +82,8 @@ class TestStorageSCPSessions:
         assert not scp.is_running
 
 
-# ===========================================================================
-# StorageSCP — C-STORE handler
-# ===========================================================================
-
-
-class TestStorageSCPHandler:
-    """Tests for the _handle_store and _find_session methods."""
-
-    def _make_event(self, study_uid: str, series_uid: str, sop_uid: str) -> MagicMock:
-        """Create a mock pynetdicom C-STORE event."""
-        ds = Dataset()
-        ds.StudyInstanceUID = study_uid
-        ds.SeriesInstanceUID = series_uid
-        ds.SOPInstanceUID = sop_uid
-        event = MagicMock()
-        event.dataset = ds
-        event.file_meta = Dataset()
-        return event
-
-    def test_handle_store_deposits_to_series_session(self):
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/4.5.6")
-        event = self._make_event("1.2.3", "4.5.6", "7.8.9")
-        status = scp._handle_store(event)
-        assert status == 0x0000
-        assert "7.8.9" in session.instances
-        assert session.received_count == 1
-        scp.finish_session("1.2.3/4.5.6")
-
-    def test_handle_store_deposits_to_study_session(self):
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/")
-        event = self._make_event("1.2.3", "any.series", "7.8.9")
-        status = scp._handle_store(event)
-        assert status == 0x0000
-        assert "7.8.9" in session.instances
-        scp.finish_session("1.2.3/")
-
-    def test_handle_store_series_key_preferred_over_study(self):
-        scp = StorageSCP()
-        study_session = scp.register_session("1.2.3/")
-        series_session = scp.register_session("1.2.3/4.5.6")
-        event = self._make_event("1.2.3", "4.5.6", "7.8.9")
-        scp._handle_store(event)
-        # Should go to series-level session, not study-level
-        assert "7.8.9" in series_session.instances
-        assert "7.8.9" not in study_session.instances
-        scp.finish_session("1.2.3/")
-        scp.finish_session("1.2.3/4.5.6")
-
-    def test_handle_store_unregistered_accepted(self):
-        """Unregistered datasets are accepted (return 0x0000) but not stored."""
-        scp = StorageSCP()
-        event = self._make_event("unknown", "unknown", "7.8.9")
-        status = scp._handle_store(event)
-        assert status == 0x0000
-
-    def test_handle_store_signals_done_on_expected(self):
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/4.5.6")
-        scp.set_expected("1.2.3/4.5.6", 2)
-        event1 = self._make_event("1.2.3", "4.5.6", "sop1")
-        event2 = self._make_event("1.2.3", "4.5.6", "sop2")
-        scp._handle_store(event1)
-        assert not session.done.is_set()
-        scp._handle_store(event2)
-        assert session.done.is_set()
-        scp.finish_session("1.2.3/4.5.6")
-
-    def test_concurrent_stores_thread_safe(self):
-        """Multiple threads calling _handle_store don't corrupt session."""
-        scp = StorageSCP()
-        session = scp.register_session("1.2.3/")
-        n = 50
-        scp.set_expected("1.2.3/", n)
-
-        def store_one(i: int):
-            event = self._make_event("1.2.3", "ser", f"sop.{i}")
-            scp._handle_store(event)
-
-        threads = [threading.Thread(target=store_one, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert session.received_count == n
-        assert len(session.instances) == n
-        assert session.done.is_set()
-        scp.finish_session("1.2.3/")
-
+# C-STORE handler routing is dimsechord's responsibility; end-to-end C-MOVE
+# is covered by the PACS-gated integration suite (tests/e2e/).
 
 # ===========================================================================
 # StorageSCP — stop clears sessions
@@ -248,71 +125,3 @@ class TestSingleton:
         shutdown_storage_scp()
         scp2 = get_storage_scp()
         assert scp1 is not scp2
-
-
-# ===========================================================================
-# _retrieve() dispatch
-# ===========================================================================
-
-
-class TestRetrieveDispatch:
-    """Tests that _retrieve() dispatches to C-GET or C-MOVE based on settings."""
-
-    @pytest.mark.asyncio
-    async def test_cget_mode_calls_get_study(self):
-        from clarinet.services.dicom.client import DicomClient
-        from clarinet.services.dicom.models import DicomNode
-
-        client = DicomClient(calling_aet="TEST")
-        peer = DicomNode(aet="ORTHANC", host="localhost", port=4242)
-
-        mock_result = MagicMock()
-        mock_result.num_completed = 5
-        mock_result.num_failed = 0
-
-        with (
-            patch.object(client._operations, "get_study", return_value=mock_result) as mock_get,
-            patch("clarinet.services.dicom.client.settings") as mock_settings,
-        ):
-            mock_settings.dicom_retrieve_mode = "c-get"
-            result = await client._retrieve(
-                study_uid="1.2.3",
-                peer=peer,
-                level=QueryRetrieveLevel.STUDY,
-                mode=StorageMode.MEMORY,
-            )
-            mock_get.assert_called_once()
-            assert result is mock_result
-
-    @pytest.mark.asyncio
-    async def test_cmove_mode_calls_retrieve_via_move(self):
-        from clarinet.services.dicom.client import DicomClient
-        from clarinet.services.dicom.models import DicomNode
-
-        client = DicomClient(calling_aet="TEST")
-        peer = DicomNode(aet="ORTHANC", host="localhost", port=4242)
-
-        mock_result = MagicMock()
-        mock_result.num_completed = 5
-        mock_result.num_failed = 0
-
-        mock_scp = MagicMock()
-
-        with (
-            patch.object(
-                client._operations, "retrieve_via_move", return_value=mock_result
-            ) as mock_move,
-            patch("clarinet.services.dicom.client.settings") as mock_settings,
-            patch("clarinet.services.dicom.scp.get_storage_scp", return_value=mock_scp),
-        ):
-            mock_settings.dicom_retrieve_mode = "c-move"
-            mock_settings.dicom_aet = "TEST"
-            mock_settings.dicom_cmove_timeout = 300.0
-            result = await client._retrieve(
-                study_uid="1.2.3",
-                peer=peer,
-                level=QueryRetrieveLevel.STUDY,
-                mode=StorageMode.MEMORY,
-            )
-            mock_move.assert_called_once()
-            assert result is mock_result

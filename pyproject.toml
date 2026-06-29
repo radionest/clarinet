@@ -67,6 +67,7 @@ dependencies = [
     # schemas the *.qmd chunks import (coerce=True restores the dtypes a CSV
     # round-trip loses). Base dep, not an extra: the render kernel imports it.
     "pandera>=0.24",
+    "dimsechord",
 ]
 
 [project.optional-dependencies]
@@ -98,6 +99,9 @@ constraint-dependencies = [
     "cryptography>=48.0.1",     # via pyjwt[crypto] -> fastapi-users; GHSA-537c-gmf6-5ccf
     "starlette>=1.3.1",         # via fastapi; CVE-2026-48817/48818/54282/54283
 ]
+
+[tool.uv.sources]
+dimsechord = { git = "https://github.com/radionest/dimsechord.git", rev = "main" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["clarinet"]

@@ -5,16 +5,16 @@ Ensures dataset_to_dicom_json never mutates the original pydicom Dataset
 cause frame retrieval to fail with 404.
 """
 
+from dimsechord import (
+    dataset_to_dicom_json,
+    study_result_to_dicom_json,
+)
 from pydicom import Dataset, config
 from pydicom.dataelem import RawDataElement
 from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage
 
 from clarinet.services.dicom.models import StudyResult
-from clarinet.services.dicomweb.converter import (
-    dataset_to_dicom_json,
-    study_result_to_dicom_json,
-)
 
 
 def _make_dataset_with_pixel_data() -> Dataset:

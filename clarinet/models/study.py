@@ -29,9 +29,9 @@ class StudyBase(BaseModel):
         description=(
             "Modalities of the study, DICOM-standard '\\'-joined (e.g. "
             "'CT\\SR'); see clarinet.services.dicom.models.MODALITIES_SEPARATOR. "
-            "Written by clarinet.services.dicom.operations._ds_modalities; "
-            "consumed by _modalities_string (path rendering, converts to '_') "
-            "and _modalities_to_list (DICOMweb JSON, splits to array)."
+            "Populated by dimsechord's find_studies (DICOM ModalitiesInStudy "
+            "parsing); consumed by _modalities_string (path rendering, "
+            "converts to '_')."
         ),
     )
     patient_id: PatientID

@@ -73,7 +73,7 @@ the right queue.
 
 Storage-path rendering lives in `clarinet/files/` — one template engine
 (`_storage.render_all_levels`, surfaced as `Files.working_dirs(...)`)
-feeds the writer (`AnonymizationService`), every reader (`DicomWebCache`,
+feeds the writer (`AnonymizationService`), every reader (`CacheFiller`,
 `prefetch_dicom_web`), CLI `anon migrate-paths`, plus the pipeline's
 `ctx.files` (`Files(record)` from `build_task_context`). One rendering
 point means a custom `disk_path_template` produces the same path everywhere.
@@ -106,7 +106,7 @@ reader-side tasks use `Files(record, fallback=True)`.
 
 Registered in `clarinet/services/pipeline/tasks/` and `clarinet/services/dicom/pipeline.py` — imported at broker startup.
 - `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `settings.dicom_queue_name`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
-- `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Queue: `settings.dicom_queue_name`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
+- `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via dimsechord's `PullEngine` (C-GET default, C-MOVE in c-move worker mode), teeing each series to `{storage_path}/dicomweb_cache/{study}/{series}/` + the shared SQLite index. Builds its own `DicomCache`+engine per invocation (no `app.state`). Queue: `settings.dicom_queue_name`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips already-indexed series via `cache.series_cached` or a `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
 - `anonymize_study_pipeline` — Record-aware DICOM anonymization (skip-guard + Patient anonymize + DICOM anonymize + submit to Record). Queue: `settings.dicom_queue_name`. Requires `msg.record_id`. Payload knobs: `save_to_disk`, `send_to_pacs`. Downstream wraps via `run_anonymization(msg, ctx, extra_record_data=...)` to add project-specific Record fields.
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).

@@ -626,6 +626,7 @@ dependencies = [
     { name = "bcrypt" },
     { name = "cachetools" },
     { name = "dicom-anonymizer" },
+    { name = "dimsechord" },
     { name = "fastapi" },
     { name = "fastapi-users" },
     { name = "httpx" },
@@ -705,6 +706,7 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=4.0.1" },
     { name = "cachetools", specifier = ">=7.0.0" },
     { name = "dicom-anonymizer", specifier = ">=1.0.0" },
+    { name = "dimsechord", git = "https://github.com/radionest/dimsechord.git?rev=main" },
     { name = "fastapi", specifier = ">=0.95.0" },
     { name = "fastapi-users", specifier = ">=13.0.0" },
     { name = "httptools", marker = "extra == 'performance'", specifier = ">=0.6.0" },
@@ -973,6 +975,16 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8c/65/4a5463d1efa2510dc58b4fba0c574e1d9b0d5819989ca0de7640e2beef8c/dicom_anonymizer-1.0.12.tar.gz", hash = "sha256:2318a8c06e7f655d6d7920471a60a0369a05f9079dfdff8875274b0cbd3756a5", size = 23138, upload-time = "2024-03-26T13:22:34.283Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/af/bf9bed1d1fb236082fd19aecee7bd4f84f11a8d22898b2529bc83b59ce71/dicom_anonymizer-1.0.12-py3-none-any.whl", hash = "sha256:3593555f11ba7cbe910b949bca67b30e21292632d1942f2e2b580942764de1c7", size = 25441, upload-time = "2024-03-26T13:22:32.516Z" },
+]
+
+[[package]]
+name = "dimsechord"
+version = "0.3.0"
+source = { git = "https://github.com/radionest/dimsechord.git?rev=main#4afa0385117e39e53ac160bca864da4f749c9748" }
+dependencies = [
+    { name = "cachetools" },
+    { name = "pydicom" },
+    { name = "pynetdicom" },
 ]
 
 [[package]]

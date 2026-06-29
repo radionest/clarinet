@@ -208,7 +208,7 @@ async def run_worker(
 
         scp = get_storage_scp()
         try:
-            scp.start(aet=settings.dicom_aet, port=settings.dicom_port, ip=settings.dicom_ip)
+            scp.start(settings.dicom_aet, settings.dicom_port, settings.dicom_ip)
         except OSError as e:
             logger.error(
                 f"Failed to start Storage SCP on port {settings.dicom_port}: {e}. "

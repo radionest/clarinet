@@ -8,17 +8,19 @@ import io
 import zipfile
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pydicom
 import pytest
 import pytest_asyncio
+from dimsechord import DicomCache
 from httpx import ASGITransport, AsyncClient
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
 from clarinet.api.app import app
-from clarinet.api.dependencies import get_dicom_client, get_dicomweb_cache, get_pacs_node
-from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.api.dependencies import get_dicomweb_filler
+from clarinet.services.dicomweb.filler import CacheFiller
 from tests.conftest import create_authenticated_client, create_mock_superuser
 
 pytestmark = pytest.mark.asyncio
@@ -59,40 +61,48 @@ def _make_dicom_dataset(sop_uid: str) -> Dataset:
 
 
 @pytest.fixture
-def dicomweb_cache(tmp_path: Path) -> DicomWebCache:
+def dicomweb_filler(tmp_path: Path) -> CacheFiller:
+    """A CacheFiller over a dimsechord DicomCache, pre-populated in memory.
+
+    ``ensure_series`` returns the in-memory entry (memory hit) without touching
+    the engine; ``session_factory=None`` disables the dcm_anon tier.
+    """
     cache_dir = tmp_path / "dicomweb_cache"
     cache_dir.mkdir()
-    return DicomWebCache(base_dir=cache_dir, memory_ttl_minutes=30, memory_max_entries=50)
-
-
-@pytest.fixture
-def cached_series(dicomweb_cache: DicomWebCache) -> dict[str, Dataset]:
-    """Populate cache with real DICOM datasets and return them."""
+    cache = DicomCache(
+        base_dir=cache_dir,
+        index_path=cache_dir / "index.db",
+        memory_ttl_minutes=30,
+        memory_max_entries=50,
+    )
     instances = {sop_uid: _make_dicom_dataset(sop_uid) for sop_uid in SOP_UIDS}
-    dicomweb_cache._put_to_memory(STUDY_UID, SERIES_UID, instances, disk_persisted=True)
-    return instances
+    cache.put_series_to_memory(STUDY_UID, SERIES_UID, instances, disk_persisted=True)
+    return CacheFiller(
+        cache=cache,
+        engine=MagicMock(),
+        client=MagicMock(),
+        pacs=MagicMock(),
+        retrieve_mode="c-get",
+        session_factory=None,
+        storage_path=tmp_path,
+    )
 
 
 @pytest_asyncio.fixture
 async def client(
     test_session,
     test_settings,
-    dicomweb_cache,
-    cached_series,
+    dicomweb_filler,
 ) -> AsyncGenerator[AsyncClient]:
-    """Authenticated client with DICOMweb cache override."""
+    """Authenticated client with DICOMweb filler override."""
     mock_user = await create_mock_superuser(test_session, email="dicom_dl@test.com")
 
-    app.dependency_overrides[get_dicomweb_cache] = lambda: dicomweb_cache
-    app.dependency_overrides[get_dicom_client] = lambda: None
-    app.dependency_overrides[get_pacs_node] = lambda: None
+    app.dependency_overrides[get_dicomweb_filler] = lambda: dicomweb_filler
 
     async for ac in create_authenticated_client(mock_user, test_session, test_settings):
         yield ac
 
-    app.dependency_overrides.pop(get_dicomweb_cache, None)
-    app.dependency_overrides.pop(get_dicom_client, None)
-    app.dependency_overrides.pop(get_pacs_node, None)
+    app.dependency_overrides.pop(get_dicomweb_filler, None)
 
 
 @pytest_asyncio.fixture

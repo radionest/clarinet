@@ -25,13 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from clarinet.api.app import app
 from clarinet.api.dependencies import (
     get_dicom_client,
-    get_dicomweb_cache,
+    get_dicomweb_filler,
     get_dicomweb_proxy_service,
     get_pacs_node,
 )
 from clarinet.models.patient import Patient
 from clarinet.services.dicom import DicomClient, DicomNode
-from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicomweb.filler import CacheFiller
 from clarinet.services.dicomweb.service import DicomWebProxyService
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.conftest import create_authenticated_client, create_mock_superuser
@@ -153,31 +153,46 @@ async def imported_study(
 @pytest_asyncio.fixture(autouse=True)
 async def override_dicomweb_deps(tmp_path: Path) -> AsyncGenerator[None]:
     """Override DICOMweb DI dependencies to point at the test PACS with tmp cache."""
-    cache = DicomWebCache(
-        base_dir=tmp_path / "dicomweb_cache",
+    from dimsechord import DicomCache, PullEngine
+    from dimsechord import DicomClient as DimseDicomClient
+
+    cache_dir = tmp_path / "dicomweb_cache"
+    cache_dir.mkdir(exist_ok=True)
+    cache = DicomCache(
+        base_dir=cache_dir,
+        index_path=cache_dir / "index.db",
         ttl_hours=1,
         max_size_gb=1.0,
         memory_ttl_minutes=30,
         memory_max_entries=50,
     )
-    (tmp_path / "dicomweb_cache").mkdir(exist_ok=True)
 
-    dicom_client = DicomClient(calling_aet=CALLING_AET)
+    dicom_client = DicomClient(calling_aet=CALLING_AET)  # façade — serves QIDO
     pacs_node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
-    proxy_service = DicomWebProxyService(client=dicom_client, pacs=pacs_node, cache=cache)
+    engine = PullEngine.via_cget(cache, pacs_node, calling_aet=CALLING_AET)
+    filler = CacheFiller(
+        cache=cache,
+        engine=engine,
+        client=DimseDicomClient(calling_aet=CALLING_AET),
+        pacs=pacs_node,
+        retrieve_mode="c-get",
+        session_factory=None,
+        storage_path=tmp_path,
+    )
+    proxy_service = DicomWebProxyService(client=dicom_client, pacs=pacs_node, filler=filler)
 
     app.dependency_overrides[get_dicom_client] = lambda: dicom_client
     app.dependency_overrides[get_pacs_node] = lambda: pacs_node
-    app.dependency_overrides[get_dicomweb_cache] = lambda: cache
+    app.dependency_overrides[get_dicomweb_filler] = lambda: filler
     app.dependency_overrides[get_dicomweb_proxy_service] = lambda: proxy_service
 
     yield
 
-    await cache.shutdown()
+    await filler.shutdown()
 
     app.dependency_overrides.pop(get_dicom_client, None)
     app.dependency_overrides.pop(get_pacs_node, None)
-    app.dependency_overrides.pop(get_dicomweb_cache, None)
+    app.dependency_overrides.pop(get_dicomweb_filler, None)
     app.dependency_overrides.pop(get_dicomweb_proxy_service, None)
 
 

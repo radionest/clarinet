@@ -9,7 +9,7 @@ Resolver builds the working folder for any level (PATIENT/STUDY/SERIES)
 by appending the corresponding number of segments to ``storage_path``.
 Anonymized DICOM files (``dcm_anon/``) live as a sub-directory of the
 SERIES-level working folder, so both ``AnonymizationService`` (writer)
-and ``DicomWebCache`` (reader) compute the same path from this template.
+and ``CacheFiller`` (reader) compute the same path from this template.
 All non-writer call sites (``Files``, Slicer context, file validation)
 reach the same path through ``render_all_levels`` — the single rendering
 point for storage directories.

@@ -33,7 +33,7 @@ UserServiceDep, StudyServiceDep, RecordServiceDep, RecordTypeServiceDep, AdminSe
 DicomClientDep, PacsNodeDep
 
 # DICOMweb proxy
-DicomWebCacheDep, DicomWebProxyServiceDep
+DicomWebFillerDep, DicomWebProxyServiceDep
 
 # File registry
 ProjectFileRegistryDep  # dict | None from app.state

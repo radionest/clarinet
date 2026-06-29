@@ -1,26 +1,33 @@
 # DICOM Service
 
 Async DICOM client for Query/Retrieve operations against external PACS servers (e.g. Orthanc).
+The DICOM transport core (`DicomClient`, `StorageSCP`, query/result models, converters,
+multipart) lives in the **`dimsechord`** package; this service re-exports it and adds the
+Clarinet-specific anonymization / Record / series-filter layers on top.
 
 ## Architecture
 
 ```
 dicom/
-  models.py         # Pydantic models: DicomNode, queries, results, storage config
-  operations.py     # Synchronous pynetdicom wrapper (C-FIND, C-GET, C-MOVE)
-  handlers.py       # C-STORE event handlers (disk / memory / forward modes)
-  client.py         # Async facade — delegates to operations via asyncio.to_thread()
-  anonymizer.py     # Anonymizer, PACS stubs (planned; not yet exported)
+  models.py         # Clarinet domain models (AnonymizationResult, Pacs* requests …);
+                    #   re-exports DicomNode/queries/results/BatchStoreResult from dimsechord
+  scp.py            # Process-wide StorageSCP singleton (thin wrap of dimsechord.StorageSCP)
+  anonymizer.py     # DicomAnonymizer + per-study patient-id helpers
   series_filter.py  # Configurable series filter (modality blocklist, instance count, unknown policy)
   orchestrator.py   # AnonymizationOrchestrator — Record-aware skip-guard + Patient + submit
   pipeline.py       # Built-in @pipeline_task anonymize_study_pipeline + run_anonymization helper
   tasks.py          # create_anonymization_service factory (raw, no Record bookkeeping)
-  __init__.py       # Public API re-exports
+  __init__.py       # Public API re-exports (dimsechord core + domain models)
 ```
 
-- `DicomClient` is the main entry point — all methods are async
-- `DicomOperations` is synchronous; never call it directly from async code
-- `StorageHandler` handles incoming C-STORE events in three modes: `DISK`, `MEMORY`, `FORWARD`
+- `DicomClient` (from `dimsechord`, re-exported via `from clarinet.services.dicom import DicomClient`)
+  is the main entry point — all methods are async; the synchronous pynetdicom plumbing and its
+  `asyncio.to_thread()` offloading are internal to dimsechord.
+- `StorageSCP` (the C-MOVE move-to-self target) is dimsechord's; `scp.py` only owns the
+  process-wide singleton (`get_storage_scp()` / `shutdown_storage_scp()`), started in the app
+  lifespan when `dicom_retrieve_mode` is a `c-move*` mode.
+- The package `__init__` preserves a process-wide pynetdicom identifier-logging toggle
+  (`LOG_RESPONSE_IDENTIFIERS` / `LOG_REQUEST_IDENTIFIERS` from `settings.dicom_log_identifiers`).
 
 ## Settings (`clarinet/settings.py`)
 
@@ -30,7 +37,7 @@ dicom/
 | `dicom_port` | `11112` | Local DICOM port |
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
-| `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
+| `dicom_max_concurrent_associations` | `8` | Process-global cap on concurrent DICOM associations (dimsechord) |
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |
@@ -50,7 +57,6 @@ Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 from clarinet.services.dicom import (
     DicomClient, DicomNode, StudyQuery, SeriesQuery,
     PacsImportRequest, PacsStudyWithSeries, RetrieveResult,
-    StorageMode,
 )
 from clarinet.settings import settings
 
@@ -71,16 +77,18 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 
 ## Batch C-STORE
 
-`store_instances_batch` sends multiple datasets over a single DICOM association (vs `store_instance` which opens one association per dataset).
+`DicomClient.store_instances_batch(datasets, peer)` (dimsechord, async) sends multiple datasets
+over a single DICOM association (vs `store_instance`, which opens one association per dataset).
+Returns `BatchStoreResult(total_sent, total_failed, failed_sop_uids)` (re-exported from dimsechord).
+Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution.
 
-- **`operations.py`**: `store_instances_batch(config, datasets)` → `BatchStoreResult` (sync, one `ae.associate()`, loops `send_c_store`)
-- **`client.py`**: `store_instances_batch(datasets, peer)` → async wrapper via `asyncio.to_thread()`
-- **`models.py`**: `BatchStoreResult(total_sent, total_failed, failed_sop_uids)`
-- Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution
+## Association cap
 
-## Association Semaphore
-
-`DicomOperations._association()` enforces a global `threading.Semaphore` to limit concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in app lifespan via `DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)`. Uses `threading.Semaphore` (not `asyncio.Semaphore`) because `_association()` is synchronous, called via `asyncio.to_thread()`.
+dimsechord's `DicomClient` enforces a process-global cap on concurrent DICOM associations
+(shared across DICOMweb, anonymization, import). The app lifespan sets it once via
+`DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)`. The
+C-MOVE Storage-SCP / `PullEngine` path bounds itself with the same value through dimsechord's
+`AssociationPool(per_aet_cap=settings.dicom_max_concurrent_associations)`.
 
 ## Anonymization API surface
 
@@ -122,8 +130,8 @@ or `Files.for_reader(record)`.
 
 Backend (no fallback — default):
 - `AnonymizationService._save_series_to_disk` (the writer)
-- `DicomWebCache._resolve_dcm_anon_dir` (the reader; catches
-  `AnonPathError` and returns `None` so the cache simply misses)
+- `CacheFiller._resolve_dcm_anon_dir` (the dcm_anon reader; catches
+  `AnonPathError` and returns `None` so the lookup simply misses)
 - `prefetch_dicom_web._has_dcm_anon` (anonymized cache lookup; same
   catch pattern)
 - `clarinet anon migrate-paths` (per-record failures are logged and the
@@ -154,6 +162,6 @@ in the call site, not in the entity.
 
 ## Key conventions
 
-- All I/O goes through `asyncio.to_thread()` because pynetdicom is synchronous
+- DICOM transport I/O (synchronous pynetdicom + its `asyncio.to_thread()` offloading) is owned by dimsechord
 - Exceptions: `CONFLICT` for association failures, `NOT_FOUND` where applicable
 - Logger: `from clarinet.utils.logger import logger`
