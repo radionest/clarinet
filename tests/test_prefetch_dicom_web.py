@@ -112,7 +112,7 @@ class _FakeEngine:
 
     ``ensure_series`` is the partial-miss path (one association per series);
     ``stream_study`` is the cold-study path — ONE study-level association that
-    streams + tees every series, mirroring ``PullEngine.iter_study``.
+    streams + tees every series, mirroring ``PullEngine.stream_study``.
     """
 
     def __init__(self, cache: DicomCache, plan: dict[str, list[str]]) -> None:
@@ -698,6 +698,48 @@ class TestPrefetchDicomWebImpl:
         assert engine.calls == []  # type: ignore[attr-defined]
         assert _series_cached(tmp_path, "STUDY1", "SER1")
         assert _series_cached(tmp_path, "STUDY1", "SER2")
+
+    @pytest.mark.asyncio
+    async def test_cold_study_partial_arrival_reports_missing_series(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A study-level stream where SOME series never arrive must flag the
+        no-shows — parity with the per-series branch — instead of reporting a
+        clean success for a study that only partially landed.
+        """
+        monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
+
+        ctx = _build_ctx(tmp_path)
+        msg = PipelineMessage(patient_id="PAT001", study_uid="STUDY1")
+
+        mock_client = AsyncMock()
+        mock_client.find_series = AsyncMock(
+            return_value=[_series_result("SER1"), _series_result("SER2")]
+        )
+        # SER1 streams an instance; SER2 never arrives (empty plan entry).
+        holder = _patch_engine(monkeypatch, plan={"SER1": ["SOP1"], "SER2": []})
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr("clarinet.services.pipeline.tasks.cache_dicomweb.logger", mock_logger)
+
+        with (
+            patch("clarinet.services.dicom.DicomClient", return_value=mock_client),
+            patch("clarinet.services.dicom.DicomNode"),
+        ):
+            await _prefetch_dicom_web_impl(msg, ctx)
+
+        engine = holder["engine"]
+        # ONE study-level association over both series (cold-study branch) ...
+        assert engine.study_calls == [["SER1", "SER2"]]  # type: ignore[attr-defined]
+        assert engine.calls == []  # type: ignore[attr-defined]
+        # ... SER1 arrived, SER2 did not.
+        assert _series_cached(tmp_path, "STUDY1", "SER1")
+        assert not _series_cached(tmp_path, "STUDY1", "SER2")
+        # The partial failure was reported, naming only the missing series.
+        assert mock_logger.error.called
+        failure_msg = mock_logger.error.call_args.args[0]
+        assert "SER2" in failure_msg
+        assert "SER1" not in failure_msg
 
     @pytest.mark.asyncio
     async def test_partial_cache_fetches_only_missing(self, tmp_path: Path, monkeypatch):

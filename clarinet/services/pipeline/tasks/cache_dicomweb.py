@@ -328,7 +328,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         #
         # Whole study cold (nothing cached, nothing anon-covered): ONE
         # study-level C-GET/C-MOVE via ``stream_study`` instead of N per-series
-        # associations — ``iter_study`` issues a single study-level retrieval
+        # associations — ``stream_study`` issues a single study-level retrieval
         # and ``schedule_tee``s every dataset to disk + the index, matching the
         # API ``CacheFiller`` path. A partial miss keeps the per-series loop so
         # already-covered series (filtered above) are never re-retrieved.
@@ -336,8 +336,15 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         total_completed = 0
         failed_series: list[str] = []
         if len(series_to_fetch) == len(series_uids):
-            async for _ds in engine.stream_study(msg.study_uid, series_to_fetch):
+            arrived: set[str] = set()
+            async for ds in engine.stream_study(msg.study_uid, series_to_fetch):
+                arrived.add(str(ds.SeriesInstanceUID))
                 total_completed += 1
+            # Parity with the per-series branch: a study-level stream can drop
+            # some series while others arrive. Record the no-shows so the shared
+            # partial-failure report below names them, instead of silently
+            # reporting a clean success for a study that only partially landed.
+            failed_series = [s for s in series_to_fetch if s not in arrived]
         else:
             for series_uid in series_to_fetch:
                 cached = await engine.ensure_series(msg.study_uid, series_uid)

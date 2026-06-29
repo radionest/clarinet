@@ -243,6 +243,57 @@ async def test_ensure_study_cget_study_preserves_dcm_anon_over_raw(monkeypatch, 
     assert cache.schedule_tee.call_count == 1  # only S2's single instance
 
 
+@pytest.mark.asyncio
+async def test_ensure_study_cget_extra_series_served_from_dcm_anon(monkeypatch, tmp_path):
+    """An *extra* series the study-level C-GET returns but the caller never
+    requested must be served from its dcm_anon copy, never tee'd raw.
+
+    PHI guard: dcm_anon wins for EVERY series the loop caches, not only the
+    requested ones — a study-level C-GET that hands back a series with an
+    anonymized copy on disk must not persist a raw copy of it.
+    """
+    cache = MagicMock()
+    cache.get_series_from_memory.return_value = None
+    cache.load_series_from_disk.return_value = None
+    anon_entry = MagicMock(instances={"x": _ds2("ST", "S2", "x")})
+
+    def _put(study, series, instances, **kw):
+        return anon_entry if kw.get("disk_persisted") else MagicMock(instances=instances)
+
+    cache.put_series_to_memory.side_effect = _put
+    client = MagicMock()
+    cget = MagicMock()
+    # C-GET returns requested S1 (raw) + extra S2 (which has a dcm_anon copy on disk).
+    cget.instances = {"a": _ds2("ST", "S1", "a"), "x2": _ds2("ST", "S2", "x2")}
+    cget.num_completed = 2
+    cget.status = 0x0000
+    client.get_study_to_memory = AsyncMock(return_value=cget)
+
+    filler = _make_filler(cache=cache, client=client, mode="c-get")
+
+    # Only S1 is requested. S1 misses dcm_anon (fetched raw); S2 has a dcm_anon dir.
+    async def _resolve(study, series):
+        return tmp_path / "anon" if series == "S2" else None
+
+    monkeypatch.setattr(filler, "_resolve_dcm_anon_dir", AsyncMock(side_effect=_resolve))
+    monkeypatch.setattr(
+        filler, "_read_dcm_files", staticmethod(lambda d: {"x": _ds2("ST", "S2", "x")})
+    )
+
+    result = await filler.ensure_study("ST", ["S1"], on_progress=None)
+
+    # Only the requested S1 is returned to the caller.
+    assert set(result) == {"S1"}
+    # S2 (extra) was served from dcm_anon: put with disk_persisted=True ...
+    s2_puts = [c for c in cache.put_series_to_memory.call_args_list if c.args[1] == "S2"]
+    assert len(s2_puts) == 1
+    assert s2_puts[0].kwargs.get("disk_persisted") is True
+    # ... and its raw C-GET datasets were NEVER tee'd; only S1 was.
+    teed_series = {c.args[1] for c in cache.schedule_tee.call_args_list}
+    assert teed_series == {"S1"}
+    assert cache.schedule_tee.call_count == 1
+
+
 # --- ensure_study: c-move-study (stream_study counting arrivals) ---------
 
 

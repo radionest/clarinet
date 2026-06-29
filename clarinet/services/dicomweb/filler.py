@@ -178,9 +178,19 @@ class CacheFiller:
                 # overwritten by its raw PACS copy — that would leak non-anonymized data.
                 if ser_uid in result:
                     continue
-                entry = self._cache.put_series_to_memory(study_uid, ser_uid, instances)
-                for sop_uid, ds in instances.items():
-                    self._cache.schedule_tee(study_uid, ser_uid, sop_uid, ds)
+                # The study-level C-GET may hand back *extra* series the caller
+                # never requested; dcm_anon must win for them too. Teeing their raw
+                # datasets would leak a non-anonymized copy of a series that has an
+                # anonymized version on disk — re-check dcm_anon before teeing.
+                anon = await self._load_from_dcm_anon(study_uid, ser_uid)
+                if anon:
+                    entry = self._cache.put_series_to_memory(
+                        study_uid, ser_uid, anon, disk_persisted=True
+                    )
+                else:
+                    entry = self._cache.put_series_to_memory(study_uid, ser_uid, instances)
+                    for sop_uid, ds in instances.items():
+                        self._cache.schedule_tee(study_uid, ser_uid, sop_uid, ds)
                 if ser_uid in requested:
                     result[ser_uid] = entry
             return result
