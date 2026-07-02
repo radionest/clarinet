@@ -16,7 +16,7 @@ pub fn admin_stats_decoder_workload_test() {
     <> "\"available_pending\":3,"
     <> "\"workload_by_user\":["
     <> "{\"user_id\":\"u-1\",\"email\":\"a@x.org\",\"inwork\":1,\"pending\":2,"
-    <> "\"blocked\":0,\"failed\":1}]}"
+    <> "\"blocked\":0,\"failed\":1,\"finished\":7,\"available\":4}]}"
 
   let assert Ok(stats) = json.parse(json_str, admin_api.admin_stats_decoder())
 
@@ -29,5 +29,7 @@ pub fn admin_stats_decoder_workload_test() {
   should.equal(w.pending, 2)
   should.equal(w.blocked, 0)
   should.equal(w.failed, 1)
+  should.equal(w.finished, 7)
+  should.equal(w.available, 4)
   should.equal(dict.size(stats.records_by_status), 2)
 }
