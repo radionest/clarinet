@@ -31,7 +31,9 @@ for pair in "$@"; do
         echo "vm-setting-write.sh: invalid pair '$pair' (need KEY=VALUE, identifier key)" >&2
         exit 2
     fi
-    quoted_pairs+=("'${pair}'")
+    # End the quote, splice an escaped ', resume — values may contain '.
+    escaped_pair="${pair//\'/\'\"\'\"\'}"
+    quoted_pairs+=("'${escaped_pair}'")
 done
 
 exec ssh -o StrictHostKeyChecking=no \

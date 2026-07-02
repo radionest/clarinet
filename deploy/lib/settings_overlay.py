@@ -47,6 +47,10 @@ NEVER_COERCE = frozenset(
 # "007" stay strings while "4242" still coerces to int.
 _INT_RE = re.compile(r"-?(0|[1-9][0-9]*)$")
 
+# Same identifier charset vm-setting-write.sh enforces host-side — an empty or
+# non-bare key ("=x", "foo bar=1") would emit a line tomllib can't read back.
+_KEY_RE = re.compile(r"[A-Za-z0-9_]+$")
+
 
 def coerce(key: str, value: str) -> object:
     if key in NEVER_COERCE:
@@ -91,6 +95,9 @@ def main(argv: list[str]) -> int:
             print(f"settings_overlay.py: malformed pair (need KEY=VALUE): {pair}", file=sys.stderr)
             return 2
         key, value = pair.split("=", 1)
+        if not _KEY_RE.match(key):
+            print(f"settings_overlay.py: malformed pair (need identifier key): {pair}", file=sys.stderr)
+            return 2
         settings[key] = coerce(key, value)
 
     lines = [HEADER]

@@ -141,19 +141,32 @@ def main(argv: list[str]) -> None:
     if not argv:
         _die(__doc__ or "usage: topology.py <subcommand> ...", 2)
     cmd, rest = argv[0], argv[1:]
+
+    def need(n: int) -> None:
+        # Deterministic usage error (exit 2), not an IndexError traceback.
+        if len(rest) < n:
+            _die(f"topology.py {cmd}: expected at least {n} argument(s), got {len(rest)}", 2)
+
     if cmd == "file":
+        need(1)
         print(resolve_file(rest[0]))
     elif cmd == "vms":
+        need(1)
         cmd_vms(rest[0])
     elif cmd == "get":
+        need(3)
         cmd_get(rest[0], rest[1], rest[2], rest[3] if len(rest) > 3 else None)
     elif cmd == "project":
+        need(2)
         cmd_project(rest[0], rest[1], rest[2] if len(rest) > 2 else None)
     elif cmd == "lock-write":
+        need(2)
         cmd_lock_write(rest[0], rest[1])
     elif cmd == "lock-get":
+        need(3)
         cmd_lock_get(rest[0], rest[1], rest[2])
     elif cmd == "key-of-role":
+        need(2)
         cmd_key_of_role(rest[0], rest[1])
     else:
         _die(f"unknown subcommand: {cmd}", 2)

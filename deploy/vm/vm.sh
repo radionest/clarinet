@@ -879,6 +879,9 @@ cmd_topology_wire() {
     local dicom_aet dicom_port
     dicom_aet="$(bash "$vmset" "$worker_ip" dicom_aet)"; dicom_aet="${dicom_aet:-CLARINET}"
     dicom_port="$(bash "$vmset" "$worker_ip" dicom_port)"; dicom_port="${dicom_port:-11112}"
+    # orthanc:orthanc is the user Orthanc itself auto-registers once
+    # setup-services.sh flips RemoteAccessAllowed (implicit auth-on, empty
+    # RegisteredUsers) — a stock default on a disposable NAT VM, not a secret.
     ssh_ip "$pacs_ip" "curl -sf -u orthanc:orthanc -X PUT http://localhost:8042/modalities/clarinet \
         -H 'Content-Type: application/json' \
         -d '{\"AET\":\"${dicom_aet}\",\"Host\":\"${worker_ip}\",\"Port\":${dicom_port},\"AllowFind\":true,\"AllowGet\":true,\"AllowMove\":true,\"AllowStore\":true}'" \

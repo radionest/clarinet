@@ -354,6 +354,14 @@ class TestTopology:
         r = py(TOPOLOGY_PY, "key-of-role", str(f), "nonesuch")
         assert r.stdout.strip() == ""
 
+    def test_missing_subcommand_args_exit_2(self, tmp_path):
+        # Usage mistakes must be deterministic exit-2 errors, not tracebacks.
+        f = self._topo_file(tmp_path)
+        for args in (["file"], ["vms"], ["get", str(f), "stand"], ["lock-get", "x.json", "stand"]):
+            r = py(TOPOLOGY_PY, *args, check=False)
+            assert r.returncode == 2, args
+            assert "Traceback" not in r.stderr, args
+
 
 # ── settings_overlay.py ──────────────────────────────────────────────────
 
@@ -429,6 +437,14 @@ class TestSettingsOverlay:
         py(SETTINGS_OVERLAY_PY, str(target), "some_code=007")
         data = tomllib.loads(target.read_text())
         assert data["some_code"] == "007"
+
+    def test_non_identifier_key_rejected(self, tmp_path):
+        # "=x" / "foo bar=1" would write a TOML line tomllib can't read back.
+        target = tmp_path / "settings.custom.toml"
+        for pair in ("=oops", "foo bar=1"):
+            r = py(SETTINGS_OVERLAY_PY, str(target), pair, check=False)
+            assert r.returncode == 2, pair
+        assert not target.exists()
 
 
 # ── python helper syntax ─────────────────────────────────────────────────
