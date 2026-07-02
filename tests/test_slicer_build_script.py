@@ -93,6 +93,25 @@ def test_context_keys_removed_when_user_script_raises(slicer_service: SlicerServ
     assert "pacs_host" not in ns
 
 
+def test_execresult_not_carried_over_between_calls(slicer_service: SlicerService) -> None:
+    """Stale ``__execResult`` must not bleed across calls in Slicer's reused namespace.
+
+    Slicer keeps one exec namespace for every HTTP call. A script that assigns
+    ``__execResult`` writes it into that namespace; a *later* script that assigns
+    none must still return ``{}`` (the documented ``execute()`` contract), not the
+    previous call's result. Regression for #339 — worst case is a
+    ``slicer_result_validator`` that forgets to assign one silently merging another
+    record's validator output into ``record.data``.
+    """
+    ns: dict = {}
+    # Call 1 assigns a result — the propagation line writes it into the reused ns.
+    exec(slicer_service._build_script("__execResult = {'first': True}", None), ns)
+    assert ns["__execResult"] == {"first": True}
+    # Call 2 in the SAME namespace assigns nothing — must reset to {}, not carry over.
+    exec(slicer_service._build_script("pass", None), ns)
+    assert ns["__execResult"] == {}
+
+
 def test_build_script_user_can_shadow_helper_names(slicer_service: SlicerService) -> None:
     """Regression: user scripts must be able to shadow any helper name.
 
