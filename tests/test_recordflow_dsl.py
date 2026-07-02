@@ -808,6 +808,30 @@ class TestRecordFlowEngineUnit:
         assert call_args.record_type_name == "output-from-status"
 
     @pytest.mark.asyncio
+    async def test_get_record_context_paginates_via_iter_records(self):
+        """Context must aggregate via iter_records (all pages), never first-page find_records."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        # Tripwire: the truncating method must not be used for aggregation.
+        mock_client.find_records = AsyncMock(
+            side_effect=AssertionError("must aggregate via iter_records, not find_records")
+        )
+        # A record a paginating fetch would surface (same patient/study → in tree slice).
+        extra = make_record_read("child-type", record_id=999, status=RecordStatus.finished)
+        mock_client.iter_records = _mock_iter_records([extra])
+
+        engine = RecordFlowEngine(mock_client)
+        trigger = make_record_read("trigger-type", record_id=1, status=RecordStatus.finished)
+
+        context = await engine._get_record_context(trigger)
+
+        mock_client.find_records.assert_not_called()
+        assert any(r.id == 999 for records in context.values() for r in records)
+
+    @pytest.mark.asyncio
     async def test_invalidate_records_hard_mode(self):
         """_invalidate_records calls invalidate_record with mode='hard'."""
         from unittest.mock import AsyncMock
