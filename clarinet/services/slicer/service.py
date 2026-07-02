@@ -174,6 +174,15 @@ class SlicerService:
         ``from_slicer()`` fallback must stay reachable. Helpers only run while
         the user script executes, so popping after ``exec`` loses nothing; the
         ``finally`` keeps a crashing script from leaving stale context behind.
+
+        **``__execResult`` is dropped from the per-call ``_ns``, not in
+        ``finally``.** The propagation line writes the result into module globals
+        so Slicer can read it *after* the script finishes — cleaning it in
+        ``finally`` would erase the channel before Slicer reads it. But the same
+        write means the *next* call's ``_ns = dict(globals())`` inherits the
+        previous result; without the pop, a script that assigns no
+        ``__execResult`` returns the stale one via ``_ns.get(..., {})``, breaking
+        the "``{}`` if the script did not assign one" contract.
         """
         ctx_lines = "".join(
             f"    globals()[{key!r}] = {value!r}\n" for key, value in (context or {}).items()
@@ -182,6 +191,7 @@ class SlicerService:
         runner = f"""\
 def _run():
 {ctx_lines}    _ns = dict(globals())
+    _ns.pop('__execResult', None)
     try:
         exec(compile({script!r}, '<slicer_script>', 'exec'), _ns)
         globals()['__execResult'] = _ns.get('__execResult', {{}})
