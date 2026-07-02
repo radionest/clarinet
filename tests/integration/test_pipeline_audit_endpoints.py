@@ -169,6 +169,14 @@ class TestPipelineRunEndpoints:
         assert done not in ids
 
     @pytest.mark.asyncio
+    async def test_list_rejects_out_of_range_record_id(self, client: AsyncClient):
+        # record_id maps to a 32-bit DB column; a value above int32 max must be
+        # rejected at the API boundary (422), not forwarded to the DB where
+        # PostgreSQL raises NumericValueOutOfRange. 2147483648 == int32 max + 1.
+        resp = await client.get(f"{PIPELINE_RUNS}?record_id=2147483648")
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
     async def test_get_unknown_returns_404(self, client: AsyncClient):
         resp = await client.get(pipeline_run_url("nonexistent"))
         assert resp.status_code == 404
