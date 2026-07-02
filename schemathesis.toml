@@ -18,10 +18,16 @@ enabled = false
 #   Body-level validation is enforced via extra="forbid" on Pydantic models instead.
 # - unsupported_method: Starlette returns 404 (not 405) for sub-path action
 #   endpoints and fastapi-users auto-generated endpoints
-# - positive_data_acceptance: known flaky — Pydantic constraints (patient_id
-#   pattern, int bounds) are not advertised in OpenAPI parameter schemas, so
-#   hypothesis boundary values (huge ints, random Unicode) get a legitimate 422
-#   that the check misreads as rejecting schema-valid data
+#
+# positive_data_acceptance is ENABLED (schema-valid data must be accepted; the
+# check fails only on 400/422 — 404/409 are allowed). Kept green by advertising
+# param constraints in OpenAPI so hypothesis can't generate rejectable values —
+# e.g. study.py PatientIdPath (pattern) and pipeline.py record_id (int32 bounds)
+# — not by disabling it (PR #437's "constraints not advertised in OpenAPI" was
+# wrong: PatientIdPath advertises them fine). Operations whose validity OpenAPI
+# cannot express (records/find opaque cursor, records/types nested JSON-Schema)
+# stay opted out via excluded_checks in tests/schema/test_critical_endpoints.py
+# and EXCLUDED_PATTERN in tests/schema/test_api_schema.py.
 [checks.ignored_auth]
 enabled = false
 
@@ -29,7 +35,4 @@ enabled = false
 enabled = false
 
 [checks.unsupported_method]
-enabled = false
-
-[checks.positive_data_acceptance]
 enabled = false
