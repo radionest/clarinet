@@ -5,6 +5,7 @@ This module creates and configures the FastAPI application with all routers,
 middleware, and static files.
 """
 
+import asyncio
 import html
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
@@ -13,9 +14,10 @@ from string import Template
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, ORJSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, ORJSONResponse, Response
 from starlette.middleware.gzip import GZipMiddleware
 
+from clarinet.api import ohif_config
 from clarinet.api.exception_handlers import setup_exception_handlers
 
 # Use relative imports for development
@@ -35,6 +37,7 @@ from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
 from clarinet.exceptions.domain import ConfigLoadError, RecordFlowError
+from clarinet.files import Files
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
 from clarinet.utils.admin import ensure_admin_exists
@@ -44,7 +47,6 @@ from clarinet.utils.bootstrap import (
 )
 from clarinet.utils.db_manager import db_manager
 from clarinet.utils.file_registry_resolver import load_project_file_registry
-from clarinet.utils.fs import shutdown_fs_executor
 from clarinet.utils.logger import logger
 
 
@@ -243,6 +245,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         activate_plan_package(settings.config_tasks_path)
         _ensure_record_types_imported()
+        from clarinet.services.pipeline.fingerprint import compute_fingerprint
+
+        compute_fingerprint()  # pin the startup snapshot before any later plan/ edits
         _load_plan_registries()
     except ConfigLoadError as e:
         raise _config_startup_error(e) from e
@@ -442,6 +447,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             app.state.dicomweb_cleanup = DicomWebCacheCleanupService(cache=app.state.dicomweb_cache)
             await app.state.dicomweb_cleanup.start()
 
+    if settings.sse_enabled:
+        from clarinet.services.events.bus import EventBus, set_event_bus
+        from clarinet.services.events.capture import register_capture_listeners
+
+        app.state.event_bus = EventBus(asyncio.get_running_loop())
+        set_event_bus(app.state.event_bus)
+        register_capture_listeners()
+
     logger.info("Application startup complete")
 
     try:
@@ -477,7 +490,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if settings.recordflow_enabled:
             await _shutdown_recordflow(app)
 
-        shutdown_fs_executor()
+        Files.shutdown_io()
+
+        from clarinet.services.events.bus import set_event_bus
+
+        if getattr(app.state, "event_bus", None) is not None:
+            app.state.event_bus.shutdown()
+        set_event_bus(None)
 
         await db_manager.close()
         logger.info("Application shutdown")
@@ -577,6 +596,13 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(viewer.router, prefix="/api/records", tags=["Viewers"])
     app.include_router(health.router, prefix="/api", tags=["Health"])
 
+    # Mount SSE event stream (conditional on settings)
+    if settings.sse_enabled:
+        from clarinet.api.routers import sse
+
+        app.include_router(sse.router, prefix="/api", tags=["SSE"])
+        logger.info("SSE event stream enabled at /api/events")
+
     # Mount DICOMweb proxy router (conditional on settings)
     if settings.dicomweb_enabled:
         app.include_router(dicomweb.router, prefix="/dicom-web", tags=["DICOMweb"])
@@ -604,6 +630,7 @@ def create_app(root_path: str = "") -> FastAPI:
 
         # Cache rendered index.html with $BASE_PATH / $PROJECT_TITLE substituted
         _index_html_cache: dict[str, str] = {}
+        _app_config_cache: dict[str, str] = {}
 
         def _render_index(index_path: Path) -> str:
             """Read index.html, substitute $BASE_PATH/$PROJECT_TITLE, cache result."""
@@ -618,7 +645,7 @@ def create_app(root_path: str = "") -> FastAPI:
 
         # Serve index.html for all non-API routes (SPA support)
         @app.get("/{full_path:path}", response_model=None)
-        async def serve_spa(full_path: str) -> FileResponse | HTMLResponse:
+        async def serve_spa(full_path: str) -> FileResponse | HTMLResponse | Response:
             """Serve SPA for all non-API routes."""
             # Skip API and DICOMweb routes
             if full_path.startswith(("api/", "dicom-web/")):
@@ -628,6 +655,34 @@ def create_app(root_path: str = "") -> FastAPI:
 
             # OHIF Viewer SPA routing: serve static files or fall back to index.html
             if full_path.startswith("ohif/"):
+                if full_path == "ohif/app-config.js" and settings.ohif_enabled:
+                    cfg_path = ohif_dir / "app-config.js"
+                    if cfg_path.is_file():
+                        if root_path in _app_config_cache:
+                            return Response(
+                                _app_config_cache[root_path],
+                                media_type="application/javascript",
+                            )
+                        text = cfg_path.read_text(encoding="utf-8")
+                        js = ohif_config.render_datasources_js(
+                            backend=settings.dicomweb_backend,
+                            external_root=settings.dicomweb_external_root,
+                            friendly_name=settings.dicomweb_friendly_name,
+                            qido_include=settings.dicomweb_qido_supports_include_field,
+                            fuzzy=settings.dicomweb_supports_fuzzy_matching,
+                            wildcard=settings.dicomweb_supports_wildcard,
+                            base_path=root_path,
+                        )
+                        rendered = ohif_config.inject_datasources(text, js)
+                        if rendered is None:
+                            logger.warning(
+                                f"OHIF app-config.js missing {ohif_config.DATASOURCES_SENTINEL} "
+                                "sentinel; serving unrendered. Run "
+                                "'clarinet ohif install --force-config' to refresh."
+                            )
+                            return Response(text, media_type="application/javascript")
+                        _app_config_cache[root_path] = rendered
+                        return Response(rendered, media_type="application/javascript")
                 if settings.ohif_enabled and ohif_dir.exists():
                     # Try to serve the exact static file
                     ohif_file = ohif_dir / full_path.removeprefix("ohif/")

@@ -26,7 +26,10 @@ import asyncio
 import functools
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from clarinet.files import Files
 
 from clarinet.client import ClarinetClient
 from clarinet.settings import settings
@@ -34,7 +37,7 @@ from clarinet.utils.logger import logger
 
 from .broker import get_broker_for
 from .chain import register_task
-from .context import FileResolver, build_task_context
+from .context import build_task_context
 from .message import PipelineMessage
 from .sync_wrappers import build_sync_context
 
@@ -84,7 +87,7 @@ def pipeline_task(
             )
             try:
                 ctx = await build_task_context(message, client)
-                pre_checksums = await ctx.files.snapshot_checksums()
+                pre_checksums = await ctx.files.checksums()
 
                 if is_async:
                     result = await fn(message, ctx)
@@ -135,22 +138,20 @@ def pipeline_task(
     return decorator
 
 
-async def _detect_file_changes(files: FileResolver, pre: dict[str, str | None]) -> list[str]:
-    """Compare pre-task checksums with current state to detect file changes.
+async def _detect_file_changes(files: Files, pre: dict[str, str]) -> list[str]:
+    """Return file-definition names whose on-disk state changed during the task.
 
-    Args:
-        files: FileResolver with access tracking from the completed task.
-        pre: Pre-task checksums from ``snapshot_checksums()``.
-
-    Returns:
-        List of file definition names whose checksums changed.
+    ``pre`` and the freshly computed post-task map are both full-registry
+    ``Files.checksums()`` results — singular files keyed by ``name``, collection
+    (``multiple=True``) members keyed ``name:filename``, missing files absent.
+    A key whose checksum differs between the two maps (added, modified, or
+    removed) marks its file definition as changed; the leading ``name`` segment
+    is reported. Comparing the full maps — rather than only the per-name first
+    ``files.accessed`` entry — keeps collection members and deletions correct
+    (the old accessed-loop reported every collection def as changed because its
+    ``name`` key never appears in the ``name:filename``-keyed checksum map).
     """
-    from clarinet.utils.file_checksums import compute_file_checksum
-
-    changed: list[str] = []
-    for name, path in files.accessed_files.items():
-        old = pre.get(name)
-        new = await compute_file_checksum(path) if path.is_file() else None
-        if old != new:
-            changed.append(name)
-    return changed
+    post = await files.checksums()
+    return sorted(
+        {key.split(":", 1)[0] for key in pre.keys() | post.keys() if pre.get(key) != post.get(key)}
+    )

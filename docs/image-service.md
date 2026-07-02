@@ -27,7 +27,7 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NRRD spacing resolution**: tries `spacings` key first, then `space directions` diagonal. Falls back to default `(1.0, 1.0, 1.0)` if neither is present.
 
-**DICOM slice sorting**: `ImagePositionPatient[2]` (Z-coordinate) → `InstanceNumber` → file order.
+**DICOM slice sorting**: GDCM orders by `ImagePositionPatient` projected onto the slice normal (→ `InstanceNumber` fallback); the reader then canonicalizes the slice axis to a version-stable orientation (see "Slice-Axis Canonicalization" below).
 
 **DICOM error tolerance**: non-DICOM files and DICOM files without `pixel_array` are silently skipped. Only raises `ImageReadError` if zero valid slices remain.
 
@@ -40,7 +40,7 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NIfTI write (`_save_nifti`)**: uses `_nifti_image.affine` if available, otherwise `np.eye(4)`. This means spacing is only preserved in the NIfTI affine when the source was also NIfTI.
 
-**NRRD write (`_save_nrrd`)**: passes `_nrrd_header` (minus `Segment*` keys) if available, otherwise empty `{}`. Spacing is only embedded in NRRD when the source was also NRRD.
+**NRRD write (`_save_nrrd`)**: passes `_nrrd_header` if available, otherwise empty `{}`. Segment metadata (`Segment{i}_Name`/`_LabelValue`/`_Color`/...) is preserved but **reconciled to the labels actually present** in the voxel data — blocks for absent label values are dropped and survivors renumbered contiguously, and grid-dependent keys (`*_Extent`, `Segmentation_ReferenceImageExtentOffset`) are dropped (readers recompute the effective extent on load). This guarantees a written segmentation never names a label value absent from its data. Spacing is only embedded in NRRD when the source was also NRRD.
 
 ### Cross-Format Spacing Preservation
 
@@ -116,14 +116,41 @@ All set operations are **label-based** (operate on connected-component labels), 
 
 | Method | Semantics | Key Parameters |
 |---|---|---|
-| `a.intersection(b, *, min_overlap=1, min_overlap_ratio=None)` | Keep ROIs from `a` with sufficient overlap with `b` | `min_overlap`: min voxels (default 1). `min_overlap_ratio`: min fraction of label size. |
+| `a.intersection(b, *, min_overlap=1, min_overlap_ratio=None, strategy=None)` | Keep ROIs from `a` with sufficient overlap with `b` | `min_overlap`: min voxels (default 1). `min_overlap_ratio`: min fraction of label size. `strategy`: optional `MatchingStrategy` — see below. |
 | `a.union(b)` | Binary union — all nonzero from both, result is single-valued | — |
-| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction of label size. |
-| `a.symmetric_difference(b, *, min_overlap=1, min_overlap_ratio=None, max_overlap=0, max_overlap_ratio=None)` | `a.union(b).difference(a.intersection(b, ...))` | Passes params through to `intersection()` and `difference()`. |
+| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None, strategy=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction (now applied per component — see below). `strategy`: optional `MatchingStrategy`. |
+| `a.symmetric_difference(b, *, min_overlap=1, min_overlap_ratio=None, max_overlap=0, max_overlap_ratio=None, strategy=None)` | Component-level symmetric difference (unmatched A + unmatched B) | Same threshold params as `intersection`/`difference`. `strategy`: optional `MatchingStrategy`. |
 
 **Union flattening**: the result is always binary (values 0 or 1). With `autolabel=True`, connected regions become a single label. Separate regions get different labels.
 
 **Strict difference** (`max_overlap=0`, the default): drops any label with nonzero overlap. Use `max_overlap=N` to tolerate small overlaps.
+
+**`difference(max_overlap_ratio=...)`**: the ratio threshold is now applied and enforced (prior versions had an inert implementation). Setting `max_overlap_ratio=0.1` drops an A component only if its overlap with the largest single B component exceeds 10% of A's size.
+
+**`symmetric_difference` is component-level**: produces the union of unmatched A and unmatched B components. This is cleaner than the prior implementation which called `union().difference(intersection())` and could introduce re-labeling artifacts.
+
+**Per-edge overlap threshold (behavior note)**: for `intersection` and `difference`, the default no-`strategy` path evaluates the threshold against the **largest single B-component overlap**, not the summed overlap across all B components. This matches historical behavior for default thresholds (`min_overlap=1` / `max_overlap=0`) and for single-component overlaps. Consumers relying on raised thresholds with fragmented (multi-component) other masks should be aware: for example, two B components each overlapping A by 3 voxels (sum 6) do not trigger a `min_overlap=5` threshold — only the per-component max of 3 is tested.
+
+#### Optional `strategy=` parameter
+
+The three matching-based operations (`intersection`, `difference`, `symmetric_difference`) accept an optional `strategy: MatchingStrategy` keyword argument (`union` is a plain binary OR with nothing to match). When provided, it replaces the default `ThresholdMatch`-based matching with a fully configurable correspondence engine.
+
+```python
+from clarinet.services.image.correspondence import GreedyArgmax, AbsoluteOverlap, IoU
+
+# Resolve 1-to-N overlaps: each A picks its highest-IoU B partner
+result = seg_a.difference(seg_b, strategy=GreedyArgmax(IoU(), direction="a_to_b"))
+```
+
+Available measures: `IoU`, `Dice`, `Coverage`, `OverlapCoefficient`, `AbsoluteOverlap`, `CentroidProximity`.
+
+**Grid alignment (fail-fast)**: every set operation compares the two segmentations **by voxel index**, so both must occupy the same physical grid. By default a grid mismatch (different shape, origin, spacing, or direction — e.g. a Z-flipped projection vs. its doctor segmentation) raises `GeometryMismatchError` instead of silently producing wrong results. Pass `resample=True` to opt into automatic nearest-neighbour resampling of `other` onto the caller's grid. This mirrors ITK's "same physical space" guard plus an explicit `ResampleImageFilter`.
+
+| Helper | Returns | Purpose |
+|---|---|---|
+| `a.same_grid(b, *, atol=1e-4)` | `bool` | Grids equal within tolerance (shape + affine). |
+| `a.assert_same_grid(b, *, atol=1e-4)` | `None` | Raises `GeometryMismatchError` with a diagnostic if grids differ. |
+| `conform_seg_to_grid(seg_path, grid_path, *, out_path=None)` | `bool` | Repair helper: resample a `.seg.nrrd` onto a reference volume's grid (in place or to `out_path`); returns whether a resample was needed. For batch-fixing historically misaligned files. |
 
 ### Deprecated Operators
 
@@ -137,14 +164,27 @@ The dunder operators delegate to the named methods above and emit `DeprecationWa
 | `a + b` | `a.union(b)` | — |
 | `a ^ b` | `a.symmetric_difference(b, min_overlap=3)` | Inherits old `&` threshold |
 
+Because they delegate to the named methods, the operators also **raise `GeometryMismatchError` on grid mismatch** — there is no `resample` opt-in on the operator form, so migrate to the named method (`a.union(b, resample=True)`) if you need resampling.
+
 ### In-Place Operations
 
 | Method | Behavior |
 |---|---|
-| `subtract(other)` | Zeros out voxels where `other` is nonzero (voxel-level, not label-level) |
-| `append(other)` | Merges ROIs from `other` into matching labels. Raises `ValueError` if an ROI overlaps multiple labels. |
+| `subtract(other, *, resample=False)` | Zeros out voxels where `other` is nonzero (voxel-level, not label-level). Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
+| `append(other, *, strategy=None, resample=False)` | Merges ROIs from `other` into matching labels. Default (no `strategy`): raises `ValueError` if an ROI overlaps multiple labels. With `strategy`: resolves overlaps via the correspondence engine — each B component is merged into its best matching A label. Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
 | `copy_from(other)` | Replaces voxel data entirely |
 | `separate_labels()` | Re-runs connected-component labeling |
+
+**`append` with `strategy=`**: pass a `MatchingStrategy` to resolve multi-label overlaps instead of raising. The B component's voxels are repainted with the matched A label value.
+
+```python
+from clarinet.services.image.correspondence import GreedyArgmax, AbsoluteOverlap
+
+# merge bridging ROIs into their best-matching existing label
+seg.append(other, strategy=GreedyArgmax(AbsoluteOverlap(), direction="b_to_a"))
+```
+
+Unmatched B components (no A partner found by the strategy) are silently dropped.
 
 ---
 
@@ -193,12 +233,25 @@ Supports compressed (JPEG/JPEG2000/JPEG-LS), Enhanced multi-frame, and vendor-sp
 GDCM sorts slices by projection of `ImagePositionPatient` onto the slice direction (handles oblique acquisitions).
 Falls back to `InstanceNumber` when position metadata is unavailable.
 
+### Slice-Axis Canonicalization
+
+The reader normalizes the slice axis so it points along the **positive sense of its dominant
+anatomical axis** (`_canonicalize_slice_axis`). This makes the conversion **reproducible across
+framework versions**: a series re-converted later (repair, anonymization path migration, manual
+re-run) lands on the *identical* voxel grid. Without it, the slice-ordering convention drifts
+between readers — the pre-#221 hand-written reader sorted by ascending `ImagePositionPatient[2]`,
+while GDCM sorts along the IOP slice normal, which can point either way — so a segmentation frozen
+on one grid and another frozen on the other end up on physically equivalent but **index-reversed**
+grids (the projection/doctor-seg Z-flip). The flip is **geometry-preserving**: the array, origin,
+and slice direction are reversed *together*, so every voxel keeps its physical position (a
+direction-only flip would mirror the data). No-op when the slice axis already points the canonical way.
+
 ### Spacing, Origin, Direction
 
-Pulled directly from the resulting `sitk.Image`:
+Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization:
 - `GetSpacing()` returns `(x, y, z)`, mapped to internal `(row=y, col=x, slice=z)`
-- `GetOrigin()` returns `(x, y, z)` in LPS, used as-is
-- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention
+- `GetOrigin()` returns `(x, y, z)` in LPS — moved to the opposite slice end if the axis is flipped
+- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention, then the slice column is sign-normalized
 
 `RescaleSlope`/`RescaleIntercept` are applied automatically by GDCM during `Execute()`.
 

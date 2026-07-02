@@ -19,6 +19,7 @@ import aiofiles
 from clarinet.config.primitives import FileDef, RecordDef, fileref_to_file_definition
 from clarinet.models.record import RecordTypeCreate
 from clarinet.utils.logger import logger
+from clarinet.utils.schema_bundler import bundle_external_defs
 
 # Fields whose values can reference external .py files
 _SCRIPT_FIELDS = ("slicer_script", "slicer_result_validator")
@@ -82,7 +83,7 @@ async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any
         async with aiofiles.open(schema_path) as f:
             content = await f.read()
         parsed: dict[str, Any] = json.loads(content)
-        return parsed
+        return bundle_external_defs(parsed, schema_path.parent)
 
     # Try sidecar
     sidecar = folder / f"{rt_def.name}.schema.json"
@@ -90,7 +91,7 @@ async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any
         async with aiofiles.open(sidecar) as f:
             content = await f.read()
         sidecar_parsed: dict[str, Any] = json.loads(content)
-        return sidecar_parsed
+        return bundle_external_defs(sidecar_parsed, folder)
 
     return None
 
@@ -212,10 +213,14 @@ async def _to_record_type_create(
         kwargs["inherit_user_from_parent"] = rt_def.inherit_user_from_parent
     if "editable" in rt_def.model_fields_set:
         kwargs["editable"] = rt_def.editable
+    if "shared_editing" in rt_def.model_fields_set:
+        kwargs["shared_editing"] = rt_def.shared_editing
     if "edit_window_days" in rt_def.model_fields_set:
         kwargs["edit_window_days"] = rt_def.edit_window_days
     if "viewer_mode" in rt_def.model_fields_set:
         kwargs["viewer_mode"] = rt_def.viewer_mode
+    if rt_def.allowed_viewers is not None:
+        kwargs["allowed_viewers"] = rt_def.allowed_viewers
     if data_schema is not None:
         kwargs["data_schema"] = data_schema
     if ui_schema is not None:

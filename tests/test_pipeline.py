@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from clarinet.cli.main import _normalize_worker_queues
 from clarinet.exceptions.domain import PipelineConfigError
 from clarinet.services.pipeline.broker import reset_brokers
 from clarinet.services.pipeline.chain import (
@@ -20,7 +21,7 @@ from clarinet.services.pipeline.chain import (
     persist_definitions,
 )
 from clarinet.services.pipeline.message import PipelineMessage
-from clarinet.services.pipeline.worker import get_worker_queues
+from clarinet.services.pipeline.worker import get_worker_queues, warn_if_stale
 from clarinet.settings import settings
 
 # Module-level snapshots of the namespaced queue names. Captured at
@@ -29,6 +30,7 @@ from clarinet.settings import settings
 DEFAULT_QUEUE = settings.default_queue_name
 GPU_QUEUE = settings.gpu_queue_name
 DICOM_QUEUE = settings.dicom_queue_name
+QUARTO_QUEUE = settings.quarto_queue_name
 
 
 @pytest.fixture(autouse=True)
@@ -314,6 +316,7 @@ class TestWorkerQueues:
         """Worker with no capabilities gets only default queue."""
         monkeypatch.setattr(settings, "have_gpu", False)
         monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.setattr(settings, "have_quarto", False)
         queues = get_worker_queues()
         assert queues == [DEFAULT_QUEUE]
 
@@ -321,6 +324,7 @@ class TestWorkerQueues:
         """Worker with GPU capability gets default + GPU queues."""
         monkeypatch.setattr(settings, "have_gpu", True)
         monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.setattr(settings, "have_quarto", False)
         queues = get_worker_queues()
         assert DEFAULT_QUEUE in queues
         assert GPU_QUEUE in queues
@@ -329,19 +333,65 @@ class TestWorkerQueues:
         """Worker with DICOM capability gets default + DICOM queues."""
         monkeypatch.setattr(settings, "have_gpu", False)
         monkeypatch.setattr(settings, "have_dicom", True)
+        monkeypatch.setattr(settings, "have_quarto", False)
         queues = get_worker_queues()
         assert DEFAULT_QUEUE in queues
         assert DICOM_QUEUE in queues
+
+    def test_quarto_queue(self, monkeypatch):
+        """Worker with Quarto capability gets default + Quarto queues."""
+        monkeypatch.setattr(settings, "have_gpu", False)
+        monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.setattr(settings, "have_quarto", True)
+        queues = get_worker_queues()
+        assert DEFAULT_QUEUE in queues
+        assert QUARTO_QUEUE in queues
 
     def test_all_queues(self, monkeypatch):
         """Worker with all capabilities gets all queues."""
         monkeypatch.setattr(settings, "have_gpu", True)
         monkeypatch.setattr(settings, "have_dicom", True)
+        monkeypatch.setattr(settings, "have_quarto", True)
         queues = get_worker_queues()
         assert DEFAULT_QUEUE in queues
         assert GPU_QUEUE in queues
         assert DICOM_QUEUE in queues
-        assert len(queues) == 3
+        assert QUARTO_QUEUE in queues
+        assert len(queues) == 4
+
+
+class TestNormalizeWorkerQueues:
+    """`clarinet worker --queues <kind>` must resolve to the version-gated names."""
+
+    def test_kind_shorthand_resolves_to_versioned_queue(self, monkeypatch):
+        """Gate on: a bare kind maps to the fingerprinted name the API uses."""
+        from clarinet.services.pipeline.fingerprint import queue_version_segment
+
+        monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+        ns = settings.pipeline_task_namespace
+        # Reconstruct the expected name from the fingerprint module independently
+        # of settings.quarto_queue_name, so the assert is not tautological.
+        seg = queue_version_segment()
+        assert _normalize_worker_queues(["quarto"]) == [f"{ns}.{seg}.quarto"]
+        assert _normalize_worker_queues(["default"]) == [f"{ns}.{seg}.default"]
+        # the legacy bare "{ns}.quarto" would orphan the worker on a dead queue
+        assert _normalize_worker_queues(["quarto"]) != [f"{ns}.quarto"]
+
+    def test_kind_shorthand_unversioned_when_gate_off(self, monkeypatch):
+        """Gate off: the shorthand still equals the (now unversioned) producer name."""
+        monkeypatch.setattr(settings, "pipeline_version_check_enabled", False)
+        ns = settings.pipeline_task_namespace
+        assert _normalize_worker_queues(["quarto"]) == [settings.quarto_queue_name]
+        assert _normalize_worker_queues(["quarto"]) == [f"{ns}.quarto"]
+
+    def test_full_name_passes_through(self):
+        """An explicit fully-qualified queue name is left untouched."""
+        assert _normalize_worker_queues(["liver.123abc.quarto"]) == ["liver.123abc.quarto"]
+
+    def test_unknown_shorthand_falls_back_to_namespace_prefix(self):
+        """An unknown bare token keeps the legacy {namespace}.<token> shape."""
+        ns = settings.pipeline_task_namespace
+        assert _normalize_worker_queues(["custom"]) == [f"{ns}.custom"]
 
 
 # ─── RecordFlow PipelineAction integration ───────────────────────────────────
@@ -1446,3 +1496,63 @@ class TestAuditMiddleware:
             assert AuditMiddleware in types
             assert types.index(PipelineLoggingMiddleware) < types.index(AuditMiddleware)
             assert types.index(AuditMiddleware) < types.index(DeadLetterMiddleware)
+
+
+# ─── warn_if_stale ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_logs_error_on_mismatch(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    monkeypatch.setattr(
+        "clarinet.services.pipeline.fingerprint.compute_fingerprint", lambda: "mine"
+    )
+    mock_client = AsyncMock()
+    mock_client.get_worker_fingerprint = AsyncMock(return_value="theirs")
+    mock_client.close = AsyncMock()
+    with (
+        patch("clarinet.client.ClarinetClient", return_value=mock_client),
+        caplog.at_level("ERROR"),
+    ):
+        await warn_if_stale(["proj.default"])
+    assert "stale" in caplog.text.lower()
+    mock_client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_info_on_match(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    monkeypatch.setattr(
+        "clarinet.services.pipeline.fingerprint.compute_fingerprint", lambda: "same"
+    )
+    mock_client = AsyncMock()
+    mock_client.get_worker_fingerprint = AsyncMock(return_value="same")
+    mock_client.close = AsyncMock()
+    with patch("clarinet.client.ClarinetClient", return_value=mock_client), caplog.at_level("INFO"):
+        await warn_if_stale(["proj.default"])
+    assert "matches" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_disabled_is_noop(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", False)
+    with patch("clarinet.client.ClarinetClient") as mk:
+        await warn_if_stale(["proj.default"])
+    mk.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_warning_on_api_error(monkeypatch, caplog) -> None:
+    from clarinet.client import ClarinetAPIError
+
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    mock_client = AsyncMock()
+    mock_client.get_worker_fingerprint = AsyncMock(side_effect=ClarinetAPIError("boom"))
+    mock_client.close = AsyncMock()
+    with (
+        patch("clarinet.client.ClarinetClient", return_value=mock_client),
+        caplog.at_level("WARNING"),
+    ):
+        await warn_if_stale(["proj.default"])
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+    mock_client.close.assert_awaited_once()

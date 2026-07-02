@@ -3,6 +3,7 @@
 import pytest
 import pytest_asyncio
 
+from clarinet.models.base import RecordStatus
 from tests.utils.factories import (
     make_patient,
     make_record_type,
@@ -11,7 +12,7 @@ from tests.utils.factories import (
     make_user,
     seed_record,
 )
-from tests.utils.urls import ADMIN_RECORD_STATUS, ADMIN_RECORD_USER
+from tests.utils.urls import ADMIN_RECORD_STATUS, ADMIN_RECORD_USER, ADMIN_STATS
 
 
 @pytest_asyncio.fixture
@@ -150,3 +151,29 @@ class TestAdminUnassignUser:
     async def test_admin_unassign_nonexistent(self, client):
         resp = await client.delete(f"{ADMIN_RECORD_USER}/999999/user")
         assert resp.status_code == 404
+
+
+class TestAdminStatsWorkload:
+    """GET /api/admin/stats carries per-user workload + available pending."""
+
+    @pytest.mark.asyncio
+    async def test_admin_stats_includes_workload(self, client, record_env, test_session):
+        user = record_env["user"]  # env seeded 1 assigned pending record for this user
+        # one unassigned pending record → the available pool
+        await seed_record(
+            test_session,
+            patient_id="ADMIN_PAT",
+            study_uid="1.2.3.900",
+            series_uid="1.2.3.900.1",
+            rt_name="admin-test-rt",
+            status=RecordStatus.pending,
+        )
+
+        resp = await client.get(ADMIN_STATS)
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["available_pending"] == 1
+        by_email = {w["email"]: w for w in data["workload_by_user"]}
+        assert user.email in by_email
+        assert by_email[user.email]["pending"] == 1

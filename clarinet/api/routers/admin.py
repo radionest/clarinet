@@ -14,16 +14,20 @@ from clarinet.api.dependencies import (
     PaginationDep,
     RecordEventRepositoryDep,
     RecordServiceDep,
+    SessionDep,
 )
 from clarinet.models import Record, RecordEventFind, RecordEventRead, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
     DeleteRecordResult,
+    OnlineUsersResponse,
     RecordTypeStats,
     RoleMatrixResponse,
 )
 from clarinet.models.base import RecordStatus
+from clarinet.settings import settings
+from clarinet.utils.session import get_online_user_ids
 
 router = APIRouter(
     responses={
@@ -158,31 +162,42 @@ async def clear_record_output_files(
 
 @router.get("/records/events", response_model=list[RecordEventRead])
 async def list_record_events(
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     events_repo: RecordEventRepositoryDep,
     pagination: PaginationDep,
     kind: str | None = None,
     actor_id: UUID | None = None,
     patient_id: str | None = None,
+    record_type_name: str | None = None,
     since: datetime | None = None,
 ) -> list[RecordEventRead]:
     """Global record audit feed, newest first (admin only).
 
     Optional filters: ``kind``, ``actor_id``, ``patient_id`` (events of the
-    patient's current records), ``since`` (``occurred_at`` lower bound).
-    Events of already-deleted records are available only via
-    ``/records/events/deleted``.
+    patient's current records), ``record_type_name`` (events of records of that
+    type), ``since`` (``occurred_at`` lower bound). Events of already-deleted
+    records are available only via ``/records/events/deleted``.
+
+    ``patient_id`` is returned to superusers only. This cross-patient feed also
+    serves admin-role non-superusers, who are masked on every other surface
+    (the record-scoped ``/records/{id}/events`` view applies per-patient
+    masking), so an anonymized patient's real id is withheld here too. The
+    ``patient_id`` query filter still works for any admin.
     """
     criteria = RecordEventFind(
         kind=kind,
         actor_id=actor_id,
         patient_id=patient_id,
+        record_type_name=record_type_name,
         since=since,
         skip=pagination.skip,
         limit=pagination.limit,
     )
     events = await events_repo.find(criteria)
-    return [RecordEventRead.model_validate(e) for e in events]
+    reads = [RecordEventRead.model_validate(e) for e in events]
+    if not current_user.is_superuser:
+        reads = [r.model_copy(update={"patient_id": None}) for r in reads]
+    return reads
 
 
 @router.get("/records/events/deleted", response_model=list[RecordEventRead])
@@ -215,6 +230,22 @@ async def get_role_matrix(
         RoleMatrixResponse with all roles and users with their assignments.
     """
     return await service.get_role_matrix()
+
+
+@router.get("/online-users", response_model=OnlineUsersResponse)
+async def get_online_users(
+    _current_user: AdminUserDep,
+    session: SessionDep,
+) -> OnlineUsersResponse:
+    """Ids of users currently online, for the admin presence indicator.
+
+    "Online" = at least one session that would still authenticate now: not
+    expired and within ``session_idle_timeout_minutes`` of last access. SSE
+    ``presence`` events deliver live deltas; this is the initial snapshot (and
+    the resync after an SSE reconnect).
+    """
+    ids = await get_online_user_ids(session, settings.session_idle_timeout_minutes)
+    return OnlineUsersResponse(user_ids=sorted(str(u) for u in ids))
 
 
 @router.get("/record-types/stats", response_model=list[RecordTypeStats])

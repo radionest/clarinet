@@ -21,6 +21,10 @@ source "${DEPLOY_DIR}/lib/provision.sh"
 
 VENV_DIR="${INSTALL_DIR}/venv"
 
+# Set by install_quarto when a Quarto toolchain is provisioned — gates the
+# dedicated clarinet-worker@quarto instance in install_systemd.
+QUARTO_INSTALLED=""
+
 # --- Step 1: System user (delegated to provision.sh) ---
 setup_user() { setup_clarinet_user; }
 
@@ -177,6 +181,12 @@ install_quarto() {
         log "No Quarto tarball in bundle — skipping (optional feature)"
         return
     fi
+    # A bundled tarball means this host is meant to render Quarto reports — flag
+    # it so install_systemd starts the dedicated worker that consumes the quarto
+    # queue. Set on intent (not on install success): if the CLI install hiccups
+    # the worker then fails renders loudly ("quarto binary not found") instead of
+    # leaving them queued with no consumer forever.
+    QUARTO_INSTALLED=1
     log "Installing Quarto CLI..."
     cd "$INSTALL_DIR"
     sudo -u clarinet "$VENV_DIR/bin/clarinet" quarto install --from-file "$tarball" || warn "Quarto install failed (non-critical)"
@@ -194,6 +204,22 @@ install_systemd() {
         systemctl enable clarinet-worker@default
         systemctl restart clarinet-api
         systemctl restart clarinet-worker@default
+
+        # Quarto renders are bound to the quarto queue (render_quarto_report →
+        # settings.quarto_queue_name) and run on a dedicated worker. The default
+        # worker only consumes clarinet.<ns>.default, so without this instance the
+        # quarto queue has no consumer and renders hang in "pending" forever.
+        if [[ -n "$QUARTO_INSTALLED" ]]; then
+            systemctl enable clarinet-worker@quarto
+            systemctl restart clarinet-worker@quarto
+            log "Quarto worker started (clarinet-worker@quarto)"
+        else
+            # Bare redeploy (no Quarto toolchain): tear down a worker left by a
+            # previous Quarto-enabled deploy. A stale instance would keep a (now
+            # version-mismatched) consumer registered and silently re-orphan renders.
+            # --now also stops it; ignore failure when it was never enabled.
+            systemctl disable --now clarinet-worker@quarto 2>/dev/null || true
+        fi
         log "Systemd services started (api + worker@default)"
     else
         # worker role: install the unit template only. topology-wire enables the
@@ -242,6 +268,7 @@ print_summary() {
     echo " Services:"
     echo "   systemctl status clarinet-api"
     echo "   systemctl status clarinet-worker@default"
+    [[ -n "$QUARTO_INSTALLED" ]] && echo "   systemctl status clarinet-worker@quarto"
     echo "   journalctl -u clarinet-api -f"
     echo ""
     echo "=============================================="

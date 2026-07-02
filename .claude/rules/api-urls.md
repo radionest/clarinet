@@ -52,6 +52,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
+| `/api/records/claim-next?record_type_name=` | POST | 200 | Claim a random unassigned `pending` record of the given type from the pool (role-scoped, `unique_per_user`-aware): assigns it to the caller + sets `inwork`. **404** when no claimable record of that type. **409**: `unique_per_user` violated. Powers the dashboard "take a task" button |
 | `/api/records/filter-options` | POST | 200 | Distinct patient/record_type/user values for filter dropdowns (RBAC-scoped; body filters ignored) |
 | `/api/records/bulk/status` | PATCH | 204 | Bulk status update. **409** for non-superusers when any target record is finished and its type locks submitted records (`editable=False` or expired `edit_window_days`); **409** when any target is `preparing` and the new status is `inwork`/`finished`. Preparing → pending re-validates files per record (may land in `blocked`) |
 | `/api/records/{id}` | GET | 200 | Get record |
@@ -115,18 +116,19 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/admin/stats` | GET | 200 | Admin stats |
+| `/api/admin/online-users` | GET | 200 | Ids of users online now (≥1 session valid within `session_idle_timeout_minutes`); feeds role-matrix presence dots. SSE `presence` events deliver live deltas |
 | `/api/admin/records/{id}` | DELETE | 200 | Cascade-delete record + descendants + output files (admin; 409 if any inwork) |
 | `/api/admin/records/{id}/assign` | PATCH | 200 | Admin assign record |
 | `/api/admin/records/{id}/status` | PATCH | 200 | Admin set record status |
 | `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |
 | `/api/admin/records/{id}/output-files` | DELETE | 200 | Clear output files (admin) |
-| `/api/admin/records/events` | GET | 200 | Global record audit feed, newest first (admin). Filters: `kind`, `actor_id`, `patient_id` (events of the patient's current records), `since` + pagination. `actor_name` (email) resolved server-side |
+| `/api/admin/records/events` | GET | 200 | Global record audit feed, newest first (admin). Filters: `kind`, `actor_id`, `patient_id` (events of the patient's current records), `record_type_name` (events of records of that type), `since` + pagination. `actor_name` (email) resolved server-side |
 | `/api/admin/records/events/deleted` | GET | 200 | Audit events of deleted records (snapshot in `old_value`), newest first |
 | `/api/admin/record-types/stats` | GET | 200 | Record type stats |
 | `/api/admin/reports` | GET | 200 | List custom SQL reports (`*.sql` from `settings.reports_path`) |
 | `/api/admin/reports/{name}/download?format=csv\|xlsx` | GET | 200 | Download report as CSV or XLSX (default: csv) |
 | `/api/admin/quarto-reports` | GET | 200 | List Quarto report templates (`*.qmd` from `settings.quarto_reports_path`) |
-| `/api/admin/quarto-reports/{name}/render` | POST | 202 | Start background render. Body `{"formats":["docx","pdf"]}`; returns the pending render state (with `render_id`). **404** template or a declared `clarinet.data` SQL report is unknown. **422** empty `formats`. **503** quarto CLI not installed |
+| `/api/admin/quarto-reports/{name}/render` | POST | 202 | Start background render. Body `{"formats":["docx","pdf"]}`; returns the pending render state (with `render_id`). Files declared in front matter under `clarinet.stage` (paths relative to the .qmd) are staged flat into the render dir so a chunk can import a project helper module + its deps; a missing stage file is logged, not fatal (unlike `clarinet.data`). **404** template or a declared `clarinet.data` SQL report is unknown. **422** empty `formats`. **503** quarto CLI not installed |
 | `/api/admin/quarto-reports/{name}/renders/{render_id}/status` | GET | 200 | Poll the render status sidecar. **404** render unknown |
 | `/api/admin/quarto-reports/{name}/renders/{render_id}/download?format=docx\|pdf` | GET | 200 | Download the rendered file. **409** render not finished. **404** render unknown |
 
@@ -148,6 +150,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/pipelines/runs` | GET | 200 | List runs, filters: `status`, `task_name`, `record_id`, `patient_id`, `since` (started_at lower bound) + pagination (AdminUserDep) |
 | `/api/pipelines/runs/{task_id}` | GET | 200 | Get single run (AdminUserDep) |
 | `/api/pipelines/runs/{task_id}` | PATCH | 200 | Record terminal status (AdminUserDep); late `retrying` after a terminal status is ignored |
+| `/api/pipelines/fingerprint` | GET | 200 | Version fingerprint (clarinet version + plan/ hash); no auth, worker-facing — workers compare against their own to detect stale code |
 
 ### Workflow visualization (`/api/admin/workflow`)
 
@@ -187,3 +190,11 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/dicom-web/studies/{uid}/series/{uid}/archive` | GET | 200 | Download series as ZIP |
 | `/dicom-web/preload` | POST | 200 | Start multi-study preload. Body `{"study_uids": [...]}` (1–20 UIDs). **422**: empty/oversized list |
 | `/dicom-web/preload/progress/{task_id}` | GET | 200 | Poll preload progress (`starting`/`fetching`/`ready`/`error`/`not_found`) |
+
+### SSE (`/api/events`)
+
+Mounted under `/api`, conditional on `settings.sse_enabled`. Cookie auth via `CurrentUserDep`.
+
+| URL | Method | Status | Description |
+|---|---|---|---|
+| `/api/events` | GET | 200 | Server-Sent Events stream (`text/event-stream`) of entity / task-progress events. Server-push only (client sends nothing). Frames: `entity`, `task_progress`, `ping`, `auth_expired`. **401** without a valid session cookie. **503** when `sse_enabled=False` or the bus is not initialised |

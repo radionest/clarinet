@@ -10,9 +10,10 @@ import pytest
 
 from clarinet.client import ClarinetAPIError
 from clarinet.exceptions.domain import PipelineStepError
+from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.dicom.models import RetrieveResult, SeriesResult
-from clarinet.services.pipeline.context import FileResolver, RecordQuery, TaskContext
+from clarinet.services.pipeline.context import RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.cache_dicomweb import (
     _filter_series_to_fetch,
@@ -48,13 +49,9 @@ def _build_ctx(tmp_path: Path) -> TaskContext:
     to ``settings.storage_path/dicomweb_cache/...``), so the resolver is
     a stub keyed only by PATIENT level.
     """
-    working_dirs = {DicomQueryLevel.PATIENT: tmp_path}
-    files = FileResolver(
-        working_dirs=working_dirs,
-        record_type_level=DicomQueryLevel.PATIENT,
-        file_registry=[],
-        fields={},
-    )
+    files = Files.empty()
+    files._dirs = {DicomQueryLevel.PATIENT: tmp_path}
+    files._level = DicomQueryLevel.PATIENT
     client = AsyncMock()
     records = RecordQuery(client=client, files=files)
     msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3")
@@ -176,7 +173,7 @@ class TestHasDcmAnon:
 
     def test_empty_anon_dir_returns_false(self, tmp_path: Path) -> None:
         """dcm_anon dir exists but contains no ``.dcm`` files → False."""
-        from clarinet.services.common.storage_paths import build_context, render_working_folder
+        from clarinet.files._storage import build_context, render_working_folder
 
         patient, study, series = _make_anonymized_triple(
             patient_id="HAS_EMPTY_ANON",
@@ -197,7 +194,7 @@ class TestHasDcmAnon:
 
     def test_finds_dcm_via_resolved_path(self, tmp_path: Path) -> None:
         """dcm_anon dir with ``.dcm`` files at template-resolved path → True."""
-        from clarinet.services.common.storage_paths import build_context, render_working_folder
+        from clarinet.files._storage import build_context, render_working_folder
 
         patient, study, series = _make_anonymized_triple(
             patient_id="HAS_DCM_ANON",

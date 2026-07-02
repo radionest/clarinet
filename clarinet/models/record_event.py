@@ -18,6 +18,7 @@ from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import PortableJSON
 
+from .record import Record
 from .user import User
 
 # DB column stays a plain string (additive downstream migrations);
@@ -94,6 +95,12 @@ class RecordEvent(RecordEventBase, table=True):
     # eager-load it with selectinload so ``actor_name`` can be serialized.
     actor: User | None = Relationship()
 
+    # Read-only nav to the linked record (single FK: record_id), never
+    # back-populated. Eager-loaded with selectinload so ``patient_id`` resolves
+    # without a lazy query; goes None once the record is deleted (record_id
+    # SET NULL), where ``record_key`` still preserves the original id.
+    record: Record | None = Relationship()
+
     @property
     def actor_name(self) -> str | None:
         """Email of the acting user; None for system actions or when unloaded.
@@ -116,6 +123,53 @@ class RecordEvent(RecordEventBase, table=True):
         actor = self.__dict__["actor"]
         return actor.email if actor is not None else None
 
+    @property
+    def patient_id(self) -> str | None:
+        """Patient id of the linked record; None for system/deleted-record events.
+
+        Reads from ``__dict__`` to avoid triggering a lazy load outside an
+        async context (mirrors ``actor_name``). The repo's read methods
+        eager-load ``record`` with selectinload so this resolves without a
+        query; a missing eager-load logs a warning rather than silently
+        dropping the id.
+        """
+        if "record" not in self.__dict__:
+            if self.record_id is not None:
+                from clarinet.utils.logger import logger
+
+                logger.warning(
+                    f"RecordEvent.patient_id accessed without eager-loaded record "
+                    f"(event_id={self.id}, record_id={self.record_id}); returning None",
+                )
+            return None
+        record = self.__dict__["record"]
+        return record.patient_id if record is not None else None
+
+    @property
+    def record_type_name(self) -> str | None:
+        """RecordType name of the linked record; None for system/deleted events.
+
+        ``record_type_name`` is a scalar FK column on ``record`` (FK to
+        ``recordtype.name``), so the repo's existing
+        ``selectinload(RecordEvent.record)`` already loads it — no nested
+        ``selectinload(Record.record_type)`` is required. Reads from
+        ``__dict__`` to avoid a lazy load outside an async context (mirrors
+        ``patient_id``); a missing eager-load logs a warning rather than
+        silently dropping the name.
+        """
+        if "record" not in self.__dict__:
+            if self.record_id is not None:
+                from clarinet.utils.logger import logger
+
+                logger.warning(
+                    f"RecordEvent.record_type_name accessed without eager-loaded "
+                    f"record (event_id={self.id}, record_id={self.record_id}); "
+                    f"returning None",
+                )
+            return None
+        record = self.__dict__["record"]
+        return record.record_type_name if record is not None else None
+
 
 class RecordEventRead(RecordEventBase):
     """API response schema for record audit events."""
@@ -124,19 +178,29 @@ class RecordEventRead(RecordEventBase):
     # Email of the acting user, resolved from ``actor_id`` via the eager-loaded
     # ``actor`` relationship; None for system actions (actor_id NULL).
     actor_name: str | None = None
+    # Patient id of the linked record, resolved via the eager-loaded ``record``
+    # relationship; None for system / deleted-record events. Masked per the
+    # record masking policy on the record-scoped endpoint.
+    patient_id: str | None = None
+    # RecordType name of the linked record, resolved via the eager-loaded
+    # ``record`` relationship; None for system / deleted-record events. Not
+    # masked — the record type is workflow metadata, not patient data.
+    record_type_name: str | None = None
 
 
 class RecordEventFind(SQLModel):
     """Search filters for the record audit feed (all optional).
 
-    ``patient_id`` matches events whose record currently belongs to that
-    patient (JOIN via ``record``); events of already-deleted records
-    (``record_id`` NULL) are excluded. Results are newest first.
+    ``patient_id`` and ``record_type_name`` match events whose record
+    currently belongs to that patient / has that record type (subquery via
+    ``record``); events of already-deleted records (``record_id`` NULL) are
+    excluded by either. Results are newest first.
     """
 
     kind: str | None = None
     actor_id: UUID | None = None
     patient_id: str | None = None
+    record_type_name: str | None = None
     since: datetime | None = None
     skip: int = 0
     limit: int = 100

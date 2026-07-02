@@ -12,6 +12,7 @@ import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set
 import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -38,6 +39,7 @@ pub type Model {
     role_matrix: Option(models.RoleMatrix),
     matrix_status: LoadStatus,
     role_toggling: Option(#(String, String)),
+    online_user_ids: set.Set(String),
     active_filters: Dict(String, String),
   )
 }
@@ -63,6 +65,9 @@ pub type Msg {
   RetryLoadMatrix
   ToggleUserRole(user_id: String, role_name: String, add: Bool)
   UserRoleToggled(Result(Nil, types.ApiError))
+  // Online presence (role matrix dots)
+  OnlineUsersLoaded(Result(List(String), types.ApiError))
+  PresenceChanged(user_id: String, online: Bool)
   // Records filters / sort
   AddFilter(key: String, value: String)
   RemoveFilter(key: String)
@@ -95,12 +100,14 @@ pub fn init(
       role_matrix: None,
       matrix_status: load_status.Loading,
       role_toggling: None,
+      online_user_ids: set.new(),
       active_filters: effective_filters,
     )
   let effects =
     effect.batch([
       load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
       load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+      load_effect(admin_api.get_online_users, OnlineUsersLoaded),
       filters_fx,
     ])
   #(model, effects, [
@@ -298,6 +305,24 @@ pub fn update(
       handle_error(err, "Failed to update role"),
     )
 
+    OnlineUsersLoaded(Ok(ids)) -> #(
+      Model(..model, online_user_ids: set.from_list(ids)),
+      effect.none(),
+      [],
+    )
+
+    // Presence is a non-critical overlay; ignore load errors silently
+    // (stats/matrix loaders already surface auth failures).
+    OnlineUsersLoaded(Error(_)) -> #(model, effect.none(), [])
+
+    PresenceChanged(user_id, online) -> {
+      let ids = case online {
+        True -> set.insert(model.online_user_ids, user_id)
+        False -> set.delete(model.online_user_ids, user_id)
+      }
+      #(Model(..model, online_user_ids: ids), effect.none(), [])
+    }
+
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
       #(Model(..model, active_filters: filters), sync_filters_effect(filters), [
@@ -378,14 +403,14 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.h1([], [html.text("Admin Dashboard")]),
     html.div([attribute.class("dashboard-content")], [
-      stats_view(model),
+      stats_view(model, shared),
       roles_section(model),
       records_section(model, shared),
     ]),
   ])
 }
 
-fn stats_view(model: Model) -> Element(Msg) {
+fn stats_view(model: Model, shared: Shared) -> Element(Msg) {
   load_status.render(
     model.stats_status,
     fn() {
@@ -396,7 +421,11 @@ fn stats_view(model: Model) -> Element(Msg) {
     fn() {
       case model.admin_stats {
         Some(stats) ->
-          element.fragment([overview_section(stats), status_section(stats)])
+          element.fragment([
+            overview_section(stats),
+            status_section(stats),
+            workload_section(stats, shared),
+          ])
         None ->
           html.div([attribute.class("loading")], [
             html.p([], [html.text("Loading statistics...")]),
@@ -425,17 +454,25 @@ fn overview_section(stats: models.AdminStats) -> Element(Msg) {
         label: "Studies",
         count: stats.total_studies,
         color: "blue",
+        route: Some(router.Studies(dict.new())),
       ),
       admin_stat_card(
         label: "Records",
         count: stats.total_records,
         color: "green",
+        route: Some(router.Records(dict.new())),
       ),
-      admin_stat_card(label: "Users", count: stats.total_users, color: "purple"),
+      admin_stat_card(
+        label: "Users",
+        count: stats.total_users,
+        color: "purple",
+        route: None,
+      ),
       admin_stat_card(
         label: "Patients",
         count: stats.total_patients,
         color: "orange",
+        route: Some(router.Patients(dict.new())),
       ),
     ]),
   ])
@@ -455,10 +492,96 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
             label: s,
             count: count,
             color: status.color(status.from_backend_string(s)),
+            route: Some(router.Records(dict.from_list([#("status", s)]))),
           )
         }),
     ),
   ])
+}
+
+fn records_route(status_str: String, user: String) -> router.Route {
+  router.Records(dict.from_list([#("status", status_str), #("user", user)]))
+}
+
+fn workload_section(stats: models.AdminStats, shared: Shared) -> Element(Msg) {
+  html.div([attribute.class("dashboard-section")], [
+    html.h3([], [html.text(shared.translate(i18n.AdminWorkloadTitle))]),
+    html.div([attribute.class("stats-grid")], [
+      admin_stat_card(
+        label: shared.translate(i18n.AdminAvailablePending),
+        count: stats.available_pending,
+        color: "blue",
+        route: Some(records_route(
+          "pending",
+          record_filters.unassigned_user_value,
+        )),
+      ),
+    ]),
+    html.div([attribute.class("table-responsive")], [
+      html.table([attribute.class("table")], [
+        html.thead([], [
+          html.tr([], [
+            html.th([], [html.text(shared.translate(i18n.AdminWorkloadUser))]),
+            html.th([], [
+              html.text(shared.translate(status.to_i18n_key(types.InWork))),
+            ]),
+            html.th([], [
+              html.text(shared.translate(status.to_i18n_key(types.Pending))),
+            ]),
+            html.th([], [
+              html.text(shared.translate(status.to_i18n_key(types.Blocked))),
+            ]),
+            html.th([], [
+              html.text(shared.translate(status.to_i18n_key(types.Failed))),
+            ]),
+            html.th(
+              [attribute.title(shared.translate(i18n.AdminWorkloadTotalHint))],
+              [html.text(shared.translate(i18n.AdminWorkloadTotal))],
+            ),
+            html.th([], [
+              html.text(shared.translate(status.to_i18n_key(types.Finished))),
+            ]),
+            html.th(
+              [attribute.title(shared.translate(i18n.AdminWorkloadAvailableHint))],
+              [html.text(shared.translate(i18n.AdminWorkloadAvailable))],
+            ),
+          ]),
+        ]),
+        html.tbody([], list.map(stats.workload_by_user, workload_row)),
+      ]),
+    ]),
+  ])
+}
+
+fn workload_row(w: models.UserWorkload) -> Element(Msg) {
+  let total = w.inwork + w.pending + w.blocked + w.failed
+  html.tr([], [
+    html.td([], [html.text(w.email)]),
+    workload_cell(w.user_id, "inwork", w.inwork),
+    workload_cell(w.user_id, "pending", w.pending),
+    workload_cell(w.user_id, "blocked", w.blocked),
+    workload_cell(w.user_id, "failed", w.failed),
+    html.td([], [html.text(int.to_string(total))]),
+    workload_cell(w.user_id, "finished", w.finished),
+    html.td([], [html.text(int.to_string(w.available))]),
+  ])
+}
+
+fn workload_cell(user_id: String, status_str: String, count: Int) -> Element(Msg) {
+  case count {
+    0 -> html.td([attribute.class("text-muted")], [html.text("0")])
+    _ ->
+      html.td([], [
+        html.a(
+          [
+            attribute.href(
+              router.route_to_href(records_route(status_str, user_id)),
+            ),
+          ],
+          [html.text(int.to_string(count))],
+        ),
+      ])
+  }
 }
 
 fn roles_section(model: Model) -> Element(Msg) {
@@ -534,6 +657,10 @@ fn role_matrix_row(
             html.text("admin"),
           ])
         False -> html.text("")
+      },
+      case set.contains(model.online_user_ids, user.id) {
+        True -> html.span([attribute.class("online-dot")], [])
+        False -> element.none()
       },
     ]),
     ..list.map(roles, fn(role) {
@@ -646,14 +773,13 @@ fn assign_cell(
         Some(uid) -> {
           let email = cache.user_email(shared.cache, uid)
           html.div([attribute.class("assign-cell")], [
-            html.span([], [html.text(email)]),
-            html.text(" "),
+            html.span([attribute.class("assign-email")], [html.text(email)]),
             html.button(
               [
                 attribute.class("btn btn-sm btn-outline"),
                 event.on_click(ToggleAssignDropdown(Some(record_id))),
               ],
-              [html.text("Change")],
+              [html.text(shared.translate(i18n.BtnChange))],
             ),
           ])
         }
@@ -663,7 +789,7 @@ fn assign_cell(
               attribute.class("btn btn-sm btn-primary"),
               event.on_click(ToggleAssignDropdown(Some(record_id))),
             ],
-            [html.text("Assign")],
+            [html.text(shared.translate(i18n.BtnAssign))],
           )
       }
   }
@@ -784,11 +910,15 @@ fn admin_stat_card(
   label label: String,
   count count: Int,
   color color: String,
+  route route: Option(router.Route),
 ) -> Element(Msg) {
-  html.div([attribute.class("stat-card card stat-" <> color)], [
-    html.div([attribute.class("stat-value")], [
-      html.text(int.to_string(count)),
-    ]),
+  let card_class = attribute.class("stat-card card stat-" <> color)
+  let body = [
+    html.div([attribute.class("stat-value")], [html.text(int.to_string(count))]),
     html.div([attribute.class("stat-label")], [html.text(label)]),
-  ])
+  ]
+  case route {
+    Some(r) -> html.a([attribute.href(router.route_to_href(r)), card_class], body)
+    None -> html.div([card_class], body)
+  }
 }

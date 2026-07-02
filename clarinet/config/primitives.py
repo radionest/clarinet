@@ -117,7 +117,13 @@ class RecordDef(BaseModel):
         inherit_user_from_parent: Child inherits user_id from its parent record.
         editable: Whether non-superusers may change a submitted (finished) record.
         edit_window_days: Days a finished record stays editable; None = no limit.
+        shared_editing: Any role-holder may edit any record of this type;
+            each edit reassigns ownership to the editor. Requires
+            unique_per_user=False.
         viewer_mode: How many series the viewer loads (single vs all series).
+        allowed_viewers: Restrict the DICOM viewers shown for this type to these
+            viewer names (matching ``ViewerInfo.name``); None/empty = all
+            configured viewers.
     """
 
     name: str
@@ -149,7 +155,9 @@ class RecordDef(BaseModel):
     inherit_user_from_parent: bool = False
     editable: bool = True
     edit_window_days: int | None = None
+    shared_editing: bool = False
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
+    allowed_viewers: list[str] | None = None
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name``."""

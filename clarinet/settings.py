@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -46,6 +46,7 @@ class QueueConfig(BaseSettings):
 
     have_gpu: bool = False
     have_dicom: bool = False
+    have_quarto: bool = False
 
     def has_not(self, conditions: Self) -> bool:
         """Check if the current configuration doesn't meet the specified conditions.
@@ -118,7 +119,7 @@ class Settings(BaseSettings):
     # On-disk path template for working folders + anonymized output.
     # Exactly 3 '/'-separated segments → patient / study / series levels.
     # Supported placeholders are listed in
-    # ``clarinet.services.common.storage_paths.SUPPORTED_PLACEHOLDERS``.
+    # ``clarinet.files._template.SUPPORTED_PLACEHOLDERS``.
     # Default reproduces the legacy hard-coded layout.
     #
     # "Shape" settings — not part of the template itself, but baked into
@@ -170,13 +171,30 @@ class Settings(BaseSettings):
     def validate_disk_path_template_setting(cls, v: str) -> str:
         """Validate the 3-segment disk path template.
 
-        Delegates to ``clarinet.utils.path_template.validate_template`` —
+        Delegates to ``clarinet.files._template.validate_template`` —
         a stdlib-only helper that the migration CLI also uses, so
         settings-time and runtime-supplied templates share rules.
         """
-        from clarinet.utils.path_template import validate_template
+        from clarinet.files._template import validate_template
 
         return validate_template(v)
+
+    @model_validator(mode="after")
+    def _check_dicomweb_external_root(self) -> Self:
+        """Require dicomweb_external_root (an absolute path) when backend is 'external'."""
+        if self.dicomweb_backend == "external":
+            if not self.dicomweb_external_root:
+                msg = (
+                    "dicomweb_backend='external' requires dicomweb_external_root (e.g. '/pacs-web')"
+                )
+                raise ValueError(msg)
+            if not self.dicomweb_external_root.startswith("/"):
+                msg = (
+                    "dicomweb_external_root must be an absolute path starting with '/' "
+                    "(e.g. '/pacs-web') — it is prefixed with the deploy base path at render time"
+                )
+                raise ValueError(msg)
+        return self
 
     anon_names_list: str | None = None
 
@@ -208,6 +226,7 @@ class Settings(BaseSettings):
     # Queue requirements
     have_gpu: bool = False
     have_dicom: bool = False
+    have_quarto: bool = False
     have_keras: bool = False
     have_torch: bool = False
 
@@ -244,6 +263,22 @@ class Settings(BaseSettings):
     dicomweb_dcm_anon_path_cache_max_entries: int = 1000
     dicomweb_dcm_anon_path_cache_ttl_seconds: int = 300
 
+    # --- DICOMweb backend selection (which proxy OHIF talks to) ---
+    # "builtin" = in-process proxy router (/dicom-web); "external" = a separate
+    # DICOMweb server (e.g. Orthanc) reverse-proxied same-origin by nginx.
+    # Drives the OHIF app-config.js dataSources block (clarinet/api/ohif_config.py).
+    dicomweb_backend: Literal["builtin", "external"] = "builtin"
+    # Same-origin path OHIF uses for QIDO/WADO when backend == "external"
+    # (e.g. "/pacs-web"); nginx proxies it to the local DICOMweb server. The
+    # deploy base path is prepended at render time. Required when "external".
+    dicomweb_external_root: str | None = None
+    dicomweb_friendly_name: str = "Clarinet PACS"
+    # OHIF capability flags. None -> per-backend default (builtin: False,
+    # external: True), resolved in clarinet/api/ohif_config.py.
+    dicomweb_qido_supports_include_field: bool | None = None
+    dicomweb_supports_fuzzy_matching: bool | None = None
+    dicomweb_supports_wildcard: bool | None = None
+
     # OHIF viewer settings
     ohif_enabled: bool = True
     ohif_default_version: str = "3.12.0"
@@ -258,6 +293,11 @@ class Settings(BaseSettings):
 
     # Role settings
     extra_roles: list[str] = []
+    # Maps a role name to the capabilities it grants (e.g. {"analyst": ["reports"]}).
+    # Roles named here are auto-created at startup; capability values are
+    # validated against the known vocabulary (clarinet/models/capability.py).
+    # Env override: CLARINET_ROLE_CAPABILITIES as JSON.
+    role_capabilities: dict[str, list[str]] = {}
 
     # Admin user settings
     admin_username: str = "admin"
@@ -284,6 +324,13 @@ class Settings(BaseSettings):
     session_ip_check: bool = False  # Validate IP consistency
     session_secure_cookie: bool = True  # HTTPS only in production
     session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
+
+    # SSE push (single-process in-memory bus; see services/events/bus.py)
+    sse_enabled: bool = True
+    sse_revalidate_seconds: int = 300  # session re-check interval per connection
+    sse_send_queue_size: int = (
+        256  # per-connection send queue; overflow -> close stream (slow consumer)
+    )
 
     # Internal service token for ClarinetClient (RecordFlow, pipeline tasks).
     # If empty, auto-derived from admin_password so API and workers share
@@ -359,6 +406,8 @@ class Settings(BaseSettings):
     pipeline_retry_delay: int = 5  # Initial retry delay (seconds)
     pipeline_retry_max_delay: int = 120  # Max retry delay with backoff
     pipeline_ack_type: AcknowledgeType = AcknowledgeType.WHEN_EXECUTED
+    # Gate workers by version fingerprint (queue-name segment); also enables the worker startup diagnostic
+    pipeline_version_check_enabled: bool = True
 
     # Viewer plugin settings (nested dict, configured via [viewers.<name>] in TOML)
     viewers: dict[str, dict[str, Any]] = {}
@@ -433,20 +482,39 @@ class Settings(BaseSettings):
         name = re.sub(r"[^a-z0-9_]", "", name)
         return name or "clarinet"
 
+    def _versioned_queue(self, kind: str) -> str:
+        """Queue name with an optional version-fingerprint segment.
+
+        With the gate enabled (default), embeds a short fingerprint of the
+        clarinet version + ``plan/`` content so workers on stale code listen on
+        different (dead) queues. Lazy import avoids a settings↔fingerprint cycle.
+        """
+        ns = self.pipeline_task_namespace
+        if not self.pipeline_version_check_enabled:
+            return f"{ns}.{kind}"
+        from clarinet.services.pipeline.fingerprint import queue_version_segment
+
+        return f"{ns}.{queue_version_segment()}.{kind}"
+
     @property
     def default_queue_name(self) -> str:
-        """Project-namespaced default queue name."""
-        return f"{self.pipeline_task_namespace}.default"
+        """Project-namespaced default queue name (version-gated)."""
+        return self._versioned_queue("default")
 
     @property
     def gpu_queue_name(self) -> str:
-        """Project-namespaced GPU queue name."""
-        return f"{self.pipeline_task_namespace}.gpu"
+        """Project-namespaced GPU queue name (version-gated)."""
+        return self._versioned_queue("gpu")
 
     @property
     def dicom_queue_name(self) -> str:
-        """Project-namespaced DICOM queue name."""
-        return f"{self.pipeline_task_namespace}.dicom"
+        """Project-namespaced DICOM queue name (version-gated)."""
+        return self._versioned_queue("dicom")
+
+    @property
+    def quarto_queue_name(self) -> str:
+        """Project-namespaced Quarto render queue name (version-gated)."""
+        return self._versioned_queue("quarto")
 
     @property
     def dlq_queue_name(self) -> str:
@@ -528,6 +596,7 @@ class Settings(BaseSettings):
         return QueueConfig(
             have_gpu=self.have_gpu,
             have_dicom=self.have_dicom,
+            have_quarto=self.have_quarto,
         )
 
     @property

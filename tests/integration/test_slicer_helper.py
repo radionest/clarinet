@@ -469,3 +469,221 @@ __execResult = {
     result = await slicer_service.execute(slicer_url, script, context=context)
     assert isinstance(result, dict)
     assert result.get("distance", 0) > 1.0
+
+
+async def test_segmentation_has_voxels_real_slicer(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """_segmentation_has_voxels: True for painted voxels, False for empty/0-segment.
+
+    Validates the set-op guard's empty-vs-foreign discriminator against real VTK
+    bindings (the pure-Python unit tests monkeypatch this primitive).
+    """
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+s = SlicerHelper(working_folder)
+vol = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', '_HVVol')
+slicer.util.updateVolumeFromArray(vol, np.zeros((20, 20, 20), dtype=np.int16))
+s._image_node = vol
+
+# Segmentation with painted voxels.
+filled = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', '_Filled')
+filled.CreateDefaultDisplayNodes()
+filled.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', '_HVLM')
+arr = np.zeros((20, 20, 20), dtype=np.uint8)
+arr[5:10, 5:10, 5:10] = 1
+slicer.util.updateVolumeFromArray(lm, arr)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(lm, filled)
+slicer.mrmlScene.RemoveNode(lm)
+
+# Segmentation with a segment but no voxels.
+voxelless = s.create_segmentation('_Voxelless').add_segment('e', (1, 0, 0)).node
+
+# Segmentation with no segments at all.
+empty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', '_NoSeg')
+empty.CreateDefaultDisplayNodes()
+empty.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+
+__execResult = {
+    "filled": _segmentation_has_voxels(filled),
+    "voxelless": _segmentation_has_voxels(voxelless),
+    "no_segments": _segmentation_has_voxels(empty),
+}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert result.get("filled") is True
+    assert result.get("voxelless") is False
+    assert result.get("no_segments") is False
+
+
+async def test_labelmap_guard_discriminates_empty_vs_voxels(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """_labelmap_array_or_raise on a no-image-data labelmap: raises iff source has voxels.
+
+    A labelmap node with no image data is the exact precondition that crashed
+    arrayFromVolume. The guard must raise (flipped/foreign grid) when the source
+    carries voxels, and tolerate (return None) when the source is genuinely empty.
+    """
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+s = SlicerHelper(working_folder)
+vol = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', '_GuardVol')
+slicer.util.updateVolumeFromArray(vol, np.zeros((20, 20, 20), dtype=np.int16))
+
+# Source WITH voxels.
+filled = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', '_GFilled')
+filled.CreateDefaultDisplayNodes()
+filled.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', '_GLM')
+arr = np.zeros((20, 20, 20), dtype=np.uint8)
+arr[5:10, 5:10, 5:10] = 1
+slicer.util.updateVolumeFromArray(lm, arr)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(lm, filled)
+slicer.mrmlScene.RemoveNode(lm)
+
+# Genuinely empty source (no segments).
+empty = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', '_GEmpty')
+empty.CreateDefaultDisplayNodes()
+empty.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+
+# Labelmaps with NO image data — the crash precondition.
+bad_lm_a = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', '_BadLMa')
+raised_on_voxels = False
+try:
+    _labelmap_array_or_raise(bad_lm_a, filled, what='a seg with voxels')
+except SlicerHelperError:
+    raised_on_voxels = True
+
+bad_lm_b = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', '_BadLMb')
+tolerated_empty = _labelmap_array_or_raise(bad_lm_b, empty, what='an empty seg') is None
+
+__execResult = {
+    "raised_on_voxels": raised_on_voxels,
+    "tolerated_empty": tolerated_empty,
+}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert result.get("raised_on_voxels") is True
+    assert result.get("tolerated_empty") is True
+
+
+async def test_setop_tolerates_emptied_source(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """nir_liver second_review flow: a subtract empties the source, set-ops tolerate it.
+
+    Reproduces the regression: when the doctor covers every projected lesion,
+    `missed` becomes empty and feeds merge_as_pool / subtract / binarize. These
+    must no-op (with a warning), not raise.
+    """
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+s = SlicerHelper(working_folder)
+vol = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', '_ChainVol')
+slicer.util.updateVolumeFromArray(vol, np.zeros((20, 20, 20), dtype=np.int16))
+s._image_node = vol
+seg_logic = slicer.modules.segmentations.logic()
+
+
+def _seg_with_blob(name, sl):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', name)
+    node.CreateDefaultDisplayNodes()
+    node.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+    lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', name + '_lm')
+    arr = np.zeros((20, 20, 20), dtype=np.uint8)
+    arr[sl] = 1
+    slicer.util.updateVolumeFromArray(lm, arr)
+    seg_logic.ImportLabelmapToSegmentationNode(lm, node)
+    slicer.mrmlScene.RemoveNode(lm)
+    return node
+
+
+projection = _seg_with_blob('Projection', np.s_[10:15, 10:15, 10:15])
+doctor = _seg_with_blob('Doctor', np.s_[8:17, 8:17, 8:17])
+
+# Doctor fully covers the projected ROI → ROI-level subtract empties the result.
+missed = s.subtract_segmentations(projection, doctor, output_name='_Missed')
+missed_segments = missed.GetSegmentation().GetNumberOfSegments()
+
+classification = s.create_segmentation('Classification').add_segment('mts', (1, 0, 0))
+
+# All three must tolerate the now-empty `missed` (pre-fix they raised an opaque error).
+s.subtract_segmentations(missed, classification, max_overlap_ratio=0.05)
+s.merge_as_pool(missed, classification)
+islands = s.binarize_and_split_islands(missed)
+
+__execResult = {
+    "missed_segments": missed_segments,
+    "islands": islands.GetSegmentation().GetNumberOfSegments(),
+    "ok": True,
+}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert result.get("ok") is True
+    assert result.get("missed_segments") == 0
+    assert result.get("islands") == 0
+
+
+async def test_load_segmentation_grid_guard(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """load_segmentation raises on a grid mismatch, loads cleanly on a matching grid."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import os
+import numpy as np
+
+s = SlicerHelper(working_folder)
+vol_a = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolA')
+slicer.util.updateVolumeFromArray(vol_a, np.zeros((20, 20, 20), dtype=np.int16))
+
+save_seg = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'SaveSeg')
+save_seg.CreateDefaultDisplayNodes()
+save_seg.SetReferenceImageGeometryParameterFromVolumeNode(vol_a)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'SaveLM')
+arr = np.zeros((20, 20, 20), dtype=np.uint8)
+arr[5:10, 5:10, 5:10] = 1
+slicer.util.updateVolumeFromArray(lm, arr)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(lm, save_seg)
+slicer.mrmlScene.RemoveNode(lm)
+seg_path = os.path.join(working_folder, '_grid_guard_test.seg.nrrd')
+slicer.util.exportNode(save_seg, seg_path)
+
+# Mismatched grid: different dims + origin → guard must raise.
+s_bad = SlicerHelper(working_folder)  # clears the scene
+vol_b = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolB')
+slicer.util.updateVolumeFromArray(vol_b, np.zeros((30, 25, 15), dtype=np.int16))
+vol_b.SetOrigin(100.0, 50.0, 25.0)
+s_bad._image_node = vol_b
+mismatch_raised = False
+try:
+    s_bad.load_segmentation(seg_path, 'LoadedBad')
+except SlicerHelperError:
+    mismatch_raised = True
+
+# Matching grid: same dims + origin as the saved geometry → must load cleanly.
+s_ok = SlicerHelper(working_folder)  # clears the scene
+vol_ok = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolOk')
+slicer.util.updateVolumeFromArray(vol_ok, np.zeros((20, 20, 20), dtype=np.int16))
+s_ok._image_node = vol_ok
+match_ok = True
+try:
+    s_ok.load_segmentation(seg_path, 'LoadedOk')
+except SlicerHelperError:
+    match_ok = False
+
+os.remove(seg_path)
+__execResult = {"mismatch_raised": mismatch_raised, "match_ok": match_ok}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert result.get("mismatch_raised") is True
+    assert result.get("match_ok") is True

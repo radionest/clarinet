@@ -234,3 +234,17 @@ class TestAuditClientSerialization:
         assert sent["id"] == "tid-ser2"
         assert "record_id" not in sent
         assert "pipeline_id" not in sent
+
+
+@pytest.mark.asyncio
+async def test_fingerprint_endpoint(client) -> None:
+    from clarinet.services.pipeline.fingerprint import (
+        compute_fingerprint,
+        reset_fingerprint_cache,
+    )
+    from tests.utils.urls import PIPELINE_FINGERPRINT
+
+    reset_fingerprint_cache()
+    resp = await client.get(PIPELINE_FINGERPRINT)
+    assert resp.status_code == 200
+    assert resp.json()["fingerprint"] == compute_fingerprint()

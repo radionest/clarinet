@@ -244,6 +244,46 @@ async def get_my_available_record_types(
     return {rt.name: count for rt, count in type_counts.items()}
 
 
+@router.post(
+    "/claim-next",
+    response_model=RecordRead,
+    responses={
+        404: {"description": "No claimable record of this type in the pool"},
+        409: {"description": "unique_per_user violated for this user and type"},
+    },
+)
+async def claim_next_record(
+    record_type_name: Annotated[str, Query(min_length=1)],
+    service: RecordServiceDep,
+    user: CurrentUserDep,
+    actor: AuditActorDep,
+) -> RecordRead:
+    """Claim a random unassigned pending record of ``record_type_name`` from the pool.
+
+    Powers the dashboard "take a task" action: picks one random ``pending`` record
+    with no assigned user that the caller may work on (role match, no
+    ``unique_per_user`` conflict), assigns it to the caller and moves it to
+    ``inwork``. The claimable scope is built by ``_build_record_search_criteria``
+    exactly like the records list, so role filtering and unique-violation hiding
+    stay consistent; the find-and-claim itself runs in
+    ``RecordService.claim_random_from_pool``. 404 when the pool holds no
+    claimable record of this type.
+    """
+    query = RecordSearchFilter(
+        record_type_name=record_type_name,
+        record_status=RecordStatus.pending,
+        wo_user=True,
+        # Attach user_id so ``exclude_unique_violations`` applies; for a
+        # superuser it would clash with ``wo_user`` (user_id IS NULL), so drop it.
+        user_id=None if user.is_superuser else user.id,
+    )
+    criteria = _build_record_search_criteria(query, user)
+    record = await service.claim_random_from_pool(criteria, user.id, actor_id=actor)
+    if record is None:
+        raise NOT_FOUND.with_context(f"No available record of type '{record_type_name}' to claim")
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
+
+
 @router.get("/{record_id}", response_model=RecordRead)
 async def get_record(
     record: AuthorizedRecordDep,
@@ -865,17 +905,26 @@ async def get_record_events(
 
     ``actor_id=null`` marks system actions (pipeline workers, RecordFlow).
     The actor's email (``actor_name``) is exposed only to admins; other users
-    with record access see the events but not the acting user's email.
+    with record access see the events but not the acting user's email. The
+    ``patient_id`` is masked with the same policy as the record itself — a
+    non-superuser never sees an anonymized patient's real id.
     """
     assert record.id is not None  # SQLModel PK after get
     events = await events_repo.list_for_record(
         record.id, skip=pagination.skip, limit=pagination.limit
     )
-    reads = [RecordEventRead.model_validate(e) for e in events]
     is_admin = user.is_superuser or "admin" in get_user_role_names(user)
-    if not is_admin:
-        reads = [r.model_copy(update={"actor_name": None}) for r in reads]
-    return reads
+    # Every event here belongs to ``record``, so its patient is the record's
+    # patient; mask once and apply to all rows (mirrors get_record_pipeline_runs).
+    masked_patient_id = mask_record_patient_data(RecordRead.model_validate(record), user).patient_id
+    masked: list[RecordEventRead] = []
+    for event in events:
+        update: dict[str, str | None] = {"patient_id": masked_patient_id}
+        if not is_admin:
+            # actor email is admin-only — other users with record access don't see it
+            update["actor_name"] = None
+        masked.append(RecordEventRead.model_validate(event).model_copy(update=update))
+    return masked
 
 
 def _mask_run_identifier(value: str | None, raw: str | None, substitute: str | None) -> str | None:

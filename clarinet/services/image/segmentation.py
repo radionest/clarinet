@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 from typing import Any, Literal, Self
 
 import numpy as np
@@ -17,7 +18,28 @@ from skimage.morphology import (  # type: ignore[attr-defined]
     opening,
 )
 
-from clarinet.services.image.image import Image
+from clarinet.exceptions.domain import ImageError
+from clarinet.services.image.correspondence import (
+    AbsoluteOverlap,
+    Coverage,
+    MatchingStrategy,
+    ThresholdMatch,
+    correspond,
+    render,
+)
+from clarinet.services.image.correspondence import (
+    AppendMerge as _AppendMergeOp,
+)
+from clarinet.services.image.correspondence import (
+    Difference as _DifferenceOp,
+)
+from clarinet.services.image.correspondence import (
+    Intersection as _IntersectionOp,
+)
+from clarinet.services.image.correspondence import (
+    SymmetricDifference as _SymmetricDifferenceOp,
+)
+from clarinet.services.image.image import FileType, Image, _is_segment_key
 from clarinet.utils.logger import logger
 
 PropName = Literal["axis_major_length", "num_pixels", "area"]
@@ -25,6 +47,18 @@ PropName = Literal["axis_major_length", "num_pixels", "area"]
 # Z-extent threshold: below this, use isotropic (spacing-aware) morphology;
 # above, fall back to ball structuring element for performance.
 _ISOTROPIC_Z_THRESHOLD = 200
+
+
+def _strip_segment_metadata(header: dict[str, Any] | None) -> dict[str, Any]:
+    """Header copy without any per-segment / ``Segmentation_*`` keys.
+
+    Used by operations that relabel the mask (``union``, ``filter_segmentation``):
+    their output labels are connected-component indices that no longer map to the
+    source's named segments, so carrying those names would be wrong.
+    """
+    if not header:
+        return {}
+    return {k: v for k, v in header.items() if not _is_segment_key(k)}
 
 
 class Segmentation(Image):
@@ -199,34 +233,75 @@ class Segmentation(Image):
         new_img = self.filter_roi(prop_name=prop_name, ge=ge, le=le)
         new_seg = Segmentation(template=self)
         new_seg.img = new_img
+        new_seg._nrrd_header = _strip_segment_metadata(new_seg._nrrd_header)
         return new_seg
 
-    def subtract(self, other: Self) -> None:
+    def subtract(self, other: Self, *, resample: bool = False) -> None:
         """Zero out all voxels that are nonzero in `other` (in-place).
 
         Args:
             other: Segmentation to subtract.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
         """
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         img = self.img.copy()
         img[other.img != 0] = 0
         self.img = img
+        # In-place ops leave _nrrd_header untouched: a label fully removed here is
+        # pruned from the segment metadata on write (Image._save_nrrd reconciles it).
 
-    def append(self, other: Self | Image) -> None:
+    def append(
+        self,
+        other: Self | Image,
+        *,
+        strategy: MatchingStrategy | None = None,
+        resample: bool = False,
+    ) -> None:
         """Add ROIs from `other` that overlap with exactly one existing label.
 
         Each connected component in `other` is checked for overlap with this mask:
         - No overlap: skipped.
         - Overlaps one label: merged with that label value.
-        - Overlaps multiple labels: raises ValueError.
+        - Overlaps multiple labels: raises ValueError (unless ``strategy`` is set).
+
+        When ``strategy`` is provided, multi-label overlaps are resolved instead
+        of raising: each B component is matched to its winning A label via the
+        correspondence engine, and its voxels are repainted with that label value.
+
+        Note:
+            The default path (no ``strategy=``) groups ``other`` by connected component
+            via ``label(other.img)``, so each blob is evaluated independently. With
+            ``strategy=``, the correspondence engine keys on label values instead: each
+            distinct label in ``other`` is treated as one unit. These coincide for an
+            autolabeled Segmentation (one component per label) but differ for a
+            multi-blob binary mask where all blobs share label 1.
 
         Args:
             other: Image or Segmentation whose ROIs to append.
+            strategy: Optional ``MatchingStrategy`` (e.g.
+                ``GreedyArgmax(AbsoluteOverlap(), direction="b_to_a")``).
+                When given, resolves multi-label overlaps via the correspondence
+                engine rather than raising ``ValueError``.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Raises:
-            ValueError: If an ROI in `other` overlaps multiple labels.
+            ValueError: If an ROI in `other` overlaps multiple labels and no
+                ``strategy`` is provided.
         """
-        other = self._align_other(other)
+        other = self._align_other(other, resample=resample)
+        if strategy is not None:
+            corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+            merged = render(
+                _AppendMergeOp()(corr), self.img, other.img, base=self.img, relabel=False
+            )
+            prev, self.autolabel = self.autolabel, False
+            try:
+                self.img = merged
+            finally:
+                self.autolabel = prev
+            return
         for region in regionprops(label(other.img)):
             coords = region.coords
             intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]
@@ -252,7 +327,8 @@ class Segmentation(Image):
         """Resample into *target*'s voxel grid (nearest-neighbor only).
 
         Overrides :meth:`Image.reindex_to` to force ``order=0``, preventing
-        label value corruption from interpolation.
+        label value corruption from interpolation. Segment metadata (names, label
+        values, colors) is carried onto the new grid, pruned to surviving labels.
         """
         if order != 0:
             logger.warning("Segmentation.reindex_to: forcing order=0 to prevent label corruption")
@@ -270,11 +346,30 @@ class Segmentation(Image):
         )
         result = Segmentation(autolabel=False, template=target)
         result.img = resampled
+        # The template copies the *target*'s header (no segment metadata); carry the
+        # source's segment keys instead. Save reconciles them to the surviving labels
+        # and drops the now-stale grid extents.
+        if self._nrrd_header is not None:
+            seg_meta = {k: v for k, v in self._nrrd_header.items() if _is_segment_key(k)}
+            result._nrrd_header = {**_strip_segment_metadata(result._nrrd_header), **seg_meta}
         return result
 
-    def _align_other(self, other: Image) -> Image:
-        """Return *other* reindexed to *self*'s grid, or unchanged if grids match."""
-        if self._same_grid(other):
+    def _align_other(self, other: Image, *, resample: bool = False) -> Image:
+        """Return *other* on *self*'s grid.
+
+        If the grids already match, returns *other* unchanged. Otherwise:
+
+        - ``resample=False`` (default): raises :class:`GeometryMismatchError` — two
+          segmentations compared by index must share a grid (cf. ITK). This is the
+          safe default: a silent resample can mask a projection/segmentation that
+          drifted onto a flipped grid.
+        - ``resample=True``: resamples *other* onto *self*'s grid (nearest-neighbour,
+          labels preserved).
+        """
+        if not resample:
+            self.assert_same_grid(other)
+            return other
+        if self.same_grid(other):
             return other
         return other.reindex_to(self, order=0)
 
@@ -286,124 +381,187 @@ class Segmentation(Image):
         self,
         other: Self,
         *,
+        strategy: MatchingStrategy | None = None,
         min_overlap: int = 1,
         min_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Segmentation:
         """Intersection: keep ROIs from self that overlap sufficiently with other.
 
         Args:
             other: Segmentation to intersect with.
+            strategy: Matching strategy override. When ``None``, defaults to
+                ``ThresholdMatch(AbsoluteOverlap(), min_score=min_overlap)`` or
+                ``ThresholdMatch(Coverage("a"), min_score=min_overlap_ratio)`` when
+                ``min_overlap_ratio`` is given.
             min_overlap: Minimum absolute overlap in voxels to keep a label.
-            min_overlap_ratio: Minimum overlap as a fraction of label size
-                (0.0--1.0). ``None`` disables the ratio check.
+                Ignored when ``strategy`` or ``min_overlap_ratio`` is set.
+            min_overlap_ratio: Minimum coverage (inter/size_a) to keep a label.
+                When set, takes precedence over ``min_overlap``. ``None`` disables
+                the ratio check.
+            resample: If True, resample ``other`` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
+
+        Note:
+            Without ``strategy=``, ``min_overlap`` is checked per other-component
+            (largest single overlap), not the sum. Default (min_overlap=1) and
+            single-component cases match old behavior; raised thresholds with
+            fragmented overlap differ. Pass ``strategy=`` for full control.
 
         Returns:
             New Segmentation with only the kept labels.
         """
-        other = self._align_other(other)  # type: ignore[assignment]
-        output = Segmentation(template=self)
-        for region in self.label_props:
-            coords = region.coords
-            overlap_mask = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
-            overlap = int(np.sum(overlap_mask > 0))
-            if overlap >= min_overlap:
-                if min_overlap_ratio is not None:
-                    total = int(np.sum(self.img == region.label))
-                    if overlap / total < min_overlap_ratio:
-                        continue
-                output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = region.label
-        return output
+        if other.img.size == 1:
+            return Segmentation(template=self)  # empty other → empty intersection
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
+        if strategy is None:
+            strategy = self._threshold(min_overlap, min_overlap_ratio)
+        corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+        # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
+        out = Segmentation(autolabel=False, template=self)
+        out.img = render(_IntersectionOp()(corr), self.img, other.img, relabel=False)
+        return out
 
-    def union(self, other: Self) -> Segmentation:
+    def union(self, other: Self, *, resample: bool = False) -> Segmentation:
         """Union: combine nonzero voxels from both masks into a binary result.
 
         Args:
             other: Segmentation to combine with.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Returns:
             New Segmentation with all nonzero voxels from either mask.
         """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         output = Segmentation(template=self)
         combined = self.img.astype(np.uint16) + other.img.astype(np.uint16)
         combined[combined != 0] = 1
         output.img = combined
+        # union relabels into connected components — the source's named segments no
+        # longer map to these labels, so drop them (a plain labelmap is written).
+        output._nrrd_header = _strip_segment_metadata(output._nrrd_header)
         return output
 
     def difference(
         self,
         other: Self,
         *,
+        strategy: MatchingStrategy | None = None,
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Segmentation:
-        """Difference with tolerance: keep ROIs with overlap below thresholds.
+        """Difference with tolerance: keep ROIs from self not sufficiently overlapping other.
 
-        A label is kept if its overlap with ``other`` is at most ``max_overlap``
-        voxels AND (if ``max_overlap_ratio`` is set) the overlap ratio
-        relative to the label's total voxels is below ``max_overlap_ratio``.
+        A label is kept when it is *unmatched* under the strategy. Default strategy:
+        ``ThresholdMatch(AbsoluteOverlap(), min_score=max_overlap + 1)`` — keeps labels
+        whose largest single-component overlap is at most ``max_overlap``. When
+        ``max_overlap_ratio`` is provided the ratio takes precedence: a label is
+        removed iff ``inter / size_a >= max_overlap_ratio`` (``Coverage("a")`` measure).
 
         Args:
             other: Segmentation to subtract.
+            strategy: Matching strategy override. When ``None``, the default is
+                derived from ``max_overlap`` / ``max_overlap_ratio``.
             max_overlap: Maximum absolute overlap in voxels to tolerate.
-            max_overlap_ratio: Maximum overlap as a fraction of label size
-                (0.0--1.0). ``None`` disables the ratio check.
+                Ignored when ``strategy`` or ``max_overlap_ratio`` is set.
+            max_overlap_ratio: Maximum coverage (inter/size_a) to tolerate.
+                When set, takes precedence over ``max_overlap``. ``None`` disables
+                the ratio check.
+            resample: If True, resample ``other`` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
+
+        Note:
+            Without ``strategy=``, ``max_overlap`` is checked per other-component
+            (largest single overlap), not the sum. Default (max_overlap=0) and
+            single-component cases match old behavior; raised thresholds with
+            fragmented overlap differ. Pass ``strategy=`` for full control.
 
         Returns:
             New Segmentation with only the kept labels.
         """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
-        other = self._align_other(other)  # type: ignore[assignment]
-        output = Segmentation(template=self)
-        for region in self.label_props:
-            coords = region.coords
-            intersection = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
-            overlap = int(np.sum(intersection > 0))
-            if overlap <= max_overlap:
-                if max_overlap_ratio is not None:
-                    total = int(np.sum(self.img == region.label))
-                    if overlap / total > max_overlap_ratio:
-                        continue
-                output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = int(region.label)
-        return output
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
+        if strategy is None:
+            if max_overlap_ratio is not None:
+                strategy = ThresholdMatch(Coverage("a"), min_score=max_overlap_ratio)
+            else:
+                strategy = ThresholdMatch(AbsoluteOverlap(), min_score=float(max_overlap + 1))
+        corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+        # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
+        out = Segmentation(autolabel=False, template=self)
+        out.img = render(_DifferenceOp()(corr), self.img, other.img, relabel=False)
+        return out
 
     def symmetric_difference(
         self,
         other: Self,
         *,
+        strategy: MatchingStrategy | None = None,
         min_overlap: int = 1,
         min_overlap_ratio: float | None = None,
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Segmentation:
-        """Symmetric difference: voxels in the union but not in the intersection.
+        """Symmetric difference: component-level labels unique to each side.
 
-        Computes ``self.union(other).difference(self.intersection(other, ...), ...)``.
+        Uses the correspondence engine: unmatched A labels and unmatched B labels
+        are combined into a single relabeled output. This is a cleaner decomposition
+        than the legacy union-minus-intersection approach.
+
+        ``max_overlap`` and ``max_overlap_ratio`` are accepted for API stability but
+        are ignored — use ``min_overlap`` / ``min_overlap_ratio`` or ``strategy=``
+        to control the matching threshold.
 
         Args:
             other: Segmentation to compare with.
-            min_overlap: Passed to ``intersection()`` as ``min_overlap``.
-            min_overlap_ratio: Passed to ``intersection()`` as ``min_overlap_ratio``.
-            max_overlap: Passed to ``difference()`` as ``max_overlap``.
-            max_overlap_ratio: Passed to ``difference()`` as ``max_overlap_ratio``.
+            strategy: Matching strategy override. When ``None``, defaults to
+                ``ThresholdMatch(AbsoluteOverlap(), min_score=min_overlap)`` or
+                ``ThresholdMatch(Coverage("a"), min_score=min_overlap_ratio)`` when
+                ``min_overlap_ratio`` is given.
+            min_overlap: Minimum absolute overlap to consider a pair matched.
+                Ignored when ``strategy`` or ``min_overlap_ratio`` is set.
+            min_overlap_ratio: Minimum coverage (inter/size_a) to match.
+                When set, takes precedence over ``min_overlap``.
+            max_overlap: Accepted for API stability; ignored.
+            max_overlap_ratio: Accepted for API stability; ignored.
+            resample: If True, resample ``other`` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Returns:
             New Segmentation with the symmetric difference.
         """
-        combined = self.union(other)
-        intersected = self.intersection(
-            other,
-            min_overlap=min_overlap,
-            min_overlap_ratio=min_overlap_ratio,
-        )
-        return combined.difference(
-            intersected,
-            max_overlap=max_overlap,
-            max_overlap_ratio=max_overlap_ratio,
-        )
+        if max_overlap != 0 or max_overlap_ratio is not None:
+            logger.warning(
+                "Segmentation.symmetric_difference: max_overlap/max_overlap_ratio are "
+                "ignored in the correspondence model; use min_overlap/min_overlap_ratio "
+                "or strategy= instead."
+            )
+        if other.img.size == 1:
+            return Segmentation(template=self, copy_data=True)
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
+        if strategy is None:
+            strategy = self._threshold(min_overlap, min_overlap_ratio)
+        corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+        # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
+        out = Segmentation(autolabel=False, template=self)
+        out.img = render(_SymmetricDifferenceOp()(corr), self.img, other.img, relabel=True)
+        # relabel=True assigns fresh component indices — the source's named segments
+        # no longer map to them, so drop the segment metadata (mirrors union()).
+        out._nrrd_header = _strip_segment_metadata(out._nrrd_header)
+        return out
+
+    @staticmethod
+    def _threshold(min_overlap: int, min_overlap_ratio: float | None) -> MatchingStrategy:
+        """Build the default matching strategy from scalar thresholds."""
+        if min_overlap_ratio is not None:
+            return ThresholdMatch(Coverage("a"), min_score=min_overlap_ratio)
+        return ThresholdMatch(AbsoluteOverlap(), min_score=float(min_overlap))
 
     # ------------------------------------------------------------------
     # Deprecated operators — delegate to named methods
@@ -476,3 +634,59 @@ class Segmentation(Image):
             stacklevel=2,
         )
         return self.symmetric_difference(other, min_overlap=3)
+
+
+def conform_seg_to_grid(
+    seg_path: Path | str,
+    grid_path: Path | str,
+    *,
+    out_path: Path | str | None = None,
+    atol: float = 1e-4,
+) -> bool:
+    """Repair a segmentation file so it shares *grid_path*'s voxel grid.
+
+    Reads the segmentation and a reference image (e.g. the series ``volume.nii.gz``);
+    if their grids differ, resamples the segmentation onto the reference grid
+    (nearest-neighbour, labels preserved) and writes it back. A no-op when the grids
+    already match.
+
+    Intended for downstream repair scripts that fix historically misaligned
+    ``.seg.nrrd`` files (e.g. projection/segmentation Z-flips) against the canonical
+    series volume.
+
+    Args:
+        seg_path: Segmentation file to repair.
+        grid_path: Reference image whose grid is the target (``volume.nii.gz`` / .nrrd).
+        out_path: Where to write the conformed segmentation. Defaults to *seg_path*
+            (in-place overwrite).
+        atol: Grid-equality tolerance passed to :meth:`Image.same_grid`.
+
+    Returns:
+        True if a resample was performed, False if the grids already matched.
+
+    Raises:
+        ImageError: If *out_path* has an unsupported extension.
+    """
+    # Resolve target format up front so an unsupported extension fails before
+    # reading two images off disk.
+    target = Path(out_path) if out_path is not None else Path(seg_path)
+    suffixes = target.suffixes
+    if ".nrrd" in suffixes:
+        filetype = FileType.NRRD
+    elif ".nii" in suffixes:
+        filetype = FileType.NIFTI
+    else:
+        raise ImageError(f"Cannot infer format for {target.name}: expected .nrrd, .nii, or .nii.gz")
+
+    seg = Segmentation(autolabel=False)
+    seg.read(Path(seg_path))
+    reference = Image()
+    reference.read(Path(grid_path))
+
+    if seg.same_grid(reference, atol=atol):
+        return False
+
+    conformed = seg.reindex_to(reference, order=0)
+    conformed.save_as(target, filetype)
+    logger.info(f"Conformed segmentation {Path(seg_path).name} onto grid of {Path(grid_path).name}")
+    return True

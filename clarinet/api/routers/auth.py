@@ -24,6 +24,7 @@ from clarinet.models.user import User, UserCreate, UserRead
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
+from clarinet.utils.session import emit_offline_if_last
 
 
 class SessionInfo(BaseModel):
@@ -223,13 +224,20 @@ async def revoke_session(
             detail="Multiple sessions match this preview. Please use full token.",
         )
 
-    # Delete the session
-    await session.delete(access_tokens[0])
+    # Delete the session and evict it from the in-memory validation cache —
+    # otherwise the revoked token stays valid in the TTL cache until
+    # session_cache_ttl_seconds elapses (same eviction destroy_token does).
+    revoked = access_tokens[0]
+    DatabaseStrategy.evict_token(revoked.token)
+    await session.delete(revoked)
     await session.commit()
 
     logger.info(
         f"User {user.id} revoked session {token_preview}",
         extra={"user_id": str(user.id), "token_preview": token_preview},
     )
+
+    # sse-capture: session lifecycle (AccessToken not ORM-captured)
+    await emit_offline_if_last(session, user.id)
 
     return {"status": "success", "message": "Session revoked successfully"}

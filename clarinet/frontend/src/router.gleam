@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
+import utils/permissions
 import utils/record_filters
 
 // Route definitions
@@ -120,6 +121,7 @@ pub fn requires_admin_role(route: Route) -> Bool {
     Studies(_)
     | StudyDetail(_)
     | SeriesDetail(_)
+    | Records(_)
     | Patients(_)
     | PatientDetail(_)
     | PatientNew
@@ -128,11 +130,18 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
     | AdminRecordTypeEdit(_)
-    | AdminReports
-    | AdminQuartoReports
     | AdminWorkflow
     | AdminActivity -> True
     _ -> False
+  }
+}
+
+// Capability required to view a route, if any. These routes are NOT admin-gated;
+// a non-admin holding the capability may enter.
+pub fn requires_capability(route: Route) -> Option(String) {
+  case route {
+    AdminReports | AdminQuartoReports -> Some(permissions.reports_capability)
+    _ -> None
   }
 }
 

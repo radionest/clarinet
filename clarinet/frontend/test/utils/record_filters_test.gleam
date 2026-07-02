@@ -51,6 +51,7 @@ fn make_record(
     radiant: None,
     display_anon_id: None,
     is_editable: True,
+    shared_editing: False,
   )
 }
 
@@ -62,6 +63,7 @@ fn make_user(id: String, email: String) -> User {
     is_superuser: False,
     is_verified: True,
     role_names: [],
+    capabilities: [],
   )
 }
 

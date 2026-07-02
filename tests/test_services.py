@@ -16,7 +16,7 @@ from clarinet.exceptions.domain import (
 from clarinet.models.base import RecordStatus
 from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
 from clarinet.models.study import Study
-from clarinet.models.user import User, UserCreate, UserRole, UserUpdate
+from clarinet.models.user import User, UserCreate, UserRole, UserRolesLink, UserUpdate
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.record_repository import RecordRepository
@@ -27,7 +27,14 @@ from clarinet.services.admin_service import AdminService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.user_service import UserService
 from clarinet.utils.auth import get_password_hash, verify_password
-from tests.utils.factories import make_patient
+from tests.utils.factories import (
+    make_patient,
+    make_record_type,
+    make_series,
+    make_study,
+    make_user,
+    seed_record,
+)
 
 # ===================================================================
 # UserService
@@ -218,6 +225,179 @@ class TestAdminService:
         assert stats.total_studies >= 1
         assert stats.total_patients >= 1
         assert stats.total_users >= 1
+
+    @pytest.mark.asyncio
+    async def test_get_stats_workload_by_user(self, env):
+        session = env["session"]
+        pat = make_patient("WL_PAT", "Workload Patient")
+        session.add(pat)
+        await session.commit()
+        study = make_study("WL_PAT", "1.2.3.700")
+        session.add(study)
+        await session.commit()
+        series = make_series("1.2.3.700", "1.2.3.700.1", 1)
+        session.add(series)
+        await session.commit()
+        rt = make_record_type("wl-rt")
+        session.add(rt)
+        await session.commit()
+
+        u_busy = make_user(email="wl_busy@test.com", is_active=True)
+        u_idle = make_user(email="wl_idle@test.com", is_active=True)
+        u_off = make_user(email="wl_off@test.com", is_active=False)
+        session.add_all([u_busy, u_idle, u_off])
+        await session.commit()
+        for u in (u_busy, u_idle, u_off):
+            await session.refresh(u)
+
+        async def add(user_id, status):
+            await seed_record(
+                session,
+                patient_id="WL_PAT",
+                study_uid="1.2.3.700",
+                series_uid="1.2.3.700.1",
+                rt_name="wl-rt",
+                user_id=user_id,
+                status=status,
+            )
+
+        await add(u_busy.id, RecordStatus.inwork)
+        await add(u_busy.id, RecordStatus.failed)
+        await add(u_off.id, RecordStatus.inwork)  # inactive user → excluded
+        await add(None, RecordStatus.pending)  # available pool
+        await add(None, RecordStatus.pending)  # available pool
+
+        stats = await env["service"].get_stats()
+
+        assert stats.available_pending == 2
+        by_email = {w.email: w for w in stats.workload_by_user}
+        assert "wl_busy@test.com" in by_email
+        assert "wl_idle@test.com" in by_email  # active, zero-count row present
+        assert "wl_off@test.com" not in by_email  # deactivated excluded
+        assert by_email["wl_busy@test.com"].inwork == 1
+        assert by_email["wl_busy@test.com"].failed == 1
+        assert by_email["wl_busy@test.com"].pending == 0
+        assert by_email["wl_idle@test.com"].inwork == 0
+
+    @pytest.mark.asyncio
+    async def test_get_stats_finished_and_available(self, env):
+        session = env["session"]
+        pat = make_patient("FA_PAT", "Finished/Available Patient")
+        session.add(pat)
+        await session.commit()
+        study = make_study("FA_PAT", "1.2.3.800")
+        session.add(study)
+        await session.commit()
+        series = make_series("1.2.3.800", "1.2.3.800.1", 1)
+        session.add(series)
+        await session.commit()
+
+        # Two roles, each backing its own record type.
+        session.add_all([UserRole(name="fa-role"), UserRole(name="other-role")])
+        await session.commit()
+        # Non-unique types: this test covers role-scoping, not unique_per_user
+        # (make_record_type defaults unique_per_user=True). The unique-per-user
+        # exclusion is verified in test_available_excludes_unique_per_user_conflicts.
+        session.add_all(
+            [
+                make_record_type("fa-rt", role_name="fa-role", unique_per_user=False),
+                make_record_type("other-rt", role_name="other-role", unique_per_user=False),
+            ]
+        )
+        await session.commit()
+
+        # Regular user holds only fa-role; superuser holds no role.
+        u_role = make_user(email="fa_role@test.com", is_active=True)
+        u_super = make_user(email="fa_super@test.com", is_active=True, is_superuser=True)
+        session.add_all([u_role, u_super])
+        await session.commit()
+        session.add(UserRolesLink(user_id=u_role.id, role_name="fa-role"))
+        await session.commit()
+
+        async def add(rt_name, user_id, status):
+            await seed_record(
+                session,
+                patient_id="FA_PAT",
+                study_uid="1.2.3.800",
+                series_uid="1.2.3.800.1",
+                rt_name=rt_name,
+                user_id=user_id,
+                status=status,
+            )
+
+        # Claimable pool: 3 fa-role + 2 other-role, unassigned + pending.
+        for _ in range(3):
+            await add("fa-rt", None, RecordStatus.pending)
+        for _ in range(2):
+            await add("other-rt", None, RecordStatus.pending)
+        # One finished record assigned to the regular user.
+        await add("fa-rt", u_role.id, RecordStatus.finished)
+
+        stats = await env["service"].get_stats()
+        by_email = {w.email: w for w in stats.workload_by_user}
+
+        assert by_email["fa_role@test.com"].finished == 1
+        assert by_email["fa_role@test.com"].available == 3  # fa-role pool only
+        assert by_email["fa_super@test.com"].available == 5  # whole pool
+        assert by_email["fa_super@test.com"].finished == 0
+
+    @pytest.mark.asyncio
+    async def test_available_excludes_unique_per_user_conflicts(self, env):
+        session = env["session"]
+        pat = make_patient("UQ_PAT", "Unique-per-user Patient")
+        session.add(pat)
+        await session.commit()
+        study = make_study("UQ_PAT", "1.2.3.901")
+        session.add(study)
+        await session.commit()
+        # Two SERIES contexts under the same study.
+        session.add_all(
+            [
+                make_series("1.2.3.901", "1.2.3.901.1", 1),
+                make_series("1.2.3.901", "1.2.3.901.2", 2),
+            ]
+        )
+        await session.commit()
+
+        session.add(UserRole(name="uq-role"))
+        await session.commit()
+        # SERIES-level (make_record_type default) unique_per_user type.
+        session.add(make_record_type("uq-rt", role_name="uq-role", unique_per_user=True))
+        await session.commit()
+
+        u_role = make_user(email="uq_role@test.com", is_active=True)
+        u_super = make_user(email="uq_super@test.com", is_active=True, is_superuser=True)
+        session.add_all([u_role, u_super])
+        await session.commit()
+        session.add(UserRolesLink(user_id=u_role.id, role_name="uq-role"))
+        await session.commit()
+
+        async def add(series_uid, user_id, status):
+            await seed_record(
+                session,
+                patient_id="UQ_PAT",
+                study_uid="1.2.3.901",
+                series_uid=series_uid,
+                rt_name="uq-rt",
+                user_id=user_id,
+                status=status,
+            )
+
+        # Series .1: u_role already holds a uq-rt record → its 2 unassigned
+        # pending records are NOT claimable by u_role (unique_per_user conflict).
+        await add("1.2.3.901.1", u_role.id, RecordStatus.inwork)
+        await add("1.2.3.901.1", None, RecordStatus.pending)
+        await add("1.2.3.901.1", None, RecordStatus.pending)
+        # Series .2: no u_role record → its unassigned pending record is claimable.
+        await add("1.2.3.901.2", None, RecordStatus.pending)
+
+        stats = await env["service"].get_stats()
+        by_email = {w.email: w for w in stats.workload_by_user}
+
+        # Only series .2 is claimable for u_role; series .1 is blocked.
+        assert by_email["uq_role@test.com"].available == 1
+        # Superuser holds no records, so no conflicts: whole unassigned pool (3).
+        assert by_email["uq_super@test.com"].available == 3
 
     @pytest.mark.asyncio
     async def test_get_record_type_stats_empty(self, env):

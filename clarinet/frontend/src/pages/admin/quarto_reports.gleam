@@ -6,6 +6,8 @@ import api/models.{type QuartoReportTemplate, type QuartoRenderState}
 import api/quarto_reports as quarto_api
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
+import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -61,6 +63,8 @@ pub type Msg {
   PollTick
   PollScheduled(global.TimerID)
   RenderPolled(key: String, result: Result(QuartoRenderState, ApiError))
+  /// SSE push of a render status sidecar; matched to a render by render_id.
+  RenderPushed(payload: dynamic.Dynamic)
 }
 
 // --- Init ---
@@ -181,6 +185,33 @@ pub fn update(
       effect.none(),
       handle_error(err, "Failed to poll render status"),
     )
+    // Opportunistic push — same update as a poll, located by render_id.
+    // Unknown render_id (or undecodable payload) is ignored.
+    RenderPushed(payload) ->
+      case decode.run(payload, quarto_api.quarto_render_state_decoder()) {
+        Ok(state) -> #(
+          Model(..model, renders: update_by_render_id(model.renders, state)),
+          effect.none(),
+          [],
+        )
+        Error(_) -> #(model, effect.none(), [])
+      }
+  }
+}
+
+fn update_by_render_id(
+  renders: Dict(String, RenderEntry),
+  state: QuartoRenderState,
+) -> Dict(String, RenderEntry) {
+  let match =
+    dict.to_list(renders)
+    |> list.find(fn(pair) {
+      let #(_key, entry) = pair
+      entry.render_id == state.render_id
+    })
+  case match {
+    Ok(#(key, _entry)) -> update_entry(renders, key, state)
+    Error(_) -> renders
   }
 }
 

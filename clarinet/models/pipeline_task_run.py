@@ -12,7 +12,7 @@ from pydantic import field_serializer
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlmodel import Column, Field, SQLModel
 
-from clarinet.types import PortableJSON
+from clarinet.types import DbNonNegativeInt32, DbPositiveInt32, PortableJSON
 
 # DB column stays a plain string (additive downstream migrations);
 # API payloads are constrained to these values.
@@ -104,8 +104,8 @@ class PipelineTaskRunCreate(SQLModel):
     task_name: str = Field(min_length=1, max_length=255)
     queue: str = Field(max_length=255)
     pipeline_id: str | None = Field(default=None, max_length=100)
-    step_index: int | None = None
-    record_id: int | None = None
+    step_index: DbNonNegativeInt32 | None = None
+    record_id: DbPositiveInt32 | None = None
     patient_id: str | None = Field(default=None, max_length=64)
     study_uid: str | None = Field(default=None, max_length=255)
     series_uid: str | None = Field(default=None, max_length=255)
@@ -118,10 +118,10 @@ class PipelineTaskRunUpdate(SQLModel):
     status: PipelineRunStatus
     finished_at: datetime
     execution_time: float | None = None
-    retry_count: int | None = None
+    retry_count: DbNonNegativeInt32 | None = None
     error_type: str | None = Field(default=None, max_length=255)
     error_message: str | None = None
-    error_status_code: int | None = None
+    error_status_code: DbNonNegativeInt32 | None = None
     result: dict[str, Any] | None = None
 
 

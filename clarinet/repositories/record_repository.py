@@ -38,6 +38,7 @@ from clarinet.models.record import RecordFindResult, RecordFindResultComparisonO
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User, UserRolesLink
 from clarinet.repositories.base import BaseRepository
+from clarinet.services.events.capture import emit_entity
 from clarinet.settings import settings
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
@@ -635,25 +636,32 @@ class RecordRepository(BaseRepository[Record]):
         record_id: int,
         data: RecordData,
         new_status: RecordStatus | None = None,
+        *,
+        reassign_to: UUID | None = None,
     ) -> tuple[Record, RecordStatus]:
-        """Update record data and optionally status.
+        """Update record data and optionally status / owner.
 
         Args:
-            record_id: Record ID
-            data: New record data
-            new_status: Optional new status to set
+            record_id: Record ID.
+            data: New record data.
+            new_status: Optional new status to set.
+            reassign_to: When set, reassign ``user_id`` to this user in the same
+                commit (used by shared_editing "last editor owns it"). Unlike
+                ``assign_user`` this has no status side effect.
 
         Returns:
-            Tuple of (record with relations loaded, old status)
+            Tuple of (record with relations loaded, old status).
 
         Raises:
-            RecordNotFoundError: If record doesn't exist
+            RecordNotFoundError: If record doesn't exist.
         """
         record = await self.get(record_id)
         old_status = record.status
         record.data = data
         if new_status is not None:
             record.status = new_status
+        if reassign_to is not None:
+            record.user_id = reassign_to
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
@@ -1126,6 +1134,12 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(stmt)
         if commit:
             await self.session.commit()
+            # sse-capture: explicit emit, UoW-invisible (Core bulk DML).
+            # Children whose parent_record_id is SET NULL by the FK are
+            # intentionally not emitted as "updated" (minor: parent rarely
+            # affects the UI; thin events keep the client cache eventually
+            # consistent via TTL/refetch).
+            emit_entity("record", "deleted", [str(i) for i in record_ids])
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def collect_descendants(self, root_id: int, *, for_update: bool = False) -> list[Record]:
@@ -1455,10 +1469,21 @@ class RecordRepository(BaseRepository[Record]):
     async def find_random(
         self,
         criteria: RecordSearchCriteria,
+        *,
+        for_update: bool = False,
     ) -> Record | None:
-        """Find a single random record matching criteria (SQL-level random)."""
+        """Find a single random record matching criteria (SQL-level random).
+
+        ``for_update=True`` locks the chosen row with ``FOR UPDATE OF record
+        SKIP LOCKED`` (PostgreSQL) so a concurrent claimer skips it instead of
+        selecting the same record — this is what makes the claim-from-pool
+        select-then-claim atomic. SQLite omits the clause (no row locking),
+        which only relaxes the in-memory test runner, never production.
+        """
         statement = self._build_criteria_query(criteria)
         statement = statement.order_by(func.random()).limit(1)
+        if for_update:
+            statement = statement.with_for_update(skip_locked=True, of=Record)
         result = await self.session.execute(statement)
         return result.scalars().first()
 
@@ -1593,6 +1618,71 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         rows = result.all()
         return {type_name: count for type_name, count in rows}  # noqa: C416
+
+    async def get_assigned_status_counts_by_user(self) -> dict[str, dict[str, int]]:
+        """Per assigned user, per status: ``{str(user_id): {status_value: count}}``.
+
+        Only records with a user assigned (``user_id IS NOT NULL``) are counted.
+        All statuses are returned; the caller selects the ones it surfaces.
+        """
+        query = (
+            select(col(Record.user_id), col(Record.status), func.count())
+            .where(col(Record.user_id).is_not(None))
+            .group_by(col(Record.user_id), col(Record.status))
+        )
+        result = await self.session.execute(query)
+        out: dict[str, dict[str, int]] = {}
+        for user_id, status, count in result.all():
+            out.setdefault(str(user_id), {})[status.value] = count
+        return out
+
+    async def count_unassigned_pending(self) -> int:
+        """Count of ``pending`` records with no user assigned (the claimable pool)."""
+        query = select(func.count()).where(
+            col(Record.user_id).is_(None),
+            col(Record.status) == RecordStatus.pending,
+        )
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
+    async def count_available_pending_for_user(
+        self, user_id: UUID, role_names: list[str] | None
+    ) -> int:
+        """Count records a user could claim right now.
+
+        Counts ``pending``, unassigned records whose ``RecordType`` the user
+        may act on, excluding the user's own ``unique_per_user`` conflicts.
+        This mirrors ``claim-next`` eligibility (role-scoped and
+        ``unique_per_user``-aware), so the admin-dashboard figure matches what
+        the user can actually take from the pool.
+
+        Args:
+            user_id: User whose claimable pool is counted; drives the
+                ``unique_per_user`` violation filter.
+            role_names: Restrict to record types in these roles. An empty list
+                yields ``0`` (a role-less regular user claims nothing).
+                ``None`` applies no role restriction — the whole pool,
+                including the role-less bucket (superusers).
+
+        Returns:
+            Number of claimable records.
+        """
+        if role_names is not None and not role_names:
+            return 0
+        query = (
+            select(func.count())
+            .select_from(Record)
+            .join(RecordType, col(Record.record_type_name) == col(RecordType.name))
+            .where(
+                col(Record.user_id).is_(None),
+                col(Record.status) == RecordStatus.pending,
+                _unique_per_user_violation_filter(user_id),
+            )
+        )
+        if role_names is not None:
+            query = query.where(col(RecordType.role_name).in_(role_names))
+        result = await self.session.execute(query)
+        return result.scalar() or 0
 
     async def get_filter_options(
         self, criteria: RecordSearchCriteria, user: User

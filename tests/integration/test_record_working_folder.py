@@ -1,9 +1,9 @@
-"""Tests for path resolution through ``FileRepository``.
+"""Tests for path resolution through ``Files``.
 
 The legacy ``RecordRead._format_path*`` / ``_format_slicer_kwargs`` /
-``_get_working_folder`` helpers were removed in the FileRepository
+``_get_working_folder`` helpers were removed in the Files
 refactor (Phase 3). This file now exercises the same path-resolution
-surface via ``FileRepository(record).working_dir`` (replaces
+surface via ``Files(record).dir()`` (replaces
 ``_get_working_folder``) and ``validate_record_files`` (unchanged —
 still the public API).
 
@@ -19,12 +19,12 @@ import pytest
 import pytest_asyncio
 
 from clarinet.exceptions.domain import AnonPathError
+from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordRead, RecordType
 from clarinet.models.study import Series, Study
-from clarinet.repositories import FileRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.settings import settings
@@ -202,7 +202,7 @@ async def _create_record(session, *, patient_id, study_uid, series_uid, rt_name,
 
 
 # ===========================================================================
-# Group 1: FileRepository.working_dir (replaces _get_working_folder)
+# Group 1: Files.dir() (replaces _get_working_folder)
 # ===========================================================================
 
 
@@ -225,7 +225,7 @@ async def test_working_dir_series_level(
         / "ANON_STUDY_WF"
         / "ANON_SERIES_WF"
     )
-    assert FileRepository(record_read).working_dir == expected
+    assert Files(record_read).dir() == expected
 
 
 @pytest.mark.asyncio
@@ -239,7 +239,7 @@ async def test_working_dir_study_level(test_session, patient_with_anon, study_wi
     )
 
     expected = Path(settings.storage_path) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF"
-    assert FileRepository(record_read).working_dir == expected
+    assert Files(record_read).dir() == expected
 
 
 @pytest.mark.asyncio
@@ -252,14 +252,14 @@ async def test_working_dir_patient_level(test_session, patient_with_anon, rt_pat
     )
 
     expected = Path(settings.storage_path) / f"{settings.anon_id_prefix}_42"
-    assert FileRepository(record_read).working_dir == expected
+    assert Files(record_read).dir() == expected
 
 
 @pytest.mark.asyncio
 async def test_working_dir_strict_raises_on_unanonymized_study(
     test_session, test_patient, study_without_anon, series_without_anon, rt_series
 ):
-    """FileRepository is strict by default — unanon study → AnonPathError."""
+    """Files is strict by default — unanon study → AnonPathError."""
     record = await _create_record(
         test_session,
         patient_id=test_patient.id,
@@ -273,7 +273,7 @@ async def test_working_dir_strict_raises_on_unanonymized_study(
     record_read = RecordRead.model_validate(loaded)
 
     with pytest.raises(AnonPathError, match=r"Study|Series has no anon_uid"):
-        FileRepository(record_read)
+        Files(record_read)
 
 
 # ===========================================================================
@@ -331,7 +331,7 @@ async def test_working_dir_uses_per_record_clarinet_storage_path_override(
     expected = (
         Path(custom_storage) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF" / "ANON_SERIES_WF"
     )
-    rendered = FileRepository(record_read).working_dir
+    rendered = Files(record_read).dir()
     assert rendered == expected
     # Settings-level storage_path must NOT be used when override is set.
     assert not str(rendered).startswith(str(settings.storage_path))
@@ -352,7 +352,7 @@ async def test_working_dir_falls_back_to_settings_storage_path_when_override_non
     )
 
     assert record_read.clarinet_storage_path is None
-    rendered = FileRepository(record_read).working_dir
+    rendered = Files(record_read).dir()
     assert str(rendered).startswith(str(settings.storage_path))
 
 
@@ -410,4 +410,4 @@ async def test_working_dir_respects_custom_disk_path_template(
     )
 
     expected = Path(settings.storage_path).joinpath(*expected_segments)
-    assert FileRepository(record_read).working_dir == expected
+    assert Files(record_read).dir() == expected

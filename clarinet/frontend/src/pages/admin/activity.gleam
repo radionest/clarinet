@@ -1,65 +1,41 @@
 // Admin Activity page — server-wide audit feed (record events + pipeline runs).
-import api/audit
-import api/models.{type PipelineRun, type RecordEvent}
-import api/types.{type ApiError}
+// A thin host around the reusable `activity_feed` sub-component: it owns the
+// page chrome and forwards everything else to the feed.
 import clarinet_frontend/i18n
-import components/activity_feed.{type ActivityTab, EventsTab, RunsTab}
-import gleam/javascript/promise
-import gleam/option.{None}
+import components/activity_feed
+import gleam/dict
+import gleam/list
+import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import shared.{type OutMsg, type Shared}
-import utils/load_status.{type LoadStatus}
+import utils/record_filters
 
 // --- Model ---
 
 pub type Model {
-  Model(
-    tab: ActivityTab,
-    events: List(RecordEvent),
-    events_status: LoadStatus,
-    runs: List(PipelineRun),
-    runs_status: LoadStatus,
-  )
+  Model(activity: activity_feed.Model)
 }
 
 // --- Msg ---
 
 pub type Msg {
-  TabSelected(ActivityTab)
-  EventsLoaded(Result(List(RecordEvent), ApiError))
-  RunsLoaded(Result(List(PipelineRun), ApiError))
-  Retry(ActivityTab)
+  ActivityMsg(activity_feed.Msg)
 }
 
 // --- Init ---
 
 pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let model =
-    Model(
-      tab: EventsTab,
-      events: [],
-      events_status: load_status.Loading,
-      runs: [],
-      runs_status: load_status.Loading,
-    )
-  #(model, effect.batch([load_events(), load_runs()]), [])
-}
-
-fn load_events() -> Effect(Msg) {
-  use dispatch <- effect.from
-  audit.list_events(None)
-  |> promise.tap(fn(result) { dispatch(EventsLoaded(result)) })
-  Nil
-}
-
-fn load_runs() -> Effect(Msg) {
-  use dispatch <- effect.from
-  audit.list_runs(None)
-  |> promise.tap(fn(result) { dispatch(RunsLoaded(result)) })
-  Nil
+  let #(activity, eff, out) = activity_feed.init(activity_feed.GlobalSource)
+  // Load users + record types so the events filter dropdowns have options.
+  let out_msgs = [
+    shared.ReloadUsers,
+    shared.ReloadRecordTypes,
+    ..shared.activity_out(out)
+  ]
+  #(Model(activity: activity), effect.map(eff, ActivityMsg), out_msgs)
 }
 
 // --- Update ---
@@ -70,51 +46,32 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    TabSelected(tab) -> #(Model(..model, tab: tab), effect.none(), [])
-
-    EventsLoaded(Ok(events)) -> #(
-      Model(..model, events: events, events_status: load_status.Loaded),
-      effect.none(),
-      [],
-    )
-    EventsLoaded(Error(err)) -> #(
-      Model(..model, events_status: load_status.Failed("Failed to load events")),
-      effect.none(),
-      handle_error(err, "Failed to load events"),
-    )
-
-    RunsLoaded(Ok(runs)) -> #(
-      Model(..model, runs: runs, runs_status: load_status.Loaded),
-      effect.none(),
-      [],
-    )
-    RunsLoaded(Error(err)) -> #(
-      Model(
-        ..model,
-        runs_status: load_status.Failed("Failed to load pipeline runs"),
-      ),
-      effect.none(),
-      handle_error(err, "Failed to load pipeline runs"),
-    )
-
-    Retry(EventsTab) -> #(
-      Model(..model, events_status: load_status.Loading),
-      load_events(),
-      [],
-    )
-    Retry(RunsTab) -> #(
-      Model(..model, runs_status: load_status.Loading),
-      load_runs(),
-      [],
-    )
+    ActivityMsg(sub_msg) -> {
+      let #(activity, eff, out) = activity_feed.update(model.activity, sub_msg)
+      #(Model(activity: activity), effect.map(eff, ActivityMsg), shared.activity_out(out))
+    }
   }
 }
 
-fn handle_error(err: ApiError, fallback: String) -> List(OutMsg) {
-  case err {
-    types.AuthError(_) -> [shared.Logout]
-    _ -> [shared.ShowError(fallback)]
-  }
+// --- Cleanup ---
+
+/// Cancel the feed's pending SSE-refresh / highlight timers on route change.
+/// Registered in `main.cleanup_current_page`.
+pub fn cleanup(model: Model) -> Effect(Msg) {
+  effect.map(activity_feed.cleanup(model.activity), ActivityMsg)
+}
+
+// --- SSE bridge ---
+
+/// Built by `main.delegate_sse` when a relevant push lands while this page is
+/// open, so the feed silently refreshes the matching tab. Kept here so `main`
+/// constructs the page Msg without importing the feed sub-component directly.
+pub fn external_events_change() -> Msg {
+  ActivityMsg(activity_feed.ExternalEventsChange)
+}
+
+pub fn external_runs_change() -> Msg {
+  ActivityMsg(activity_feed.ExternalRunsChange)
 }
 
 // --- View ---
@@ -124,15 +81,36 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text(shared.translate(i18n.NavActivity))]),
     ]),
-    activity_feed.view(
-      model.tab,
-      model.events_status,
-      model.events,
-      model.runs_status,
-      model.runs,
-      TabSelected,
-      Retry,
-      shared.translate,
+    element.map(
+      activity_feed.view(
+        model.activity,
+        shared.translate,
+        actor_filter_options(shared),
+        record_type_filter_options(shared),
+      ),
+      ActivityMsg,
     ),
   ])
+}
+
+/// Actor dropdown options for the events filter, built from the users cache
+/// (sorted by email). The feed stays decoupled from `shared`, so the host
+/// resolves the options and passes them in.
+fn actor_filter_options(shared: Shared) -> List(#(String, String)) {
+  let users = shared.cache.users
+  let ids =
+    users
+    |> dict.values
+    |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+    |> list.map(fn(u) { u.id })
+  record_filters.user_options(ids, users, shared.translate)
+}
+
+/// Record-type dropdown options for the events filter, built from the record
+/// types cache (sorted by name).
+fn record_type_filter_options(shared: Shared) -> List(#(String, String)) {
+  shared.cache.record_types
+  |> dict.keys
+  |> list.sort(string.compare)
+  |> record_filters.type_options(shared.translate)
 }

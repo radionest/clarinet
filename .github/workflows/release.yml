@@ -64,10 +64,12 @@ jobs:
       - name: Build wheel
         run: uv build --wheel
 
-      - name: Verify wheel contains static files
+      - name: Verify wheel contains static files and agent docs
         run: |
           python3 -m zipfile -l dist/*.whl | grep "clarinet/static/" | head -5
           echo "Wheel verified: contains frontend static files"
+          python3 -m zipfile -l dist/*.whl | grep -q "clarinet/docs/" || { echo "ERROR: clarinet/docs/ missing from wheel"; exit 1; }
+          echo "Wheel verified: contains agent docs"
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4

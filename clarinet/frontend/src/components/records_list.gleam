@@ -7,6 +7,7 @@ import api/models.{type Record}
 import api/types
 import cache/bucket.{type BucketStatus}
 import clarinet_frontend/i18n.{type Key}
+import components/entity_link
 import components/forms/base
 import gleam/dict.{type Dict}
 import gleam/int
@@ -18,6 +19,7 @@ import lustre/element/html
 import lustre/event
 import router
 import shared.{type Shared}
+import utils/permissions
 import utils/record_filters
 import utils/table_sort.{type SortDirection}
 
@@ -221,12 +223,16 @@ fn records_table(
   // (sort_col, sort_dir) pair is read only to draw the header arrows.
   let #(sort_col, sort_dir) =
     table_sort.read_sort(active_filters, default_sort_col)
+  let is_admin = case shared.user {
+    Some(u) -> permissions.is_admin_user(u)
+    None -> False
+  }
   html.div([attribute.class("table-responsive")], [
     html.table([attribute.class("table")], [
       html.thead([], [header_row(sort_col, sort_dir, shared, config)]),
       html.tbody(
         [],
-        list.map(records, fn(record) { record_row(record, config) }),
+        list.map(records, fn(record) { record_row(record, config, is_admin) }),
       ),
     ]),
   ])
@@ -281,8 +287,11 @@ fn header_row(
   )
 }
 
-fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
-  let record_id_str = int.to_string(option.unwrap(record.id, 0))
+fn record_row(
+  record: Record,
+  config: Config(msg),
+  is_admin: Bool,
+) -> Element(msg) {
   let type_label = case record.record_type {
     Some(rt) -> option.unwrap(rt.label, rt.name)
     None -> record.record_type_name
@@ -291,7 +300,9 @@ fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
     [],
     list.flatten([
       [
-        html.td([attribute.class("cell-id")], [html.text(record_id_str)]),
+        html.td([attribute.class("cell-id")], [
+          entity_link.record(option.unwrap(record.id, 0)),
+        ]),
         html.td([], [html.text(type_label)]),
         html.td([], [config.status_cell(record)]),
       ],
@@ -299,7 +310,7 @@ fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
         True -> [
           html.td([], [html.text(patient_name(record))]),
           html.td([attribute.class("cell-id")], [
-            html.text(record.patient_id),
+            entity_link.patient_if_admin(record.patient_id, is_admin),
           ]),
           html.td([attribute.class("cell-id")], [
             html.text(patient_anon_id(record)),

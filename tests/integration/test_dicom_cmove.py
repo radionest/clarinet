@@ -25,6 +25,7 @@ from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyRe
 from clarinet.services.dicom.models import SeriesResult
 from clarinet.services.dicom.scp import StorageSCP
 from tests.config import PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
+from tests.utils.dicom import move_with_retry
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
@@ -71,12 +72,19 @@ def dicom_client() -> DicomClient:
 
 @pytest.fixture(scope="session")
 def small_mr_study(dicom_client: DicomClient, orthanc_node: DicomNode) -> StudyResult:
-    """Find the smallest MR study on Orthanc for fast C-MOVE tests."""
+    """Smallest SHIPILOV MR study on Orthanc for fast C-MOVE tests.
+
+    Scoped to the SHIPILOV test patient so the anonymized MR copies that the
+    anonymize tests push to the shared PACS (patient ``CLARINET_*``) can't be
+    selected — they mutate mid-run and would flake the count assertions.
+    """
     from clarinet.services.dicom import StudyQuery
 
-    studies = asyncio.run(dicom_client.find_studies(StudyQuery(), orthanc_node))
+    studies = asyncio.run(
+        dicom_client.find_studies(StudyQuery(patient_name="SHIPILOV*"), orthanc_node)
+    )
     mr = [s for s in studies if s.modalities_in_study and "MR" in s.modalities_in_study]
-    assert mr, "No MR study found on test PACS"
+    assert mr, "No SHIPILOV MR study found on test PACS"
     return min(mr, key=lambda s: s.number_of_study_related_instances or float("inf"))
 
 
@@ -224,13 +232,7 @@ async def test_cmove_series_to_memory(
 
     ops = DicomOperations(calling_aet=CALLING_AET)
     result = await asyncio.to_thread(
-        ops.retrieve_via_move,
-        config,
-        request,
-        storage,
-        CALLING_AET,
-        storage_scp,
-        timeout=120.0,
+        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
     )
 
     assert result.instances, "No instances received via C-MOVE"
@@ -275,13 +277,7 @@ async def test_cmove_study_to_disk(
 
     ops = DicomOperations(calling_aet=CALLING_AET)
     result = await asyncio.to_thread(
-        ops.retrieve_via_move,
-        config,
-        request,
-        storage,
-        CALLING_AET,
-        storage_scp,
-        timeout=120.0,
+        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
     )
 
     assert result.num_completed > 0
@@ -332,13 +328,7 @@ async def test_cmove_matches_cget(
 
     ops = DicomOperations(calling_aet=CALLING_AET)
     cmove_result = await asyncio.to_thread(
-        ops.retrieve_via_move,
-        config,
-        request,
-        storage,
-        CALLING_AET,
-        storage_scp,
-        timeout=120.0,
+        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
     )
     cmove_uids = set(cmove_result.instances.keys())
 

@@ -9,6 +9,57 @@ download the result from the **Quarto** tab once it finishes.
 It mirrors the SQL *reports* feature (`*.sql` → CSV/XLSX) but produces a
 formatted document instead of a spreadsheet.
 
+## Scaffolding a new report
+
+Use `clarinet quarto new` to create a minimal `.qmd` and a matching
+`reference.docx` in one step:
+
+```bash
+clarinet quarto new my_report \
+    --title "Monthly Summary" \
+    --description "Records grouped by status." \
+    --lang ru \
+    --format docx \
+    --data monthly_summary,user_stats \
+    --from-docx /path/to/brand.docx   # optional: copy styles from an existing .docx
+```
+
+The command writes `<name>.qmd` (YAML front matter + one empty heading) into the
+project's `quarto_reports_path` (default `./review/`). Flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `name` | (required) | Stem of the `.qmd` file |
+| `--title` | `<name>` | `title` in front matter |
+| `--description` | `""` | `description` in front matter |
+| `--lang` | `ru` | `lang` in front matter |
+| `--format` | `docx` | Output format: `docx`, `pdf`, or `both` |
+| `--data` | `""` | Comma-separated SQL report names for `clarinet.data` |
+| `--from-docx` | — | Existing `.docx` whose styles become `reference.docx` |
+| `--force` | `false` | Overwrite existing `.qmd` / `reference.docx` |
+
+**One `reference.docx` per folder.** All `.qmd` files in the same folder share a
+single `reference.docx`. The command refuses to overwrite an existing one unless
+`--force` is set, so adding a second report to an already-scaffolded folder is
+safe — the existing styles file is kept.
+
+**`--from-docx` scrubs author content, keeps the letterhead.** A clinical
+document used as a branding template can carry patient data far beyond the main
+body, so the import strips it thoroughly. **Scrubbed:** the document body;
+footnotes and endnotes; comments (text *and* reviewer names in `w:author` /
+`w:initials`) and the `people.xml` roster; document authorship and metadata in
+`docProps/core.xml` (`dc:creator`, `cp:lastModifiedBy`, title/subject/
+description/keywords) and any `docProps/custom.xml` custom properties. Dropped
+parts have their relationships and `[Content_Types].xml` entries cleaned so the
+result is still a valid `.docx`. **Kept:** the visual style template — paragraph
+and character styles, theme, numbering, fonts, page geometry — and, by design,
+the **whole letterhead**: headers, footers, and embedded media (the org logo).
+Review the produced `reference.docx` before committing it.
+
+**Default `reference.docx`** (when `--from-docx` is omitted) is generated via
+`quarto pandoc --print-default-data-file reference.docx`. Quarto must be
+installed (`clarinet quarto install`) for this branch.
+
 ## Authoring a report
 
 Drop a `*.qmd` file into the project's reports folder
@@ -51,6 +102,45 @@ df.head()
 
 Because the data is a plain CSV, the chunk never opens a database connection
 and never needs credentials.
+
+## Typed columns (optional)
+
+A bare `pd.read_csv` loses the column types the SQL query knew: a CSV round-trip
+turns dates into strings and integer columns with NULLs into floats, and the
+DataFrame's columns are untyped in the editor. To get **typed, dtype-correct
+columns**, generate a [pandera](https://pandera.readthedocs.io/) schema per
+report from the live SQL result types:
+
+```bash
+# Run with the project's PostgreSQL database reachable (CLARINET_DATABASE_URL).
+uv run clarinet quarto gen-types
+```
+
+This inspects each `*.sql` report's result columns (via the planner — no rows
+are fetched) and writes `review/report_schemas.py`, one
+`pandera.DataFrameModel` per report. **Commit that file** — the renderer stages
+it next to the `.qmd`. PostgreSQL only: SQLite exposes no column types, so the
+command refuses on the SQLite driver.
+
+A chunk then reads through the generated schema instead of `pd.read_csv`:
+
+````markdown
+```{python}
+from report_schemas import MonthlySummary
+
+df = MonthlySummary.read()        # validates + coerces dtypes
+df[MonthlySummary.status]         # typo-checked column reference (mypy/pyright)
+```
+````
+
+`Config.coerce = True` repairs the dtypes the CSV lost — `int4`→`Int64`,
+`timestamptz`→`datetime64`, `bool`→`boolean` — and `MonthlySummary.read()`
+returns a validated frame. Columns whose PostgreSQL type has no mapping (JSON,
+arrays, enums) fall back to an untyped `object` column rather than failing
+generation. Re-run `gen-types` whenever you change a report's `SELECT`.
+
+The generated module imports only `pandas`/`pandera` (no DB, no clarinet), so
+it is safe to import inside the sandboxed render kernel.
 
 ## Rendering & download (UI / API)
 

@@ -60,3 +60,14 @@
     background: var(--plum-wash);
     color: var(--plum);
 }
+
+/* Presence dot on the admin role matrix — shown only for online users. */
+.online-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-left: var(--spacing-xs, 6px);
+    border-radius: 50%;
+    background: var(--green, #2e7d4f);
+    vertical-align: middle;
+}

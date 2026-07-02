@@ -147,6 +147,7 @@ secret_key = "change-this-secret-key-in-production"
 # ── Worker capabilities ──────────────────────────────
 # have_gpu = false
 # have_dicom = false
+# have_quarto = false
 # have_keras = false
 # have_torch = false
 
@@ -510,6 +511,43 @@ def _parse_dicom_scp_arg(value: str) -> tuple[str, int]:
     return parts[0], port
 
 
+def _normalize_worker_queues(queues: list[str]) -> list[str]:
+    """Resolve ``--queues`` shorthands to the broker's actual (version-gated) names.
+
+    ``--queues quarto`` must map to ``settings.quarto_queue_name`` — the exact
+    name the API publishes to — not a bare ``{namespace}.quarto``. With
+    ``pipeline_version_check_enabled`` (default on) the real name carries a
+    fingerprint segment (``clarinet.<fp>.quarto``), so a worker bound to the bare
+    name sits on a different queue under the DIRECT exchange and silently
+    consumes nothing. Full names (already containing ``.``) pass through
+    unchanged. An unknown bare shorthand can only be guessed as the unversioned
+    ``{namespace}.<name>``, which may not match the producer — pass it through
+    but warn, so the operator switches to a known kind or a full queue name.
+    """
+    kind_queues = {
+        "default": settings.default_queue_name,
+        "gpu": settings.gpu_queue_name,
+        "dicom": settings.dicom_queue_name,
+        "quarto": settings.quarto_queue_name,
+        "dead_letter": settings.dlq_queue_name,
+    }
+    ns = settings.pipeline_task_namespace
+    resolved: list[str] = []
+    for q in queues:
+        if "." in q:
+            resolved.append(q)
+        elif q in kind_queues:
+            resolved.append(kind_queues[q])
+        else:
+            logger.warning(
+                f"Unknown worker queue shorthand '{q}'; using unversioned "
+                f"'{ns}.{q}', which may not match the queue the API publishes to. "
+                f"Use a known kind (default/gpu/dicom/quarto) or a full queue name."
+            )
+            resolved.append(f"{ns}.{q}")
+    return resolved
+
+
 async def _run_pipeline_worker(
     queues: list[str] | None,
     workers: int,
@@ -718,8 +756,6 @@ def _patch_ohif_paths(ohif_dir: Path, base_path: str = "") -> None:
     if config_file.exists():
         config = config_file.read_text(encoding="utf-8")
         config = config.replace("routerBasename: '/ohif'", f"routerBasename: '{ohif_base}'")
-        dicomweb_path = f"{base_path}/dicom-web"
-        config = config.replace("'/dicom-web'", f"'{dicomweb_path}'")
         config_file.write_text(config, encoding="utf-8")
 
 
@@ -1075,6 +1111,86 @@ def cleanup_quarto_renders(days: int) -> None:
     )
 
 
+def generate_report_types() -> None:
+    """Generate ``review/report_schemas.py`` (pandera) from the ``*.sql`` reports.
+
+    Connects to the configured PostgreSQL database to read each report's result
+    column types (no rows fetched), then writes one module the ``*.qmd`` reports
+    import for typed, dtype-coerced DataFrames. Re-run after adding or changing
+    a report; commit the result.
+    """
+    asyncio.run(_generate_report_types())
+
+
+def cmd_quarto_new(args: argparse.Namespace) -> None:
+    """Handle ``clarinet quarto new`` — scaffold a .qmd + reference.docx."""
+    from clarinet.exceptions.domain import QuartoNotInstalledError, QuartoScaffoldError
+    from clarinet.utils.quarto_scaffold import scaffold_quarto_report
+
+    formats = {"docx": ["docx"], "pdf": ["pdf"], "both": ["docx", "pdf"]}[args.format]
+    data_reports = [item.strip() for item in args.data.split(",") if item.strip()]
+    from_docx = Path(args.from_docx) if args.from_docx else None
+    try:
+        scaffold_quarto_report(
+            args.name,
+            title=args.title,
+            description=args.description,
+            lang=args.lang,
+            formats=formats,
+            data_reports=data_reports,
+            from_docx=from_docx,
+            force=args.force,
+        )
+    except (QuartoScaffoldError, QuartoNotInstalledError) as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+
+
+async def _generate_report_types() -> None:
+    from clarinet.exceptions.domain import ReportQueryError
+    from clarinet.repositories.report_repository import ReportColumn, ReportRepository
+    from clarinet.utils.db_manager import db_manager
+    from clarinet.utils.report_discovery import discover_report_templates
+    from clarinet.utils.report_schema_codegen import (
+        ReportSpec,
+        duplicate_column_names,
+        render_schemas_module,
+    )
+
+    reports_dir = settings.get_reports_path()
+    discovered = discover_report_templates(reports_dir)
+    if not discovered:
+        logger.warning(f"No *.sql reports found in {reports_dir}; nothing to generate")
+        return
+
+    repo = ReportRepository()
+    specs: list[ReportSpec] = []
+    try:
+        for template, sql in discovered:
+            columns: list[ReportColumn] = await repo.describe_report(sql)
+            specs.append((template.name, columns))
+            logger.info(f"Report '{template.name}': {len(columns)} column(s)")
+            if dups := duplicate_column_names(columns):
+                logger.warning(
+                    f"Report '{template.name}': duplicate column name(s) {dups} — "
+                    "alias them in SQL or coercion won't apply to the later copy"
+                )
+    except ReportQueryError as exc:
+        # opt(exception=) so the underlying planner/SQL error (preserved on
+        # __cause__) reaches the operator — there is no API handler on the CLI
+        # path to log the traceback for us.
+        logger.opt(exception=exc).error(f"Type generation failed: {exc}")
+        sys.exit(1)
+    finally:
+        await db_manager.close()
+
+    out_path = reports_dir / "report_schemas.py"
+    out_path.write_text(render_schemas_module(specs), encoding="utf-8")
+    logger.info(
+        f"Wrote {out_path} ({len(specs)} schema(s)). Commit it — the .qmd reports import it."
+    )
+
+
 def handle_quarto_command(args: argparse.Namespace) -> None:
     """Handle Quarto-related commands."""
     if args.quarto_command == "install":
@@ -1085,8 +1201,51 @@ def handle_quarto_command(args: argparse.Namespace) -> None:
         uninstall_quarto()
     elif args.quarto_command == "cleanup":
         cleanup_quarto_renders(days=args.days)
+    elif args.quarto_command == "gen-types":
+        generate_report_types()
+    elif args.quarto_command == "new":
+        cmd_quarto_new(args)
     else:
         logger.error(f"Unknown quarto command: {args.quarto_command}")
+        sys.exit(1)
+
+
+def cmd_agent_init(args: argparse.Namespace) -> None:
+    """Handle ``clarinet agent init`` — install managed agent docs into a project."""
+    from clarinet.exceptions.domain import AgentScaffoldError
+    from clarinet.utils.agent_scaffold import scaffold_agent_docs
+
+    try:
+        dest = scaffold_agent_docs(
+            args.agent, project_dir=Path(args.path), mode="init", force=args.force
+        )
+    except AgentScaffoldError as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    logger.info(f"Agent docs installed at {dest}")
+
+
+def cmd_agent_update(args: argparse.Namespace) -> None:
+    """Handle ``clarinet agent update`` — refresh managed agent docs + re-resolve links."""
+    from clarinet.exceptions.domain import AgentScaffoldError
+    from clarinet.utils.agent_scaffold import scaffold_agent_docs
+
+    try:
+        dest = scaffold_agent_docs(args.agent, project_dir=Path(args.path), mode="update")
+    except AgentScaffoldError as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    logger.info(f"Agent docs updated at {dest}")
+
+
+def handle_agent_command(args: argparse.Namespace) -> None:
+    """Handle agent-docs commands."""
+    if args.agent_command == "init":
+        cmd_agent_init(args)
+    elif args.agent_command == "update":
+        cmd_agent_update(args)
+    else:
+        logger.error(f"Unknown agent command: {args.agent_command}")
         sys.exit(1)
 
 
@@ -1406,6 +1565,58 @@ def main() -> None:
         "--days", type=int, default=30, help="Retention in days (default: 30)"
     )
 
+    quarto_subparsers.add_parser(
+        "gen-types",
+        help="Generate review/report_schemas.py (pandera) from *.sql reports for typed .qmd DataFrames",
+    )
+
+    quarto_new_parser = quarto_subparsers.add_parser(
+        "new", help="Scaffold a new Quarto report (.qmd + reference.docx)"
+    )
+    quarto_new_parser.add_argument("name", help="Report name → <name>.qmd")
+    quarto_new_parser.add_argument("--title", help="Front-matter title (default: <name>)")
+    quarto_new_parser.add_argument("--description", default="", help="Front-matter description")
+    quarto_new_parser.add_argument("--lang", default="ru", help="Document language (default: ru)")
+    quarto_new_parser.add_argument(
+        "--format", default="docx", choices=["docx", "pdf", "both"], help="Output format(s)"
+    )
+    quarto_new_parser.add_argument(
+        "--data", default="", help="Comma-separated SQL report names for clarinet.data"
+    )
+    quarto_new_parser.add_argument(
+        "--from-docx", help="Existing .docx whose styles become reference.docx"
+    )
+    quarto_new_parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing .qmd / reference.docx"
+    )
+
+    # agent command
+    agent_parser = subparsers.add_parser(
+        "agent", help="Manage framework agent docs in a project's .claude/rules/clarinet/"
+    )
+    agent_subparsers = agent_parser.add_subparsers(dest="agent_command")
+
+    agent_init_parser = agent_subparsers.add_parser(
+        "init", help="Install agent docs into a project"
+    )
+    agent_init_parser.add_argument("path", nargs="?", default=".", help="Project dir (default: .)")
+    agent_init_parser.add_argument(
+        "--agent", default="claude", choices=["claude"], help="Target agent (default: claude)"
+    )
+    agent_init_parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing managed docs"
+    )
+
+    agent_update_parser = agent_subparsers.add_parser(
+        "update", help="Refresh agent docs and re-resolve package links"
+    )
+    agent_update_parser.add_argument(
+        "path", nargs="?", default=".", help="Project dir (default: .)"
+    )
+    agent_update_parser.add_argument(
+        "--agent", default="claude", choices=["claude"], help="Target agent (default: claude)"
+    )
+
     # worker command
     worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")
     worker_parser.add_argument(
@@ -1503,7 +1714,7 @@ def main() -> None:
         description=(
             "Move anonymized dcm_anon directories from one disk_path_template "
             "layout to another (no DB changes).\n\n"
-            "Supported placeholders (full reference in clarinet.utils.path_template):\n"
+            "Supported placeholders (full reference in clarinet.files._template):\n"
             "  {anon_patient_id}   anonymized patient identifier\n"
             "  {anon_study_uid}    anonymized study UID (or original if not set)\n"
             "  {anon_series_uid}   anonymized series UID (or original if not set)\n"
@@ -1575,7 +1786,7 @@ def main() -> None:
             "the result for surviving PHI.\n\n"
             "Operates on settings.database_* — restore a production copy into a "
             "throwaway scratch database BEFORE running. study.anon_uid / "
-            "series.anon_uid / patient.auto_id are preserved so FileRepository "
+            "series.anon_uid / patient.auto_id are preserved so Files "
             "still resolves the anonymized DICOM."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1694,13 +1905,7 @@ def main() -> None:
         else:
             admin_parser.print_help()
     elif args.command == "worker":
-        queues = args.queues
-        if queues:
-            # Normalize queue names: "gpu" -> "{namespace}.gpu" (current project)
-            from clarinet.settings import settings as _settings
-
-            ns = _settings.pipeline_task_namespace
-            queues = [q if "." in q else f"{ns}.{q}" for q in queues]
+        queues = _normalize_worker_queues(args.queues) if args.queues else None
         dicom_scp = _parse_dicom_scp_arg(args.dicom) if args.dicom else None
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(
@@ -1730,6 +1935,11 @@ def main() -> None:
         handle_ohif_command(args)
     elif args.command == "quarto":
         handle_quarto_command(args)
+    elif args.command == "agent":
+        if not args.agent_command:
+            agent_parser.print_help()
+        else:
+            handle_agent_command(args)
     elif args.command == "session":
         if not args.session_command:
             session_parser.print_help()

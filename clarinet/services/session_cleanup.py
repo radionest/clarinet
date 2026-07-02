@@ -6,14 +6,31 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import CursorResult, delete, func, select
+from sqlalchemy import CursorResult, delete, func, or_, select
 from sqlmodel import col
 
 from clarinet.models.auth import AccessToken
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
+from clarinet.utils.session import emit_offline_if_last
+
+
+def _dead_session_filter() -> Any:
+    """SQL predicate for sessions to evict: expired, or idle past the idle timeout.
+
+    An idle-timed-out session is already rejected by ``read_token`` (removing it
+    is safe — it cannot authenticate), and its removal is what drives the
+    presence "offline" event consumed by the admin online indicator.
+    """
+    now = datetime.now(UTC)
+    idle = settings.session_idle_timeout_minutes
+    dead: Any = col(AccessToken.expires_at) <= now
+    if idle > 0:
+        dead = or_(dead, col(AccessToken.last_accessed) <= now - timedelta(minutes=idle))
+    return dead
 
 
 class SessionCleanupService:
@@ -68,29 +85,26 @@ class SessionCleanupService:
         """Perform the actual cleanup."""
         async for session in get_async_session():
             try:
-                # Count expired sessions
+                # Count dead sessions (expired or idle-timed-out)
                 count_stmt = (
-                    select(func.count())
-                    .select_from(AccessToken)
-                    .where(AccessToken.expires_at <= datetime.now(UTC))  # type:ignore
+                    select(func.count()).select_from(AccessToken).where(_dead_session_filter())
                 )
                 result = await session.execute(count_stmt)
-                expired_count = result.scalar() or 0
+                dead_count = result.scalar() or 0
 
-                if expired_count == 0:
-                    logger.debug("No expired sessions to clean")
+                if dead_count == 0:
+                    logger.debug("No dead sessions to clean")
                     return
 
-                logger.info(f"Found {expired_count} expired sessions to clean")
+                logger.info(f"Found {dead_count} dead sessions to clean")
 
                 # Delete in batches to avoid locking
                 deleted_total = 0
-                while deleted_total < expired_count:
+                affected_users: set[UUID] = set()
+                while deleted_total < dead_count:
                     # Get tokens to delete (with details for logging)
                     tokens_query = (
-                        select(AccessToken)
-                        .where(AccessToken.expires_at <= datetime.now(UTC))  # type:ignore[arg-type]
-                        .limit(self.batch_size)
+                        select(AccessToken).where(_dead_session_filter()).limit(self.batch_size)
                     )
                     tokens_result = await session.execute(tokens_query)
                     tokens_to_delete = tokens_result.scalars().all()
@@ -101,9 +115,9 @@ class SessionCleanupService:
                     # Log details before deletion
                     for token_obj in tokens_to_delete:
                         logger.debug(
-                            f"Deleting expired session: token={token_obj.token[:8]}..., "
+                            f"Deleting dead session: token={token_obj.token[:8]}..., "
                             f"user_id={token_obj.user_id}, "
-                            f"expired_at={token_obj.expires_at.isoformat()}, "
+                            f"expires_at={token_obj.expires_at.isoformat()}, "
                             f"last_accessed={token_obj.last_accessed.isoformat()}",
                             extra={
                                 "token_preview": token_obj.token[:8],
@@ -111,12 +125,13 @@ class SessionCleanupService:
                                 "expires_at": token_obj.expires_at.isoformat(),
                                 "last_accessed": token_obj.last_accessed.isoformat(),
                                 "created_at": token_obj.created_at.isoformat(),
-                                "reason": "expired",
+                                "reason": "dead",
                             },
                         )
 
                     # SQLite doesn't support LIMIT in DELETE, use subquery
                     token_ids = [t.token for t in tokens_to_delete]
+                    affected_users.update(t.user_id for t in tokens_to_delete)
                     delete_stmt = delete(AccessToken).where(col(AccessToken.token).in_(token_ids))
 
                     dr: CursorResult[Any] = await session.execute(delete_stmt)  # type: ignore[assignment]
@@ -128,13 +143,18 @@ class SessionCleanupService:
                     if deleted_count == 0:
                         break
 
-                    logger.debug(f"Deleted {deleted_count} expired sessions in batch")
+                    logger.debug(f"Deleted {deleted_count} dead sessions in batch")
 
                     # Small delay between batches
-                    if deleted_total < expired_count:
+                    if deleted_total < dead_count:
                         await asyncio.sleep(0.1)
 
                 logger.info(f"Cleanup completed: removed {deleted_total} sessions")
+
+                # sse-capture: a user whose last valid session was just evicted
+                # (expired or idle) goes offline.
+                for uid in affected_users:
+                    await emit_offline_if_last(session, uid)
 
                 # Also clean very old sessions (older than retention days)
                 if settings.session_cleanup_retention_days > 0:
@@ -192,15 +212,13 @@ class SessionCleanupService:
         deleted_total = 0
         async for session in get_async_session():
             try:
-                # Delete expired sessions
-                delete_stmt = delete(AccessToken).where(
-                    AccessToken.expires_at <= datetime.now(UTC)  # type:ignore[arg-type]
-                )
+                # Delete dead sessions (expired or idle-timed-out)
+                delete_stmt = delete(AccessToken).where(_dead_session_filter())
                 dr2: CursorResult[Any] = await session.execute(delete_stmt)  # type: ignore[assignment]
                 await session.commit()
                 deleted_total = dr2.rowcount
 
-                logger.info(f"Manual cleanup: removed {deleted_total} expired sessions")
+                logger.info(f"Manual cleanup: removed {deleted_total} dead sessions")
 
                 # Also clean very old sessions
                 if settings.session_cleanup_retention_days > 0:

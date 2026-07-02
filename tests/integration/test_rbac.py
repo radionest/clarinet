@@ -8,6 +8,7 @@ This module tests role-based filtering and authorization for records:
 - Admin endpoints require superuser access
 """
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -18,11 +19,21 @@ from httpx import ASGITransport, AsyncClient
 from clarinet.api.app import app
 from clarinet.api.auth_config import current_active_user, current_superuser
 from clarinet.api.dependencies import current_admin_user, get_dicom_client, get_pacs_node
+from clarinet.models import DicomQueryLevel
 from clarinet.models.record import Record, RecordType
+from clarinet.models.record_event import RecordEvent
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.database import get_async_session
-from tests.utils.urls import DICOM_BASE, DICOM_IMPORT_STUDY
+from tests.utils.factories import make_record_type
+from tests.utils.test_helpers import PatientFactory, RecordFactory
+from tests.utils.urls import (
+    ADMIN_RECORD_EVENTS,
+    DICOM_BASE,
+    DICOM_IMPORT_STUDY,
+    PIPELINE_RUNS,
+    record_events_url,
+)
 
 # Fixtures
 
@@ -453,6 +464,30 @@ async def test_patient_masking_for_non_admin(
 
 
 @pytest.mark.asyncio
+async def test_study_date_and_description_masked_for_non_admin(
+    test_session, role_a_client, record_role_a, test_patient, test_study
+):
+    """Non-superuser sees the study date replaced with the sentinel and the
+    free-text description dropped (PHI) when the patient is anonymized.
+
+    Guards the HTTP serialization contract: the sentinel ``date(1976, 1, 1)``
+    must reach the client as the ISO string ``"1976-01-01"``.
+    """
+    test_patient.auto_id = 123
+    test_study.study_description = "CT ANGIO LIVER - IVANOV I.I."
+    test_session.add(test_patient)
+    test_session.add(test_study)
+    await test_session.commit()
+
+    response = await role_a_client.get(f"/api/records/{record_role_a.id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["study"]["date"] == "1976-01-01"
+    assert data["study"]["study_description"] is None
+
+
+@pytest.mark.asyncio
 async def test_superuser_sees_real_patient_data(
     test_session, superuser_client, record_role_a, test_patient
 ):
@@ -470,6 +505,38 @@ async def test_superuser_sees_real_patient_data(
     assert data["patient"]["id"] == "TEST_PAT001"
     assert data["patient"]["name"] == "Test Patient"
     assert data["patient_id"] == "TEST_PAT001"
+
+
+@pytest.mark.asyncio
+async def test_record_events_mask_patient_id_for_non_admin(
+    test_session, role_a_client, record_role_a, test_patient
+):
+    """A non-superuser with record access sees the anonymized patient id on the
+    record-scoped events feed — the real id of an anonymized patient must not
+    leak through the audit trail (mirrors the RecordRead masking on /records/{id}).
+    """
+    test_patient.auto_id = 123
+    test_session.add(test_patient)
+    test_session.add(
+        RecordEvent(
+            record_id=record_role_a.id,
+            record_key=record_role_a.id,
+            kind="status_changed",
+            from_status="pending",
+            to_status="inwork",
+        )
+    )
+    await test_session.commit()
+
+    response = await role_a_client.get(record_events_url(record_role_a.id))
+    assert response.status_code == 200, response.text
+    events = response.json()
+    assert events, "seeded event should appear in the record's audit trail"
+    assert all(e["patient_id"] == "CLARINET_123" for e in events)  # anon_id, not real
+    assert all(e["patient_id"] != test_patient.id for e in events)
+    # The record type is workflow metadata, not PHI — it is NOT masked for
+    # non-admins, unlike patient_id / actor_name.
+    assert all(e["record_type_name"] == record_role_a.record_type_name for e in events)
 
 
 @pytest.mark.asyncio
@@ -679,6 +746,69 @@ async def test_admin_endpoint_admin_role_user_ok(admin_role_client):
     """Non-superuser with the 'admin' role can access /api/admin/* endpoints."""
     response = await admin_role_client.get("/api/admin/stats")
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_global_events_feed_masks_patient_id_for_admin_role(admin_role_client, test_session):
+    """The global Events feed withholds ``patient_id`` from admin-role
+    non-superusers, who are masked on every other surface — an anonymized
+    patient's real id must not leak through this cross-patient feed.
+    """
+    patient = await PatientFactory.create_patient(test_session)
+    record_type = make_record_type(level=DicomQueryLevel.PATIENT)
+    test_session.add(record_type)
+    await test_session.commit()
+    record = await RecordFactory.create_record_with_relations(
+        test_session, patient=patient, record_type=record_type
+    )
+    test_session.add(
+        RecordEvent(
+            record_id=record.id,
+            record_key=record.id,
+            kind="status_changed",
+            from_status="pending",
+            to_status="inwork",
+        )
+    )
+    await test_session.commit()
+
+    resp = await admin_role_client.get(ADMIN_RECORD_EVENTS)
+    assert resp.status_code == 200, resp.text
+    events = resp.json()
+    assert events, "seeded event should appear in the feed"
+    assert all(e["patient_id"] is None for e in events)
+    # The record type is workflow metadata, not PHI — it rides through unmasked
+    # even though patient_id is withheld from admin-role users.
+    assert all(e["record_type_name"] == record.record_type_name for e in events)
+
+
+@pytest.mark.asyncio
+async def test_global_runs_feed_masks_identifiers_for_admin_role(admin_role_client, test_session):
+    """The global pipeline-runs feed withholds patient/study/series identifiers
+    from admin-role non-superusers (same policy as ``/records/{id}/runs``).
+    """
+    patient = await PatientFactory.create_patient(test_session)
+    created = await admin_role_client.post(
+        PIPELINE_RUNS,
+        json={
+            "id": "rbac-mask-run",
+            "task_name": "t",
+            "queue": "clarinet.default",
+            "started_at": datetime.now(UTC).isoformat(),
+            "patient_id": patient.id,  # real patient (FK), masked out on read
+            "study_uid": "1.2.3",
+            "series_uid": "1.2.3.4",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    listing = await admin_role_client.get(PIPELINE_RUNS)
+    assert listing.status_code == 200, listing.text
+    runs = listing.json()
+    assert runs, "seeded run should appear in the feed"
+    assert all(
+        r["patient_id"] is None and r["study_uid"] is None and r["series_uid"] is None for r in runs
+    )
 
 
 @pytest.mark.asyncio

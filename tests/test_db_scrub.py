@@ -3,7 +3,7 @@
 Pure-function coverage for the schema-aware JSON scrub and the PHI audit, plus
 end-to-end :class:`DbScrubber` runs on the SQLite test engine (FK enforcement
 on) asserting the fixture deliverable: MRN gone everywhere, structural data and
-anon identifiers preserved, the ``FileRepository`` path still resolves, and the
+anon identifiers preserved, the ``clarinet.files`` path engine still resolves, and the
 audit stays green.
 """
 
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from clarinet.cli.anon_scrub import _parse_keep
+from clarinet.files._storage import build_context, render_working_folder
 from clarinet.models.auth import AccessToken
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.counter import AutoIdCounter
@@ -26,7 +27,6 @@ from clarinet.models.record import Record
 from clarinet.models.record_event import RecordEvent
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User
-from clarinet.services.common.storage_paths import build_context, render_working_folder
 from clarinet.services.db_scrub import (
     DbScrubber,
     PhiLeakError,
@@ -330,7 +330,7 @@ async def test_scrub_db_end_to_end(test_session: AsyncSession) -> None:
     ).scalar_one()
     assert counter.last_value == 42
 
-    # FileRepository path engine still resolves to the anonymized layout.
+    # The clarinet.files._storage path engine still resolves to the anonymized layout.
     ctx = build_context(patient=patient, study=study, series=series, template=_DEFAULT_TEMPLATE)
     series_dir = render_working_folder(
         _DEFAULT_TEMPLATE, DicomQueryLevel.SERIES, ctx, Path("/storage")

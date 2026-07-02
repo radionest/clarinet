@@ -6,10 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from clarinet.models.base import DicomQueryLevel
-from clarinet.models.patient import Patient
-from clarinet.models.study import Series, Study
-from clarinet.services.common.storage_paths import (
+from clarinet.files._storage import (
     AnonPathError,
     build_context,
     derive_anon_patient_id,
@@ -17,7 +14,10 @@ from clarinet.services.common.storage_paths import (
     split_template,
     validate_template,
 )
-from clarinet.utils.path_template import extract_placeholders
+from clarinet.files._template import extract_placeholders
+from clarinet.models.base import DicomQueryLevel
+from clarinet.models.patient import Patient
+from clarinet.models.study import Series, Study
 
 # Default disk_path_template (matches settings.toml). build_context() reads
 # settings.disk_path_template when template= is not passed; mock its value
@@ -87,9 +87,7 @@ class TestSplitTemplate:
 
 class TestBuildContext:
     def test_default_per_patient_mode(self, patient: Patient, study: Study, series: Series) -> None:
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             ctx = build_context(
@@ -112,9 +110,7 @@ class TestBuildContext:
         assert ctx["series_num"] == "00001"
 
     def test_per_study_mode(self, patient: Patient, study: Study, series: Series) -> None:
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = True
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"
@@ -127,9 +123,7 @@ class TestBuildContext:
         assert len(ctx["anon_patient_id"].split("_")[-1]) == 8
 
     def test_writer_overrides(self, patient: Patient, study: Study, series: Series) -> None:
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
             mock_settings.disk_path_template = _DEFAULT_TEMPLATE
@@ -146,9 +140,7 @@ class TestBuildContext:
         assert ctx["anon_series_uid"] == "OSS"
 
     def test_missing_entities_yield_unknown_with_fallback(self) -> None:
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
             ctx = build_context(
@@ -172,9 +164,7 @@ class TestBuildContext:
         # surface the asymmetric-anonymization race instead of silently
         # rendering the raw patient_id into a working folder.
         unanon_patient = Patient(id="PAT001", name="John", auto_id=None)
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             mock_settings.disk_path_template = _DEFAULT_TEMPLATE
@@ -190,9 +180,7 @@ class TestBuildContext:
             patient_id=patient.id,
             anon_uid=None,
         )
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             mock_settings.disk_path_template = _DEFAULT_TEMPLATE
@@ -208,9 +196,7 @@ class TestBuildContext:
             patient_id=patient.id,
             anon_uid=None,
         )
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             mock_settings.disk_path_template = _DEFAULT_TEMPLATE
@@ -232,9 +218,7 @@ class TestBuildContext:
             study_uid=study.study_uid,
             anon_uid=None,
         )
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             mock_settings.disk_path_template = _DEFAULT_TEMPLATE
@@ -244,27 +228,21 @@ class TestBuildContext:
 
 class TestDeriveAnonPatientId:
     def test_per_patient_uses_anon_id(self, patient: Patient, study: Study) -> None:
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             result = derive_anon_patient_id(patient, study)
         assert result == "CLARINET_42"
 
     def test_per_study_uses_hash(self, patient: Patient, study: Study) -> None:
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = True
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"
             mock_settings.anon_id_prefix = "P"
             result = derive_anon_patient_id(patient, study)
         # Same salt+study_uid+length+prefix must be deterministic across calls
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = True
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"
@@ -275,9 +253,7 @@ class TestDeriveAnonPatientId:
 
     def test_missing_anon_id_raises_in_default_safe_mode(self, study: Study) -> None:
         unanon_patient = Patient(id="PAT001", name="John", auto_id=None)
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             with pytest.raises(AnonPathError, match="Patient has no anon_id"):
@@ -285,9 +261,7 @@ class TestDeriveAnonPatientId:
 
     def test_missing_anon_id_with_fallback_uses_raw(self, study: Study) -> None:
         unanon_patient = Patient(id="PAT001", name="John", auto_id=None)
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             result = derive_anon_patient_id(unanon_patient, study, fallback_to_unanonymized=True)
@@ -449,30 +423,28 @@ class TestValidateTemplate:
 
 
 class TestSeriesReadWorkingFolder:
-    """``FileRepository(series_read).working_dir`` uses the resolver — no hardcoded layout.
+    """``Files(series_read).dir()`` uses the resolver — no hardcoded layout.
 
     ``SeriesRead.working_folder`` was removed entirely; the canonical
-    entry point for series paths is now ``FileRepository``.
+    entry point for series paths is now ``Files``.
     """
 
     def test_default_template_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from clarinet.files import Files
         from clarinet.models.patient import PatientInfo
         from clarinet.models.study import SeriesRead, StudyRead
-        from clarinet.repositories import FileRepository
 
+        monkeypatch.setattr("clarinet.files._storage.settings.storage_path", "/storage")
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.storage_path", "/storage"
-        )
-        monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.disk_path_template",
+            "clarinet.files._storage.settings.disk_path_template",
             "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
+            "clarinet.files._storage.settings.anon_per_study_patient_id",
             False,
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "clarinet.files._storage.settings.anon_id_prefix",
             "CLARINET",
         )
 
@@ -494,26 +466,24 @@ class TestSeriesReadWorkingFolder:
             records=[],
         )
         expected = str(Path("/storage") / "CLARINET_7" / "9.9.9" / "9.9.9.4")
-        assert str(FileRepository(series_read).working_dir) == expected
+        assert str(Files(series_read).dir()) == expected
 
     def test_custom_template_uses_modalities_date(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from clarinet.files import Files
         from clarinet.models.patient import PatientInfo
         from clarinet.models.study import SeriesRead, StudyRead
-        from clarinet.repositories import FileRepository
 
+        monkeypatch.setattr("clarinet.files._storage.settings.storage_path", "/storage")
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.storage_path", "/storage"
-        )
-        monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.disk_path_template",
+            "clarinet.files._storage.settings.disk_path_template",
             "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}",
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
+            "clarinet.files._storage.settings.anon_per_study_patient_id",
             False,
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "clarinet.files._storage.settings.anon_id_prefix",
             "CLARINET",
         )
 
@@ -536,7 +506,7 @@ class TestSeriesReadWorkingFolder:
             records=[],
         )
         expected = str(Path("/storage") / "7" / "CT_PT_20260105" / "9.9.9.4")
-        assert str(FileRepository(series_read).working_dir) == expected
+        assert str(Files(series_read).dir()) == expected
 
 
 def _full_ctx() -> dict[str, str]:
@@ -562,18 +532,18 @@ class TestRenderAllLevels:
     def test_returns_only_patient_when_study_none(
         self, patient: Patient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from clarinet.services.common.storage_paths import render_all_levels
+        from clarinet.files._storage import render_all_levels
 
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.disk_path_template",
+            "clarinet.files._storage.settings.disk_path_template",
             "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
+            "clarinet.files._storage.settings.anon_per_study_patient_id",
             False,
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "clarinet.files._storage.settings.anon_id_prefix",
             "CLARINET",
         )
 
@@ -585,18 +555,18 @@ class TestRenderAllLevels:
     def test_returns_patient_and_study_when_series_none(
         self, patient: Patient, study: Study, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from clarinet.services.common.storage_paths import render_all_levels
+        from clarinet.files._storage import render_all_levels
 
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.disk_path_template",
+            "clarinet.files._storage.settings.disk_path_template",
             "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
+            "clarinet.files._storage.settings.anon_per_study_patient_id",
             False,
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "clarinet.files._storage.settings.anon_id_prefix",
             "CLARINET",
         )
 
@@ -612,18 +582,18 @@ class TestRenderAllLevels:
         series: Series,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from clarinet.services.common.storage_paths import render_all_levels
+        from clarinet.files._storage import render_all_levels
 
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.disk_path_template",
+            "clarinet.files._storage.settings.disk_path_template",
             "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
+            "clarinet.files._storage.settings.anon_per_study_patient_id",
             False,
         )
         monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "clarinet.files._storage.settings.anon_id_prefix",
             "CLARINET",
         )
 
@@ -638,7 +608,7 @@ class TestRenderAllLevels:
         assert dirs[DicomQueryLevel.SERIES] == Path("/storage/CLARINET_42/9.9.9.9/9.9.9.9.5")
 
     def test_empty_when_patient_none(self) -> None:
-        from clarinet.services.common.storage_paths import render_all_levels
+        from clarinet.files._storage import render_all_levels
 
         assert (
             render_all_levels(patient=None, study=None, series=None, storage_path=Path("/storage"))
@@ -661,7 +631,7 @@ class TestWriterFileResolverUnification:
         template: str,
         storage_path: Path,
     ) -> Path:
-        from clarinet.services.common.storage_paths import (
+        from clarinet.files._storage import (
             build_context,
             render_working_folder,
         )
@@ -686,20 +656,12 @@ class TestWriterFileResolverUnification:
         template: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from clarinet.services.common.storage_paths import render_all_levels
+        from clarinet.files._storage import render_all_levels
 
-        monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.storage_path", "/storage"
-        )
-        monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.disk_path_template", template
-        )
-        monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id", False
-        )
-        monkeypatch.setattr(
-            "clarinet.services.common.storage_paths.settings.anon_id_prefix", "CLARINET"
-        )
+        monkeypatch.setattr("clarinet.files._storage.settings.storage_path", "/storage")
+        monkeypatch.setattr("clarinet.files._storage.settings.disk_path_template", template)
+        monkeypatch.setattr("clarinet.files._storage.settings.anon_per_study_patient_id", False)
+        monkeypatch.setattr("clarinet.files._storage.settings.anon_id_prefix", "CLARINET")
 
         writer_path = self._writer_series_path(patient, study, series, template, Path("/storage"))
         resolver_dirs = render_all_levels(
@@ -750,10 +712,8 @@ class TestBuildContextPullBased:
             anon_uid=None,
         )
         with (
-            patch("clarinet.services.common.storage_paths.require_anon_or_raw") as mock_raar,
-            patch(
-                "clarinet.services.common.storage_paths.settings", spec_set=True
-            ) as mock_settings,
+            patch("clarinet.files._storage.require_anon_or_raw") as mock_raar,
+            patch("clarinet.files._storage.settings", spec_set=True) as mock_settings,
         ):
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
@@ -778,9 +738,7 @@ class TestBuildContextPullBased:
             patient_id=patient.id,
             anon_uid=None,
         )
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             with pytest.raises(AnonPathError, match="Study has no anon_uid"):
@@ -798,9 +756,7 @@ class TestBuildContextPullBased:
             patient_id=patient.id,
             anon_uid=None,
         )
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             ctx = build_context(
@@ -816,9 +772,7 @@ class TestBuildContextPullBased:
         self, patient: Patient, study: Study, series: Series
     ) -> None:
         """When template=None, falls back to settings.disk_path_template (default behavior)."""
-        with patch(
-            "clarinet.services.common.storage_paths.settings", spec_set=True
-        ) as mock_settings:
+        with patch("clarinet.files._storage.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             mock_settings.disk_path_template = (

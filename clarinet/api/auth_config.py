@@ -29,6 +29,7 @@ from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.fastapi_users_db import SQLModelUserDatabaseAsync
 from clarinet.utils.logger import logger
+from clarinet.utils.session import emit_offline_if_last
 
 
 # Minimal UserManager
@@ -126,6 +127,16 @@ class DatabaseStrategy(Strategy[User, UUID]):
         for token in stale:
             cls._user_cache.pop(token, None)
 
+    @classmethod
+    def evict_token(cls, token: str) -> None:
+        """Drop a single token from the in-memory validation cache.
+
+        Lets callers outside this class (e.g. the session-revoke endpoint)
+        invalidate one session immediately without reaching into the private
+        cache or deleting the DB row (which ``destroy_token`` also does).
+        """
+        cls._user_cache.pop(token, None)
+
     def __init__(self, session: AsyncSession, request: Request | None = None) -> None:
         """Initialize strategy with database session and optional request."""
         self.session = session
@@ -168,6 +179,12 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 "user_agent": user_agent,
             },
         )
+
+        # sse-capture: session lifecycle (AccessToken not ORM-captured). Local
+        # import: capture pulls the ORM model graph; module-level would risk a cycle.
+        from clarinet.services.events.capture import emit_presence
+
+        emit_presence(user.id, True)
 
         return token
 
@@ -362,6 +379,8 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 f"Session destroyed for user {user.id}",
                 extra={"user_id": str(user.id), "token_preview": token[:8] + "..."},
             )
+            # sse-capture: session lifecycle (AccessToken not ORM-captured)
+            await emit_offline_if_last(self.session, user.id)
 
     async def _enforce_session_limit(self, user_id: UUID) -> None:
         """Enforce maximum concurrent sessions per user."""

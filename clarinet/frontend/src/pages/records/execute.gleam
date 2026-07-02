@@ -1,9 +1,6 @@
 // Record execution page — self-contained MVU module
 import api/admin as admin_api
-import api/audit
-import api/models.{
-  type PipelineRun, type Record, type RecordEvent, type RecordType,
-}
+import api/models.{type Record, type RecordType}
 import api/records
 import api/slicer
 import api/types.{type ApiError, AuthError}
@@ -20,6 +17,7 @@ import api/workflow_models.{
 import cache
 import clarinet_frontend/i18n
 import components/activity_feed
+import components/entity_link
 import components/status_badge
 import components/workflow_graph as wf_renderer
 import config
@@ -28,12 +26,14 @@ import gleam/bool
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/float
 import gleam/int
 import gleam/javascript/promise
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set.{type Set}
+import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -42,6 +42,7 @@ import lustre/event
 import plinth/javascript/global
 import router
 import shared.{type OutMsg, type Shared}
+import utils/json_utils
 import utils/load_status.{type LoadStatus}
 import utils/logger
 import utils/permissions
@@ -75,11 +76,7 @@ pub type Model {
     workflow_request_id: Int,
     // Activity section (record events + pipeline runs) — visible to anyone
     // with record access; loaded on init alongside the record.
-    activity_tab: activity_feed.ActivityTab,
-    activity_events: List(RecordEvent),
-    activity_events_status: LoadStatus,
-    activity_runs: List(PipelineRun),
-    activity_runs_status: LoadStatus,
+    activity: activity_feed.Model,
   )
 }
 
@@ -224,10 +221,7 @@ pub type Msg {
   DispatchDismiss
   RetryDispatchDryRun(PendingDispatch)
   // Activity section
-  ActivityTabSelected(activity_feed.ActivityTab)
-  ActivityEventsLoaded(Result(List(RecordEvent), ApiError))
-  ActivityRunsLoaded(Result(List(PipelineRun), ApiError))
-  ActivityRetry(activity_feed.ActivityTab)
+  ActivityMsg(activity_feed.Msg)
 }
 
 // --- Init ---
@@ -236,6 +230,8 @@ pub fn init(
   record_id: String,
   shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let #(activity, activity_eff, _activity_out) =
+    activity_feed.init(activity_feed.RecordSource(record_id))
   let model =
     Model(
       record_id: record_id,
@@ -256,11 +252,7 @@ pub fn init(
       dispatch_picker: NoDispatchPicker,
       dispatch_state: NoDispatch,
       workflow_request_id: 1,
-      activity_tab: activity_feed.EventsTab,
-      activity_events: [],
-      activity_events_status: load_status.Loading,
-      activity_runs: [],
-      activity_runs_status: load_status.Loading,
+      activity: activity,
     )
 
   // Start slicer ping timer + load hydrated schema
@@ -293,8 +285,7 @@ pub fn init(
       schema_eff,
       probe_eff,
       workflow_eff,
-      load_activity_events_effect(record_id),
-      load_activity_runs_effect(record_id),
+      effect.map(activity_eff, ActivityMsg),
     ]),
     out_msgs,
   )
@@ -341,30 +332,6 @@ fn load_record_probe_effect(record_id: String) -> Effect(Msg) {
   records.get_record(record_id)
   |> promise.tap(fn(result) { dispatch(RecordLoadProbe(result)) })
   Nil
-}
-
-fn load_activity_events_effect(record_id: String) -> Effect(Msg) {
-  use dispatch <- effect.from
-  audit.get_record_events(record_id)
-  |> promise.tap(fn(result) { dispatch(ActivityEventsLoaded(result)) })
-  Nil
-}
-
-fn load_activity_runs_effect(record_id: String) -> Effect(Msg) {
-  use dispatch <- effect.from
-  audit.get_record_runs(record_id)
-  |> promise.tap(fn(result) { dispatch(ActivityRunsLoaded(result)) })
-  Nil
-}
-
-/// Activity loads are secondary to the record itself: the inline Failed +
-/// retry state is the feedback channel, so we don't raise a toast (only the
-/// session-killing AuthError needs to escalate).
-fn activity_error(err: ApiError) -> List(OutMsg) {
-  case err {
-    AuthError(_) -> [shared.Logout]
-    _ -> []
-  }
 }
 
 /// Cleanup slicer ping timer — called from main.gleam on route change
@@ -1209,58 +1176,14 @@ pub fn update(
       [],
     )
 
-    ActivityTabSelected(tab) -> #(
-      Model(..model, activity_tab: tab),
-      effect.none(),
-      [],
-    )
-
-    ActivityEventsLoaded(Ok(events)) -> #(
-      Model(
-        ..model,
-        activity_events: events,
-        activity_events_status: load_status.Loaded,
-      ),
-      effect.none(),
-      [],
-    )
-    ActivityEventsLoaded(Error(err)) -> #(
-      Model(
-        ..model,
-        activity_events_status: load_status.Failed("Failed to load events"),
-      ),
-      effect.none(),
-      activity_error(err),
-    )
-
-    ActivityRunsLoaded(Ok(runs)) -> #(
-      Model(
-        ..model,
-        activity_runs: runs,
-        activity_runs_status: load_status.Loaded,
-      ),
-      effect.none(),
-      [],
-    )
-    ActivityRunsLoaded(Error(err)) -> #(
-      Model(
-        ..model,
-        activity_runs_status: load_status.Failed("Failed to load pipeline runs"),
-      ),
-      effect.none(),
-      activity_error(err),
-    )
-
-    ActivityRetry(activity_feed.EventsTab) -> #(
-      Model(..model, activity_events_status: load_status.Loading),
-      load_activity_events_effect(model.record_id),
-      [],
-    )
-    ActivityRetry(activity_feed.RunsTab) -> #(
-      Model(..model, activity_runs_status: load_status.Loading),
-      load_activity_runs_effect(model.record_id),
-      [],
-    )
+    ActivityMsg(sub_msg) -> {
+      let #(activity, eff, out) = activity_feed.update(model.activity, sub_msg)
+      #(
+        Model(..model, activity: activity),
+        effect.map(eff, ActivityMsg),
+        shared.activity_out(out),
+      )
+    }
   }
 }
 
@@ -1391,9 +1314,18 @@ fn dispatch_fire_effect(
 // --- Helpers ---
 
 /// Where "Back" / post-completion auto-return should lead: the page the
-/// user came from, or the Records list when entered by direct URL.
+/// user came from, or — on direct entry — the Records list for admins and the
+/// dashboard for non-admins (who can't open the admin-gated Records list).
 fn back_target(shared: Shared) -> router.Route {
-  option.unwrap(shared.previous_route, router.Records(dict.new()))
+  let fallback = case shared.user {
+    Some(user) ->
+      case permissions.is_admin_user(user) {
+        True -> router.Records(dict.new())
+        False -> router.Home
+      }
+    None -> router.Home
+  }
+  option.unwrap(shared.previous_route, fallback)
 }
 
 /// Pre-submit status check: True when the cached record is already
@@ -1503,6 +1435,8 @@ fn render_record_execution(
       render_record_metadata(record, shared),
       viewer.record_viewer_buttons(
         shared.viewers,
+        option.map(record.record_type, fn(rt) { rt.allowed_viewers })
+          |> option.flatten,
         record.study_uid,
         record.series_uid,
         record.viewer_study_uids,
@@ -1510,6 +1444,7 @@ fn render_record_execution(
         option.map(record.record_type, fn(rt) { rt.level }),
         option.map(record.record_type, fn(rt) { rt.viewer_mode })
           |> option.unwrap("single_series"),
+        viewer.ohif_preload_enabled(shared.dicomweb_backend),
         "btn btn-primary",
         fn(url, study_uids) { RequestPreload(url, study_uids) },
       ),
@@ -1597,15 +1532,9 @@ fn render_record_execution(
 fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
-    activity_feed.view(
-      model.activity_tab,
-      model.activity_events_status,
-      model.activity_events,
-      model.activity_runs_status,
-      model.activity_runs,
-      ActivityTabSelected,
-      ActivityRetry,
-      shared.translate,
+    element.map(
+      activity_feed.view(model.activity, shared.translate, [], []),
+      ActivityMsg,
     ),
   ])
 }
@@ -1640,25 +1569,45 @@ fn render_slicer_toolbar(
   let btn_disabled =
     model.slicer_loading || model.slicer_available != Some(True)
 
+  let btn_tooltip = case model.slicer_available {
+    Some(True) -> translate(i18n.ExecSlicerOpenHint)
+    Some(False) -> translate(i18n.ExecSlicerUnreachableHint)
+    None -> translate(i18n.ExecSlicerCheckingHint)
+  }
+  let hint_id = "slicer-open-hint"
+
   html.div([attribute.class("slicer-toolbar card")], [
     html.div([attribute.class("slicer-toolbar-header")], [
       html.h4([], [html.text("3D Slicer")]),
       slicer_badge,
     ]),
     html.div([attribute.class("slicer-toolbar-actions")], [
-      html.button(
-        [
-          attribute.class("btn btn-primary"),
-          attribute.disabled(btn_disabled),
-          event.on_click(OpenInSlicer),
-        ],
-        [
-          case model.slicer_loading {
-            True -> html.text("Opening...")
-            False -> html.text("Open in Slicer")
-          },
-        ],
-      ),
+      // The tooltip lives on a wrapper, not the button: a disabled button
+      // has `pointer-events: none`, so hover never reaches it and a `title`
+      // on the button alone would stay hidden. The wrapper surfaces the
+      // hint to sighted users on hover.
+      html.span([attribute.title(btn_tooltip)], [
+        html.button(
+          [
+            attribute.class("btn btn-primary"),
+            attribute.disabled(btn_disabled),
+            attribute.attribute("aria-describedby", hint_id),
+            event.on_click(OpenInSlicer),
+          ],
+          [
+            case model.slicer_loading {
+              True -> html.text(translate(i18n.ExecSlicerOpening))
+              False -> html.text(translate(i18n.ExecBtnOpenSlicer))
+            },
+          ],
+        ),
+        // The same hint exposed to assistive tech: a native `title` on a
+        // disabled button is not announced, so back aria-describedby with
+        // a visually-hidden copy.
+        html.span([attribute.id(hint_id), attribute.class("sr-only")], [
+          html.text(btn_tooltip),
+        ]),
+      ]),
     ]),
   ])
 }
@@ -1763,7 +1712,8 @@ fn render_dynamic_form(
             model.record_id,
             record,
           )
-        False -> render_readonly_data(record)
+        False ->
+          render_readonly_form(schema_json, record_type.ui_schema, record)
       }
     }
     None -> {
@@ -1796,6 +1746,10 @@ fn render_dynamic_form(
                 ],
                 [html.text("Re-submit")],
               ),
+              case record.data {
+                Some(data) -> render_stored_data(data)
+                None -> element.none()
+              },
             ])
           _, _ ->
             html.div([], [
@@ -1803,13 +1757,31 @@ fn render_dynamic_form(
                 html.text("This record does not have a data form defined."),
               ]),
               case record.data {
-                Some(data) -> render_raw_data(data)
+                Some(data) -> render_stored_data(data)
                 None -> html.text("No data submitted.")
               },
             ])
         },
       ])
     }
+  }
+}
+
+// Append the formosh ui_schema attribute, skipping the backend's
+// default-factory empty value: record types without a ui_schema serialize it
+// as "{}", which formosh would parse into an empty UiSchema anyway — emitting
+// it just adds noise. Shared by the editable and read-only form renderers.
+fn append_ui_schema(
+  attrs: List(attribute.Attribute(Msg)),
+  ui_schema_json: Option(String),
+) -> List(attribute.Attribute(Msg)) {
+  case ui_schema_json {
+    Some(ui) ->
+      case ui == "" || ui == "{}" {
+        True -> attrs
+        False -> list.append(attrs, [formosh_component.ui_schema_string(ui)])
+      }
+    None -> attrs
   }
 }
 
@@ -1837,18 +1809,7 @@ fn render_editable_form(
     event.on("formosh-submit", decode_form_submit()),
   ]
 
-  // Default-factory on the backend produces ui_schema="{}" for record types
-  // that don't set one. Skip the attribute in that case — formosh would parse
-  // {} into an empty UiSchema anyway, so emitting it adds noise without effect.
-  let attrs_with_ui = case ui_schema_json {
-    Some(ui) ->
-      case ui == "" || ui == "{}" {
-        True -> base_attrs
-        False ->
-          list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
-      }
-    None -> base_attrs
-  }
+  let attrs_with_ui = append_ui_schema(base_attrs, ui_schema_json)
 
   let attrs = case record.data {
     Some(data) ->
@@ -1877,13 +1838,29 @@ fn decode_form_submit() -> decode.Decoder(Msg) {
   }
 }
 
-fn render_readonly_data(record: Record) -> Element(Msg) {
+// Read-only "review" rendering for a finished, non-editable record: the same
+// formosh component as the editable form, but in `read_only` mode — every
+// field is a static "label → value" row (no inputs, no submit). Reuses the
+// record type's schema + ui_schema so labels, enums, units and field order
+// match exactly what the user saw while filling the form.
+fn render_readonly_form(
+  schema_json: String,
+  ui_schema_json: Option(String),
+  record: Record,
+) -> Element(Msg) {
   case record.data {
-    Some(data) -> render_raw_data(data)
     None ->
       html.div([attribute.class("no-data")], [
         html.p([], [html.text("No data submitted yet")]),
       ])
+    Some(data) -> {
+      let base_attrs = [
+        formosh_component.schema_string(schema_json),
+        formosh_component.read_only(True),
+        formosh_component.initial_values_string(data),
+      ]
+      formosh_component.element(append_ui_schema(base_attrs, ui_schema_json))
+    }
   }
 }
 
@@ -1900,20 +1877,55 @@ fn format_series_label(
 }
 
 fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
+  let is_admin = is_admin_user(shared)
   html.div([attribute.class("record-metadata")], [
     html.dl([], [
       html.dt([], [html.text("Patient:")]),
-      html.dd([], [html.text(record.patient_id)]),
+      html.dd([], [entity_link.patient_if_admin(record.patient_id, is_admin)]),
+      // Simple per-patient anon_id. Hidden whenever the deployment uses
+      // per-study anonymization: it is stable across a patient's studies, so
+      // showing it would let studies be correlated and defeat per-study
+      // unlinkability (backend also strips it from non-superuser payloads).
+      case is_admin && !shared.anon_per_study {
+        True ->
+          case option.then(record.patient, fn(p) { p.anon_id }) {
+            Some(anon_id) ->
+              element.fragment([
+                html.dt([], [html.text("Anon ID:")]),
+                html.dd([], [html.text(anon_id)]),
+              ])
+            None -> element.none()
+          }
+        False -> element.none()
+      },
+      // Study-specific anon ID (per-study hash). The backend sets
+      // display_anon_id only in per-study mode once the study is anonymized
+      // (None otherwise), so this row needs no explicit anon_per_study gate —
+      // it simply never appears in per-patient mode.
+      case is_admin {
+        True ->
+          case record.display_anon_id {
+            Some(study_anon_id) ->
+              element.fragment([
+                html.dt([], [html.text("Study anon ID:")]),
+                html.dd([], [html.text(study_anon_id)]),
+              ])
+            None -> element.none()
+          }
+        False -> element.none()
+      },
       case record.study {
         Some(study) ->
           element.fragment([
             html.dt([], [html.text("Study:")]),
             html.dd([], [
-              html.text(
+              entity_link.study_labeled_if_admin(
+                study.study_uid,
                 option.unwrap(study.study_description, study.study_uid)
-                <> " ("
-                <> study.date
-                <> ")",
+                  <> " ("
+                  <> study.date
+                  <> ")",
+                is_admin,
               ),
             ]),
           ])
@@ -1922,7 +1934,9 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             Some(uid) ->
               element.fragment([
                 html.dt([], [html.text("Study:")]),
-                html.dd([], [html.text(uid)]),
+                html.dd([], [
+                  entity_link.study_labeled_if_admin(uid, uid, is_admin),
+                ]),
               ])
             None -> element.none()
           }
@@ -1932,12 +1946,14 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
           element.fragment([
             html.dt([], [html.text("Series:")]),
             html.dd([], [
-              html.text(
+              entity_link.series_labeled_if_admin(
+                series.series_uid,
                 format_series_label(series.modality, series.series_description)
-                <> case series.instance_count {
+                  <> case series.instance_count {
                   Some(n) -> " (" <> int.to_string(n) <> " img)"
                   None -> ""
                 },
+                is_admin,
               ),
             ]),
           ])
@@ -1946,7 +1962,9 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             Some(uid) ->
               element.fragment([
                 html.dt([], [html.text("Series:")]),
-                html.dd([], [html.text(uid)]),
+                html.dd([], [
+                  entity_link.series_labeled_if_admin(uid, uid, is_admin),
+                ]),
               ])
             None -> element.none()
           }
@@ -2002,6 +2020,64 @@ fn render_raw_data(data: String) -> Element(Msg) {
       html.code([], [html.text(data)]),
     ]),
   ])
+}
+
+// Schema-less fallback (results from Slicer/pipeline with no data_schema):
+// render the stored JSON object as a humanized key/value summary. Keys are
+// sorted because the decoder does not preserve JSON object order; payloads
+// that aren't a flat object fall back to the raw JSON block.
+fn render_stored_data(data: String) -> Element(Msg) {
+  case json.parse(data, decode.dict(decode.string, decode.dynamic)) {
+    Ok(fields) ->
+      case dict.size(fields) {
+        0 -> render_raw_data(data)
+        _ ->
+          html.dl(
+            [attribute.class("record-data-summary")],
+            dict.to_list(fields)
+              |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+              |> list.flat_map(fn(pair) { data_row(pair.0, pair.1) }),
+          )
+      }
+    Error(_) -> render_raw_data(data)
+  }
+}
+
+fn data_row(key: String, value: Dynamic) -> List(Element(Msg)) {
+  [
+    html.dt([], [html.text(humanize_key(key))]),
+    html.dd([], [html.text(format_dynamic(value))]),
+  ]
+}
+
+fn humanize_key(key: String) -> String {
+  key |> string.replace("_", " ") |> string.capitalise()
+}
+
+fn format_dynamic(value: Dynamic) -> String {
+  case decode.run(value, decode.string) {
+    Ok(s) -> s
+    Error(_) ->
+      case decode.run(value, decode.int) {
+        Ok(i) -> int.to_string(i)
+        Error(_) ->
+          case decode.run(value, decode.float) {
+            Ok(f) -> float.to_string(f)
+            Error(_) ->
+              case decode.run(value, decode.bool) {
+                Ok(True) -> "Yes"
+                Ok(False) -> "No"
+                Error(_) ->
+                  case decode.run(value, decode.list(decode.dynamic)) {
+                    Ok([]) -> "—"
+                    Ok(items) ->
+                      list.map(items, format_dynamic) |> string.join(", ")
+                    Error(_) -> json_utils.dynamic_to_string(value)
+                  }
+              }
+          }
+      }
+  }
 }
 
 fn loading_view(record_id: String) -> Element(Msg) {

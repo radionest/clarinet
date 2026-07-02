@@ -82,6 +82,26 @@
     word-break: break-all;
 }
 
+/* Schema-less stored data — humanized key/value fallback
+   (see render_stored_data in execute.gleam). */
+.record-data-summary {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--spacing-xs) var(--spacing-md);
+    margin: 0;
+
+    & dt {
+        font-weight: 600;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    & dd {
+        margin: 0;
+        word-break: break-word;
+    }
+}
+
 /* PACS series details */
 .pacs-series-details-row {
     & > td {

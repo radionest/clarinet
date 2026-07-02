@@ -1,0 +1,10 @@
+{
+    "$comment": "Shared definitions referenced across record-type schemas via $ref. Inlined into each schema's local $defs at config load.",
+    "$defs": {
+        "StudyType": {
+            "type": "string",
+            "title": "Тип исследования",
+            "enum": ["CT", "MRI"]
+        }
+    }
+}

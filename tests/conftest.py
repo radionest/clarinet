@@ -20,10 +20,40 @@ from clarinet.api.app import app
 # Import all models to ensure metadata is populated
 from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
-from clarinet.settings import Settings
+from clarinet.settings import Settings, settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
 from tests.utils.cookies import patch_cookie_forwarding
+
+# Disable version gating on the module singleton before any test module is imported.
+# This is the single, load-bearing disable: the queue-name properties and warn_if_stale
+# read the module singleton `settings` (not the DI-injected test_settings), and test
+# modules capture constants like `DEFAULT_QUEUE = settings.default_queue_name` at collection
+# time — before any fixture runs — so the flag must already be off here. Individual
+# fingerprint tests opt back in explicitly via monkeypatch.setattr.
+settings.pipeline_version_check_enabled = False
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Serialize the DICOM suite onto a single xdist worker.
+
+    Every ``dicom``-marked test shares one mutable test PACS (Orthanc). The
+    anonymize -> send-to-PACS tests C-STORE anonymized studies back to it, so
+    spreading the suite across xdist workers lets those writes race reads on
+    another worker: the unscoped whole-PACS count assertions (e.g.
+    ``test_find_all_studies`` and the modality counts) then see a shifting study
+    set, and the deterministic anonymized study UIDs can collide between
+    workers. A shared ``xdist_group`` keeps every dicom test on one worker under
+    ``--dist loadgroup`` (a no-op when xdist is inactive), restoring serial PACS
+    access. (``mr_study``/``small_mr_study`` additionally scope their selection
+    to the SHIPILOV patient so they never pick an anonymized copy.)
+    """
+    for item in items:
+        # Leave tests that already declare their own xdist_group alone — the
+        # slicer-PACS suite carries xdist_group("slicer"), and a second group
+        # would merge it into a combined "dicom_slicer" group.
+        if item.get_closest_marker("dicom") and not item.get_closest_marker("xdist_group"):
+            item.add_marker(pytest.mark.xdist_group("dicom"))
 
 
 @pytest.fixture
@@ -88,6 +118,15 @@ def _plan_package_sanitation():
     from clarinet.config.plan_package import deactivate_plan_package
 
     deactivate_plan_package()
+
+
+@pytest.fixture(autouse=True)
+def _reset_fingerprint_cache():
+    from clarinet.services.pipeline.fingerprint import reset_fingerprint_cache
+
+    reset_fingerprint_cache()
+    yield
+    reset_fingerprint_cache()
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -256,6 +295,51 @@ async def create_mock_superuser(session: AsyncSession, email: str = "mock@test.c
     await session.refresh(user)
     session.expunge(user)
     return user
+
+
+async def create_mock_user_with_role(
+    session: AsyncSession,
+    role_name: str,
+    email: str = "roled@test.com",
+    is_superuser: bool = False,
+) -> User:
+    """Create a user with one role, roles eagerly loaded then detached.
+
+    Mirrors ``create_mock_superuser`` but attaches a ``UserRole`` so
+    ``role_names`` / ``capabilities`` resolve in capability-gated endpoint tests.
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlmodel import select
+
+    from clarinet.models.user import User, UserRole, UserRolesLink
+    from clarinet.utils.auth import get_password_hash
+
+    if await session.get(UserRole, role_name) is None:
+        session.add(UserRole(name=role_name))
+        await session.commit()
+
+    user = User(
+        id=uuid4(),
+        email=email,
+        hashed_password=get_password_hash("mock"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=is_superuser,
+    )
+    session.add(user)
+    await session.commit()
+
+    user_id = user.id
+    session.add(UserRolesLink(user_id=user_id, role_name=role_name))
+    await session.commit()
+    session.expire_all()
+
+    result = await session.execute(
+        select(User).options(selectinload(User.roles)).where(User.id == user_id)
+    )
+    loaded = result.scalar_one()
+    session.expunge(loaded)
+    return loaded
 
 
 def setup_auth_overrides(

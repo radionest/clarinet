@@ -24,6 +24,7 @@ pub type Key {
   BtnChange
   BtnCancel
   BtnUnassign
+  BtnAssign
   BtnDelete
   BtnBack
   BtnFail
@@ -127,14 +128,17 @@ pub type Key {
   HomeOverview
   HomeStudies
   HomeRecords
-  HomeMyRecords
   HomeViewAll
+  HomeLoadMore
   HomeRecentStudies
   HomeNoRecentStudies
-  HomeQuickActions
-  HomeActionInWork
-  HomeActionMyPending
-  HomeActionFreePending
+  HomeMyTasks
+  HomeTakeTask
+  HomeTakeTaskPlaceholder
+  HomeNoPoolTasks
+  HomeWorklistEmpty
+  HomeTaskTaken
+  HomeTakeTaskError
 
   // --- Records ---
   RecordsAllTitle
@@ -258,6 +262,13 @@ pub type Key {
   AdminNoRoles
   AdminBadge
   AdminRecords
+  AdminWorkloadTitle
+  AdminWorkloadUser
+  AdminWorkloadTotal
+  AdminWorkloadTotalHint
+  AdminWorkloadAvailable
+  AdminWorkloadAvailableHint
+  AdminAvailablePending
   AdminNoRecords
   AdminSelectUser
   AdminSelectStatus
@@ -282,6 +293,10 @@ pub type Key {
   ExecSlicerConnected
   ExecSlicerUnreachable
   ExecSlicerChecking
+  ExecSlicerOpening
+  ExecSlicerOpenHint
+  ExecSlicerUnreachableHint
+  ExecSlicerCheckingHint
   ExecNoFormRequired
   ExecRecordCompleted
   ExecNoFormDefined
@@ -372,6 +387,7 @@ pub type Key {
   ThStarted
   ThDuration
   ThError
+  ThRecord
   ActivityKindCreated
   ActivityKindStatusChanged
   ActivityKindDataSubmitted
@@ -389,6 +405,10 @@ pub type Key {
   ActivityRunFailed
   ActivityRunRetrying
   ActivityRunOther
+  ActivityFilterAllKinds
+  ActivityFilterAllStatuses
+  ActivityFilterKind
+  ActivityFilterSince
 }
 
 pub fn translate(locale: Locale, key: Key) -> String {
@@ -424,6 +444,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, BtnCancel -> "Отмена"
     En, BtnUnassign -> "Unassign"
     Ru, BtnUnassign -> "Снять назначение"
+    En, BtnAssign -> "Assign"
+    Ru, BtnAssign -> "Назначить"
     En, BtnDelete -> "Delete"
     Ru, BtnDelete -> "Удалить"
     En, BtnBack -> "Back"
@@ -617,22 +639,28 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeStudies -> "Исследования"
     En, HomeRecords -> "Records"
     Ru, HomeRecords -> "Записи"
-    En, HomeMyRecords -> "My Records"
-    Ru, HomeMyRecords -> "Мои записи"
     En, HomeViewAll -> "View all →"
     Ru, HomeViewAll -> "Показать все →"
+    En, HomeLoadMore -> "Load more"
+    Ru, HomeLoadMore -> "Загрузить ещё"
     En, HomeRecentStudies -> "Recent Studies"
     Ru, HomeRecentStudies -> "Недавние исследования"
     En, HomeNoRecentStudies -> "No recent studies found."
     Ru, HomeNoRecentStudies -> "Нет недавних исследований."
-    En, HomeQuickActions -> "My Tasks"
-    Ru, HomeQuickActions -> "Мои задачи"
-    En, HomeActionInWork -> "In progress"
-    Ru, HomeActionInWork -> "В работе"
-    En, HomeActionMyPending -> "Assigned to me"
-    Ru, HomeActionMyPending -> "Назначенные мне"
-    En, HomeActionFreePending -> "Available tasks"
-    Ru, HomeActionFreePending -> "Свободные задачи"
+    En, HomeMyTasks -> "My Tasks"
+    Ru, HomeMyTasks -> "Мои задачи"
+    En, HomeTakeTask -> "Take a task"
+    Ru, HomeTakeTask -> "Взять задачу"
+    En, HomeTakeTaskPlaceholder -> "Select task type"
+    Ru, HomeTakeTaskPlaceholder -> "Выберите тип задачи"
+    En, HomeNoPoolTasks -> "No tasks available to take"
+    Ru, HomeNoPoolTasks -> "Нет доступных задач"
+    En, HomeWorklistEmpty -> "No tasks"
+    Ru, HomeWorklistEmpty -> "Нет задач"
+    En, HomeTaskTaken -> "Task taken"
+    Ru, HomeTaskTaken -> "Задача взята"
+    En, HomeTakeTaskError -> "Couldn't take a task"
+    Ru, HomeTakeTaskError -> "Не удалось взять задачу"
 
     // --- Records ---
     En, RecordsAllTitle -> "All Records"
@@ -872,6 +900,24 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, AdminRecords -> "Записи"
     En, AdminNoRecords -> "No records found."
     Ru, AdminNoRecords -> "Записи не найдены."
+    En, AdminWorkloadTitle -> "Workload by user"
+    Ru, AdminWorkloadTitle -> "Загрузка по пользователям"
+    En, AdminWorkloadUser -> "User"
+    Ru, AdminWorkloadUser -> "Пользователь"
+    En, AdminWorkloadTotal -> "Total"
+    Ru, AdminWorkloadTotal -> "Всего"
+    En, AdminWorkloadTotalHint ->
+      "Active workload: in work + pending + blocked + failed"
+    Ru, AdminWorkloadTotalHint ->
+      "Активная нагрузка: в работе + ожидание + заблокировано + ошибки"
+    En, AdminWorkloadAvailable -> "Claimable"
+    Ru, AdminWorkloadAvailable -> "Можно взять"
+    En, AdminWorkloadAvailableHint ->
+      "Records this user can claim now; users sharing a role overlap — do not sum this column"
+    Ru, AdminWorkloadAvailableHint ->
+      "Записи, которые пользователь может взять сейчас; у носителей одной роли пул общий — не суммируйте столбец"
+    En, AdminAvailablePending -> "Available pending"
+    Ru, AdminAvailablePending -> "Доступно (свободные)"
     En, AdminSelectUser -> "Select user..."
     Ru, AdminSelectUser -> "Выберите пользователя..."
     En, AdminSelectStatus -> "Select status..."
@@ -916,6 +962,16 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ExecSlicerUnreachable -> "Недоступен"
     En, ExecSlicerChecking -> "Checking..."
     Ru, ExecSlicerChecking -> "Проверка..."
+    En, ExecSlicerOpening -> "Opening..."
+    Ru, ExecSlicerOpening -> "Открытие..."
+    En, ExecSlicerOpenHint -> "Open this record's workspace in 3D Slicer"
+    Ru, ExecSlicerOpenHint -> "Открыть рабочее пространство записи в 3D Slicer"
+    En, ExecSlicerUnreachableHint ->
+      "3D Slicer is not reachable. Launch 3D Slicer and enable its Web Server module. If a plain launch doesn't help, restart Slicer and make sure the Web Server is running."
+    Ru, ExecSlicerUnreachableHint ->
+      "3D Slicer недоступен. Запустите 3D Slicer и включите на нём веб-сервер (модуль Web Server). Если простой запуск не помог — перезапустите Slicer и убедитесь, что веб-сервер запущен."
+    En, ExecSlicerCheckingHint -> "Checking 3D Slicer availability..."
+    Ru, ExecSlicerCheckingHint -> "Проверяем доступность 3D Slicer..."
     En, ExecNoFormRequired -> "This record does not require form data."
     Ru, ExecNoFormRequired -> "Эта запись не требует заполнения формы."
     En, ExecRecordCompleted -> "Record completed. Re-submit after changes."
@@ -1107,6 +1163,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThDuration -> "Длительность"
     En, ThError -> "Error"
     Ru, ThError -> "Ошибка"
+    En, ThRecord -> "Record"
+    Ru, ThRecord -> "Запись"
     En, ActivityKindCreated -> "Created"
     Ru, ActivityKindCreated -> "Создано"
     En, ActivityKindStatusChanged -> "Status changed"
@@ -1141,6 +1199,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ActivityRunRetrying -> "Повтор"
     En, ActivityRunOther -> "Unknown"
     Ru, ActivityRunOther -> "Неизвестно"
+    En, ActivityFilterAllKinds -> "All events"
+    Ru, ActivityFilterAllKinds -> "Все события"
+    En, ActivityFilterAllStatuses -> "All statuses"
+    Ru, ActivityFilterAllStatuses -> "Все статусы"
+    En, ActivityFilterKind -> "Event type"
+    Ru, ActivityFilterKind -> "Тип события"
+    En, ActivityFilterSince -> "Since"
+    Ru, ActivityFilterSince -> "С даты"
   }
 }
 

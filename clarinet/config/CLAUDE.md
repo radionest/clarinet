@@ -41,7 +41,7 @@ lesion_seg = RecordDef(
 
 - `FileDef`: pattern, multiple, level (str or `DicomQueryLevel`, **required**), description, name (auto-derived)
 - `FileRef(file, role, required)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum
-- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum
+- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum; `unique_per_user`: one record per user (default True); `editable`: non-superusers may update a finished record (default True); `shared_editing`: any role-holder may edit any record of this type — each edit reassigns ownership to the editor (requires `unique_per_user=False`, default False)
 
 **String coercion:** `level` and `role` fields accept plain strings (`"SERIES"`, `"input"`) — validators coerce to enums automatically.
 

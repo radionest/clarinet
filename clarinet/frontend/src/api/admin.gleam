@@ -21,6 +21,29 @@ pub fn get_admin_stats() -> Promise(Result(AdminStats, ApiError)) {
   })
 }
 
+// Decoder for UserWorkload
+fn user_workload_decoder() -> decode.Decoder(models.UserWorkload) {
+  use user_id <- decode.field("user_id", decode.string)
+  use email <- decode.field("email", decode.string)
+  use inwork <- decode.field("inwork", decode.int)
+  use pending <- decode.field("pending", decode.int)
+  use blocked <- decode.field("blocked", decode.int)
+  use failed <- decode.field("failed", decode.int)
+  use finished <- decode.field("finished", decode.int)
+  use available <- decode.field("available", decode.int)
+
+  decode.success(models.UserWorkload(
+    user_id: user_id,
+    email: email,
+    inwork: inwork,
+    pending: pending,
+    blocked: blocked,
+    failed: failed,
+    finished: finished,
+    available: available,
+  ))
+}
+
 // Decoder for AdminStats
 pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
   use total_studies <- decode.field("total_studies", decode.int)
@@ -31,6 +54,11 @@ pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
     "records_by_status",
     decode.dict(decode.string, decode.int),
   )
+  use available_pending <- decode.field("available_pending", decode.int)
+  use workload_by_user <- decode.field(
+    "workload_by_user",
+    decode.list(user_workload_decoder()),
+  )
 
   decode.success(models.AdminStats(
     total_studies: total_studies,
@@ -38,6 +66,8 @@ pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
     total_users: total_users,
     total_patients: total_patients,
     records_by_status: records_by_status,
+    available_pending: available_pending,
+    workload_by_user: workload_by_user,
   ))
 }
 
@@ -116,6 +146,23 @@ pub fn get_role_matrix() -> Promise(Result(models.RoleMatrix, ApiError)) {
       "Invalid role matrix data",
     ))
   })
+}
+
+// Get ids of users currently online (role-matrix presence dots)
+pub fn get_online_users() -> Promise(Result(List(String), ApiError)) {
+  http_client.get("/admin/online-users")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      online_users_decoder(),
+      "Invalid online users data",
+    ))
+  })
+}
+
+fn online_users_decoder() -> decode.Decoder(List(String)) {
+  use user_ids <- decode.field("user_ids", decode.list(decode.string))
+  decode.success(user_ids)
 }
 
 // Add a role to a user

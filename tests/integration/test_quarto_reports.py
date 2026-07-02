@@ -11,7 +11,11 @@ from clarinet.api.app import app
 from clarinet.api.dependencies import get_quarto_report_registry
 from clarinet.models.quarto_report import QuartoReportTemplate
 from clarinet.services.quarto_report_service import QuartoReportRegistry
-from tests.conftest import create_authenticated_client, create_mock_superuser
+from tests.conftest import (
+    create_authenticated_client,
+    create_mock_superuser,
+    create_mock_user_with_role,
+)
 from tests.utils.urls import (
     ADMIN_QUARTO_REPORTS,
     admin_quarto_render,
@@ -83,6 +87,39 @@ async def test_list_quarto_reports(quarto_client: AsyncClient) -> None:
     data = resp.json()
     assert [t["name"] for t in data] == ["demo"]
     assert data[0]["data_reports"] == []
+    assert data[0]["kind"] == "file"  # default kind serialized in the response
+
+
+async def test_list_marks_book_kind(test_session, test_settings) -> None:
+    """A BOOK template is surfaced with kind == 'book' so the UI can distinguish it."""
+    from clarinet.models.quarto_report import QuartoReportKind
+
+    mock_user = await create_mock_superuser(test_session, email="qbook@test.com")
+
+    def book_registry() -> QuartoReportRegistry:
+        return QuartoReportRegistry(
+            [
+                (
+                    QuartoReportTemplate(
+                        name="bk",
+                        title="Book",
+                        description="",
+                        data_reports=[],
+                        kind=QuartoReportKind.BOOK,
+                    ),
+                    Path("/tmp/bk"),
+                )
+            ]
+        )
+
+    app.dependency_overrides[get_quarto_report_registry] = book_registry
+    try:
+        async for ac in create_authenticated_client(mock_user, test_session, test_settings):
+            resp = await ac.get(ADMIN_QUARTO_REPORTS)
+            assert resp.status_code == 200
+            assert resp.json()[0]["kind"] == "book"
+    finally:
+        app.dependency_overrides.pop(get_quarto_report_registry, None)
 
 
 async def test_list_requires_auth(unauth_client: AsyncClient) -> None:
@@ -131,3 +168,24 @@ async def test_download_null_byte_in_path_returns_404(quarto_client: AsyncClient
         admin_quarto_render_download("demo%00", "20260101_000000_000000")
     )
     assert resp.status_code == 404
+
+
+@pytest_asyncio.fixture
+async def analyst_quarto_client(
+    test_session, test_settings, monkeypatch
+) -> AsyncGenerator[AsyncClient]:
+    from clarinet.settings import settings
+
+    monkeypatch.setattr(settings, "role_capabilities", {"analyst": ["reports"]})
+    user = await create_mock_user_with_role(test_session, "analyst", email="analyst-q@test.com")
+    app.dependency_overrides[get_quarto_report_registry] = _make_registry
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+    app.dependency_overrides.pop(get_quarto_report_registry, None)
+
+
+async def test_analyst_can_list_quarto_reports(
+    analyst_quarto_client: AsyncClient,
+) -> None:
+    resp = await analyst_quarto_client.get(ADMIN_QUARTO_REPORTS)
+    assert resp.status_code == 200

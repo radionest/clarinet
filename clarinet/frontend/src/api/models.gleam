@@ -84,6 +84,9 @@ pub type RecordType {
     editable: Bool,
     edit_window_days: Option(Int),
     viewer_mode: String,
+    // Per-RecordType viewer allowlist (matching ViewerInfo.name). None or empty
+    // → all configured viewers; a non-empty list restricts the UI to those.
+    allowed_viewers: Option(List(String)),
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
     constraint_role: Option(String),
@@ -133,6 +136,7 @@ pub type Record {
     // Server-side verdict: may the submitted data still be changed by
     // non-superusers (RecordType.editable + edit_window_days)
     is_editable: Bool,
+    shared_editing: Bool,
   )
 }
 
@@ -147,6 +151,7 @@ pub type User {
     is_superuser: Bool,
     is_verified: Bool,
     role_names: List(String),
+    capabilities: List(String),
   )
 }
 
@@ -178,6 +183,20 @@ pub type LoginResponse {
 
 pub type RegisterRequest {
   RegisterRequest(email: String, password: String)
+}
+
+/// One active session row from GET /api/auth/sessions/active. `last_accessed`
+/// is a backend ISO-8601 timestamp (UTC). `is_current` marks the session
+/// making the request — the settings page renders it as "This device" with no
+/// revoke button, so users can't sign themselves out by accident.
+pub type SessionInfo {
+  SessionInfo(
+    token_preview: String,
+    last_accessed: String,
+    user_agent: Option(String),
+    ip_address: Option(String),
+    is_current: Bool,
+  )
 }
 
 // Form data types for creating/updating models
@@ -351,6 +370,20 @@ pub type PacsStudyWithSeries {
   )
 }
 
+// Per-user assigned-record workload counts (admin dashboard)
+pub type UserWorkload {
+  UserWorkload(
+    user_id: String,
+    email: String,
+    inwork: Int,
+    pending: Int,
+    blocked: Int,
+    failed: Int,
+    finished: Int,
+    available: Int,
+  )
+}
+
 // Admin dashboard statistics
 pub type AdminStats {
   AdminStats(
@@ -359,6 +392,8 @@ pub type AdminStats {
     total_users: Int,
     total_patients: Int,
     records_by_status: Dict(String, Int),
+    available_pending: Int,
+    workload_by_user: List(UserWorkload),
   )
 }
 
@@ -447,6 +482,8 @@ pub type RecordEvent {
     id: Int,
     record_id: Option(Int),
     record_key: Option(Int),
+    record_type_name: Option(String),
+    patient_id: Option(String),
     kind: String,
     actor_name: Option(String),
     from_status: Option(String),
@@ -464,6 +501,7 @@ pub type PipelineRun {
     queue: String,
     status: String,
     record_id: Option(Int),
+    patient_id: Option(String),
     started_at: String,
     finished_at: Option(String),
     execution_time: Option(Float),

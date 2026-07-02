@@ -25,7 +25,27 @@ from clarinet.services.dicom import (
     StudyResult,
 )
 from clarinet.services.dicom.models import SeriesResult
+from clarinet.settings import settings
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_anonymized_copy(patient_id: str | None) -> bool:
+    """True for a study that is a transient anonymized copy on the shared PACS.
+
+    The anonymize -> send-to-PACS tests C-STORE copies whose PatientID carries
+    ``settings.anon_id_prefix`` (e.g. ``CLARINET_42``) back into the shared test
+    Orthanc. Those studies are created and deleted mid-session and Orthanc
+    indexes them asynchronously, so whole-PACS count assertions must exclude
+    them: the remaining (non-anonymized) studies are immutable for the run, so a
+    REST snapshot and the session-cached C-FIND always agree on them regardless
+    of when each was taken.
+    """
+    return bool(patient_id) and str(patient_id).startswith(f"{settings.anon_id_prefix}_")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -44,38 +64,50 @@ def pacs_available() -> None:
 
 @pytest.fixture(scope="session")
 def orthanc_expected_counts(pacs_available: None) -> dict[str, int]:
-    """Ground-truth study counts from Orthanc REST API."""
-    total = len(requests.get(f"{PACS_REST_URL}/studies", timeout=5).json())
+    """Ground-truth study counts from a single Orthanc REST snapshot.
 
-    shipilov = len(
-        requests.post(
-            f"{PACS_REST_URL}/tools/find",
-            json={"Level": "Study", "Query": {"PatientName": "SHIPILOV*"}},
-            timeout=5,
-        ).json()
+    Every count excludes anonymized copies (see :func:`_is_anonymized_copy`) so
+    the whole-PACS comparisons in this module stay deterministic against the
+    shared mutable test PACS. All counts are derived from one expanded
+    ``/tools/find`` response, so they can never drift against each other.
+    """
+    resp = requests.post(
+        f"{PACS_REST_URL}/tools/find",
+        json={
+            "Level": "Study",
+            "Query": {},
+            "Expand": True,
+            "RequestedTags": ["ModalitiesInStudy"],
+        },
+        timeout=5,
     )
-
-    ct = len(
-        requests.post(
-            f"{PACS_REST_URL}/tools/find",
-            json={"Level": "Study", "Query": {"ModalitiesInStudy": "CT"}},
-            timeout=5,
-        ).json()
-    )
-
-    mr = len(
-        requests.post(
-            f"{PACS_REST_URL}/tools/find",
-            json={"Level": "Study", "Query": {"ModalitiesInStudy": "MR"}},
-            timeout=5,
-        ).json()
-    )
+    resp.raise_for_status()
+    studies = resp.json()
+    stable = [
+        s
+        for s in studies
+        if not _is_anonymized_copy(s.get("PatientMainDicomTags", {}).get("PatientID"))
+    ]
 
     return {
-        "total_studies": total,
-        "shipilov_studies": shipilov,
-        "ct_studies": ct,
-        "mr_studies": mr,
+        "total_studies": len(stable),
+        "shipilov_studies": sum(
+            1
+            for s in stable
+            if str(s.get("PatientMainDicomTags", {}).get("PatientName") or "")
+            .upper()
+            .startswith("SHIPILOV")
+        ),
+        "ct_studies": sum(
+            1
+            for s in stable
+            if "CT" in (s.get("RequestedTags", {}).get("ModalitiesInStudy") or "").split("\\")
+        ),
+        "mr_studies": sum(
+            1
+            for s in stable
+            if "MR" in (s.get("RequestedTags", {}).get("ModalitiesInStudy") or "").split("\\")
+        ),
     }
 
 
@@ -101,14 +133,25 @@ def all_studies(dicom_client: DicomClient, orthanc_node: DicomNode) -> list[Stud
 
 @pytest.fixture(scope="session")
 def mr_study(all_studies: list[StudyResult]) -> StudyResult:
-    """Smallest MR study on the PACS — used for C-GET tests.
+    """Smallest SHIPILOV MR study on the PACS — used for C-GET tests.
 
-    Selects the study with fewest instances to avoid C-GET timeouts
-    on large studies (2000+ instances).
+    Restricted to the SHIPILOV test patient: the anonymize -> send-to-PACS
+    tests push anonymized MR copies (patient ``CLARINET_*``) back to the shared
+    PACS, so an unscoped "smallest MR study" would intermittently select one
+    while it is still being ingested, yielding flaky instance-count mismatches.
+    The SHIPILOV studies are immutable for the test run, so this selection is
+    stable. Picks the fewest-instance study to avoid C-GET timeouts on large
+    studies (2000+ instances).
     """
-    matches = [s for s in all_studies if s.modalities_in_study and "MR" in s.modalities_in_study]
-    assert matches, "No MR study found on test PACS"
-    # Pick smallest study to keep tests fast and reliable
+    matches = [
+        s
+        for s in all_studies
+        if s.modalities_in_study
+        and "MR" in s.modalities_in_study
+        and s.patient_name
+        and "SHIPILOV" in str(s.patient_name).upper()
+    ]
+    assert matches, "No SHIPILOV MR study found on test PACS"
     return min(matches, key=lambda s: s.number_of_study_related_instances or float("inf"))
 
 
@@ -148,8 +191,9 @@ async def test_find_all_studies(
     all_studies: list[StudyResult],
     orthanc_expected_counts: dict[str, int],
 ) -> None:
-    """All studies are returned and each has a study_instance_uid."""
-    assert len(all_studies) == orthanc_expected_counts["total_studies"]
+    """Non-anonymized studies match the REST count; every study has a UID."""
+    stable_studies = [s for s in all_studies if not _is_anonymized_copy(s.patient_id)]
+    assert len(stable_studies) == orthanc_expected_counts["total_studies"]
     for study in all_studies:
         assert study.study_instance_uid
 
@@ -163,6 +207,9 @@ async def test_find_studies_by_patient_name(
 ) -> None:
     """Wildcard search on patient name returns matching results."""
     results = await dicom_client.find_studies(StudyQuery(patient_name="SHIPILOV*"), orthanc_node)
+    # No _is_anonymized_copy filter needed here: anonymization rewrites PatientName
+    # to CLARINET_*, so the SHIPILOV* query can never match an anonymized copy —
+    # results already align with the anon-excluded shipilov_studies count.
     assert len(results) == orthanc_expected_counts["shipilov_studies"]
     assert results[0].modalities_in_study and "MR" in results[0].modalities_in_study
 
@@ -174,9 +221,10 @@ async def test_find_studies_by_modality_ct(
     orthanc_node: DicomNode,
     orthanc_expected_counts: dict[str, int],
 ) -> None:
-    """Filtering by CT returns expected number of studies."""
+    """Filtering by CT returns the expected number of non-anonymized studies."""
     results = await dicom_client.find_studies(StudyQuery(modality="CT"), orthanc_node)
-    assert len(results) == orthanc_expected_counts["ct_studies"]
+    stable = [s for s in results if not _is_anonymized_copy(s.patient_id)]
+    assert len(stable) == orthanc_expected_counts["ct_studies"]
 
 
 @pytest.mark.dicom
@@ -186,9 +234,10 @@ async def test_find_studies_by_modality_mr(
     orthanc_node: DicomNode,
     orthanc_expected_counts: dict[str, int],
 ) -> None:
-    """Filtering by MR returns expected number of studies."""
+    """Filtering by MR returns the expected number of non-anonymized studies."""
     results = await dicom_client.find_studies(StudyQuery(modality="MR"), orthanc_node)
-    assert len(results) == orthanc_expected_counts["mr_studies"]
+    stable = [s for s in results if not _is_anonymized_copy(s.patient_id)]
+    assert len(stable) == orthanc_expected_counts["mr_studies"]
 
 
 @pytest.mark.dicom

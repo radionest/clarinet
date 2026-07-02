@@ -9,6 +9,7 @@ leak into unrelated queries on the same connection.
 
 import asyncio
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import text
@@ -16,6 +17,19 @@ from sqlalchemy import text
 from clarinet.exceptions.domain import ReportQueryError
 from clarinet.settings import DatabaseDriver, settings
 from clarinet.utils.db_manager import DatabaseManager, db_manager
+
+
+@dataclass(frozen=True)
+class ReportColumn:
+    """A report result column and its PostgreSQL type name (e.g. ``int4``).
+
+    Produced by :meth:`ReportRepository.describe_report` and consumed by
+    :mod:`clarinet.utils.report_schema_codegen` to derive pandera field types.
+    """
+
+    name: str
+    pg_type: str
+
 
 # Strips leading whitespace, line comments (``--``), and block comments
 # (``/* ... */``) from the start of a SQL string so :func:`_validate_select_only`
@@ -71,6 +85,56 @@ class ReportRepository:
             return await asyncio.wait_for(self._run(sql, sql_timeout), timeout=wait_timeout)
         except TimeoutError as exc:
             raise ReportQueryError(f"Report query exceeded {wait_timeout:.0f}s timeout") from exc
+
+    async def describe_report(self, sql: str) -> list[ReportColumn]:
+        """Return result columns + PostgreSQL type names without fetching rows.
+
+        Plans the query with asyncpg ``prepare()`` (which parses and plans but
+        does not execute) and reads ``get_attributes()`` for the projected
+        column types. Drives ``clarinet quarto gen-types``.
+
+        PostgreSQL only: SQLite is dynamically typed and exposes no column
+        types through the DBAPI cursor description, so there is nothing to
+        infer.
+
+        Raises:
+            ReportQueryError: SQLite driver, invalid SQL, or planning failed.
+        """
+        _validate_select_only(sql)
+        if settings.database_driver == DatabaseDriver.SQLITE:
+            raise ReportQueryError(
+                "Report type generation requires PostgreSQL — the SQLite driver "
+                "exposes no column types. Point CLARINET_DATABASE_URL at the "
+                "project's PostgreSQL database and re-run."
+            )
+        try:
+            return await self._describe(sql)
+        except ReportQueryError:
+            raise
+        except Exception as exc:
+            raise ReportQueryError("Failed to determine report column types") from exc
+
+    async def _describe(self, sql: str) -> list[ReportColumn]:
+        async with self._db_manager.async_session_factory() as session:
+            try:
+                # Same read-only + statement_timeout budget as execute_report:
+                # prepare() only plans (no rows), but a pathological plan must
+                # still be time-boxed and barred from side effects.
+                await self._apply_safety_pragmas(session, settings.reports_query_timeout_seconds)
+                connection = await session.connection()
+                raw = await connection.get_raw_connection()
+                # SQLAlchemy's asyncpg adapter exposes the real asyncpg
+                # connection here; prepare() plans the statement (no execution).
+                asyncpg_conn = raw.driver_connection
+                if asyncpg_conn is None:
+                    raise ReportQueryError("no raw asyncpg connection for type inspection")
+                stmt = await asyncpg_conn.prepare(sql)
+                return [
+                    ReportColumn(name=attr.name, pg_type=attr.type.name)
+                    for attr in stmt.get_attributes()
+                ]
+            finally:
+                await session.rollback()
 
     async def _run(
         self,

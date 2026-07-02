@@ -21,7 +21,8 @@ def get_worker_queues() -> list[str]:
     """Auto-detect worker queues based on machine capabilities.
 
     Every worker listens to the default queue. Additional queues
-    are added based on ``settings.have_gpu`` and ``settings.have_dicom``.
+    are added based on ``settings.have_gpu``, ``settings.have_dicom``,
+    and ``settings.have_quarto``.
 
     Returns:
         List of queue names this worker should consume from.
@@ -36,7 +37,50 @@ def get_worker_queues() -> list[str]:
         queues.append(settings.dicom_queue_name)
         logger.info("DICOM capability detected — worker will listen to DICOM queue")
 
+    if settings.have_quarto:
+        queues.append(settings.quarto_queue_name)
+        logger.info("Quarto capability detected — worker will listen to Quarto queue")
+
     return queues
+
+
+async def warn_if_stale(queues: list[str]) -> None:
+    """Log a loud ERROR if our fingerprint differs from the running API's.
+
+    Diagnostic only — broker-level isolation (version-gated queue names) already
+    prevents a stale worker from receiving tasks. Never raises: a 404 (old API
+    without the endpoint) or an unreachable API downgrades to a WARNING.
+    """
+    if not settings.pipeline_version_check_enabled:
+        return
+
+    from clarinet.client import ClarinetAPIError, ClarinetClient
+    from clarinet.services.pipeline.fingerprint import compute_fingerprint
+
+    client = None
+    try:
+        client = ClarinetClient(
+            base_url=settings.effective_api_base_url,
+            service_token=settings.effective_service_token,
+        )
+        api_fp = await client.get_worker_fingerprint()
+        mine = compute_fingerprint()
+        if api_fp != mine:
+            logger.error(
+                f"Worker fingerprint {mine} != API {api_fp}; listening on stale "
+                f"queues {queues} — will NOT receive new tasks until the worker's "
+                f"code is updated and the process restarted."
+            )
+        else:
+            logger.info(f"Worker fingerprint matches API: {mine}")
+    except ClarinetAPIError as e:
+        # _request wraps transport/HTTP errors (incl. 404 from an old API) here.
+        logger.warning(f"Could not verify worker fingerprint against API: {e}")
+    except Exception as e:  # diagnostic must never crash worker startup
+        logger.warning(f"Unexpected error verifying worker fingerprint: {e}")
+    finally:
+        if client is not None:
+            await client.close()
 
 
 def load_task_modules() -> None:
@@ -190,6 +234,8 @@ async def run_worker(
             queues = get_worker_queues()
 
         logger.info(f"Starting pipeline worker on queues: {queues} (workers={workers})")
+
+        await warn_if_stale(queues)
 
         brokers = [get_broker_for(q) for q in queues]
 

@@ -160,7 +160,7 @@ class RecordBase(BaseModel):
     # Parent record link
     parent_record_id: int | None = None
 
-    # Anon UIDs — sibling-relationship snapshot used by FileRepository
+    # Anon UIDs — sibling-relationship snapshot used by Files
     # when the study/series relations are not eager-loaded.
     study_anon_uid: str | None = None
     series_anon_uid: str | None = None
@@ -404,9 +404,9 @@ class RecordRead(RecordBase):
         """
         if self.display_anon_id is not None:
             return self
-        from ..services.common.storage_paths import compute_display_anon_id
+        from clarinet.files import Files
 
-        self.display_anon_id = compute_display_anon_id(
+        self.display_anon_id = Files.display_anon_id(
             self.study_uid,
             self.study.anon_uid if self.study is not None else None,
         )
@@ -438,6 +438,12 @@ class RecordRead(RecordBase):
         :func:`is_record_editable`. Superuser bypass is the client's concern.
         """
         return is_record_editable(self.status, self.finished_at, self.record_type)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def shared_editing(self) -> bool:
+        """Mirror RecordType.shared_editing for the frontend permission check."""
+        return self.record_type.shared_editing
 
 
 class RecordFind(SQLModel):

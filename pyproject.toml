@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clarinet"
-version = "0.10.1"
+version = "0.10.16"
 description = "Clarinet — an imaging-centric framework for clinical research"
 readme = "README.md"
 authors = [
@@ -25,7 +25,7 @@ dependencies = [
     "pydantic>=2.12.0",
     "pydantic-settings>=2.0.0",
     "alembic>=1.11.0",
-    "python-multipart>=0.0.26",
+    "python-multipart>=0.0.31",
     "bcrypt>=4.0.1",
     "loguru>=0.7.0",
     "aiosqlite>=0.21.0",
@@ -63,6 +63,10 @@ dependencies = [
     "jupyter-client>=8.0",
     "ipykernel>=6.0",
     "pandas>=2.0",
+    # Typed report DataFrames: `clarinet quarto gen-types` emits pandera
+    # schemas the *.qmd chunks import (coerce=True restores the dtypes a CSV
+    # round-trip loses). Base dep, not an extra: the render kernel imports it.
+    "pandera>=0.24",
 ]
 
 [project.optional-dependencies]
@@ -85,11 +89,14 @@ Repository = "https://github.com/radionest/clarinet"
 Issues = "https://github.com/radionest/clarinet/issues"
 
 [tool.uv]
-# Security floors for transitive deps (Dependabot alerts 11-13).
-# Keeps future `uv lock --upgrade` from resolving back into vulnerable ranges.
+# Security floors for transitive deps Dependabot flags but we don't require
+# directly. Keeps future `uv lock --upgrade` from relocking into vulnerable
+# ranges. Each floor is the first patched release for the CVE; raise on new
+# alerts.
 constraint-dependencies = [
-    "aiohttp>=3.14.0",
-    "starlette>=1.0.1",
+    "aiohttp>=3.14.0",          # via taskiq
+    "cryptography>=48.0.1",     # via pyjwt[crypto] -> fastapi-users; GHSA-537c-gmf6-5ccf
+    "starlette>=1.3.1",         # via fastapi; CVE-2026-48817/48818/54282/54283
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -105,6 +112,7 @@ exclude = [
 [tool.hatch.build]
 artifacts = [
     "clarinet/static/**/*",
+    "clarinet/docs/**/*",
 ]
 
 [dependency-groups]
@@ -130,6 +138,16 @@ dev = [
 e2e = [
     "pytest-playwright>=0.6",
 ]
+
+[tool.mutmut]
+# Mutation testing, intentionally scoped to the RecordFlow comparison core —
+# pure business logic exercised by fast unit tests (no DB / external services).
+# `source_paths` copies the package into mutants/ so imports resolve;
+# `only_mutate` restricts which file is actually mutated. mutmut is run
+# ephemerally (not a project dependency) — see `make test-mutation`.
+source_paths = ["clarinet"]
+only_mutate = ["clarinet/services/recordflow/flow_result.py"]
+pytest_add_cli_args_test_selection = ["tests/test_recordflow_dsl.py"]
 
 [tool.black]
 line-length = 100

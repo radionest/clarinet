@@ -1,6 +1,7 @@
 // Patients list page — self-contained MVU module
 import api/models
 import clarinet_frontend/i18n.{type Key}
+import components/entity_link
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
@@ -196,7 +197,7 @@ fn patient_row(
   }
 
   html.tr([], [
-    html.td([attribute.class("cell-id")], [html.text(patient.id)]),
+    html.td([attribute.class("cell-id")], [entity_link.patient(patient.id)]),
     html.td([], [html.text(option.unwrap(patient.name, "-"))]),
     html.td([attribute.class("cell-id")], [
       html.text(option.unwrap(patient.anon_id, "-")),

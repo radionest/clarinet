@@ -25,11 +25,12 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from clarinet.client import ClarinetClient
+    from clarinet.files import Files
     from clarinet.models import Patient, RecordCreate, RecordPage, RecordRead, RecordStatus
     from clarinet.models.study import SeriesRead, StudyRead
     from clarinet.types import RecordData
 
-    from .context import FileResolver, RecordQuery, TaskContext
+    from .context import RecordQuery, TaskContext
     from .message import PipelineMessage
 
 
@@ -261,10 +262,18 @@ class SyncTaskContext:
         msg: The parsed pipeline message.
     """
 
-    files: FileResolver
+    files: Files
     records: SyncRecordQuery
     client: SyncPipelineClient
     msg: PipelineMessage
+
+    def files_for(self, record: RecordRead) -> Files:
+        """Build a resolver for another record (sync ``TaskContext.files_for``)."""
+        # Local import (not module-level): keep this module free of the
+        # broker / TaskIQ import chain.
+        from clarinet.files import Files
+
+        return Files(record)
 
 
 def build_sync_context(ctx: TaskContext, loop: asyncio.AbstractEventLoop) -> SyncTaskContext:

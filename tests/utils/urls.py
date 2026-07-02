@@ -19,6 +19,8 @@ AUTH_ME = "/api/auth/me"
 AUTH_SESSION_VALIDATE = "/api/auth/session/validate"
 AUTH_SESSION_REFRESH = "/api/auth/session/refresh"
 AUTH_SESSIONS_ACTIVE = "/api/auth/sessions/active"
+# Dynamic: AUTH_SESSIONS_REVOKE.format(token_preview="abcdef12...")
+AUTH_SESSIONS_REVOKE = "/api/auth/sessions/{token_preview}"
 
 # --- Users ---
 USERS_BASE = "/api/user"
@@ -31,6 +33,7 @@ RECORDS_BASE = "/api/records"
 RECORDS_FIND = "/api/records/find"
 RECORDS_FIND_RANDOM = "/api/records/find/random"
 RECORDS_AVAILABLE_TYPES = "/api/records/available_types"
+RECORDS_CLAIM_NEXT = "/api/records/claim-next"
 RECORDS_FILTER_OPTIONS = "/api/records/filter-options"
 RECORDS_BULK_STATUS = "/api/records/bulk/status"
 
@@ -62,6 +65,7 @@ SERIES_FIND = "/api/series/find"
 # --- Admin ---
 ADMIN_BASE = "/api/admin"
 ADMIN_STATS = "/api/admin/stats"
+ADMIN_ONLINE_USERS = "/api/admin/online-users"
 ADMIN_RT_STATS = "/api/admin/record-types/stats"
 ADMIN_RECORDS = "/api/admin/records"  # + /{id} for cascade delete
 ADMIN_RECORD_STATUS = "/api/admin/records"  # + /{id}/status
@@ -111,8 +115,12 @@ DICOM_IMPORT_STUDY = "/api/dicom/import-study"
 # --- Health ---
 HEALTH = "/api/health"
 
+# --- SSE ---
+SSE_URL = "/api/events"
+
 # --- Pipelines ---
 PIPELINES_BASE = "/api/pipelines"
+PIPELINE_FINGERPRINT = "/api/pipelines/fingerprint"
 PIPELINES_SYNC = "/api/pipelines/sync"
 PIPELINE_RUNS = "/api/pipelines/runs"
 

@@ -30,6 +30,7 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "inherit_user_from_parent",
     "editable",
     "edit_window_days",
+    "shared_editing",
     "viewer_mode",
     "slicer_script",
     "slicer_result_validator",
@@ -45,6 +46,7 @@ _TABLE_FIELDS: tuple[str, ...] = (
 _LIST_FIELDS: tuple[str, ...] = (
     "slicer_context_hydrators",
     "data_validators",
+    "allowed_viewers",
 )
 
 

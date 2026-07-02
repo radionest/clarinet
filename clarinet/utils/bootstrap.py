@@ -8,12 +8,13 @@ such as user roles and record types, during startup.
 from pathlib import Path
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import ReconcileResult, reconcile_record_types
-from clarinet.exceptions.domain import ConfigurationError
+from clarinet.exceptions.domain import ConfigLoadError, ConfigurationError
 from clarinet.models import RecordType, RecordTypeCreate, User, UserRole
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.utils.auth import get_password_hash
@@ -27,14 +28,27 @@ from clarinet.utils.logger import logger
 async def add_default_user_roles() -> None:
     """Add default user roles to the database if they don't exist.
 
-    Creates built-in roles (doctor, auto, admin, expert, ordinator)
-    plus any project-specific roles from ``settings.extra_roles``.
-    Duplicates between the two lists are ignored.
+    Creates roles from three sources:
+    - Built-in roles: doctor, auto, admin, expert, ordinator
+    - ``settings.extra_roles``: project-specific role names
+    - Keys of ``settings.role_capabilities``: any role that appears as a key
+      in the capability mapping is also created automatically
+
+    ``settings.role_capabilities`` is validated first via
+    ``validate_role_capabilities``; a ``ConfigurationError`` is raised if the
+    mapping references an unknown capability.  Duplicates across the three
+    sources are silently ignored.
     """
+    from clarinet.models.capability import validate_role_capabilities
     from clarinet.settings import settings
 
+    # Fail fast on a typo'd capability before creating roles or hitting the DB.
+    validate_role_capabilities(settings.role_capabilities)
+
     default_roles = ["doctor", "auto", "admin", "expert", "ordinator"]
-    all_roles = list(dict.fromkeys(default_roles + settings.extra_roles))
+    all_roles = list(
+        dict.fromkeys(default_roles + settings.extra_roles + list(settings.role_capabilities))
+    )
 
     async with db_manager.get_async_session_context() as session:
         for role_name in all_roles:
@@ -367,6 +381,16 @@ async def reconcile_config(
                     continue
                 props = resolve_task_files(props, project_registry)
                 all_items.append(RecordTypeCreate(**props))
+            except ConfigLoadError:
+                raise
+            except ValidationError as e:
+                # A record-type config that violates a model invariant (e.g.
+                # shared_editing + unique_per_user) must abort startup, not be
+                # swallowed by the lenient handler below — otherwise the type is
+                # silently dropped and later references 404 at runtime.
+                raise ConfigurationError(
+                    f"Invalid record type config '{config_path.name}': {e}"
+                ) from e
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 
@@ -389,6 +413,33 @@ async def reconcile_config(
                     + "\n".join(bad_items)
                     + f"\nAvailable roles: {sorted(all_db_roles)}.\n"
                     f"Add missing roles to CLARINET_EXTRA_ROLES or fix the config."
+                )
+
+        # Validate that referenced viewer names are actually configured. A typo
+        # (e.g. ["ohiff"]) would otherwise pass a non-empty allowlist that
+        # matches no configured viewer, silently hiding every viewer button on
+        # the record page. Fail fast at startup instead. (Built-in adapter names
+        # — ohif/radiant/weasis — plus any custom TemplateAdapter live in
+        # settings.viewers, so that dict is the source of truth.)
+        referenced_viewers: set[str] = set()
+        for item in all_items:
+            referenced_viewers.update(item.allowed_viewers or [])
+        if referenced_viewers:
+            configured_viewers = set(settings.viewers)
+            missing_viewers = referenced_viewers - configured_viewers
+            if missing_viewers:
+                bad_items = [
+                    f"  - '{item.name}' allows viewer(s) "
+                    f"{[n for n in (item.allowed_viewers or []) if n in missing_viewers]}"
+                    for item in all_items
+                    if any(n in missing_viewers for n in (item.allowed_viewers or []))
+                ]
+                raise ConfigurationError(
+                    f"RecordType config references unconfigured viewer(s): "
+                    f"{', '.join(sorted(missing_viewers))}.\n"
+                    + "\n".join(bad_items)
+                    + f"\nConfigured viewers: {sorted(configured_viewers)}.\n"
+                    f"Enable them via [viewers.<name>] in settings.toml."
                 )
 
         # Validate decorator-registry references (data_validators,

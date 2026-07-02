@@ -167,7 +167,7 @@ class TestRecordServiceTriggers:
             result, result_old_status = await service.submit_data(1, data, RecordStatus.finished)
 
             repo_mock.update_data.assert_awaited_once_with(
-                1, data, new_status=RecordStatus.finished
+                1, data, new_status=RecordStatus.finished, reassign_to=None
             )
             patched.model_validate.assert_called_once_with(record_mock)
             engine_mock.handle_record_status_change.assert_awaited_once_with(
@@ -197,7 +197,7 @@ class TestRecordServiceTriggers:
             patched.model_validate.return_value = record_read_mock
             result, result_old_status = await service.update_data(1, data)
 
-            repo_mock.update_data.assert_awaited_once_with(1, data)
+            repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
             patched.model_validate.assert_called_once_with(record_mock)
             engine_mock.handle_record_data_update.assert_awaited_once_with(record_read_mock)
             assert result == record_mock
@@ -218,9 +218,159 @@ class TestRecordServiceTriggers:
 
         result, result_old_status = await service.update_data(1, data)
 
-        repo_mock.update_data.assert_awaited_once_with(1, data)
+        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
         assert result == record_mock
         assert result_old_status == old_status
+
+    @pytest.mark.asyncio
+    async def test_update_data_transfers_ownership_for_shared_type(self) -> None:
+        """Editing a shared record owned by another user threads reassign_to."""
+        actor = uuid4()
+        data = {"field": "value"}
+        fetched = MagicMock()
+        fetched.record_type.shared_editing = True
+        fetched.user_id = uuid4()  # owned by someone else
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.pending
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = fetched
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
+        service = RecordService(repo_mock, AsyncMock())
+        # Superuser acting_user skips ensure_record_editable; the transfer branch
+        # is independent of superuser status.
+        acting_user = SimpleNamespace(is_superuser=True, id=actor)
+
+        with patch("clarinet.services.record_service.RecordRead") as patched:
+            patched.model_validate.return_value = MagicMock()
+            await service.update_data(1, data, acting_user=acting_user, actor_id=actor)
+
+        repo_mock.get_with_relations.assert_awaited_once_with(1)
+        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=actor)
+
+    @pytest.mark.asyncio
+    async def test_update_data_no_transfer_for_system_call(self) -> None:
+        """acting_user=None (system/worker) never fetches or transfers."""
+        data = {"field": "value"}
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.pending
+
+        repo_mock = AsyncMock()
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
+        service = RecordService(repo_mock, AsyncMock())
+
+        with patch("clarinet.services.record_service.RecordRead") as patched:
+            patched.model_validate.return_value = MagicMock()
+            await service.update_data(1, data)
+
+        repo_mock.get_with_relations.assert_not_awaited()
+        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
+
+    @pytest.mark.asyncio
+    async def test_update_data_no_transfer_when_already_owner(self) -> None:
+        """No transfer (or reassign) when the editor already owns the record."""
+        actor = uuid4()
+        data = {"field": "value"}
+        fetched = MagicMock()
+        fetched.record_type.shared_editing = True
+        fetched.user_id = actor  # already the owner
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.pending
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = fetched
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
+        service = RecordService(repo_mock, AsyncMock())
+        acting_user = SimpleNamespace(is_superuser=True, id=actor)
+
+        with patch("clarinet.services.record_service.RecordRead") as patched:
+            patched.model_validate.return_value = MagicMock()
+            await service.update_data(1, data, acting_user=acting_user, actor_id=actor)
+
+        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
+
+    @pytest.mark.asyncio
+    async def test_submit_data_transfers_ownership_for_shared_type(self) -> None:
+        """Re-submitting a shared record owned by another user threads reassign_to."""
+        actor = uuid4()
+        data = {"field": "value"}
+        check = MagicMock()
+        check.user_id = uuid4()  # owned by someone else
+        check.record_type.shared_editing = True
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.finished
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_record_type.return_value = check
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
+        service = RecordService(repo_mock, AsyncMock())
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+        ):
+            patched.model_validate.return_value = MagicMock()
+            await service.submit_data(1, data, RecordStatus.finished, user_id=actor, actor_id=actor)
+
+        # Transfer branch must NOT go through ensure_user_assigned
+        repo_mock.ensure_user_assigned.assert_not_awaited()
+        repo_mock.update_data.assert_awaited_once_with(
+            1, data, new_status=RecordStatus.finished, reassign_to=actor
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_data_no_transfer_for_service_token(self) -> None:
+        """Service-token writes (acting_user present, actor_id=None) must not transfer ownership."""
+        admin_id = uuid4()
+        other_owner = uuid4()
+        data = {"field": "value"}
+        fetched = MagicMock()
+        fetched.record_type.shared_editing = True
+        fetched.user_id = other_owner  # owned by someone else
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.pending
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = fetched
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
+        service = RecordService(repo_mock, AsyncMock())
+        acting_user = SimpleNamespace(is_superuser=True, id=admin_id)
+
+        with patch("clarinet.services.record_service.RecordRead") as patched:
+            patched.model_validate.return_value = MagicMock()
+            await service.update_data(1, data, acting_user=acting_user, actor_id=None)
+
+        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
+
+    @pytest.mark.asyncio
+    async def test_submit_data_no_transfer_for_service_token(self) -> None:
+        """Service-token submits (user_id present, actor_id=None) must not transfer ownership."""
+        admin_id = uuid4()
+        other_owner = uuid4()
+        data = {"field": "value"}
+        check = MagicMock()
+        check.user_id = other_owner  # owned by someone else
+        check.record_type.shared_editing = True
+        record_mock = MagicMock()
+        record_mock.status = RecordStatus.finished
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_record_type.return_value = check
+        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
+        service = RecordService(repo_mock, AsyncMock())
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+        ):
+            patched.model_validate.return_value = MagicMock()
+            await service.submit_data(
+                1, data, RecordStatus.finished, user_id=admin_id, actor_id=None
+            )
+
+        repo_mock.update_data.assert_awaited_once_with(
+            1, data, new_status=RecordStatus.finished, reassign_to=None
+        )
 
     @pytest.mark.asyncio
     async def test_notify_file_change_fires_file_change_trigger(self) -> None:
@@ -964,12 +1114,16 @@ def _record_read_stub(
     file_links: list[RecordFileLinkRead],
     **fields: object,
 ) -> SimpleNamespace:
-    """Duck-typed RecordRead: honest ``hasattr`` (unlike MagicMock), so
-    unresolved pattern placeholders collapse to "" instead of a mock repr."""
+    """Duck-typed RecordRead stub for _missing_output_links / _stored_checksums tests.
+
+    Provides the minimal duck-typed interface that ``Files.render_for`` (and the
+    underlying ``_patterns.fields_from``) requires: ``record_type.name``,
+    ``record_type.file_registry``, and all scalar pattern fields.
+    """
     return SimpleNamespace(
-        record_type=SimpleNamespace(file_registry=file_registry),
+        record_type=SimpleNamespace(name="test_type", file_registry=file_registry),
         file_links=file_links,
-        **fields,
+        **{"id": None, **fields},  # fields_from accesses record.id directly; callers override
     )
 
 
@@ -1018,6 +1172,28 @@ class TestMissingOutputLinks:
 
         assert result == {"seg": "seg_.nrrd"}
 
+    def test_no_anon_uid_does_not_raise(self) -> None:
+        """Files.render_for must not raise AnonPathError on a pre-anon record.
+
+        Regression: _missing_output_links used Files(record, parent=parent).render()
+        which eagerly built working_dirs and raised AnonPathError when the record
+        had no anon_uid. render_for bypasses dir-building entirely.
+        """
+        from clarinet.files import Files
+
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+            id=42,
+        )
+        # No anon_uid / anon_patient_id on the stub — simulates pre-anon record.
+        result = Files.render_for(record, "seg_{id}.nrrd")
+        assert result == "seg_42.nrrd"
+
+        # Also confirm _missing_output_links doesn't raise with the same stub.
+        missing = _missing_output_links(record, {"seg": "abc123"})
+        assert missing == {"seg": "seg_42.nrrd"}
+
     def test_collection_takes_first_sorted_file(self) -> None:
         record = _record_read_stub(
             [
@@ -1028,6 +1204,7 @@ class TestMissingOutputLinks:
             [],
         )
 
+        # Collection keys ("masks:b.nii") make collection_file truthy — render is never called.
         result = _missing_output_links(record, {"masks:b.nii": "1", "masks:a.nii": "2"})
 
         assert result == {"masks": "a.nii"}
@@ -1041,6 +1218,8 @@ class TestMissingOutputLinks:
             [RecordFileLinkRead(name="output_mask", filename="mask.nii.gz", checksum="old")],
         )
 
+        # Both entries are skipped before render is called: output_mask is already linked,
+        # input_nifti has INPUT role — render is never invoked.
         result = _missing_output_links(record, {"output_mask": "abc123", "input_nifti": "def456"})
 
         assert result == {}

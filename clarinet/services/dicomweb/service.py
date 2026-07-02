@@ -1,8 +1,9 @@
 """DICOMweb proxy service — translates DICOMweb HTTP semantics to DICOM Q/R operations."""
 
 import asyncio
+from time import monotonic
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydicom import Dataset
 
@@ -25,6 +26,8 @@ from clarinet.services.dicomweb.multipart import (
     build_multipart_response,
     extract_frames_from_dataset,
 )
+from clarinet.services.events.bus import get_event_bus
+from clarinet.services.events.models import TaskProgressEvent
 from clarinet.utils.logger import logger
 
 
@@ -283,21 +286,24 @@ class DicomWebProxyService:
         logger.debug(f"WADO-RS frames: {len(frames)} frames for instance {instance_uid}")
         return body, content_type
 
-    async def start_preload(self, study_uids: list[str]) -> str:
+    async def start_preload(self, study_uids: list[str], user_id: UUID | None = None) -> str:
         """Start background preloading of one or more studies into cache.
 
         Studies are fetched sequentially (same rationale as the study-level
         C-GET: avoid overloading the PACS with concurrent associations).
+        ``user_id`` addresses SSE progress pushes to the initiating user.
         Returns a task_id that can be used to poll progress.
         """
         task_id = f"preload_{uuid4().hex[:12]}"
         self._cache.set_preload_progress(task_id, {"status": "starting", "received": 0})
-        task = asyncio.create_task(self._preload_worker(study_uids, task_id))
+        task = asyncio.create_task(self._preload_worker(study_uids, task_id, user_id))
         self._preload_tasks.add(task)
         task.add_done_callback(self._preload_tasks.discard)
         return task_id
 
-    async def _preload_worker(self, study_uids: list[str], task_id: str) -> None:
+    async def _preload_worker(
+        self, study_uids: list[str], task_id: str, user_id: UUID | None = None
+    ) -> None:
         """Sequentially cache each study, aggregating progress across all of them.
 
         Fail-fast: an error on study N leaves studies 1..N-1 warm in cache and
@@ -306,6 +312,32 @@ class DicomWebProxyService:
         progress = self._cache.get_preload_progress(task_id)
         if progress is None:
             return
+
+        last_push = 0.0
+
+        def _publish(force: bool = False) -> None:
+            """Push a progress frame over SSE (throttled to ~1 per 500ms).
+
+            Called from pynetdicom worker threads via on_progress, so it must
+            use ``publish_threadsafe``. Terminal frames pass force=True.
+            """
+            nonlocal last_push
+            now = monotonic()
+            if not force and now - last_push < 0.5:
+                return
+            last_push = now
+            bus = get_event_bus()
+            snapshot = self._cache.get_preload_progress(task_id)
+            if bus is not None and snapshot is not None:
+                bus.publish_threadsafe(
+                    TaskProgressEvent(
+                        task="preload",
+                        task_id=task_id,
+                        payload=dict(snapshot),
+                        user_id=user_id,
+                    )
+                )
+
         total_received = 0
         try:
             for idx, study_uid in enumerate(study_uids, start=1):
@@ -316,6 +348,7 @@ class DicomWebProxyService:
                     study_received=0,
                     study_total=None,
                 )
+                _publish()
                 results = await self._client.find_series(
                     query=SeriesQuery(study_instance_uid=study_uid), peer=self._pacs
                 )
@@ -334,6 +367,7 @@ class DicomWebProxyService:
                         study_received=received,
                         study_total=total,
                     )
+                    _publish()
 
                 cached_map = await self._cache.ensure_study_cached(
                     study_uid,
@@ -344,9 +378,11 @@ class DicomWebProxyService:
                 )
                 total_received += sum(len(e.instances) for e in cached_map.values())
             progress.update(status="ready", received=total_received, total=total_received)
+            _publish(force=True)
         except Exception as e:
             logger.error(f"Preload failed (task {task_id}): {e}")
             self._cache.set_preload_progress(task_id, {"status": "error", "error": str(e)})
+            _publish(force=True)
 
     def get_preload_progress(self, task_id: str) -> dict[str, Any] | None:
         return self._cache.get_preload_progress(task_id)

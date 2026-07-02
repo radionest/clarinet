@@ -398,6 +398,17 @@ class QuartoRenderError(ClarinetError):
     """Raised when the ``quarto`` CLI exits non-zero or the render times out."""
 
 
+class QuartoScaffoldError(ClarinetError):
+    """Raised when scaffolding a new Quarto report fails: an invalid report
+    name, an existing target file without ``--force``, or an unreadable
+    source ``.docx`` passed to ``--from-docx``."""
+
+
+class AgentScaffoldError(ClarinetError):
+    """Raised when installing/refreshing agent docs fails (bad agent, missing
+    package payload, init over an existing managed dir, update with none)."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""
@@ -527,6 +538,17 @@ class ImageReadError(ImageError):
 
 class ImageWriteError(ImageError):
     """Raised when writing an image fails."""
+
+
+class GeometryMismatchError(ImageError):
+    """Two images/segmentations occupy incompatible voxel grids (shape or affine differ).
+
+    Raised by grid-sensitive operations (set operations, index-wise overlays) when the
+    inputs are not on the same physical grid. Mirrors ITK's "Inputs do not occupy the
+    same physical space" guard. Resample one input onto the other's grid
+    (``Segmentation.reindex_to`` / ``conform_seg_to_grid``) before retrying, or pass
+    ``resample=True`` to opt into automatic nearest-neighbour resampling.
+    """
 
 
 # Slicer errors

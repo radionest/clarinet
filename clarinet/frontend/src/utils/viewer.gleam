@@ -36,6 +36,12 @@ fn kind_label(kind: ViewerKind) -> String {
   }
 }
 
+/// OHIF preload warms the builtin DICOMweb cache; it is meaningless for an
+/// external backend (Orthanc), so the OHIF button opens as a plain link there.
+pub fn ohif_preload_enabled(dicomweb_backend: String) -> Bool {
+  dicomweb_backend == "builtin"
+}
+
 const all_series_mode = "all_series"
 
 // --- URI builders ---
@@ -109,15 +115,24 @@ pub fn viewer_buttons(
 /// Other viewers open directly via link.
 pub fn record_viewer_buttons(
   viewers: List(ViewerInfo),
+  allowed_viewers: Option(List(String)),
   study_uid: Option(String),
   series_uid: Option(String),
   viewer_study_uids: Option(List(String)),
   viewer_series_uids: Option(List(String)),
   level: Option(types.DicomQueryLevel),
   viewer_mode: String,
+  preload_enabled: Bool,
   class: String,
   on_view: fn(String, List(String)) -> msg,
 ) -> Element(msg) {
+  // Per-RecordType allowlist: keep only viewers whose name is listed. An empty
+  // list (or None) means no restriction — show all configured viewers.
+  let viewers = case allowed_viewers {
+    Some(names) if names != [] ->
+      list.filter(viewers, fn(v) { list.contains(names, v.name) })
+    _ -> viewers
+  }
   case level, viewer_study_uids {
     Some(types.Patient), Some(uids) if uids != [] ->
       element.fragment(
@@ -131,6 +146,7 @@ pub fn record_viewer_buttons(
                 viewer_series_uids,
                 level,
                 viewer_mode,
+                preload_enabled,
                 class,
                 on_view,
               ))
@@ -152,6 +168,7 @@ pub fn record_viewer_buttons(
                 viewer_series_uids,
                 level,
                 viewer_mode,
+                preload_enabled,
                 class,
                 on_view,
               ))
@@ -226,6 +243,8 @@ fn resolve_series_uid(
 }
 
 /// OHIF-specific record button with preload support.
+/// When preload_enabled is False (external DICOMweb backend), the button
+/// renders as a plain link instead of triggering the preload flow.
 fn ohif_record_button(
   study_uid: Option(String),
   series_uid: Option(String),
@@ -233,6 +252,7 @@ fn ohif_record_button(
   viewer_series_uids: Option(List(String)),
   level: Option(types.DicomQueryLevel),
   viewer_mode: String,
+  preload_enabled: Bool,
   class: String,
   on_view: fn(String, List(String)) -> msg,
 ) -> Element(msg) {
@@ -264,10 +284,14 @@ fn ohif_record_button(
           }
       }
       let url = url <> series_part
-      html.button(
-        [attribute.class(class), event.on_click(on_view(url, uid_list))],
-        [html.text("OHIF")],
-      )
+      case preload_enabled {
+        True ->
+          html.button(
+            [attribute.class(class), event.on_click(on_view(url, uid_list))],
+            [html.text("OHIF")],
+          )
+        False -> viewer_link(url, Ohif, class)
+      }
     }
     None -> {
       let #(url, study_uids) = case level, study_uid {
@@ -281,13 +305,17 @@ fn ohif_record_button(
       case study_uids {
         [] -> element.none()
         _ ->
-          html.button(
-            [
-              attribute.class(class),
-              event.on_click(on_view(url, study_uids)),
-            ],
-            [html.text("OHIF")],
-          )
+          case preload_enabled {
+            True ->
+              html.button(
+                [
+                  attribute.class(class),
+                  event.on_click(on_view(url, study_uids)),
+                ],
+                [html.text("OHIF")],
+              )
+            False -> viewer_link(url, Ohif, class)
+          }
       }
     }
   }

@@ -30,24 +30,7 @@ window.config = {
     ],
     'studyBrowser.studyMode': {$set: 'primary'},
   }],
-  dataSources: [
-    {
-      namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
-      sourceName: 'dicomweb',
-      configuration: {
-        friendlyName: 'Clarinet PACS',
-        name: 'clarinet',
-        wadoUriRoot: '/dicom-web',
-        qidoRoot: '/dicom-web',
-        wadoRoot: '/dicom-web',
-        qidoSupportsIncludeField: false,
-        imageRendering: 'wadors',
-        thumbnailRendering: 'wadors',
-        supportsFuzzyMatching: false,
-        supportsWildcard: false,
-      },
-    },
-  ],
+  dataSources: __CLARINET_DATASOURCES__,
   defaultDataSourceName: 'dicomweb',
 };
 

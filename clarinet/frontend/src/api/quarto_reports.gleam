@@ -92,7 +92,7 @@ fn quarto_report_template_decoder() -> decode.Decoder(QuartoReportTemplate) {
   ))
 }
 
-fn quarto_render_state_decoder() -> decode.Decoder(QuartoRenderState) {
+pub fn quarto_render_state_decoder() -> decode.Decoder(QuartoRenderState) {
   use render_id <- decode.field("render_id", decode.string)
   use status <- decode.field("status", decode.string)
   use error <- decode.field("error", decode.optional(decode.string))

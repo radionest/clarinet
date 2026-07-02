@@ -86,11 +86,110 @@
     }
 }
 
+/* Activity feed tab switcher — segmented control (Events / Runs) */
+.activity-tabs {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    margin-bottom: var(--spacing-md);
+    background-color: var(--surface-sunken);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+}
+
+.activity-tab {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0.4rem 1.1rem;
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.activity-tab:hover {
+    color: var(--ink);
+}
+
+.activity-tab:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.activity-tab.is-active {
+    background-color: var(--teal);
+    color: #ffffff;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Keyboard focus must stay visible on the active segment — its own
+   box-shadow would otherwise mask the focus ring (equal specificity) */
+.activity-tab.is-active:focus-visible {
+    box-shadow: var(--shadow-sm), var(--focus-ring);
+}
+
+/* Activity feed filters (global audit feed) */
+.activity-filters {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.activity-filter {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.activity-filter-label {
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+}
+
+.activity-filters .form-select,
+.activity-filters .form-input {
+    width: auto;
+    min-width: 160px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8125rem;
+}
+
+/* A row that just arrived via SSE live-update flashes once, then fades to the
+   normal row background. Keyed rendering gives each new row a fresh DOM node,
+   so successive bursts re-trigger the animation. */
+.activity-row-new {
+    animation: activity-row-flash 2s ease-out;
+}
+
+/* Respect reduced-motion: keep the row update, drop the flash pulse */
+@media (prefers-reduced-motion: reduce) {
+    .activity-row-new {
+        animation: none;
+    }
+}
+
 /* Admin assignment dropdown */
 .assign-cell {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--spacing-xs);
+}
+
+/* Assigned-user email — fills the cell so the Change button pins to a
+   consistent right edge across rows; truncates instead of jagging the column */
+.assign-email {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .assign-dropdown {

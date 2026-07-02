@@ -134,6 +134,26 @@ async def test_unique_per_user_forwarded_when_explicit(tmp_path) -> None:
     assert "unique_per_user" not in by_name["plain-rt"].model_fields_set
 
 
+@pytest.mark.asyncio
+async def test_shared_editing_forwarded_when_explicit(tmp_path) -> None:
+    """``shared_editing`` propagates from RecordDef only when set."""
+    _write_record_types(
+        tmp_path,
+        "from clarinet.config.primitives import RecordDef\n\n"
+        'shared = RecordDef(name="shared-rt", level="STUDY", '
+        "shared_editing=True, unique_per_user=False)\n"
+        'plain = RecordDef(name="plain-rt", level="STUDY")\n',
+    )
+
+    items = await load_python_config(tmp_path)
+    by_name = {i.name: i for i in items}
+
+    assert "shared_editing" in by_name["shared-rt"].model_fields_set
+    assert by_name["shared-rt"].shared_editing is True
+    # Absent from config → not forwarded (reconciler leaves DB state untouched)
+    assert "shared_editing" not in by_name["plain-rt"].model_fields_set
+
+
 def test_recorddef_exposes_exactly_synced_fields() -> None:
     """Drift sentinel: RecordDef fields must match the reconciler's synced set.
 
@@ -185,7 +205,9 @@ _FORWARD_SAMPLES: dict[str, object] = {
     "inherit_user_from_parent": True,
     "editable": False,
     "edit_window_days": 7,
+    "shared_editing": True,
     "viewer_mode": "all_series",
+    "allowed_viewers": ["ohif"],
 }
 
 

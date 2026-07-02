@@ -5,6 +5,8 @@ import api/models.{
 import cache
 import cache/bucket.{type BucketKey}
 import clarinet_frontend/i18n.{type Key, type Locale}
+import components/activity_feed
+import gleam/list
 import gleam/option.{type Option}
 import router.{type Route}
 
@@ -21,6 +23,12 @@ pub type Shared {
     cache: cache.Model,
     // Viewer plugins
     viewers: List(ViewerInfo),
+    // Deployment uses per-study anonymized patient IDs — gates display of the
+    // simple per-patient anon_id (hidden when True to keep studies unlinkable).
+    anon_per_study: Bool,
+    // Selected DICOMweb backend ("builtin" | "external") — gates the
+    // builtin-only OHIF preload widget.
+    dicomweb_backend: String,
     // i18n
     translate: fn(Key) -> String,
     locale: Locale,
@@ -85,4 +93,15 @@ pub type OutMsg {
   SetUser(User)
   Logout
   StartPreload(viewer_url: String, study_uids: List(String))
+}
+
+/// Translate the embedded activity feed's `OutMsg` into app-level `OutMsg`.
+/// Shared by all three hosts (record / patient / global feed): a 401 during a
+/// load becomes a logout; non-auth failures are handled inline by the feed.
+pub fn activity_out(out: List(activity_feed.OutMsg)) -> List(OutMsg) {
+  list.map(out, fn(o) {
+    case o {
+      activity_feed.AuthExpired -> Logout
+    }
+  })
 }

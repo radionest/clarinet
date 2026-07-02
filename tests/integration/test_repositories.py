@@ -801,6 +801,62 @@ class TestRecordRepository:
         counts = await env["repo"].get_per_type_status_counts()
         assert "rec-rt-00001" in counts
 
+    @pytest.mark.asyncio
+    async def test_get_assigned_status_counts_by_user(self, env):
+        session = env["session"]
+        user = env["user"]  # env already seeded 1 assigned pending record for this user
+        # second assigned record for the same user, status inwork
+        await seed_record(
+            session,
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid="1.2.3.300.1",
+            rt_name="rec-rt-00001",
+            user_id=user.id,
+            status=RecordStatus.inwork,
+        )
+        # unassigned pending record — must NOT appear in the per-user map
+        await seed_record(
+            session,
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid="1.2.3.300.1",
+            rt_name="rec-rt-00001",
+            status=RecordStatus.pending,
+        )
+
+        counts = await env["repo"].get_assigned_status_counts_by_user()
+
+        assert counts[str(user.id)]["pending"] == 1
+        assert counts[str(user.id)]["inwork"] == 1
+        # the unassigned record's NULL user_id is never a key
+        assert "None" not in counts
+        assert None not in counts
+
+    @pytest.mark.asyncio
+    async def test_count_unassigned_pending(self, env):
+        session = env["session"]
+        # env's record is assigned → not counted; add one unassigned pending (counted)
+        await seed_record(
+            session,
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid="1.2.3.300.1",
+            rt_name="rec-rt-00001",
+            status=RecordStatus.pending,
+        )
+        # unassigned but inwork → not counted
+        await seed_record(
+            session,
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid="1.2.3.300.1",
+            rt_name="rec-rt-00001",
+            status=RecordStatus.inwork,
+        )
+
+        assert await env["repo"].count_unassigned_pending() == 1
+
 
 # ===================================================================
 # StudyRepository

@@ -30,6 +30,11 @@ pub fn user_decoder() -> decode.Decoder(User) {
     [],
     decode.list(decode.string),
   )
+  use capabilities <- decode.optional_field(
+    "capabilities",
+    [],
+    decode.list(decode.string),
+  )
 
   decode.success(models.User(
     id: id,
@@ -38,5 +43,6 @@ pub fn user_decoder() -> decode.Decoder(User) {
     is_superuser: is_superuser,
     is_verified: is_verified,
     role_names: role_names,
+    capabilities: capabilities,
   ))
 }

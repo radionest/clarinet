@@ -6,6 +6,7 @@ from clarinet.models.admin import (
     RecordTypeStatusCounts,
     RoleMatrixResponse,
     UserRoleInfo,
+    UserWorkload,
 )
 from clarinet.models.base import RecordStatus
 from clarinet.repositories.patient_repository import PatientRepository
@@ -55,12 +56,39 @@ class AdminService:
         """
         total_studies, total_records, total_users, total_patients = await self._get_total_counts()
         records_by_status = await self._get_records_by_status()
+        assigned = await self.record_repo.get_assigned_status_counts_by_user()
+        available_pending = await self.record_repo.count_unassigned_pending()
+        active_users = await self.user_repo.list_active_with_roles()
+        workload_by_user = []
+        for user in sorted(active_users, key=lambda u: u.email):
+            counts = assigned.get(str(user.id), {})
+            # `available` mirrors claim-next eligibility (role-scoped,
+            # unique_per_user-aware). Superusers have no roles and see the whole
+            # pool, so pass role_names=None; regular users are scoped to their
+            # roles. Computed per user because the unique_per_user filter is
+            # user-specific — one sequential query each (shared AsyncSession).
+            role_names = None if user.is_superuser else [role.name for role in user.roles]
+            available = await self.record_repo.count_available_pending_for_user(user.id, role_names)
+            workload_by_user.append(
+                UserWorkload(
+                    user_id=str(user.id),
+                    email=user.email,
+                    inwork=counts.get("inwork", 0),
+                    pending=counts.get("pending", 0),
+                    blocked=counts.get("blocked", 0),
+                    failed=counts.get("failed", 0),
+                    finished=counts.get("finished", 0),
+                    available=available,
+                )
+            )
         return AdminStats(
             total_studies=total_studies,
             total_records=total_records,
             total_users=total_users,
             total_patients=total_patients,
             records_by_status=records_by_status,
+            available_pending=available_pending,
+            workload_by_user=workload_by_user,
         )
 
     async def get_record_type_stats(self) -> list[RecordTypeStats]:

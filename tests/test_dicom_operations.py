@@ -12,7 +12,7 @@ import pytest
 from pydicom import Dataset
 from pydicom.multival import MultiValue
 
-from clarinet.services.common.storage_paths import _modalities_string
+from clarinet.files._storage import _modalities_string
 from clarinet.services.dicom.operations import DicomOperations, _ds_modalities
 
 

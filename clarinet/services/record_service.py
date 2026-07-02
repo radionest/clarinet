@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
@@ -12,21 +12,20 @@ from clarinet.exceptions.domain import (
     RecordUniquePerUserError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
+from clarinet.files import Files
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
-from clarinet.repositories.file_repository import FileRepository
+from clarinet.services.events.capture import emit_record_events, mark_pending_audit
+from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
-from clarinet.utils.file_checksums import checksums_changed, compute_checksums
-from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
-from clarinet.utils.fs import run_in_fs_thread
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models import User
     from clarinet.models.record_event import RecordEventKind
     from clarinet.repositories.record_event_repository import RecordEventRepository
-    from clarinet.repositories.record_repository import RecordRepository
+    from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
 
@@ -62,7 +61,7 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     """Drop paths whose resolved location escapes the sandbox directory.
 
     Both ``Path.resolve()`` calls hit the filesystem (symlink chasing), so
-    callers should run this through ``run_in_fs_thread``.
+    callers should run this through ``Files.in_thread``.
     """
     sandbox_resolved = sandbox.resolve()
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
@@ -78,13 +77,13 @@ def _missing_output_links(
     OUTPUT files appear on disk only after pipeline tasks or users produce
     them, so creation-time matching (``set_files``) never sees them — without
     this reconciliation no ``RecordFileLink`` would ever exist for outputs.
-    ``compute_checksums`` keys every found file by definition name (singular)
-    or ``"name:filename"`` (collections), so each key proves the file existed
-    on disk at scan time — no second filesystem scan is needed. Returns
-    name → filename for OUTPUT definitions that have no link yet; for
+    ``Files(record).checksums()`` keys every found file by definition name
+    (singular) or ``"name:filename"`` (collections), so each key proves the
+    file existed on disk at scan time — no second filesystem scan is needed.
+    Returns name → filename for OUTPUT definitions that have no link yet; for
     collections the lexicographically first file is stored, matching the
     download endpoint's pick. ``parent`` must mirror the fallback passed to
-    ``compute_checksums`` so the stored filename matches the scanned path.
+    ``Files`` so the stored filename matches the scanned path.
     """
     output_defs = {
         fd.name: fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
@@ -96,12 +95,12 @@ def _missing_output_links(
         fd = output_defs.get(name)
         if fd is None or name in linked or name in missing:
             continue
-        missing[name] = collection_file or resolve_pattern(fd.pattern, record, parent)
+        missing[name] = collection_file or Files.render_for(record, fd.pattern, parent=parent)
     return missing
 
 
 def _stored_checksums(record: RecordRead) -> dict[str, str]:
-    """Checksums stored on file links, keyed to match ``compute_checksums``.
+    """Checksums stored on file links, keyed to match ``Files(record).checksums()``.
 
     Emits both ``name`` (singular definitions) and ``"name:filename"``
     (collections) for every link — the irrelevant key of the pair never
@@ -176,6 +175,17 @@ class RecordService:
             )
         )
 
+    def _mark_audit(self, record_id: int | None, actor_id: UUID | None) -> None:
+        """Announce the *next* committing record mutation to the SSE capture.
+
+        The repo write commits internally and the matching ``RecordEvent``
+        commits later, so the SSE capture cannot pair them per-commit. Setting
+        this breadcrumb right before the committing write lets the capture emit
+        one enriched record event (``user_id`` = the acting user) and skip the
+        drift warning. No-op when SSE is off (see ``mark_pending_audit``).
+        """
+        mark_pending_audit(self.repo.session, record_id, actor_id)
+
     # ── Public methods ───────────────────────────────────────────────────
 
     async def create_record(self, record: Record, *, actor_id: UUID | None = None) -> Record:
@@ -226,6 +236,7 @@ class RecordService:
                 await self.repo.set_files(record, file_result.matched_files)
                 record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
             elif not file_result.valid and record.status != RecordStatus.preparing:
+                self._mark_audit(record.id, actor_id)
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
         await self._record_event(
@@ -284,6 +295,7 @@ class RecordService:
         current = await self.repo.get(record_id)
         if current.status == RecordStatus.preparing:
             target_status, matched_files = await self._resolve_preparing_exit(record_id, new_status)
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.update_status(record_id, target_status)
         if matched_files:
             await self.repo.set_files(record, matched_files)
@@ -317,6 +329,7 @@ class RecordService:
         """
         record = await self.repo.get_with_record_type(record_id)
         await self._check_unique_per_user(user_id, record)
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.assign_user(record_id, user_id)
         await self._record_event(
             record_id=record_id,
@@ -335,13 +348,17 @@ class RecordService:
     ) -> Record:
         """Claim a record for a user with uniqueness constraint check.
 
+        Mirrors ``assign_user``: assigns the user, moves the record to
+        ``inwork`` and fires the RecordFlow status-change trigger, so taking a
+        task from the pool runs the same automation as an admin assignment.
+
         Args:
             record_id: Record ID.
             user_id: User UUID claiming the record.
             actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
-            Updated record with inwork status.
+            Updated record (relations loaded) with inwork status.
 
         Raises:
             RecordConstraintViolationError: If unique_per_user is violated.
@@ -349,7 +366,9 @@ class RecordService:
         record = await self.repo.get_with_record_type(record_id)
         old_status = record.status
         await self._check_unique_per_user(user_id, record)
-        updated = await self.repo.claim_record(record_id, user_id)
+        self._mark_audit(record_id, actor_id)
+        await self.repo.claim_record(record_id, user_id)
+        updated = await self.repo.get_with_relations(record_id)
         await self._record_event(
             record_id=record_id,
             kind="assigned",
@@ -358,7 +377,34 @@ class RecordService:
             to_status=updated.status,
             new_value={"user_id": str(user_id), "via": "claim"},
         )
+        if old_status != updated.status:
+            await self._fire_status_change(updated, old_status)
         return updated
+
+    async def claim_random_from_pool(
+        self,
+        criteria: RecordSearchCriteria,
+        user_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+    ) -> Record | None:
+        """Claim a random record matching ``criteria`` for ``user_id``.
+
+        Picks one random record from the pool (typically an unassigned
+        ``pending`` record of a given type) and claims it via ``claim_record``.
+        Returns ``None`` when nothing matches, so the router can answer 404
+        without reaching into the repository itself.
+
+        ``find_random`` runs with ``for_update=True`` (``FOR UPDATE SKIP
+        LOCKED``): the chosen row is locked for this transaction until
+        ``claim_record`` commits, so a concurrent claimer skips it and two
+        users can never win the same pool record.
+        """
+        record = await self.repo.find_random(criteria, for_update=True)
+        if record is None:
+            return None
+        assert record.id is not None  # find_random returns a persisted record
+        return await self.claim_record(record.id, user_id, actor_id=actor_id)
 
     async def unassign_user(
         self, record_id: int, *, actor_id: UUID | None = None
@@ -372,6 +418,7 @@ class RecordService:
         Returns:
             Tuple of (updated record, old status).
         """
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.unassign_user(record_id)
         await self._record_event(
             record_id=record_id,
@@ -410,10 +457,12 @@ class RecordService:
         Raises:
             RecordConstraintViolationError: If unique_per_user is violated on auto-assign.
         """
+        transfer_to: UUID | None = None
         if user_id is not None:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
                 await self._check_unique_per_user(user_id, record_check)
+                self._mark_audit(record_id, actor_id)
                 await self.repo.ensure_user_assigned(record_id, user_id)
                 await self._record_event(
                     record_id=record_id,
@@ -421,10 +470,25 @@ class RecordService:
                     actor_id=actor_id,
                     new_value={"user_id": str(user_id), "via": "submit"},
                 )
+            elif (
+                record_check.record_type.shared_editing
+                and record_check.user_id != user_id
+                and actor_id is not None
+            ):
+                transfer_to = user_id
+                await self._record_event(
+                    record_id=record_id,
+                    kind="assigned",
+                    actor_id=actor_id,
+                    new_value={"user_id": str(user_id), "via": "shared_submit"},
+                )
             else:
                 await self.repo.ensure_user_assigned(record_id, user_id)
 
-        record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
+        self._mark_audit(record_id, actor_id)
+        record, old_status = await self.repo.update_data(
+            record_id, data, new_status=new_status, reassign_to=transfer_to
+        )
         await self._record_event(
             record_id=record_id,
             kind="data_submitted",
@@ -481,10 +545,25 @@ class RecordService:
             RecordEditLockedError: If the record is finished and its type
                 locks submitted records for *acting_user*.
         """
-        if acting_user is not None and not acting_user.is_superuser:
+        transfer_to: UUID | None = None
+        if acting_user is not None:
             record = await self.repo.get_with_relations(record_id)
-            ensure_record_editable(record, acting_user)
-        record, old_status = await self.repo.update_data(record_id, data)
+            if not acting_user.is_superuser:
+                ensure_record_editable(record, acting_user)
+            if (
+                record.record_type.shared_editing
+                and record.user_id != acting_user.id
+                and actor_id is not None
+            ):
+                transfer_to = acting_user.id
+                await self._record_event(
+                    record_id=record_id,
+                    kind="assigned",
+                    actor_id=actor_id,
+                    new_value={"user_id": str(acting_user.id), "via": "shared_update"},
+                )
+        self._mark_audit(record_id, actor_id)
+        record, old_status = await self.repo.update_data(record_id, data, reassign_to=transfer_to)
         await self._record_event(
             record_id=record_id,
             kind="data_updated",
@@ -551,6 +630,8 @@ class RecordService:
                     continue
                 old_statuses[record_id] = record.status
 
+        for marked_id in old_statuses:
+            self._mark_audit(marked_id, actor_id)
         await self.repo.bulk_update_status(list(old_statuses), new_status)
 
         # Preparing records take the single-record path: exit re-validation
@@ -612,6 +693,7 @@ class RecordService:
         old_record = await self.repo.get(record_id)
         old_status = old_record.status
 
+        self._mark_audit(record_id, actor_id)
         record = await self.repo.invalidate_record(
             record_id=record_id,
             mode=mode,
@@ -651,6 +733,7 @@ class RecordService:
         Returns:
             Updated record with relations.
         """
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.fail_record(record_id, reason)
         logger.info(f"Record {record_id} manually failed")
 
@@ -708,15 +791,11 @@ class RecordService:
             else:
                 return [], {}
 
-        _, working_dir = FileRepository.resolve_with_fallback(record_read)
-        new_checksums = await compute_checksums(
-            record_read.record_type.file_registry or [],
-            record_read,
-            working_dir,
-            parent=parent_read,
+        new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
+            record_read.record_type.file_registry or []
         )
         old_checksums = _stored_checksums(record_read)
-        changed = checksums_changed(old_checksums, new_checksums)
+        changed = Files.checksums_changed(old_checksums, new_checksums)
 
         await self._register_output_links(record, record_read, new_checksums, parent_read)
 
@@ -811,11 +890,25 @@ class RecordService:
         # so the row locks acquired above cover the whole check-and-delete.
         await self.repo.delete_records(deleted_ids, commit=False)
         await self.repo.session.commit()
+        # sse-capture: explicit emit, UoW-invisible (Core bulk DML in delete_records).
+        # Enriched from pre-delete snapshots so the owning non-admin user gets
+        # the delete — a bare id-only event carries no record_type_name/user_id
+        # and the RBAC filter would deliver it to admins only.
+        emit_record_events(
+            EntityEvent(
+                entity="record",
+                action="deleted",
+                id=str(rid),
+                record_type_name=read.record_type_name,
+                user_id=read.user_id,
+            )
+            for rid, read in reads.items()
+        )
 
         files_removed = 0
         for p in paths_to_unlink:
             try:
-                await run_in_fs_thread(p.unlink)
+                await Files.in_thread(p.unlink)
             except FileNotFoundError:
                 continue
             except OSError as exc:
@@ -851,24 +944,27 @@ class RecordService:
 
         Records whose anonymized identifiers are missing fall back to raw
         UIDs (admin/UI-triggered cascade keeps working on legacy data —
-        cf. ``FileRepository.resolve_with_fallback``).
+        cf. ``Files.for_reader``).
         """
-        working_dirs, default_dir = FileRepository.resolve_with_fallback(record_read)
+        f = Files.for_reader(record_read)
+        working_dirs = f.dirs()
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
-            else default_dir
+            else f.dir()
         )
 
         if file_def.multiple:
-            candidates = await run_in_fs_thread(glob_file_paths, file_def, target_dir)
+            candidates = await Files.in_thread(f.glob, file_def)
         else:
-            file_path = target_dir / resolve_pattern(file_def.pattern, record_read, parent_read)
-            if not await run_in_fs_thread(file_path.is_file):
+            file_path = target_dir / Files.render_for(
+                record_read, file_def.pattern, parent=parent_read
+            )
+            if not await Files.in_thread(file_path.is_file):
                 return []
             candidates = [file_path]
 
-        return await run_in_fs_thread(_filter_in_sandbox, candidates, target_dir)
+        return cast(list[Path], await Files.in_thread(_filter_in_sandbox, candidates, target_dir))
 
     async def _collect_output_file_paths(
         self,
@@ -963,7 +1059,7 @@ class RecordService:
         deleted_files: list[str] = []
         for p in paths:
             try:
-                await run_in_fs_thread(p.unlink)
+                await Files.in_thread(p.unlink)
             except FileNotFoundError:
                 continue
             deleted_files.append(p.name)
@@ -999,6 +1095,7 @@ class RecordService:
         """
         record = await self.repo.get(record_id)
         old_value = record.context_info
+        self._mark_audit(record_id, actor_id)
         updated = await self.repo.update_fields(record_id, {"context_info": context_info})
         await self._record_event(
             record_id=record_id,
@@ -1164,10 +1261,9 @@ class RecordService:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
 
-        _, working_dir = FileRepository.resolve_with_fallback(record_read)
         try:
-            new_checksums = await compute_checksums(
-                output_defs, record_read, working_dir, parent=parent_read
+            new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
+                output_defs
             )
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
@@ -1177,7 +1273,7 @@ class RecordService:
 
         # A file without a link has no stored checksum, so any link to create
         # implies a non-empty changed set — safe to early-return here.
-        changed = checksums_changed(old_checksums, new_checksums)
+        changed = Files.checksums_changed(old_checksums, new_checksums)
         if not changed:
             return
 

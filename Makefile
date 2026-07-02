@@ -207,6 +207,12 @@ test-migration-pg: ## Run migration tests against PostgreSQL (override CLARINET_
 	@CLARINET_TEST_DATABASE_URL="$(CLARINET_TEST_PG_URL)" \
 		./scripts/run_tests.sh tests/migration/ -m migration -v
 
+.PHONY: test-mutation
+test-mutation: ## Run mutation testing (mutmut) on the configured scope ([tool.mutmut])
+	@echo "Running mutation testing (mutmut)..."
+	@uv run --with mutmut mutmut run
+	@uv run --with mutmut mutmut results
+
 .PHONY: test-py312
 test-py312: ## Run unit tests on Python 3.12 (requires uv + python3.12)
 	@command -v uv >/dev/null 2>&1 || { echo "Error: uv is required but not installed"; exit 1; }

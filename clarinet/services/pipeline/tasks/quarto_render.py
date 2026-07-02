@@ -13,9 +13,10 @@ so the in-process fallback (``pipeline_enabled=False``) shares the same code.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
+from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat, QuartoReportKind
 from clarinet.services.pipeline.context import TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.task import pipeline_task
@@ -24,36 +25,39 @@ from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
-@pipeline_task(queue=settings.default_queue_name)
+@pipeline_task(queue=settings.quarto_queue_name)
 async def render_quarto_report(msg: PipelineMessage, ctx: TaskContext) -> None:
-    """Render the Quarto report described by ``msg.payload``.
+    """Render the Quarto report described by ``msg.payload`` (file or book)."""
+    await _render_quarto_report_impl(msg, ctx)
 
-    Files are addressed by explicit paths from the payload (not via
-    record/series working dirs); ``ctx.client`` supplies the authenticated API
-    access used to materialize the data CSVs.
-    """
+
+async def _render_quarto_report_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
+    """Render core, split out so it is directly unit-testable (cf. _prefetch_dicom_web_impl)."""
     payload = msg.payload
     name: str = payload["report_name"]
     qmd_path = Path(payload["qmd_path"])
     render_dir = Path(payload["render_dir"])
     data_reports: list[str] = payload.get("data_reports", [])
+    project_subdir: str | None = payload.get("project_subdir")
+    output_dir: str | None = payload.get("output_dir")
     try:
+        report_kind = QuartoReportKind(payload.get("report_kind", "file"))
         formats = [QuartoReportFormat(value) for value in payload.get("formats", ["docx"])]
     except ValueError as exc:
-        logger.error(f"Quarto render '{name}': invalid formats in payload: {exc}")
-        write_status(
+        logger.error(f"Quarto render '{name}': invalid enum in payload: {exc}")
+        await asyncio.to_thread(
+            write_status,
             render_dir,
             name=name,
             render_id=render_dir.name,
             status=QuartoRenderStatus.FAILED,
             formats=[],
-            error=f"invalid formats: {exc}",
+            error=f"invalid payload: {exc}",
         )
         return
 
-    # Defense in depth: the write target comes from the queue payload. A
-    # legitimate message is produced by QuartoReportService (which validates the
-    # path); refuse any render_dir outside the configured output root regardless.
+    # Defense in depth: the write target comes from the queue payload. Refuse any
+    # render_dir outside the configured output root regardless of message origin.
     output_base = settings.get_quarto_output_path().resolve()
     if not render_dir.resolve().is_relative_to(output_base):
         logger.error(f"Quarto render '{name}': render_dir outside output root; refusing")
@@ -62,7 +66,8 @@ async def render_quarto_report(msg: PipelineMessage, ctx: TaskContext) -> None:
     executable = resolve_quarto_executable()
     if executable is None:
         logger.error(f"Quarto render '{name}' dispatched but quarto binary is not installed")
-        write_status(
+        await asyncio.to_thread(
+            write_status,
             render_dir,
             name=name,
             render_id=render_dir.name,
@@ -81,4 +86,7 @@ async def render_quarto_report(msg: PipelineMessage, ctx: TaskContext) -> None:
         quarto_executable=executable,
         timeout_seconds=settings.quarto_render_timeout_seconds,
         client=ctx.client,
+        kind=report_kind,
+        project_subdir=project_subdir,
+        output_dir=output_dir,
     )

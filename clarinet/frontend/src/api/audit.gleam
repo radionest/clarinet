@@ -4,8 +4,10 @@ import api/models.{type PipelineRun, type RecordEvent}
 import api/types.{type ApiError}
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import gleam/uri
 
 // --- Decoders ---
@@ -21,6 +23,16 @@ pub fn record_event_decoder() -> decode.Decoder(RecordEvent) {
     "record_key",
     None,
     decode.optional(decode.int),
+  )
+  use record_type_name <- decode.optional_field(
+    "record_type_name",
+    None,
+    decode.optional(decode.string),
+  )
+  use patient_id <- decode.optional_field(
+    "patient_id",
+    None,
+    decode.optional(decode.string),
   )
   use kind <- decode.field("kind", decode.string)
   use actor_name <- decode.optional_field(
@@ -48,6 +60,8 @@ pub fn record_event_decoder() -> decode.Decoder(RecordEvent) {
     id: id,
     record_id: record_id,
     record_key: record_key,
+    record_type_name: record_type_name,
+    patient_id: patient_id,
     kind: kind,
     actor_name: actor_name,
     from_status: from_status,
@@ -66,6 +80,11 @@ pub fn pipeline_run_decoder() -> decode.Decoder(PipelineRun) {
     "record_id",
     None,
     decode.optional(decode.int),
+  )
+  use patient_id <- decode.optional_field(
+    "patient_id",
+    None,
+    decode.optional(decode.string),
   )
   use started_at <- decode.field("started_at", decode.string)
   use finished_at <- decode.optional_field(
@@ -95,6 +114,7 @@ pub fn pipeline_run_decoder() -> decode.Decoder(PipelineRun) {
     queue: queue,
     status: status,
     record_id: record_id,
+    patient_id: patient_id,
     started_at: started_at,
     finished_at: finished_at,
     execution_time: execution_time,
@@ -134,11 +154,25 @@ pub fn get_record_runs(
 
 // --- Global feed / per-patient (admin) ---
 // `patient_id = None` → server-wide feed; `Some(id)` → scoped to a patient.
+// The remaining optional params are the global feed's UI filters; per-patient
+// callers pass them as `None`.
 
 pub fn list_events(
   patient_id: Option(String),
+  kind: Option(String),
+  actor_id: Option(String),
+  record_type_name: Option(String),
+  since: Option(String),
 ) -> Promise(Result(List(RecordEvent), ApiError)) {
-  http_client.get("/admin/records/events" <> patient_query(patient_id))
+  let query =
+    build_query([
+      #("patient_id", patient_id),
+      #("kind", kind),
+      #("actor_id", actor_id),
+      #("record_type_name", record_type_name),
+      #("since", since),
+    ])
+  http_client.get("/admin/records/events" <> query)
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,
@@ -150,8 +184,18 @@ pub fn list_events(
 
 pub fn list_runs(
   patient_id: Option(String),
+  status: Option(String),
+  task_name: Option(String),
+  since: Option(String),
 ) -> Promise(Result(List(PipelineRun), ApiError)) {
-  http_client.get("/pipelines/runs" <> patient_query(patient_id))
+  let query =
+    build_query([
+      #("patient_id", patient_id),
+      #("status", status),
+      #("task_name", task_name),
+      #("since", since),
+    ])
+  http_client.get("/pipelines/runs" <> query)
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,
@@ -161,9 +205,19 @@ pub fn list_runs(
   })
 }
 
-fn patient_query(patient_id: Option(String)) -> String {
-  case patient_id {
-    Some(pid) -> "?patient_id=" <> uri.percent_encode(pid)
-    None -> ""
+/// Build a `?k=v&...` query string from optional params, dropping the ones set
+/// to `None` and percent-encoding each value. Returns "" when nothing is set.
+fn build_query(params: List(#(String, Option(String)))) -> String {
+  let pairs =
+    list.filter_map(params, fn(param) {
+      let #(key, value) = param
+      case value {
+        Some(v) -> Ok(key <> "=" <> uri.percent_encode(v))
+        None -> Error(Nil)
+      }
+    })
+  case pairs {
+    [] -> ""
+    _ -> "?" <> string.join(pairs, "&")
   }
 }
