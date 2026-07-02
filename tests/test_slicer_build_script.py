@@ -107,6 +107,9 @@ def test_execresult_not_carried_over_between_calls(slicer_service: SlicerService
     # Call 1 assigns a result — the propagation line writes it into the reused ns.
     exec(slicer_service._build_script("__execResult = {'first': True}", None), ns)
     assert ns["__execResult"] == {"first": True}
+    # Raw scripts (e.g. _RESET_SCENE_SCRIPT via reset_scene) write __execResult
+    # into the namespace directly, without the runner wrapper — seed that too.
+    ns["__execResult"] = {"cleaned": True}
     # Call 2 in the SAME namespace assigns nothing — must reset to {}, not carry over.
     exec(slicer_service._build_script("pass", None), ns)
     assert ns["__execResult"] == {}

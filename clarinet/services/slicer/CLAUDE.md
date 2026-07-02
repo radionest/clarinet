@@ -113,7 +113,7 @@ Fallback: if context variables are absent (standalone/manual usage), `PacsHelper
 ## Router Endpoints (`clarinet/api/routers/slicer.py`)
 
 - `POST /exec` — execute script with helper DSL prepended
-- `POST /exec/raw` — execute raw script (no helper)
+- `POST /exec/raw` — execute raw script (no helper). **Known limitation:** raw scripts skip the runner wrapper, so a raw script that assigns no `__execResult` returns whatever the previous *wrapped* call left in Slicer's reused namespace (the wrapper's propagation line writes there permanently), not `{}`. Low impact — raw responses are never merged into `record.data`, and `/clear` discards the response — but don't rely on the `{}` default for raw scripts.
 - `POST /clear` — clear the Slicer scene (sends `slicer.mrmlScene.Clear(0)` via `execute_raw`)
 - `GET /ping` — check Slicer reachability
 - `POST /records/{record_id}/open` — load record workspace in Slicer (uses `build_slicer_context_async()` + `record_type.slicer_script`, 60s timeout). Raises `NoScriptError` if no script configured.
