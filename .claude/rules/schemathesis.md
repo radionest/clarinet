@@ -79,7 +79,7 @@ Schema tests take **~6-7 minutes** locally. Use `timeout 600` when running from 
 Individual schema tests have `@pytest.mark.timeout(300)` to override the global 30s pytest-timeout default. Without this, hypothesis is killed before completing even a single test.
 
 **Distinguishing timeout types:**
-- **pytest-timeout** (this PR): `Timeout (>30.0s) from pytest-timeout` in stack trace — means the per-test timeout is too low, increase via `@pytest.mark.timeout(N)`
+- **pytest-timeout**: `Timeout (>30.0s) from pytest-timeout` in stack trace — means the per-test timeout is too low, increase via `@pytest.mark.timeout(N)`
 - **Schemathesis boundary bug** (known, external): `_WrappedBaseException` / `FlakyFailure` after hypothesis generates extreme boundary values — not a timeout; if a param is involved, advertise its constraint in OpenAPI (see the positive_data_acceptance policy below) rather than raising `max_examples`.
 
 ## Interpreting results

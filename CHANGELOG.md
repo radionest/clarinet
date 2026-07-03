@@ -68,6 +68,9 @@
 - `mode` on the invalidate endpoint and in `InvalidateRecordsAction` is now
   validated as `"hard" | "soft"` — a typo returns 422 / fails at flow
   definition instead of silently behaving like soft mode.
+- `GET /api/pipelines/runs` now advertises a `[1, 2147483647]` (int32) bound on
+  the `record_id` query filter — an out-of-range value returns 422 at the API
+  boundary instead of reaching PostgreSQL as a `NumericValueOutOfRange`.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
