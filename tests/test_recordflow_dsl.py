@@ -884,8 +884,10 @@ class TestRecordFlowEngineUnit:
         # Source record
         source_record = make_record_read("test-type", record_id=1, status=RecordStatus.finished)
 
-        # Mock find_records to return source record itself
+        # Surface the source record as an invalidation candidate via the paginating
+        # fetch, so the skip-self branch is genuinely exercised (find_records is legacy).
         mock_client.find_records = AsyncMock(return_value=[source_record])
+        mock_client.iter_records = _mock_iter_records([source_record])
         mock_client.invalidate_record = AsyncMock()
 
         engine = RecordFlowEngine(mock_client)

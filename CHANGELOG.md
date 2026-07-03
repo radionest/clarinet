@@ -69,6 +69,16 @@
   validated as `"hard" | "soft"` — a typo returns 422 / fails at flow
   definition instead of silently behaving like soft mode.
 
+### Fixed
+
+- RecordFlow patient-scope context is no longer silently truncated at the first
+  cursor page. `RecordFlowEngine._get_record_context` and the
+  `call_registered_callable` pipeline task aggregated records via
+  `find_records(patient_id=..., limit=1000)`, which returns only the first page —
+  for a patient with >1000 records everything past it was dropped, skewing
+  condition and action evaluation. Both now page through all records via
+  `iter_records`.
+
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
 ### Added
