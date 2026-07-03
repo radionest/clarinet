@@ -79,8 +79,8 @@ Schema tests take **~6-7 minutes** locally. Use `timeout 600` when running from 
 Individual schema tests have `@pytest.mark.timeout(300)` to override the global 30s pytest-timeout default. Without this, hypothesis is killed before completing even a single test.
 
 **Distinguishing timeout types:**
-- **pytest-timeout** (this PR): `Timeout (>30.0s) from pytest-timeout` in stack trace — means the per-test timeout is too low, increase via `@pytest.mark.timeout(N)`
-- **Schemathesis boundary bug** (known, external): `_WrappedBaseException` / `FlakyFailure` after hypothesis generates extreme boundary values — not fixable, exclude `positive_data_acceptance` or increase `max_examples`
+- **pytest-timeout**: `Timeout (>30.0s) from pytest-timeout` in stack trace — means the per-test timeout is too low, increase via `@pytest.mark.timeout(N)`
+- **Schemathesis boundary bug** (known, external): `_WrappedBaseException` / `FlakyFailure` after hypothesis generates extreme boundary values — not a timeout; if a param is involved, advertise its constraint in OpenAPI (see the positive_data_acceptance policy below) rather than raising `max_examples`.
 
 ## Interpreting results
 
@@ -89,6 +89,32 @@ Common failure categories:
 - **500 errors**: real bugs — fix the endpoint handler
 - **Undocumented status codes**: add `responses=` to the router
 - **Response schema violations**: fix `response_model` or serialization
+
+## positive_data_acceptance policy
+
+The check fails only when schema-valid data yields a status outside
+`["2xx", "401", "403", "404", "409", "5xx"]` — effectively 400/422 (404/409 are
+allowed, so nonexistent-FK lookups don't trip it). Two failure classes:
+
+- **Unconstrained param → 422** (fixable): advertise the constraint in OpenAPI so
+  hypothesis can't generate rejectable values — `Path/Query(pattern=…, le=…)`.
+  Examples: `study.py` `PatientIdPath` (pattern), `pipeline.py` `record_id`
+  (`ge=1, le=2147483647`). This is the correct fix, **not** a disable. The #437
+  int-overflow flake was exactly this.
+- **Semantic validation → 422** (not expressible in OpenAPI): cross-field
+  validators, JSON-Schema data bodies, opaque cursors. In practice most such
+  endpoints return 404/409 for schema-valid-but-nonexistent data (allowed), so the
+  check stays green without opt-outs; the two genuine cases — `records/find`
+  (opaque base64 cursor) and `records/types` (nested JSON-Schema) — are opted out
+  via `excluded_checks=[positive_data_acceptance]` in
+  `tests/schema/test_critical_endpoints.py` and `EXCLUDED_PATTERN` in
+  `tests/schema/test_api_schema.py`.
+
+If a future endpoint genuinely rejects schema-valid data with 422 and cannot
+advertise the constraint, opt it out per-operation in `schemathesis.toml`:
+`[[operations]]` with `include-path`/`include-method` +
+`[operations.checks.positive_data_acceptance] enabled = false` (honored by the
+pytest `call_and_validate` path via `checks_config_for`).
 
 ## Schemathesis 4.x API quick reference
 

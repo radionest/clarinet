@@ -187,3 +187,6 @@ jobs:
 
       - name: Type-check frontend
         run: make frontend-check
+
+      - name: Run frontend tests
+        run: make frontend-test

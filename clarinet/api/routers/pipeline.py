@@ -8,8 +8,9 @@ to forge or overwrite audit rows.
 """
 
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from clarinet.api.dependencies import (
     AdminUserDep,
@@ -60,7 +61,7 @@ async def list_pipeline_runs(
     pagination: PaginationDep,
     status: PipelineRunStatus | None = None,
     task_name: str | None = None,
-    record_id: int | None = None,
+    record_id: Annotated[int | None, Query(ge=1, le=2147483647)] = None,
     patient_id: str | None = None,
     since: datetime | None = None,
 ) -> list[PipelineTaskRunRead]:
