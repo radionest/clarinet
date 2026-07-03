@@ -32,6 +32,11 @@ from clarinet.utils.logger import logger
 @pipeline_task()
 async def call_registered_callable(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Dispatch a registered :class:`CallFunctionAction` by its node id."""
+    await _call_registered_callable_impl(msg, ctx)
+
+
+async def _call_registered_callable_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
+    """Task body — extracted so unit tests can drive it with a hand-built TaskContext."""
     from clarinet.services.recordflow import call_function_registry
     from clarinet.services.recordflow.context_builder import build_record_context
 
@@ -60,7 +65,7 @@ async def call_registered_callable(msg: PipelineMessage, ctx: TaskContext) -> No
         )
         record_context = {}
     else:
-        records = await ctx.client.find_records(patient_id=record.patient_id, limit=1000)
+        records = [r async for r in ctx.client.iter_records(patient_id=record.patient_id)]
         record_context = build_record_context(records, record)
 
     kwargs: dict[str, Any] = {

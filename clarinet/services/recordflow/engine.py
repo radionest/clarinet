@@ -487,9 +487,9 @@ class RecordFlowEngine:
             return {}
 
         try:
-            records = await self.clarinet_client.find_records(
-                patient_id=record.patient.id, limit=1000
-            )
+            records = [
+                r async for r in self.clarinet_client.iter_records(patient_id=record.patient.id)
+            ]
         except Exception as e:
             logger.error(f"Error getting record context: {e}")
             return {}
