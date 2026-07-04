@@ -66,6 +66,12 @@
   - `mask_patient_data` heals to `True` — strictly more masking (fail-safe).
   Set the affected flag explicitly in that type's config to keep the old value.
 
+### Added
+
+- `find_records` (`ClarinetClient` and the pipeline sync wrapper) now logs a
+  warning when a wide-scope call (no `series_uid`/`study_uid` filter) is
+  truncated at the first cursor page, pointing the caller at `iter_records`.
+
 ### Improved
 
 - Cross-flow imports now work in **both** sort directions (native module cache),
@@ -102,6 +108,11 @@
   for a patient with >1000 records everything past it was dropped, skewing
   condition and action evaluation. Both now page through all records via
   `iter_records`.
+- `get_study_hierarchy` no longer silently caps the study's records at the
+  first 1000 — it aggregates every record via `iter_records`.
+- Project-template agent docs (`.claude/rules/workflows.md`) no longer document
+  the `FileResolver` API removed in 0.7.0 — the `ctx.files` section is re-synced
+  with the canonical `Files` facade docs shipped by `clarinet agent init`.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

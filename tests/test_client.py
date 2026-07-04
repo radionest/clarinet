@@ -15,12 +15,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.client import ClarinetAPIError, ClarinetAuthError, ClarinetClient
-from clarinet.models import RecordType
+from clarinet.models import RecordPage, RecordType
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User
-from tests.utils.factories import make_patient
+from tests.utils.factories import make_patient, seed_record
 
 
 class TestAuthentication:
@@ -382,6 +382,116 @@ class TestRecordManagement:
         assert str(admin_user.id) in [str(uid) for uid in user_record_ids]
 
 
+class TestFindRecordsTruncation:
+    """Truncation tripwire: find_records warns on truncated wide-scope calls."""
+
+    async def _seed_three_records(
+        self, session: AsyncSession, patient: Patient, study: Study
+    ) -> None:
+        record_type = RecordType(name="trunc-test", level="STUDY")
+        session.add(record_type)
+        await session.commit()
+        for _ in range(3):
+            await seed_record(session, patient.id, study.study_uid, None, "trunc-test")
+
+    @pytest.mark.asyncio
+    async def test_find_records_warns_on_truncated_wide_scope(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Patient-scope call with more matches than limit logs a warning."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=2)
+
+        assert len(records) == 2
+        assert "find_records truncated at first page" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_no_warning_when_scoped(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """study_uid-scoped call is a deliberate first-N — silent even when truncated."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(study_uid=test_study.study_uid, limit=2)
+
+        assert len(records) == 2
+        assert "find_records truncated at first page" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_no_warning_limit_one(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """limit=1 means 'give me one' (RecordQuery.file_path) — never warn."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=1)
+
+        assert len(records) == 1
+        assert "find_records truncated at first page" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_no_warning_not_truncated(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Wide scope but everything fits on one page — silent."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=100)
+
+        assert len(records) == 3
+        assert "find_records truncated at first page" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_warning_omits_none_filters(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Warning lists only filters actually set — no None noise from find_records_advanced."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records_advanced(patient_id=test_patient.id, limit=2)
+
+        assert len(records) == 2
+        warning = next(m for m in caplog.messages if "find_records truncated at first page" in m)
+        assert "patient_id" in warning
+        assert "None" not in warning
+
+
 class TestHighLevelMethods:
     """Test high-level convenience methods with real server."""
 
@@ -494,6 +604,47 @@ class TestHighLevelMethods:
         assert hierarchy["study"]["study_uid"] == test_study.study_uid
         assert hierarchy["patient"]["id"] == test_patient.id
         assert len(hierarchy["series"]) >= 1
+
+    @pytest.mark.asyncio
+    async def test_get_study_hierarchy_aggregates_all_pages(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_study: Study,
+        test_patient: Patient,
+        test_session: AsyncSession,
+    ) -> None:
+        """hierarchy['records'] must include records past the first cursor page."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+
+        record_type = RecordType(name="hier-page-test", level="STUDY")
+        test_session.add(record_type)
+        await test_session.commit()
+        rec1 = await seed_record(
+            test_session, test_patient.id, test_study.study_uid, None, "hier-page-test"
+        )
+        rec2 = await seed_record(
+            test_session, test_patient.id, test_study.study_uid, None, "hier-page-test"
+        )
+
+        # Fetch real RecordRead payloads, then replay them as two cursor pages.
+        fetched = await clarinet_client.find_records(study_uid=test_study.study_uid, limit=100)
+        by_id = {r.id: r for r in fetched}
+        page1 = RecordPage(
+            items=[by_id[rec1.id]], next_cursor="cursor-2", limit=1, sort="changed_at_desc"
+        )
+        page2 = RecordPage(
+            items=[by_id[rec2.id]], next_cursor=None, limit=1, sort="changed_at_desc"
+        )
+
+        with patch.object(
+            clarinet_client, "find_records_page", AsyncMock(side_effect=[page1, page2])
+        ) as page_mock:
+            hierarchy = await clarinet_client.get_study_hierarchy(test_study.study_uid)
+
+        assert [r["id"] for r in hierarchy["records"]] == [rec1.id, rec2.id]
+        assert page_mock.await_count == 2
+        assert page_mock.await_args_list[1].kwargs["cursor"] == "cursor-2"
 
     @pytest.mark.asyncio
     async def test_create_series_batch(
