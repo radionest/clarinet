@@ -261,8 +261,11 @@ def _collect_sources(node: dict[str, Any], sources: set[str]) -> None:
                 x_options = field_schema.get("x-options")
                 if isinstance(x_options, dict):
                     source = x_options.get("source")
-                    if isinstance(source, str) and source:
-                        sources.add(source)
+                    # Mirror runtime's truthy-source lookup: a non-string source
+                    # can never match a (string) registry key, so coerce and let
+                    # the guard flag it instead of leaving it to warn at render time.
+                    if source:
+                        sources.add(source if isinstance(source, str) else str(source))
                 _collect_sources(field_schema, sources)
 
     for key in _BRANCH_KEYS:

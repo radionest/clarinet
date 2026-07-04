@@ -32,8 +32,10 @@ async def hydrate_source(record, options, ctx: HydrationContext) -> list[dict]:
 
 Do not extract session from existing repos (`ctx.study_repo.session`). If a hydrator needs a new repository — add it to `HydrationContext` and `from_session()`.
 
-## Known limitation: `_walk` and `items`
+## Known limitations: `items` and `$ref`/`$defs`
 
 `_walk` calls `_hydrate_field` on each `properties` value but not on `items` nodes directly — only recurses into them. So `x-options` placed directly on `items` (not inside `items.properties`) will not be hydrated.
 
 **Workaround:** wrap the value in an object inside `items.properties` so hydration reaches it through the `properties` path.
+
+`_walk` also does not resolve `$ref` or descend into `$defs`, so an `x-options` inside a `$ref`-ed sub-schema is neither hydrated at runtime nor validated at reconcile. `collect_x_options_sources` mirrors this exactly (no false startup failures) — keep `x-options` on inline `properties` reachable without a `$ref` hop.

@@ -403,8 +403,11 @@ class TestCollectXOptionsSources:
                 },
             },
             "allOf": [{"properties": {"d": {"x-options": {"source": "src_d"}}}}],
+            "anyOf": [{"properties": {"h": {"x-options": {"source": "src_h"}}}}],
+            "oneOf": [{"properties": {"i": {"x-options": {"source": "src_i"}}}}],
             "if": {"properties": {"e": {"x-options": {"source": "src_e"}}}},
             "then": {"properties": {"f": {"x-options": {"source": "src_f"}}}},
+            "else": {"properties": {"g": {"x-options": {"source": "src_g"}}}},
         }
         assert collect_x_options_sources(schema) == {
             "src_a",
@@ -413,6 +416,9 @@ class TestCollectXOptionsSources:
             "src_d",
             "src_e",
             "src_f",
+            "src_g",
+            "src_h",
+            "src_i",
         }
 
     def test_skips_direct_items_and_malformed(self):
@@ -429,3 +435,10 @@ class TestCollectXOptionsSources:
 
     def test_empty_schema(self):
         assert collect_x_options_sources({}) == set()
+
+    def test_collects_non_string_source_coerced(self):
+        # A non-string source can never match a (string) registry key, so the
+        # guard must flag it at reconcile rather than let it warn at render time.
+        assert collect_x_options_sources({"properties": {"f": {"x-options": {"source": 123}}}}) == {
+            "123"
+        }
