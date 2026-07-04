@@ -355,6 +355,40 @@ async def test_unset_flag_heals_drifted_db_value(
 
 
 @pytest.mark.asyncio
+async def test_unset_heal_is_asymmetric_by_default_kind(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """Unset-field healing keys off the *kind* of default (issue #389).
+
+    ``min_records`` has a concrete default (1), so a drifted DB value heals to it
+    even when the config leaves it unset; ``max_records`` defaults to ``None``, so
+    an unset config keeps the "leave the DB row untouched" contract. The two
+    adjacent int fields deliberately diverge — a hand-written TOML that omits
+    ``min_records`` silently collapses a drifted DB value back to 1.
+    """
+    seed_record_type.min_records = 5  # drift from concrete default 1 → should heal
+    seed_record_type.max_records = 7  # None-default field → must stay put
+    test_session.add(seed_record_type)
+    await test_session.commit()
+    test_session.expire_all()
+
+    cfg = _make_config("existing-type", description="Original description", label="Original")
+    assert "min_records" not in cfg.model_fields_set
+    assert "max_records" not in cfg.model_fields_set
+
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.updated == ["existing-type"]
+    test_session.expire_all()
+    row = (
+        await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
+    ).scalar_one()
+    assert row.min_records == 1  # healed to concrete default
+    assert row.max_records == 7  # None-default: DB value preserved
+
+
+@pytest.mark.asyncio
 async def test_explicit_value_differs_from_default(
     test_session: AsyncSession,
     seed_record_type: RecordType,

@@ -289,6 +289,7 @@ class TestServerDefaultsForAdditiveMigrations:
         from clarinet.models import RecordType
 
         render_to_bool = {"true": True, "1": True, "false": False, "0": False}
+        examined: list[str] = []
         mismatches: list[str] = []
         for name, field_info in RecordType.model_fields.items():
             col = RecordType.__table__.columns.get(name)
@@ -298,10 +299,19 @@ class TestServerDefaultsForAdditiveMigrations:
             server_bool = render_to_bool.get(rendered)
             if server_bool is None:
                 continue
+            examined.append(name)
             if field_info.default != server_bool:
                 mismatches.append(
                     f"{name}: model default={field_info.default!r} but server_default={rendered!r}"
                 )
+
+        # Guard against a vacuous pass: if a future server_default stops rendering
+        # to a render_to_bool key, the loop would silently examine nothing and the
+        # mismatch assert would pass without checking anything. Pin the #389 field.
+        assert "unique_per_user" in examined, (
+            "guard examined no server_default for unique_per_user (the #389 field) — "
+            f"render_to_bool likely no longer covers its literal. Examined: {examined}"
+        )
 
         assert not mismatches, (
             "RecordType Boolean columns whose server_default diverges from the "
