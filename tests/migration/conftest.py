@@ -132,8 +132,7 @@ def drop_pg_database(db_name: str, base_url: str) -> None:
             except OperationalError as exc:
                 if attempt == _DROP_ATTEMPTS:
                     logger.warning(
-                        "drop_pg_database: giving up on {} after {} attempts ({}); "
-                        "create_pg_database will re-drop it next run",
+                        "drop_pg_database: giving up on {} after {} attempts ({})",
                         db_name,
                         _DROP_ATTEMPTS,
                         exc,

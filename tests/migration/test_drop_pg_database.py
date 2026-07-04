@@ -22,9 +22,15 @@ def _install_fake_engine(monkeypatch, execute):
     cm = engine.connect.return_value
     cm.__enter__.return_value = conn
     cm.__exit__.return_value = False  # do not swallow exceptions raised in the with-block
-    monkeypatch.setattr(conftest, "create_engine", lambda *a, **k: engine)
+    calls: list[dict] = []
+
+    def fake_create_engine(*a, **k):
+        calls.append(k)
+        return engine
+
+    monkeypatch.setattr(conftest, "create_engine", fake_create_engine)
     monkeypatch.setattr(conftest.time, "sleep", lambda *_: None)
-    return engine, conn
+    return engine, conn, calls
 
 
 def test_happy_path_terminates_then_drops(monkeypatch):
@@ -34,12 +40,16 @@ def test_happy_path_terminates_then_drops(monkeypatch):
         executed.append(str(stmt))
         return MagicMock()
 
-    engine, _ = _install_fake_engine(monkeypatch, execute)
+    engine, _, calls = _install_fake_engine(monkeypatch, execute)
     conftest.drop_pg_database("scratch_db", "postgresql+psycopg2://u@h:5432")
 
     assert any("pg_terminate_backend" in s for s in executed)
     assert sum("DROP DATABASE" in s for s in executed) == 1
     engine.dispose.assert_called_once()
+    # the fix's core: the admin engine is time-bounded with a fresh connection per op
+    assert calls[0]["poolclass"] is conftest.NullPool
+    assert calls[0]["connect_args"]["connect_timeout"] == 8
+    assert "statement_timeout=10000" in calls[0]["connect_args"]["options"]
 
 
 def test_retries_then_succeeds(monkeypatch):
