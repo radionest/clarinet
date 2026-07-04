@@ -54,6 +54,13 @@ paths:
 
 - `PacsHelper.verify() -> bool` — test PACS connectivity via C-ECHO (`ctkDICOMEcho`). Returns True on success, False on failure. Logs diagnostics (ACL, AE title, IP). Graceful fallback if `ctkDICOMEcho` unavailable.
 
+## Internal layout (maintainers)
+
+`helper.py` is one file by contract (shipped to Slicer as text; `_Dummy` fallback keeps it importable outside Slicer). `SlicerHelper` composes `_SlicerHelperBase` (all shared state + `_unwrap_node` / `cleanup` / `_apply_window` / `_apply_reference_geometry`) with six stateless mixins: `_VolumeLayoutMixin`, `_SegmentAnalysisMixin`, `_SegmentEditMixin`, `_PacsLoadMixin`, `_AlignmentMixin`, `_ObserverMixin`.
+
+- Cross-mixin calls resolve through `TYPE_CHECKING`-only stubs on `_SlicerHelperBase` — when changing a stubbed method's signature, update the stub in lockstep (mypy checks callers against the stub, not the sibling implementation).
+- Shared VTK boilerplate lives in dedicated helpers — extend them instead of re-inlining: `_extract_segment_labelmap` / `_labelmap_to_mask` (per-segment masks, pitfall 1), `_export_segments_labelmap` (merged export, pitfall 5; runs the `_labelmap_array_or_raise` foreign-grid guard and removes its temp node on raise), `_post_pacs_load` (PACS post-load loop).
+
 ## VTK / Slicer pitfalls
 
 1. **Shared labelmaps (Slicer 5.0+):** `segment.GetRepresentation("Binary labelmap")` returns the *shared* labelmap — same for all segments. Use `node.GetBinaryLabelmapRepresentation(seg_id, output)` instead.
