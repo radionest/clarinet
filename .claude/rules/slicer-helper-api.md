@@ -33,6 +33,7 @@ paths:
 - `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts
 - `load_study_from_pacs(study_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; auto-sets first scalar volume as `_image_node`
 - `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; loads only specified series
+- `download_series_zip(study_uid, series_uid, server_url, auth_cookie)` → path to extracted dir; downloads a series ZIP from Clarinet's DICOMweb cache (HTTP, not DIMSE), extracts it, and imports into the Slicer DICOM database
 - `get_segment_names(segmentation)` → `list[str]`
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — per-segment labelmap center via numpy
 - `count_segment_components(segmentation, segment_name)` → `int` — number of connected components via `scipy.ndimage.label` (6-connectivity); 0 if empty or not found
@@ -52,6 +53,13 @@ paths:
 ## PacsHelper methods
 
 - `PacsHelper.verify() -> bool` — test PACS connectivity via C-ECHO (`ctkDICOMEcho`). Returns True on success, False on failure. Logs diagnostics (ACL, AE title, IP). Graceful fallback if `ctkDICOMEcho` unavailable.
+
+## Internal layout (maintainers)
+
+`helper.py` is one file by contract (shipped to Slicer as text; `_Dummy` fallback keeps it importable outside Slicer). `SlicerHelper` composes `_SlicerHelperBase` (all shared state + `_unwrap_node` / `cleanup` / `_apply_window` / `_apply_reference_geometry`) with six stateless mixins: `_VolumeLayoutMixin`, `_SegmentAnalysisMixin`, `_SegmentEditMixin`, `_PacsLoadMixin`, `_AlignmentMixin`, `_ObserverMixin`.
+
+- Cross-mixin calls resolve through `TYPE_CHECKING`-only stubs on `_SlicerHelperBase` — when changing a stubbed method's signature, update the stub in lockstep (mypy checks callers against the stub, not the sibling implementation).
+- Shared VTK boilerplate lives in dedicated helpers — extend them instead of re-inlining: `_extract_segment_labelmap` / `_labelmap_to_mask` (per-segment masks, pitfall 1), `_export_segments_labelmap` (merged export, pitfall 5; runs the `_labelmap_array_or_raise` foreign-grid guard and removes its temp node on raise), `_post_pacs_load` (PACS post-load loop).
 
 ## VTK / Slicer pitfalls
 
