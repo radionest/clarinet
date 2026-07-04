@@ -59,6 +59,16 @@ _HYDRATOR_REGISTRY: CustomCodeRegistry[HydratorFunc] = CustomCodeRegistry(
 )
 
 
+def get_registered_schema_hydrator_names() -> frozenset[str]:
+    """Return the set of currently registered schema hydrator names.
+
+    Public accessor for the module-private ``_HYDRATOR_REGISTRY`` — intended
+    for reconcile-time validation in :func:`bootstrap.reconcile_config`
+    (mirrors ``record_data_validation.get_registered_validator_names``).
+    """
+    return _HYDRATOR_REGISTRY.names()
+
+
 def schema_hydrator(source_name: str) -> Callable[[HydratorFunc], HydratorFunc]:
     """Register a hydrator for a given ``x-options`` source name.
 
@@ -225,6 +235,51 @@ async def _hydrate_field(
     field_schema["oneOf"] = options_list
     field_schema.pop("x-options", None)
     field_schema.pop("pattern", None)
+
+
+def collect_x_options_sources(schema: dict[str, Any]) -> set[str]:
+    """Collect every resolvable ``x-options.source`` in *schema*.
+
+    Sync mirror of :func:`_walk` + :func:`_hydrate_field`, used by reconcile-time
+    validation (:func:`bootstrap.reconcile_config`) so a typo'd source in a
+    config-defined RecordType's ``data_schema`` fails startup instead of silently
+    keeping the raw field at render time. Only positions the runtime hydrates are
+    collected (each ``properties`` value); an ``x-options`` placed directly on
+    ``items`` is skipped, matching runtime non-hydration of that position.
+    """
+    sources: set[str] = set()
+    _collect_sources(schema, sources)
+    return sources
+
+
+def _collect_sources(node: dict[str, Any], sources: set[str]) -> None:
+    """Recurse *node* like :func:`_walk`, adding ``x-options.source`` values."""
+    properties = node.get("properties")
+    if isinstance(properties, dict):
+        for field_schema in properties.values():
+            if isinstance(field_schema, dict):
+                x_options = field_schema.get("x-options")
+                if isinstance(x_options, dict):
+                    source = x_options.get("source")
+                    if isinstance(source, str) and source:
+                        sources.add(source)
+                _collect_sources(field_schema, sources)
+
+    for key in _BRANCH_KEYS:
+        branch = node.get(key)
+        if isinstance(branch, dict):
+            _collect_sources(branch, sources)
+
+    for key in _CONTAINER_KEYS:
+        container = node.get(key)
+        if isinstance(container, list):
+            for item in container:
+                if isinstance(item, dict):
+                    _collect_sources(item, sources)
+
+    items = node.get("items")
+    if isinstance(items, dict):
+        _collect_sources(items, sources)
 
 
 # ---------------------------------------------------------------------------

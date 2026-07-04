@@ -10,6 +10,7 @@ from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.services.schema_hydration import (
     _HYDRATOR_REGISTRY,
     HydrationContext,
+    collect_x_options_sources,
     hydrate_schema,
     hydrate_study_series,
     load_custom_hydrators,
@@ -372,3 +373,59 @@ class TestHydrateSchema:
         await hydrate_schema(schema, _make_record(), _make_session())
         assert received_options["source"] == "params_src"
         assert received_options["modality_filter"] == "CT"
+
+
+# ---------------------------------------------------------------------------
+# Reconcile-time source collection: collect_x_options_sources
+# ---------------------------------------------------------------------------
+
+
+class TestCollectXOptionsSources:
+    def test_collects_nested_positions(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string", "x-options": {"source": "src_a"}},
+                "nested": {
+                    "type": "object",
+                    "properties": {
+                        "b": {"type": "string", "x-options": {"source": "src_b"}},
+                    },
+                },
+                "arr": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "c": {"type": "string", "x-options": {"source": "src_c"}},
+                        },
+                    },
+                },
+            },
+            "allOf": [{"properties": {"d": {"x-options": {"source": "src_d"}}}}],
+            "if": {"properties": {"e": {"x-options": {"source": "src_e"}}}},
+            "then": {"properties": {"f": {"x-options": {"source": "src_f"}}}},
+        }
+        assert collect_x_options_sources(schema) == {
+            "src_a",
+            "src_b",
+            "src_c",
+            "src_d",
+            "src_e",
+            "src_f",
+        }
+
+    def test_skips_direct_items_and_malformed(self):
+        schema = {
+            "properties": {
+                # x-options directly on items (not items.properties): runtime does
+                # not hydrate this position, so it is not collected.
+                "arr": {"type": "array", "items": {"x-options": {"source": "ignored"}}},
+                "no_source": {"x-options": {"note": "no source key"}},
+                "bad_options": {"x-options": "not-a-dict"},
+            },
+        }
+        assert collect_x_options_sources(schema) == set()
+
+    def test_empty_schema(self):
+        assert collect_x_options_sources({}) == set()
