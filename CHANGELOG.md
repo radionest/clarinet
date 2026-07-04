@@ -44,15 +44,27 @@
   scripts that `load_segmentation` a misaligned mask start raising. The
   empty-source set-op change is non-breaking (strictly more tolerant than the
   previous opaque `arrayFromVolume` crash).
-- **RecordType `unique_per_user` default now heals to `True` on reconcile
-  (#389).** The column `server_default` was aligned `false()`→`true()` to match
-  the model default, and the config reconciler now heals an unset flag toward its
-  concrete default on restart. **Downstream migration:** a config-managed type
-  whose DB `unique_per_user` was backfilled to `False` and that does not set the
-  flag explicitly is healed to `True` on first restart; if it already has
-  multiple records per user, new record creation returns 409 `UNIQUE_PER_USER`.
-  Set `unique_per_user=False` explicitly in that type's config to keep the old
-  behavior. Every heal is logged.
+- **RecordType config drift now self-heals on reconcile (#389).** The config
+  reconciler now heals any config-unset field that has a concrete (non-None)
+  model default toward that default on restart — previously such a field, once
+  drifted in the DB (migration backfill, manual SQL, a past `model !=
+  server_default` mismatch), never reconciled. This covers every boolean flag
+  (`unique_per_user`, `editable`, `mask_patient_data`, `parent_required`,
+  `inherit_user_from_parent`, `shared_editing`) plus `min_records`, `level`, and
+  `viewer_mode`; fields whose default is `None` (`max_records`,
+  `edit_window_days`, `role_name`, …) keep the "unset = leave the DB row
+  untouched" contract. Every heal is logged.
+  **Downstream migration** — for a config-managed type that leaves a flag unset
+  and whose DB value drifted from that flag's default:
+  - `unique_per_user` also had its `server_default` aligned `false()`→`true()` to
+    match the model default; it heals to `True`, and if the type already holds
+    multiple records per user, new record creation then returns 409
+    `UNIQUE_PER_USER`.
+  - `editable` heals to `True`, which **re-opens** finished records to
+    non-superusers (weakens the submit-time lock) wherever the DB had drifted to
+    `False`.
+  - `mask_patient_data` heals to `True` — strictly more masking (fail-safe).
+  Set the affected flag explicitly in that type's config to keep the old value.
 
 ### Improved
 
