@@ -2030,29 +2030,30 @@ class _SegmentEditMixin(_SlicerHelperBase):
         vtk_seg_a = node_a.GetSegmentation()
         segments_to_remove: list[str] = []
 
-        # A None array means a source was genuinely empty (already warned, tolerated):
-        # an empty base subtracts to itself, an empty subtrahend removes nothing —
-        # either way no segment is dropped, so skip the overlap scan entirely.
-        if arr_a is not None and arr_b is not None:
-            for i in range(vtk_seg_a.GetNumberOfSegments()):
-                seg_id = vtk_seg_a.GetNthSegmentID(i)
-                label_value = i + 1  # merged labelmap: segment 0 → label 1
+        try:
+            # A None array means a source was genuinely empty (already warned, tolerated):
+            # an empty base subtracts to itself, an empty subtrahend removes nothing —
+            # either way no segment is dropped, so skip the overlap scan entirely.
+            if arr_a is not None and arr_b is not None:
+                for i in range(vtk_seg_a.GetNumberOfSegments()):
+                    seg_id = vtk_seg_a.GetNthSegmentID(i)
+                    label_value = i + 1  # merged labelmap: segment 0 → label 1
 
-                mask_a = arr_a == label_value
-                total = int(np.sum(mask_a))
-                if total == 0:
-                    continue
+                    mask_a = arr_a == label_value
+                    total = int(np.sum(mask_a))
+                    if total == 0:
+                        continue
 
-                overlap = int(np.sum(mask_a & (arr_b > 0)))
+                    overlap = int(np.sum(mask_a & (arr_b > 0)))
 
-                remove = overlap > max_overlap
-                if max_overlap_ratio is not None:
-                    remove = remove and (overlap / total > max_overlap_ratio)
-                if remove:
-                    segments_to_remove.append(seg_id)
-
-        slicer.mrmlScene.RemoveNode(labelmap_a)
-        slicer.mrmlScene.RemoveNode(labelmap_b)
+                    remove = overlap > max_overlap
+                    if max_overlap_ratio is not None:
+                        remove = remove and (overlap / total > max_overlap_ratio)
+                    if remove:
+                        segments_to_remove.append(seg_id)
+        finally:
+            slicer.mrmlScene.RemoveNode(labelmap_a)
+            slicer.mrmlScene.RemoveNode(labelmap_b)
 
         if output_name is not None:
             # Create new segmentation with surviving segments
