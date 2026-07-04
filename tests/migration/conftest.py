@@ -62,9 +62,9 @@ def create_pg_database(db_name: str) -> tuple[str, str]:
     sync_base_url = _pg_sync_url(async_url)
     base_url, _ = sync_base_url.rsplit("/", 1)
 
+    drop_pg_database(db_name, base_url)  # robust pre-clean (terminate + FORCE + retry)
     admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
     with admin_engine.connect() as conn:
-        conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
         conn.execute(text(f'CREATE DATABASE "{db_name}"'))
     admin_engine.dispose()
 
