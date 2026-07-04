@@ -104,7 +104,14 @@ def _fields_differ(db_record_type: RecordType, config: RecordTypeCreate) -> list
     """Return list of scalar field names that differ between DB and config.
 
     Does NOT compare file_registry — that is handled separately via link diff.
-    Only compares fields explicitly set in the config (via ``model_fields_set``).
+
+    A field explicitly set in the config is always compared. A field the config
+    leaves unset is compared only when it has a concrete (non-None) effective
+    default: such a field self-heals toward that default, so a DB row that
+    drifted from it (migration backfill, a past model != server_default mismatch)
+    reconciles on restart instead of surviving forever (issue #389). Unset fields
+    whose default is ``None``/undefined keep the "unset = leave DB untouched"
+    contract — ``None`` there means "not configured".
 
     Args:
         db_record_type: Existing RecordType from DB.
@@ -115,12 +122,15 @@ def _fields_differ(db_record_type: RecordType, config: RecordTypeCreate) -> list
     """
     changed: list[str] = []
     for field_name in _COMPARED_FIELDS:
-        if field_name not in config.model_fields_set:
+        default = _get_field_default(field_name)
+        if field_name not in config.model_fields_set and (
+            default is PydanticUndefined or default is None
+        ):
             continue
         db_val = _normalize(getattr(db_record_type, field_name, None))
         config_val = _normalize(getattr(config, field_name, None))
         if db_val != config_val:
-            if config_val is None and db_val == _get_field_default(field_name):
+            if config_val is None and db_val == default:
                 continue
             changed.append(field_name)
     return changed

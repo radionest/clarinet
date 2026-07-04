@@ -195,6 +195,14 @@ mask_patient_data: bool = Field(
 )
 ```
 
+**A boolean column's `server_default` must render to the same truth value as its
+model `default`.** A freshly-created row takes the Pydantic default; a
+migration-backfilled row takes the `server_default`. If the two disagree the row is
+born with a value the config reconciler cannot converge — issue #389, where
+`unique_per_user` shipped `default=True` with `server_default=false()`. The metadata
+guard `test_recordtype_bool_server_defaults_match_model_defaults` (in the class
+below) enforces the match for every Boolean column.
+
 `sql_expression.true()` / `.false()` are the only **dialect-aware** Boolean
 literals: `true`/`false` on PG (no implicit int→bool cast — `DEFAULT 1` fails
 even in `CREATE TABLE`), `1`/`0` on SQLite. **Do NOT use:** `text("1")` (raw

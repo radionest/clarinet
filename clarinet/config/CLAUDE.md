@@ -66,7 +66,7 @@ Algorithm: SELECT all → for each config: CREATE if new, UPDATE if changed, ski
 
 `ReconcileResult`: created, updated, unchanged, orphaned, errors.
 
-Only compares fields explicitly set in config (via `model_fields_set` — missing = unchanged).
+Compares fields explicitly set in config. Fields with a concrete (non-None) default additionally heal toward that default when left unset — a DB row that drifted (migration backfill, a past model != server_default mismatch) reconciles on restart; unset nullable fields keep "don't touch DB" (issue #389).
 
 ## Python Loader (`python_loader.py`)
 

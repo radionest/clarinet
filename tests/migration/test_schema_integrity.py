@@ -275,3 +275,49 @@ class TestServerDefaultsForAdditiveMigrations:
             "mask_patient_data must declare server_default — see "
             "clarinet/models/record_type.py for the in-line rationale."
         )
+
+    def test_recordtype_bool_server_defaults_match_model_defaults(self):
+        """Every RecordType Boolean column's server_default must equal its model default.
+
+        Regression for issue #389: ``unique_per_user`` shipped with model default
+        ``True`` but ``server_default=false()``. A freshly-created row (model
+        default) and a migration-backfilled row (server_default) then disagreed,
+        and the config reconciler could not converge them. Keeping the two in
+        lockstep makes the effective default deterministic regardless of how the
+        row was created.
+        """
+        from clarinet.models import RecordType
+
+        render_to_bool = {"true": True, "1": True, "false": False, "0": False}
+        examined: list[str] = []
+        mismatches: list[str] = []
+        for name, field_info in RecordType.model_fields.items():
+            col = RecordType.__table__.columns.get(name)
+            if col is None or not isinstance(col.type, Boolean) or col.server_default is None:
+                continue
+            rendered = str(col.server_default.arg).strip().lower()
+            server_bool = render_to_bool.get(rendered)
+            if server_bool is None:
+                continue
+            examined.append(name)
+            if field_info.default != server_bool:
+                mismatches.append(
+                    f"{name}: model default={field_info.default!r} but server_default={rendered!r}"
+                )
+
+        # Guard against a vacuous pass: if a future server_default stops rendering
+        # to a render_to_bool key, the loop would silently examine nothing and the
+        # mismatch assert would pass without checking anything. Pin the #389 field.
+        assert "unique_per_user" in examined, (
+            "guard examined no server_default for unique_per_user (the #389 field) — "
+            f"render_to_bool likely no longer covers its literal. Examined: {examined}"
+        )
+
+        assert not mismatches, (
+            "RecordType Boolean columns whose server_default diverges from the "
+            "Pydantic model default. A freshly-created row and a migration-"
+            "backfilled row will disagree and the config reconciler cannot "
+            "converge them (issue #389). Align the sa_column_kwargs "
+            "server_default with the Field default.\n"
+            f"Mismatches: {mismatches}"
+        )

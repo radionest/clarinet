@@ -200,9 +200,10 @@ async def _to_record_type_create(
         kwargs["slicer_context_hydrators"] = rt_def.slicer_context_hydrators
     if rt_def.data_validators is not None:
         kwargs["data_validators"] = rt_def.data_validators
-    # Only forward mask_patient_data when explicitly set in the RecordDef so the
-    # reconciler skips comparison (and preserves DB state) when the field is
-    # absent from config — matching the contract of all other optional fields.
+    # Forward mask_patient_data only when explicitly set in the RecordDef. When it
+    # is absent, the flag stays out of the config's model_fields_set and the
+    # reconciler heals it toward its model default on restart (concrete non-None
+    # defaults self-heal — issue #389); an explicitly set value is always honored.
     if "mask_patient_data" in rt_def.model_fields_set:
         kwargs["mask_patient_data"] = rt_def.mask_patient_data
     if "unique_per_user" in rt_def.model_fields_set:
