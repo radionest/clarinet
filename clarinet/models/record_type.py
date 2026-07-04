@@ -74,12 +74,13 @@ class RecordTypeBase(SQLModel):
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None, ge=0, le=10000)
     min_records: int | None = Field(default=1, ge=0, le=10000)
-    # ``server_default=sql_expression.false()`` lets alembic safely add this
-    # column to populated tables. See ``mask_patient_data`` below for the
-    # full rationale.
+    # ``server_default`` matches the model default ``True`` so a freshly-created
+    # row and a migration-backfilled row agree (issue #389). ``sql_expression.true()``
+    # is the dialect-aware literal that keeps the additive-migration contract — see
+    # ``mask_patient_data`` below for why a raw ``text("1")`` breaks PostgreSQL.
     unique_per_user: bool = Field(
         default=True,
-        sa_column_kwargs={"server_default": sql_expression.false()},
+        sa_column_kwargs={"server_default": sql_expression.true()},
     )
     # See ``mask_patient_data`` below for the rationale on ``server_default`` and
     # the dialect-aware ``sql_expression.false()`` literal.
