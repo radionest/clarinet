@@ -160,6 +160,9 @@ HTTP-клиент к собственному API проекта. Основны
 ```python
 await ctx.client.get_record(record_id)
 await ctx.client.find_records(record_type_name="segment-ct-single", **filters)
+# find_records возвращает только первую страницу; для агрегации по пациенту /
+# без series/study-фильтра — iter_records (пагинирует все страницы):
+records = [r async for r in ctx.client.iter_records(patient_id=...)]
 await ctx.client.create_record(RecordCreate(...))
 await ctx.client.submit_record_data(record_id, data, status="finished")
 await ctx.client.update_record(record_id, **updates)

@@ -148,7 +148,12 @@ class SyncPipelineClient:
         )
 
     def find_records(self, skip: int = 0, limit: int = 100, **filters: Any) -> list[RecordRead]:
-        """Legacy wrapper — returns first page items only."""
+        """Legacy wrapper — returns first page items only.
+
+        Deliberate "first N" use is fine; to aggregate **all** matches
+        (patient-scope / unfiltered callers) use ``iter_records``, or
+        ``find_records_page`` for explicit cursor pagination.
+        """
         return _call_async(self._client.find_records(skip, limit, **filters), self._loop)
 
     def find_records_advanced(
