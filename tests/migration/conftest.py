@@ -2,6 +2,7 @@
 
 import os
 import textwrap
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,8 +11,11 @@ from unittest.mock import PropertyMock, patch
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.pool import NullPool
 
 from clarinet.settings import Settings
+from clarinet.utils.logger import logger
 
 # ---------------------------------------------------------------------------
 # Settings override
@@ -67,18 +71,62 @@ def create_pg_database(db_name: str) -> tuple[str, str]:
     return f"{base_url}/{db_name}", base_url
 
 
-def drop_pg_database(db_name: str, base_url: str) -> None:
-    """Drop a PostgreSQL database, forcibly terminating active connections.
+_DROP_ATTEMPTS = 3
+_DROP_BACKOFF_S = 1.0
+# connect_timeout: fail fast on connect; statement_timeout=10s: bound each
+# terminate/DROP so a stalled op raises OperationalError instead of hanging.
+_ADMIN_CONNECT_ARGS = {"connect_timeout": 8, "options": "-c statement_timeout=10000"}
 
-    ``WITH (FORCE)`` (PostgreSQL 13+) makes teardown robust to lingering
-    asyncpg/psycopg2 connections that ``engine.dispose()`` may not have
-    fully closed before this runs (xdist parallel teardown otherwise hits
-    the pytest 30 s timeout on a hanging DROP).
+
+def drop_pg_database(db_name: str, base_url: str) -> None:
+    """Best-effort drop of a scratch test DB, resilient to CI-load stalls (#446).
+
+    Teardown runs inside the full ~2800-test ``-n auto`` suite, where the VM
+    Postgres is CPU/IO-saturated. A bare ``DROP DATABASE ... WITH (FORCE)`` can
+    then outlast the 30 s pytest-timeout while it waits for lingering
+    asyncpg/psycopg2 backends to detach. Hardening:
+
+    * ``connect_timeout`` / ``statement_timeout`` bound each op so a stall
+      surfaces as a catchable ``OperationalError`` instead of hanging;
+    * ``pg_terminate_backend`` evicts the target DB's backends before FORCE;
+    * retry a few times — each attempt re-sends SIGTERM, so stuck backends
+      progressively exit and a later attempt completes fast;
+    * on final failure just ``logger.warning`` and return: ``create_pg_database``
+      re-drops the same worker DB next run, so a load artifact never turns an
+      otherwise-green suite into a teardown ERROR.
     """
-    admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
-    with admin_engine.connect() as conn:
-        conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
-    admin_engine.dispose()
+    admin_engine = create_engine(
+        f"{base_url}/postgres",
+        isolation_level="AUTOCOMMIT",
+        poolclass=NullPool,
+        connect_args=_ADMIN_CONNECT_ARGS,
+    )
+    try:
+        for attempt in range(1, _DROP_ATTEMPTS + 1):
+            try:
+                with admin_engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                            "WHERE datname = :d AND pid <> pg_backend_pid()"
+                        ),
+                        {"d": db_name},
+                    )
+                    conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+                return
+            except OperationalError as exc:
+                if attempt == _DROP_ATTEMPTS:
+                    logger.warning(
+                        "drop_pg_database: giving up on {} after {} attempts ({}); "
+                        "create_pg_database will re-drop it next run",
+                        db_name,
+                        _DROP_ATTEMPTS,
+                        exc,
+                    )
+                    return
+                time.sleep(_DROP_BACKOFF_S)
+    finally:
+        admin_engine.dispose()
 
 
 @pytest.fixture
