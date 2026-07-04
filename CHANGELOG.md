@@ -45,6 +45,12 @@
   empty-source set-op change is non-breaking (strictly more tolerant than the
   previous opaque `arrayFromVolume` crash).
 
+### Added
+
+- `find_records` (`ClarinetClient` and the pipeline sync wrapper) now logs a
+  warning when a wide-scope call (no `series_uid`/`study_uid` filter) is
+  truncated at the first cursor page, pointing the caller at `iter_records`.
+
 ### Improved
 
 - Cross-flow imports now work in **both** sort directions (native module cache),

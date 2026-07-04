@@ -938,10 +938,24 @@ class ClarinetClient:
         limit: int = 100,
         **filters: Any,
     ) -> list[RecordRead]:
-        """Legacy wrapper — returns first page items only."""
+        """Legacy wrapper — returns first page items only.
+
+        Deliberate "first N" use is fine; to aggregate **all** matches
+        (patient-scope / unfiltered callers) use ``iter_records``, or
+        ``find_records_page`` for explicit cursor pagination.
+        """
         if skip:
             logger.warning("find_records.skip is ignored after cursor migration")
         page = await self.find_records_page(limit=limit, **filters)
+        if (
+            page.next_cursor is not None
+            and limit != 1
+            and not (filters.get("series_uid") or filters.get("study_uid"))
+        ):
+            logger.warning(
+                f"find_records truncated at first page (limit={limit}, filters={filters}); "
+                "use iter_records to aggregate all matches"
+            )
         return page.items
 
     async def find_random_record(self, **filters: Any) -> RecordRead | None:

@@ -20,7 +20,7 @@ from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User
-from tests.utils.factories import make_patient
+from tests.utils.factories import make_patient, seed_record
 
 
 class TestAuthentication:
@@ -380,6 +380,95 @@ class TestRecordManagement:
         # Check that at least one record belongs to admin_user
         user_record_ids = [r.user_id for r in records if r.user_id]
         assert str(admin_user.id) in [str(uid) for uid in user_record_ids]
+
+
+class TestFindRecordsTruncation:
+    """Truncation tripwire: find_records warns on truncated wide-scope calls."""
+
+    async def _seed_three_records(
+        self, session: AsyncSession, patient: Patient, study: Study
+    ) -> None:
+        record_type = RecordType(name="trunc-test", level="STUDY")
+        session.add(record_type)
+        await session.commit()
+        for _ in range(3):
+            await seed_record(session, patient.id, study.study_uid, None, "trunc-test")
+
+    @pytest.mark.asyncio
+    async def test_find_records_warns_on_truncated_wide_scope(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Patient-scope call with more matches than limit logs a warning."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=2)
+
+        assert len(records) == 2
+        assert "find_records truncated at first page" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_no_warning_when_scoped(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """study_uid-scoped call is a deliberate first-N — silent even when truncated."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(study_uid=test_study.study_uid, limit=2)
+
+        assert len(records) == 2
+        assert "find_records truncated at first page" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_no_warning_limit_one(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """limit=1 means 'give me one' (RecordQuery.file_path) — never warn."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=1)
+
+        assert len(records) == 1
+        assert "find_records truncated at first page" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_find_records_no_warning_not_truncated(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Wide scope but everything fits on one page — silent."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=100)
+
+        assert len(records) == 3
+        assert "find_records truncated at first page" not in caplog.text
 
 
 class TestHighLevelMethods:
