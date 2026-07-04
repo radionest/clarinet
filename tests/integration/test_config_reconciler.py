@@ -326,6 +326,35 @@ async def test_none_config_matches_orm_default(
 
 
 @pytest.mark.asyncio
+async def test_unset_flag_heals_drifted_db_value(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """A DB row drifted from a non-None model default heals to that default even
+    when the config leaves the flag unset. Regression for issue #389: a
+    migration-backfilled ``unique_per_user=False`` must reconcile to the
+    documented default ``True`` on restart, not survive forever.
+    """
+    # Drift the DB row away from the model default (True), as a backfill would.
+    seed_record_type.unique_per_user = False
+    test_session.add(seed_record_type)
+    await test_session.commit()
+    test_session.expire_all()
+
+    cfg = _make_config("existing-type", description="Original description", label="Original")
+    assert "unique_per_user" not in cfg.model_fields_set  # precondition: flag unset
+
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.updated == ["existing-type"]
+    test_session.expire_all()
+    row = (
+        await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
+    ).scalar_one()
+    assert row.unique_per_user is True
+
+
+@pytest.mark.asyncio
 async def test_explicit_value_differs_from_default(
     test_session: AsyncSession,
     seed_record_type: RecordType,
