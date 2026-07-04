@@ -42,6 +42,21 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("db_backend", backends)
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Give the Postgres migration teardown room to finish under -n auto load (#446).
+
+    The scratch-DB DROP in ``drop_pg_database`` can legitimately run tens of
+    seconds when the whole ~2800-test suite saturates the VM; the global 30 s
+    pytest-timeout targets hung *app* code, not CI-contended DDL teardown.
+    ``db_backend`` is only parametrized on migration items, so this self-scopes
+    to the ``[postgresql]`` variants; sqlite teardown stays at the global 30 s.
+    """
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        if callspec is not None and callspec.params.get("db_backend") == "postgresql":
+            item.add_marker(pytest.mark.timeout(120))
+
+
 # ---------------------------------------------------------------------------
 # Database-aware project fixture
 # ---------------------------------------------------------------------------
