@@ -89,6 +89,9 @@
   `iter_records`.
 - `get_study_hierarchy` no longer silently caps the study's records at the
   first 1000 — it aggregates every record via `iter_records`.
+- Project-template agent docs (`.claude/rules/workflows.md`) no longer document
+  the `FileResolver` API removed in 0.7.0 — the `ctx.files` section is re-synced
+  with the canonical `Files` facade docs shipped by `clarinet agent init`.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

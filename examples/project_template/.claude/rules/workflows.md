@@ -99,47 +99,56 @@ class PipelineMessage:
 
 `TaskContext` (async) и `SyncTaskContext` (sync) дают доступ к:
 
-#### `ctx.files` — `FileResolver`
+#### `ctx.files` — `Files`
 
 ```python
 ctx.files.resolve(file_def) -> Path        # абсолютный путь к файлу
 ctx.files.exists(file_def) -> bool         # существует ли файл
+ctx.files.glob(file_def) -> list[Path]     # все файлы glob-коллекции (multiple=True)
+ctx.files.dir() -> Path                    # рабочая папка записи (на её уровне)
 ```
 
-Принимает `FileDef`-объект (импортированный из `record_types.py`) или строку с именем.
+`resolve`/`exists`/`glob` принимают `FileDef`-объект (импортированный из `record_types.py`) или строку с `name`.
 
-`ctx.files` резолвит файлы **собственной** записи таски (`msg.record_id`). Чтобы
-получить пути файлов **другой** записи, которая уже у вас на руках (родитель,
-перечитанная копия, запись другого пациента), используйте `ctx.files_for(record)`:
+`ctx.files` — экземпляр `Files`, привязанный к **собственной** записи таски
+(`msg.record_id`). Чтобы получить пути файлов **другой** записи, которая уже у вас
+на руках (родитель, перечитанная копия, запись другого пациента), используйте
+`ctx.files_for(record)`:
 
 ```python
 parents = await ctx.records.find("study-root", study_uid=msg.study_uid)
 if parents:
-    parent_files = ctx.files_for(parents[0])  # -> FileResolver
+    parent_files = ctx.files_for(parents[0])  # -> Files
     mask = parent_files.resolve("liver_mask")
 ```
 
-`ctx.files_for` есть и в `TaskContext` (async), и в `SyncTaskContext` (sync) —
-это обёртка над `FileResolver.from_record(record)`. Тот же фабричный метод
-доступен и вне таски (standalone-скрипты без `ctx`):
+`ctx.files_for` есть и в `TaskContext` (async), и в `SyncTaskContext` (sync) — это
+обёртка над конструктором `Files(record)` **без `parent`**. Сам `ctx.files`
+фреймворк строит как `Files(record, parent=parent)`, поэтому плейсхолдеры с
+fallback на родителя (`{user_id}`, `{origin_type}`, merge `{data.FIELD}`) у
+`ctx.files_for` могут резолвиться иначе — если parent-fallback нужен, постройте
+фасад сами: `Files(record, parent=parent_record)`. Тот же фасад доступен и вне
+таски (standalone-скрипты без `ctx`):
 
 ```python
-from clarinet.services.common.file_resolver import FileResolver
+from clarinet.files import Files
 
-files = FileResolver.from_record(record)  # собирает все 4 аргумента конструктора из записи
+files = Files(record)  # резолвер по записи (file-registry + working dirs)
 ```
 
-`from_record` принимает только `RecordRead` (у `SeriesRead`/`StudyRead`/`PatientRead`
-нет file-registry — для них собирайте `FileResolver` вручную или берите рабочую
-директорию через `FileRepository`). Для поиска файла **по критериям** (а не по
-готовой записи) используйте `ctx.records.file_path(...)`.
+`Files(...)` принимает `RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead`.
+File-registry (а значит резолвинг по строке-имени, `resolve("mask")`) есть только
+у `RecordRead`; `resolve(file_def)` с самим `FileDef`-объектом и `.dir()` работают
+для любой сущности, чей уровень известен. Для поиска файла **по критериям**
+(а не по готовой записи) используйте `ctx.records.file_path(...)`.
 
-`from_record` резолвит пути в строгом режиме (`build_working_dirs(record)` с
-`fallback_to_unanonymized=False`): для ещё не анонимизированной записи он бросит
-`AnonPathError`, и протолкнуть fallback через `from_record` нельзя. Если нужен
-доступ к неанонимизированной раскладке (UX-превью, миграционные скрипты) —
-стройте резолвер напрямую: `FileResolver.build_working_dirs(record,
-fallback_to_unanonymized=True)`.
+`Files(record)` работает в строгом режиме: для ещё не анонимизированной записи
+`AnonPathError` бросается уже **при создании** фасада (в конструкторе, не в
+`.resolve()`) — оборачивать в try/except нужно сам вызов `Files(record)`. Если
+нужен доступ к неанонимизированной раскладке
+(UX-превью, миграционные скрипты), стройте фасад в lenient-режиме —
+`Files(record, fallback=True)` либо `Files.for_reader(record)` (пробует строгий
+режим, при `AnonPathError` пересобирает с fallback на сырые UID).
 
 #### `ctx.records` — `RecordQuery`
 
