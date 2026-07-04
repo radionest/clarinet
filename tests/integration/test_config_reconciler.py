@@ -640,6 +640,7 @@ async def _reconcile_with_mocked_env(
         mock_settings.config_tasks_path = "/fake/path"
         mock_settings.config_validators_file = "validators.py"
         mock_settings.config_context_hydrators_file = "context_hydrators.py"
+        mock_settings.config_schema_hydrators_file = "schema_hydrators.py"
         mock_settings.config_delete_orphans = False
 
         ctx = AsyncMock()
@@ -784,6 +785,86 @@ async def test_reconcile_config_passes_with_registered_slicer_hydrator(
         assert "rt-without-hydrators" in result.created
     finally:
         _SLICER_HYDRATOR_REGISTRY.restore(saved_registry)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_validates_schema_hydrators_registered(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config raises ConfigurationError when a data_schema x-options.source
+    references an unregistered schema hydrator name.
+
+    Mirrors the slicer-hydrator guard — a typo here used to surface only at render
+    time as an "Unknown x-options source" warning, leaving the field raw.
+    """
+    from clarinet.services.schema_hydration import _HYDRATOR_REGISTRY
+
+    saved_registry = _HYDRATOR_REGISTRY.snapshot()
+    _HYDRATOR_REGISTRY.clear()
+    try:
+        items = [
+            _make_config(
+                "rt-with-ghost-source",
+                data_schema={
+                    "type": "object",
+                    "properties": {
+                        "series": {
+                            "type": "string",
+                            "x-options": {"source": "nonexistent_source"},
+                        },
+                    },
+                },
+            ),
+        ]
+
+        with pytest.raises(ConfigurationError, match=r"nonexistent_source") as exc_info:
+            await _reconcile_with_mocked_env(test_session, items)
+
+        msg = str(exc_info.value)
+        assert "rt-with-ghost-source" in msg
+        assert "schema_hydrators.py" in msg
+    finally:
+        _HYDRATOR_REGISTRY.restore(saved_registry)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_passes_with_registered_schema_hydrator(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config succeeds when every x-options.source is registered."""
+    from clarinet.services.schema_hydration import _HYDRATOR_REGISTRY, schema_hydrator
+
+    saved_registry = _HYDRATOR_REGISTRY.snapshot()
+    _HYDRATOR_REGISTRY.clear()
+    try:
+
+        @schema_hydrator("test.registered_source")
+        async def _registered(record, options, ctx):
+            return []
+
+        items = [
+            _make_config(
+                "rt-with-registered-source",
+                data_schema={
+                    "type": "object",
+                    "properties": {
+                        "series": {
+                            "type": "string",
+                            "x-options": {"source": "test.registered_source"},
+                        },
+                    },
+                },
+            ),
+            _make_config("rt-without-schema"),  # data_schema=None → no sources
+        ]
+
+        result = await _reconcile_with_mocked_env(test_session, items)
+
+        assert result.errors == []
+        assert "rt-with-registered-source" in result.created
+        assert "rt-without-schema" in result.created
+    finally:
+        _HYDRATOR_REGISTRY.restore(saved_registry)
 
 
 @pytest.mark.asyncio

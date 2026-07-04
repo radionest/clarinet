@@ -5,6 +5,7 @@ This module provides functions to initialize the application with default data,
 such as user roles and record types, during startup.
 """
 
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -283,7 +284,7 @@ async def _upsert_record_type(record_type: RecordTypeCreate, session: AsyncSessi
 def _validate_registry_refs(
     all_items: list[RecordTypeCreate],
     *,
-    attr: str,
+    extract: Callable[[RecordTypeCreate], Iterable[str]],
     registered: frozenset[str],
     label: str,
     decorator: str,
@@ -292,15 +293,17 @@ def _validate_registry_refs(
 ) -> None:
     """Fail-fast when RecordType configs reference names absent from a registry.
 
-    Shared by the ``data_validators`` and ``slicer_context_hydrators`` guards
-    (and any future decorator-registry reference). Relies on the corresponding
+    Shared by the ``data_validators``, ``slicer_context_hydrators`` and
+    ``x-options.source`` (schema hydrator) guards. Relies on the corresponding
     ``load_custom_*`` loader running BEFORE ``reconcile_config`` in the
     lifespan — otherwise the registry is empty and every reference is flagged
     as missing.
 
     Args:
         all_items: RecordType configs about to be reconciled.
-        attr: Name of the list-of-names field on ``RecordTypeCreate``.
+        extract: Returns the registry names referenced by one RecordType — a
+            flat list field (``data_validators``) or names derived from
+            ``data_schema`` (``x-options.source``).
         registered: Currently registered names for this registry.
         label: Human-readable singular label for the error message.
         decorator: Decorator name to suggest in the fix hint.
@@ -311,9 +314,12 @@ def _validate_registry_refs(
     Raises:
         ConfigurationError: If any referenced name is not registered.
     """
+    per_item: list[tuple[RecordTypeCreate, set[str]]] = [
+        (item, set(extract(item))) for item in all_items
+    ]
     referenced: set[str] = set()
-    for item in all_items:
-        referenced.update(getattr(item, attr) or [])
+    for _, names in per_item:
+        referenced |= names
     if not referenced:
         return
 
@@ -322,10 +328,9 @@ def _validate_registry_refs(
         return
 
     bad_items = [
-        f"  - '{item.name}' references {label}(s) "
-        f"{[n for n in (getattr(item, attr) or []) if n in missing]}"
-        for item in all_items
-        if any(n in missing for n in (getattr(item, attr) or []))
+        f"  - '{item.name}' references {label}(s) {sorted(names & missing)}"
+        for item, names in per_item
+        if names & missing
     ]
     raise ConfigurationError(
         f"RecordType config references unregistered {label}(s): "
@@ -443,10 +448,16 @@ async def reconcile_config(
                 )
 
         # Validate decorator-registry references (data_validators,
-        # slicer_context_hydrators). A typo used to surface only at runtime —
-        # e.g. when the doctor opened the record in Slicer.
+        # slicer_context_hydrators) and x-options.source names inside data_schema
+        # (schema hydrators). A typo used to surface only at runtime — e.g. when
+        # the doctor opened the record in Slicer, or as a render-time warning that
+        # left the field raw.
         from clarinet.services.record_data_validation import (
             get_registered_validator_names,
+        )
+        from clarinet.services.schema_hydration import (
+            collect_x_options_sources,
+            get_registered_schema_hydrator_names,
         )
         from clarinet.services.slicer.context_hydration import (
             get_registered_slicer_hydrator_names,
@@ -454,7 +465,7 @@ async def reconcile_config(
 
         _validate_registry_refs(
             all_items,
-            attr="data_validators",
+            extract=lambda it: it.data_validators or [],
             registered=get_registered_validator_names(),
             label="data validator",
             decorator="record_validator",
@@ -463,11 +474,20 @@ async def reconcile_config(
         )
         _validate_registry_refs(
             all_items,
-            attr="slicer_context_hydrators",
+            extract=lambda it: it.slicer_context_hydrators or [],
             registered=get_registered_slicer_hydrator_names(),
             label="slicer context hydrator",
             decorator="slicer_context_hydrator",
             config_file=settings.config_context_hydrators_file,
+            folder=folder,
+        )
+        _validate_registry_refs(
+            all_items,
+            extract=lambda it: collect_x_options_sources(it.data_schema or {}),
+            registered=get_registered_schema_hydrator_names(),
+            label="schema hydrator",
+            decorator="schema_hydrator",
+            config_file=settings.config_schema_hydrators_file,
             folder=folder,
         )
 
