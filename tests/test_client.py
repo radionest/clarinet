@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.client import ClarinetAPIError, ClarinetAuthError, ClarinetClient
-from clarinet.models import RecordType
+from clarinet.models import RecordPage, RecordType
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.study import Series, Study
@@ -583,6 +583,47 @@ class TestHighLevelMethods:
         assert hierarchy["study"]["study_uid"] == test_study.study_uid
         assert hierarchy["patient"]["id"] == test_patient.id
         assert len(hierarchy["series"]) >= 1
+
+    @pytest.mark.asyncio
+    async def test_get_study_hierarchy_aggregates_all_pages(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_study: Study,
+        test_patient: Patient,
+        test_session: AsyncSession,
+    ) -> None:
+        """hierarchy['records'] must include records past the first cursor page."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+
+        record_type = RecordType(name="hier-page-test", level="STUDY")
+        test_session.add(record_type)
+        await test_session.commit()
+        rec1 = await seed_record(
+            test_session, test_patient.id, test_study.study_uid, None, "hier-page-test"
+        )
+        rec2 = await seed_record(
+            test_session, test_patient.id, test_study.study_uid, None, "hier-page-test"
+        )
+
+        # Fetch real RecordRead payloads, then replay them as two cursor pages.
+        fetched = await clarinet_client.find_records(study_uid=test_study.study_uid, limit=100)
+        by_id = {r.id: r for r in fetched}
+        page1 = RecordPage(
+            items=[by_id[rec1.id]], next_cursor="cursor-2", limit=1, sort="changed_at_desc"
+        )
+        page2 = RecordPage(
+            items=[by_id[rec2.id]], next_cursor=None, limit=1, sort="changed_at_desc"
+        )
+
+        with patch.object(
+            clarinet_client, "find_records_page", AsyncMock(side_effect=[page1, page2])
+        ) as page_mock:
+            hierarchy = await clarinet_client.get_study_hierarchy(test_study.study_uid)
+
+        assert [r["id"] for r in hierarchy["records"]] == [rec1.id, rec2.id]
+        assert page_mock.await_count == 2
+        assert page_mock.await_args_list[1].kwargs["cursor"] == "cursor-2"
 
     @pytest.mark.asyncio
     async def test_create_series_batch(

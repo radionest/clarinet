@@ -87,6 +87,8 @@
   for a patient with >1000 records everything past it was dropped, skewing
   condition and action evaluation. Both now page through all records via
   `iter_records`.
+- `get_study_hierarchy` no longer silently caps the study's records at the
+  first 1000 — it aggregates every record via `iter_records`.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

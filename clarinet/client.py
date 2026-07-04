@@ -1118,7 +1118,7 @@ class ClarinetClient:
         series_list = await self.get_study_series(study_uid)
 
         # Get records for this study
-        records = await self.find_records(study_uid=study_uid, limit=1000)
+        records = [r async for r in self.iter_records(study_uid=study_uid)]
 
         return {
             "study": study.model_dump(),
