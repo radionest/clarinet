@@ -170,9 +170,10 @@ Notes:
 ## 5. Speed
 
 The win is Orthanc (C++) + serve-first caching; the OHIF data-source flags default to the
-fast settings for `external` (see §1). Additionally consider: Orthanc transfer-syntax
-transcoding to a web-friendly syntax, and OHIF prefetch. The auth subrequest is cached, so it
-does not sit in the per-frame hot path.
+fast settings for `external` (see §1), and the shipped app-config enables OHIF's
+`studyPrefetcher` so series adjacent to the current one load in the background. Additionally
+consider Orthanc transfer-syntax transcoding to a web-friendly syntax. The auth subrequest is
+cached, so it does not sit in the per-frame hot path.
 
 ## 6. Operations — switching a running deployment
 
