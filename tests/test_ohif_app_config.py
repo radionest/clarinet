@@ -128,3 +128,21 @@ def test_serve_app_config_absent_sentinel_not_cached(tmp_path, monkeypatch):
     cfg.write_text("window.config = { dataSources: __CLARINET_DATASOURCES__ };", encoding="utf-8")
     r2 = client.get("/ohif/app-config.js")
     assert "__CLARINET_DATASOURCES__" not in r2.text  # self-healed, now rendered
+
+
+def test_packaged_template_has_prefetcher_and_sentinel():
+    """The shipped OHIF template must keep both the studyPrefetcher block and
+    the dataSources sentinel. Dropping the prefetcher silently regresses
+    large-study loading back to lazy per-series; dropping the sentinel breaks
+    dataSources injection in serve_spa. Reads the repo-relative template so the
+    check is independent of how the package is installed."""
+    from pathlib import Path
+
+    from clarinet.api.ohif_config import DATASOURCES_SENTINEL
+
+    template = Path(__file__).resolve().parent.parent / "clarinet" / "ohif" / "app-config.js"
+    text = template.read_text(encoding="utf-8")
+
+    assert "studyPrefetcher" in text
+    assert "maxNumPrefetchRequests" in text
+    assert DATASOURCES_SENTINEL in text

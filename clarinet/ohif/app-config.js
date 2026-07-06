@@ -7,6 +7,22 @@ window.config = {
   maxNumberOfWebWorkers: 3,
   showLoadingIndicator: true,
   strictZSpacingForVolumeViewport: true,
+  // Eager background prefetch of series adjacent to the current one, so a large
+  // study stops loading one-series-at-a-time on demand. Concurrency is kept low
+  // on purpose: the external Orthanc/dicorina backend is fragile under parallel
+  // C-MOVE, and OHIF's own large-scan guidance is that prefetch must not starve
+  // interactive fetches (a >250 ms/image fetch makes stack scrolling lag).
+  studyPrefetcher: {
+    enabled: true,
+    displaySetsCount: 2,
+    maxNumPrefetchRequests: 3,
+    order: 'closest',
+  },
+  maxNumRequests: {
+    interaction: 10,
+    thumbnail: 5,
+    prefetch: 3,
+  },
   customizationService: [{
     'viewportOverlay.topRight': [
       {
