@@ -144,6 +144,7 @@ class Image:
         self._filetype: FileType | None = None
         self._nifti_image: Any = None
         self._nrrd_header: dict[str, Any] | None = None
+        self._shape: tuple[int, ...] | None = None
         self.force_dtype: Any = dtype
 
         if template is not None:
@@ -206,8 +207,22 @@ class Image:
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """Shape of the voxel array."""
-        return tuple(self.img.shape)
+        """Shape of the voxel array.
+
+        Works on a metadata-only image (``read(..., load_data=False)``): returns the
+        header shape when voxels are not loaded. Raises if neither data nor a header
+        has been read.
+        """
+        if self._img is not None:
+            return tuple(self._img.shape)
+        if self._shape is not None:
+            return tuple(self._shape)
+        raise ImageError("Image shape is unavailable: no data loaded and no header read")
+
+    @property
+    def has_data(self) -> bool:
+        """True when voxel data is resident (as opposed to a metadata-only read)."""
+        return self._img is not None
 
     @property
     def affine_4x4(self) -> np.ndarray:
@@ -287,11 +302,16 @@ class Image:
         result.img = resampled
         return result
 
-    def read(self, file_path: Path) -> None:
+    def read(self, file_path: Path, *, load_data: bool = True, dtype: Any = None) -> None:
         """Read an image file, dispatching by extension.
 
         Args:
             file_path: Path to a .nii, .nii.gz, or .nrrd file.
+            load_data: When False, populate grid metadata + ``shape`` from the header
+                and leave voxels unloaded (``has_data`` stays False). The #452 lean path.
+            dtype: Force voxels to this numpy dtype on load, reading the on-disk dtype
+                and casting once (no float64 intermediate). ``None`` keeps today's
+                behavior (NIfTI float64 via ``get_fdata``, NRRD native).
 
         Raises:
             ImageError: If the file extension is unsupported.
@@ -302,20 +322,25 @@ class Image:
         suffixes = file_path.suffixes
 
         if ".nii" in suffixes:
-            self.read_nifti(file_path)
+            self.read_nifti(file_path, load_data=load_data, dtype=dtype)
         elif ".nrrd" in suffixes:
-            self.read_nrrd(file_path)
+            self.read_nrrd(file_path, load_data=load_data, dtype=dtype)
         else:
             raise ImageError(
                 f"Unsupported file extension: {''.join(suffixes)}. "
                 "Supported formats: .nii, .nii.gz, .nrrd"
             )
 
-    def read_nifti(self, file_path: Path) -> None:
+    def read_nifti(self, file_path: Path, *, load_data: bool = True, dtype: Any = None) -> None:
         """Read a NIfTI file (.nii or .nii.gz).
 
         Args:
             file_path: Path to the NIfTI file.
+            load_data: When False, read only the header (grid + shape); leave voxels
+                unloaded. ``nibabel.load`` is already lazy — no data block is touched.
+            dtype: When set, load voxels via ``np.asarray(dataobj, dtype=dtype)``
+                (single cast, no float64 intermediate, no ``get_fdata`` proxy cache).
+                ``None`` keeps ``get_fdata()`` (float64).
 
         Raises:
             ImageReadError: If the file cannot be read.
@@ -336,22 +361,39 @@ class Image:
         origin_ras = np.array([affine[0, 3], affine[1, 3], affine[2, 3]])
         origin_lps = _LPS_TO_RAS @ origin_ras
         self._origin = (float(origin_lps[0]), float(origin_lps[1]), float(origin_lps[2]))
-        self.img = self._nifti_image.get_fdata()
+        self._shape = tuple(int(s) for s in self._nifti_image.header.get_data_shape())
         self._filetype = FileType.NIFTI
+
+        if not load_data:
+            self._img = None
+            logger.debug(f"Read NIfTI header {file_path.name}: shape={self._shape} (metadata only)")
+            return
+        if dtype is None:
+            self.img = self._nifti_image.get_fdata()
+        else:
+            self.img = np.asarray(self._nifti_image.dataobj, dtype=dtype)
         logger.debug(f"Read NIfTI {file_path.name}: shape={self.shape}, dtype={self.img.dtype}")
 
-    def read_nrrd(self, file_path: Path) -> None:
+    def read_nrrd(self, file_path: Path, *, load_data: bool = True, dtype: Any = None) -> None:
         """Read an NRRD file.
 
         Args:
             file_path: Path to the NRRD file.
+            load_data: When False, read only the header (``nrrd.read_header``) for grid
+                + shape; leave voxels unloaded.
+            dtype: When set, cast native voxels once via ``astype(dtype, copy=False)``.
+                pynrrd reads the file's native dtype (never float64); ``None`` keeps it.
 
         Raises:
             ImageReadError: If the file cannot be read.
         """
         file_path = Path(file_path)
+        data: np.ndarray | None = None
         try:
-            data, header = nrrd.read(str(file_path))
+            if load_data:
+                data, header = nrrd.read(str(file_path))
+            else:
+                header = nrrd.read_header(str(file_path))
         except Exception as e:
             raise ImageReadError(f"Failed to read NRRD file: {file_path}") from e
 
@@ -375,8 +417,17 @@ class Image:
             vals = space_origin[:3]
             self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
 
-        self.img = data
+        self._shape = tuple(int(s) for s in header["sizes"])
         self._filetype = FileType.NRRD
+
+        if not load_data:
+            self._img = None
+            logger.debug(f"Read NRRD header {file_path.name}: shape={self._shape} (metadata only)")
+            return
+        assert data is not None  # load_data=True guarantees nrrd.read() assigned it
+        if dtype is not None:
+            data = data.astype(dtype, copy=False)
+        self.img = data
         logger.debug(f"Read NRRD {file_path.name}: shape={self.shape}, dtype={self.img.dtype}")
 
     def read_dicom_series(self, directory: Path) -> None:
@@ -398,6 +449,7 @@ class Image:
         self._direction = direction
         self.img = data
         self._filetype = FileType.DICOM
+        self._shape = tuple(int(s) for s in data.shape)
         logger.debug(f"Read DICOM series from {directory}: shape={self.shape}")
 
     def save(self, filename: str, directory: Path | None = None) -> Path:

@@ -281,6 +281,36 @@ class TestImage:
         with pytest.raises(ImageError, match="DICOM writing"):
             img.save("test")
 
+    def test_load_data_false_populates_grid_not_voxels(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path, load_data=False)
+        assert img.has_data is False
+        assert img.shape == (10, 12, 8)
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+        assert img.affine_4x4.shape == (4, 4)  # grid math works without voxels
+        with pytest.raises(ImageError, match="not loaded"):
+            _ = img.img
+
+    def test_load_data_false_same_grid_against_full_read(self, nifti_path: Path) -> None:
+        meta = Image()
+        meta.read(nifti_path, load_data=False)
+        full = Image()
+        full.read(nifti_path)
+        assert meta.same_grid(full)
+
+    def test_load_data_false_nrrd(self, nrrd_path: Path) -> None:
+        img = Image()
+        img.read(nrrd_path, load_data=False)
+        assert img.has_data is False
+        assert img.shape == (10, 12, 8)
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+
+    def test_has_data_true_after_full_read(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path)
+        assert img.has_data is True
+        assert img.shape == (10, 12, 8)
+
 
 # ---------------------------------------------------------------------------
 # DICOM volume tests
