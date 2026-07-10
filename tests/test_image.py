@@ -139,6 +139,52 @@ class TestImage:
         img.read(nifti_path)
         assert img.img.dtype == np.float32
 
+    def test_img_setter_avoids_copy_when_dtype_matches(self) -> None:
+        img = Image(dtype=np.int16)
+        arr = np.zeros((4, 4, 4), dtype=np.int16)
+        img.img = arr
+        assert img.img is arr  # already-correct dtype is not copied
+
+    def test_template_zeros_use_template_dtype(self, nrrd_path: Path) -> None:
+        src = Image()
+        src.read(nrrd_path, dtype=np.int16)  # int16 volume
+        blank = Image(template=src, copy_data=False)
+        assert blank.img.dtype == np.int16  # not float64
+        assert np.all(blank.img == 0)
+        assert blank.shape == src.shape
+
+    def test_template_zeros_from_metadata_only(self, nifti_path: Path) -> None:
+        meta = Image()
+        meta.read(nifti_path, load_data=False)  # no voxels
+        blank = Image(template=meta, dtype=np.uint8)  # force_dtype drives zeros dtype
+        assert blank.shape == (10, 12, 8)
+        assert blank.img.dtype == np.uint8
+        assert np.all(blank.img == 0)
+
+    def test_unload_keeps_grid_drops_voxels(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path)
+        img.unload()
+        assert img.has_data is False
+        assert img.shape == (10, 12, 8)  # grid survives
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+
+    def test_close_releases_proxy(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path, load_data=False)
+        assert img._nifti_image is not None
+        img.close()
+        assert img.has_data is False
+        with pytest.raises(ImageError, match="no lazy proxy"):
+            _ = img.dataobj  # proxy released
+
+    def test_context_manager_frees(self, nifti_path: Path) -> None:
+        with Image() as img:
+            img.read(nifti_path)
+            assert img.has_data is True
+        assert img.has_data is False
+        assert img._nifti_image is None
+
     def test_unsupported_extension(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "test.xyz"
         bad_file.write_text("not an image")

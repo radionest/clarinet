@@ -155,7 +155,17 @@ class Image:
             self._nifti_image = getattr(template, "_nifti_image", None)
             self._nrrd_header = getattr(template, "_nrrd_header", None)
             self._filetype = template._filetype
-            self.img = np.copy(template.img) if copy_data else np.zeros(template.img.shape)
+            self._shape = template._shape
+            if copy_data:
+                self.img = np.copy(template.img)
+            else:
+                if self.force_dtype is not None:
+                    zeros_dtype: Any = self.force_dtype
+                elif template.has_data:
+                    zeros_dtype = template.img.dtype
+                else:
+                    zeros_dtype = np.float64  # legacy default for a metadata-only base template
+                self.img = np.zeros(template.shape, dtype=zeros_dtype)
 
     @property
     def img(self) -> np.ndarray:
@@ -167,7 +177,9 @@ class Image:
     @img.setter
     def img(self, vol: np.ndarray) -> None:
         if self.force_dtype is not None:
-            self._img = vol.astype(self.force_dtype)
+            # asarray returns vol unchanged when the dtype already matches (no copy);
+            # casts once otherwise. Prevents a redundant copy of an already-correct array.
+            self._img = np.asarray(vol, dtype=self.force_dtype)
         else:
             self._img = vol
 
@@ -507,6 +519,29 @@ class Image:
         if dtype is not None:
             arr = arr.astype(dtype, copy=False)
         return arr
+
+    def unload(self) -> None:
+        """Drop voxel data but keep grid metadata and ``shape``.
+
+        Frees the resident array (up to a float64 volume) while leaving the image usable
+        for grid checks (``same_grid``, ``affine_4x4``, ``shape``).
+        """
+        self._img = None
+
+    def close(self) -> None:
+        """Release voxel data **and** the lazy file proxy (mmap).
+
+        Beyond ``unload``, drops ``_nifti_image`` so the on-disk mmap/proxy is released.
+        Called by ``__exit__``.
+        """
+        self._img = None
+        self._nifti_image = None
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     def save(self, filename: str, directory: Path | None = None) -> Path:
         """Save the image in its original format.
