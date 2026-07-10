@@ -311,6 +311,22 @@ class TestImage:
         assert img.has_data is True
         assert img.shape == (10, 12, 8)
 
+    def test_dataobj_windows_after_metadata_read(self, nifti_path: Path) -> None:
+        full = Image()
+        full.read(nifti_path)
+        img = Image()
+        img.read(nifti_path, load_data=False)
+        # window a single voxel column via the proxy without loading the volume
+        windowed = np.asarray(img.dataobj[0, 0, :])
+        np.testing.assert_array_almost_equal(windowed, full.img[0, 0, :], decimal=4)
+        assert img.has_data is False
+
+    def test_dataobj_raises_for_nrrd(self, nrrd_path: Path) -> None:
+        img = Image()
+        img.read(nrrd_path, load_data=False)
+        with pytest.raises(ImageError, match="no lazy proxy"):
+            _ = img.dataobj
+
     def test_dtype_none_returns_float64_regression_guard(self, nifti_path: Path) -> None:
         """Filtering callers depend on the float64 default staying float64."""
         img = Image()

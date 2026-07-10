@@ -225,6 +225,19 @@ class Image:
         return self._img is not None
 
     @property
+    def dataobj(self) -> Any:
+        """Read-only lazy array proxy for repeated windowed reads (NIfTI only).
+
+        For callers that window after ``read(..., load_data=False)`` (e.g. a streaming
+        nonzero check). NIfTI only — raises ``ImageError`` for NRRD/DICOM, which have no
+        lazy proxy (pynrrd reads the whole array).
+        """
+        if self._filetype == FileType.NIFTI and self._nifti_image is not None:
+            return self._nifti_image.dataobj
+        label = self._filetype.value if self._filetype is not None else "unloaded image"
+        raise ImageError(f"no lazy proxy for {label}")
+
+    @property
     def affine_4x4(self) -> np.ndarray:
         """4x4 voxel-to-physical affine matrix in LPS coordinates."""
         A = np.eye(4)
