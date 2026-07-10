@@ -1116,6 +1116,39 @@ class TestSegmentation:
         out = seg.save("seg_output", tmp_path)
         assert out.exists()
 
+    def test_segmentation_read_avoids_float64(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A mask read must not route through float64 get_fdata()."""
+        data = np.zeros((6, 6, 4), dtype=np.float64)
+        data[1:3, 1:3, 1:3] = 2.0  # float NIfTI holding integer labels
+        path = tmp_path / "mask.nii.gz"
+        nibabel.save(nibabel.Nifti1Image(data, np.eye(4)), str(path))
+
+        def _boom(self: object, *a: object, **k: object) -> np.ndarray:
+            raise AssertionError("Segmentation read routed through float64 get_fdata()")
+
+        monkeypatch.setattr(nibabel.Nifti1Image, "get_fdata", _boom)
+        seg = Segmentation(autolabel=False)
+        seg.read(path)
+        assert seg.img.dtype == np.uint8
+        assert int(seg.img[2, 2, 2]) == 2  # values preserved through the uint8 cast
+
+    def test_segmentation_metadata_only_read(self, tmp_path: Path) -> None:
+        data = np.zeros((6, 6, 4), dtype=np.uint8)
+        path = tmp_path / "mask.seg.nrrd"
+        nrrd.write(str(path), data, {"space directions": np.eye(3), "space origin": np.zeros(3)})
+        seg = Segmentation(autolabel=False)
+        seg.read(path, load_data=False)
+        assert seg.has_data is False
+        assert seg.shape == (6, 6, 4)
+
+    def test_segmentation_explicit_dtype_override(self, nifti_path: Path) -> None:
+        """An explicit dtype= still wins over the uint8 default."""
+        seg = Segmentation(autolabel=False)
+        seg.read(nifti_path, dtype=np.int16)
+        assert seg.img.dtype == np.uint8  # Segmentation img setter always lands uint8
+
 
 # ---------------------------------------------------------------------------
 # COCO converter tests
