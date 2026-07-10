@@ -339,6 +339,32 @@ class TestImage:
         img.read(nrrd_path, dtype=np.uint8)
         assert img.img.dtype == np.uint8
 
+    def test_read_slice_matches_full_read(self, nifti_path: Path) -> None:
+        full = Image()
+        full.read(nifti_path)
+        img = Image()
+        sl = img.read_slice(nifti_path, 3, axis=2)
+        np.testing.assert_array_almost_equal(sl, full.img[:, :, 3], decimal=4)
+        assert sl.shape == (10, 12)
+        assert img.has_data is False  # slice read never materializes the volume
+        assert img.shape == (10, 12, 8)  # grid populated from the header
+
+    def test_read_slice_axis0(self, nifti_path: Path) -> None:
+        full = Image()
+        full.read(nifti_path)
+        sl = Image().read_slice(nifti_path, 2, axis=0)
+        np.testing.assert_array_almost_equal(sl, full.img[2, :, :], decimal=4)
+
+    def test_read_slice_dtype(self, nifti_path: Path) -> None:
+        sl = Image().read_slice(nifti_path, 0, dtype=np.int16)
+        assert sl.dtype == np.int16
+
+    def test_read_slice_nrrd(self, nrrd_path: Path) -> None:
+        full = Image()
+        full.read(nrrd_path)
+        sl = Image().read_slice(nrrd_path, 4, axis=2)
+        np.testing.assert_array_equal(sl, full.img[:, :, 4])
+
 
 # ---------------------------------------------------------------------------
 # DICOM volume tests

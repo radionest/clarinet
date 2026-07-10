@@ -452,6 +452,49 @@ class Image:
         self._shape = tuple(int(s) for s in data.shape)
         logger.debug(f"Read DICOM series from {directory}: shape={self.shape}")
 
+    def read_slice(
+        self, file_path: Path, index: int, *, axis: int = 2, dtype: Any = None
+    ) -> np.ndarray:
+        """Read a single 2-D slice without materializing the full volume.
+
+        Populates grid metadata + ``shape`` (like ``read(..., load_data=False)``) but
+        does not set ``img``. NIfTI is lazy via ``dataobj`` (reads only the slice's
+        region; ``.nii.gz`` still sequential-decompresses to ``index`` but returns one
+        small array). NRRD has no lazy proxy — full read then index (rare: NRRD segs go
+        through ``LayeredSegmentation``).
+
+        Args:
+            file_path: NIfTI or NRRD path.
+            index: Slice index along ``axis``.
+            axis: Axis to slice (default 2 = axial).
+            dtype: Cast the returned slice to this dtype.
+
+        Returns:
+            The 2-D slice as a numpy array.
+        """
+        file_path = Path(file_path)
+        suffixes = file_path.suffixes
+        if ".nii" in suffixes:
+            self.read_nifti(file_path, load_data=False)
+            slicer: list[Any] = [slice(None)] * len(self.shape)
+            slicer[axis] = index
+            arr = np.asarray(self._nifti_image.dataobj[tuple(slicer)])
+        elif ".nrrd" in suffixes:
+            logger.debug(f"read_slice on NRRD {file_path.name}: non-lazy full read then index")
+            self.read_nrrd(file_path, load_data=False)
+            data, _ = nrrd.read(str(file_path))
+            slicer = [slice(None)] * data.ndim
+            slicer[axis] = index
+            arr = data[tuple(slicer)]
+        else:
+            raise ImageError(
+                f"Unsupported file extension for read_slice: {''.join(suffixes)}. "
+                "Supported formats: .nii, .nii.gz, .nrrd"
+            )
+        if dtype is not None:
+            arr = arr.astype(dtype, copy=False)
+        return arr
+
     def save(self, filename: str, directory: Path | None = None) -> Path:
         """Save the image in its original format.
 
