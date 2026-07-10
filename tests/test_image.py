@@ -311,6 +311,34 @@ class TestImage:
         assert img.has_data is True
         assert img.shape == (10, 12, 8)
 
+    def test_dtype_none_returns_float64_regression_guard(self, nifti_path: Path) -> None:
+        """Filtering callers depend on the float64 default staying float64."""
+        img = Image()
+        img.read(nifti_path)  # dtype=None
+        assert img.img.dtype == np.float64
+
+    def test_dtype_int16_casts_and_bypasses_get_fdata(
+        self, nifti_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(self: object, *a: object, **k: object) -> np.ndarray:
+            raise AssertionError("get_fdata() called on a dtype-controlled read")
+
+        monkeypatch.setattr(nibabel.Nifti1Image, "get_fdata", _boom)
+        img = Image()
+        img.read(nifti_path, dtype=np.int16)  # must not touch get_fdata
+        assert img.img.dtype == np.int16
+        assert img.shape == (10, 12, 8)
+
+    def test_dtype_bool_from_nifti(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path, dtype=bool)
+        assert img.img.dtype == np.bool_
+
+    def test_dtype_nrrd_casts_native(self, nrrd_path: Path) -> None:
+        img = Image()
+        img.read(nrrd_path, dtype=np.uint8)
+        assert img.img.dtype == np.uint8
+
 
 # ---------------------------------------------------------------------------
 # DICOM volume tests
