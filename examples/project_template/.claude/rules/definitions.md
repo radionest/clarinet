@@ -3,17 +3,17 @@ paths:
   - "plan/definitions/**"
 ---
 
-# Раздел `plan/definitions/`
+# The `plan/definitions/` section
 
-Единственное место в проекте, где объявляются `FileDef` и `RecordDef`. Один файл — `record_types.py`, путь к нему зашит в `settings.toml` (`config_record_types_file`).
+The only place in the project where `FileDef` and `RecordDef` are declared. One file — `record_types.py` — whose path is set in `settings.toml` (`config_record_types_file`).
 
 ```python
 from clarinet.flow import FileDef, FileRef, RecordDef
 ```
 
-Эти три класса полностью описывают типы файлов и шагов workflow. Вся логика поведения (триггеры, действия, валидация) живёт в других разделах.
+These three classes fully describe the file types and workflow steps. All behavioral logic (triggers, actions, validation) lives in other sections.
 
-## `FileDef` — описание файла
+## `FileDef` — file description
 
 ```python
 master_model = FileDef(
@@ -23,49 +23,49 @@ master_model = FileDef(
 )
 ```
 
-| Поле | Тип | Назначение |
+| Field | Type | Purpose |
 |---|---|---|
-| `pattern` | `str` | Имя файла или шаблон с плейсхолдерами |
-| `level` | `"PATIENT"` / `"STUDY"` / `"SERIES"` | Уровень DICOM-иерархии, в working folder которого лежит файл |
-| `multiple` | `bool` | `True` — glob-коллекция, `False` — один файл |
-| `description` | `str` | Документация для агента и UI |
-| `name` | `str` | Автогенерируется из имени переменной (`master_model`); можно задать явно |
+| `pattern` | `str` | File name or a template with placeholders |
+| `level` | `"PATIENT"` / `"STUDY"` / `"SERIES"` | DICOM hierarchy level whose working folder holds the file |
+| `multiple` | `bool` | `True` — a glob collection, `False` — a single file |
+| `description` | `str` | Documentation for the agent and the UI |
+| `name` | `str` | Auto-generated from the variable name (`master_model`); can be set explicitly |
 
-### Плейсхолдеры в `pattern`
+### Placeholders in `pattern`
 
-| Плейсхолдер | Значение |
+| Placeholder | Value |
 |---|---|
-| `{patient_id}`, `{study_uid}`, `{series_uid}` | Идентификаторы из DICOM-иерархии (анонимизированные) |
-| `{user_id}` | ID пользователя, создавшего запись (для файлов «по врачу») |
-| `{origin_type}` | `record.record_type_name` — позволяет именовать файлы по типу записи-источника |
-| `{data.FIELD}` | Поле из `record.data` |
+| `{patient_id}`, `{study_uid}`, `{series_uid}` | Identifiers from the DICOM hierarchy (anonymized) |
+| `{user_id}` | ID of the user who created the record (for "per-doctor" files) |
+| `{origin_type}` | `record.record_type_name` — lets you name files after the originating record type |
+| `{data.FIELD}` | A field from `record.data` |
 
-Подробности резолвинга паттернов — в `<clarinet>/clarinet/.claude/rules/file-registry.md`.
+Pattern-resolution details are in `<clarinet>/clarinet/.claude/rules/file-registry.md`.
 
-### Семантика `level`
+### `level` semantics
 
-- **PATIENT** — файл лежит в `<storage>/<patient_id>/`. Доступен из любых записей пациента (мастер-модели, общие референсы).
-- **STUDY** — файл в `<storage>/<patient_id>/<study_uid>/`. Используется для study-level артефактов (сегментации одного study).
-- **SERIES** — файл в `<storage>/<patient_id>/<study_uid>/<series_uid>/`. Используется для series-level артефактов (NIfTI-volumes, проекции).
+- **PATIENT** — the file lives in `<storage>/<patient_id>/`. Available to any of the patient's records (master models, shared references).
+- **STUDY** — the file lives in `<storage>/<patient_id>/<study_uid>/`. Used for study-level artifacts (single-study segmentations).
+- **SERIES** — the file lives in `<storage>/<patient_id>/<study_uid>/<series_uid>/`. Used for series-level artifacts (NIfTI volumes, projections).
 
-Уровень файла должен быть **не глубже** уровня записи, которая на него ссылается. PATIENT-файл доступен всем; SERIES-файл — только SERIES-записям.
+A file's level must be **no deeper** than the level of the record referencing it. A PATIENT file is available to everyone; a SERIES file is available only to SERIES records.
 
-## `FileRef` — привязка файла к RecordDef
+## `FileRef` — binding a file to a RecordDef
 
 ```python
-FileRef(segmentation, "output")     # Позиционно
-FileRef(segmentation, role="input") # Именованно
+FileRef(segmentation, "output")     # positional
+FileRef(segmentation, role="input") # named
 ```
 
-| Поле | Тип | Назначение |
+| Field | Type | Purpose |
 |---|---|---|
-| `file` | `FileDef` | Ссылка на FileDef-объект, объявленный выше в этом же файле |
-| `role` | `"input"` / `"output"` / `"intermediate"` | Семантика: входной (требуется до выполнения) / выходной (создаётся) / промежуточный |
-| `required` | `bool` (default `True`) | Должен ли файл существовать к моменту финализации записи |
+| `file` | `FileDef` | Reference to a `FileDef` object declared earlier in the same file |
+| `role` | `"input"` / `"output"` / `"intermediate"` | Semantics: input (required before execution) / output (created) / intermediate |
+| `required` | `bool` (default `True`) | Whether the file must exist by the time the record is finalized |
 
-`output_file` в Slicer-скрипте — это путь к **первому** `FileRef` с `role="output"` из списка `RecordDef.files`.
+`output_file` in a Slicer script is the path to the **first** `FileRef` with `role="output"` from `RecordDef.files`.
 
-## `RecordDef` — описание типа записи
+## `RecordDef` — record-type description
 
 ```python
 segment_ct = RecordDef(
@@ -80,56 +80,56 @@ segment_ct = RecordDef(
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation, "output")],
-    data_schema="schemas/segment-ct.schema.json",  # необязательно
+    data_schema="schemas/segment-ct.schema.json",  # optional
 )
 ```
 
-### Обязательные поля
+### Required fields
 
-| Поле | Описание |
+| Field | Description |
 |---|---|
-| `name` | kebab-case, 5-30 символов. Идентификатор в DSL и URL. |
+| `name` | kebab-case, 5-30 characters. The identifier used in the DSL and the URL. |
 | `level` | `"PATIENT"` / `"STUDY"` / `"SERIES"` |
 
-### Опциональные поля
+### Optional fields
 
-| Поле | Описание |
+| Field | Description |
 |---|---|
-| `description` | Подробное описание для агента и UI |
-| `label` | Короткое название для UI |
-| `role` (alias `role_name`) | Кто исполняет: `"doctor"`, `"auto"`, `"expert"`, или кастомная роль из `extra_roles` |
-| `min_records`, `max_records` | Сколько записей этого типа должно/может существовать на свой parent |
-| `files` | `list[FileRef(...)]` — связь с `FileDef` |
-| `data_schema` | Путь `"schemas/X.schema.json"` или inline `dict`. Путь — относительно `config_tasks_path` (то есть `plan/`). Общие под-схемы можно вынести в отдельный файл и подключать из любых схем через `$ref` — см. раздел `schemas` |
-| `slicer_script` | Путь к Slicer-скрипту: `"scripts/segment.py"` |
-| `slicer_result_validator` | Путь к валидатору: `"validators/segment_validator.py"` |
-| `slicer_context_hydrators` | `list[str]` — имена hydrator-функций, инжектирующих переменные в Slicer |
-| `slicer_script_args` | `dict[str, Any]` — статические константы, доступные в Slicer-скрипте |
+| `description` | Detailed description for the agent and the UI |
+| `label` | Short display name for the UI |
+| `role` (alias `role_name`) | Who performs it: `"doctor"`, `"auto"`, `"expert"`, or a custom role from `extra_roles` |
+| `min_records`, `max_records` | How many records of this type must/may exist per parent |
+| `files` | `list[FileRef(...)]` — link to `FileDef` |
+| `data_schema` | A `"schemas/X.schema.json"` path or an inline `dict`. The path is relative to `config_tasks_path` (i.e. `plan/`). Shared sub-schemas can be extracted into a separate file and pulled into any schema via `$ref` — see the `schemas` section |
+| `slicer_script` | Path to the Slicer script: `"scripts/segment.py"` |
+| `slicer_result_validator` | Path to the validator: `"validators/segment_validator.py"` |
+| `slicer_context_hydrators` | `list[str]` — names of hydrator functions that inject variables into Slicer |
+| `slicer_script_args` | `dict[str, Any]` — static constants available in the Slicer script |
 
-## Связи между разделами
+## Links between sections
 
-`RecordDef` ссылается на файлы из других разделов проекта по конвенции:
+`RecordDef` references files in other project sections by convention:
 
-| Поле | Куда ссылается |
+| Field | What it points to |
 |---|---|
-| `slicer_script="scripts/X.py"` | Файл в `plan/scripts/` |
-| `slicer_result_validator="validators/X.py"` | Файл в `plan/validators/` |
-| `slicer_context_hydrators=["name"]` | Декоратор `@slicer_context_hydrator("name")` в `plan/slicer_hydrators.py` |
-| `data_schema="schemas/X.schema.json"` | Файл в `plan/schemas/` |
-| `files=[FileRef(file_def, ...)]` | `FileDef`, объявленный выше в `record_types.py` |
-| `role="custom_role"` | Должна быть в `extra_roles` в `settings.toml` |
+| `slicer_script="scripts/X.py"` | A file in `plan/scripts/` |
+| `slicer_result_validator="validators/X.py"` | A file in `plan/validators/` |
+| `slicer_context_hydrators=["name"]` | The `@slicer_context_hydrator("name")` decorator in `plan/slicer_hydrators.py` |
+| `data_schema="schemas/X.schema.json"` | A file in `plan/schemas/` |
+| `files=[FileRef(file_def, ...)]` | A `FileDef` declared earlier in `record_types.py` |
+| `role="custom_role"` | Must be present in `extra_roles` in `settings.toml` |
 
-Все пути относительны `config_tasks_path` (`plan/`), а не текущего файла `record_types.py`.
+All paths are relative to `config_tasks_path` (`plan/`), not to the current `record_types.py` file itself.
 
-## Типичные ошибки
+## Common mistakes
 
-- **Кастомная роль не в `settings.toml`**. `RecordDef(role="surgeon")` без `extra_roles = [..., "surgeon"]` упадёт при загрузке конфига.
-- **Путь к схеме относительно definitions/**. `data_schema="../schemas/X.schema.json"` неверно — путь от `plan/`, не от `plan/definitions/`. Правильно: `"schemas/X.schema.json"`.
-- **Slicer-поля без файлов**. Указали `slicer_script="scripts/foo.py"`, но файла нет — конфиг загрузится, но запуск задачи сломается.
-- **`level` файла глубже уровня записи**. SERIES-файл нельзя указать в input для STUDY-записи (она не знает, какую серию читать).
-- **Имя hydrator-а не совпадает с декоратором**. В `RecordDef` указано `slicer_context_hydrators=["best_series"]`, но в коде — `@slicer_context_hydrator("best_series_from_first_check")`. Имена должны быть строго одинаковыми.
+- **A custom role not in `settings.toml`**. `RecordDef(role="surgeon")` without `extra_roles = [..., "surgeon"]` will fail during config loading.
+- **A schema path relative to `definitions/`**. `data_schema="../schemas/X.schema.json"` is wrong — the path is relative to `plan/`, not `plan/definitions/`. Correct: `"schemas/X.schema.json"`.
+- **Slicer fields without files**. You set `slicer_script="scripts/foo.py"` but there's no such file — the config loads fine, but the task run will break.
+- **A file's `level` deeper than the record's level**. You can't set a SERIES-level file as input to a STUDY record (it doesn't know which series to read).
+- **Hydrator name doesn't match the decorator**. `RecordDef` specifies `slicer_context_hydrators=["best_series"]`, but the code has `@slicer_context_hydrator("best_series_from_first_check")`. The names must match exactly.
 
-## Полный аннотированный пример
+## Full annotated example
 
 ```python
 from clarinet.flow import FileDef, FileRef, RecordDef
@@ -137,8 +137,8 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 # --- File definitions ---
 
 segmentation = FileDef(
-    pattern="segmentation_{user_id}.seg.nrrd",  # имя зависит от пользователя
-    level="STUDY",                                # лежит в study-папке
+    pattern="segmentation_{user_id}.seg.nrrd",  # name depends on the user
+    level="STUDY",                                # lives in the study folder
     description="Doctor lesion segmentation",
 )
 
@@ -149,22 +149,22 @@ first_check = RecordDef(
     description="Initial study assessment",
     label="First check",
     level="STUDY",
-    role="doctor",                                 # стандартная роль
-    min_records=2,                                 # каждое исследование смотрят 2 врача
+    role="doctor",                                 # standard role
+    min_records=2,                                 # each study is reviewed by 2 doctors
     max_records=2,
-    data_schema="schemas/first-check.schema.json", # относительно plan/
+    data_schema="schemas/first-check.schema.json", # relative to plan/
 )
 
 segment_ct = RecordDef(
     name="segment-ct-single",
     label="CT segment",
     level="STUDY",
-    role="doctor_CT",                              # должна быть в extra_roles
+    role="doctor_CT",                              # must be in extra_roles
     min_records=2,
     max_records=4,
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation, "output")],       # output_file = путь к этому файлу
+    files=[FileRef(segmentation, "output")],       # output_file = path to this file
 )
 ```
