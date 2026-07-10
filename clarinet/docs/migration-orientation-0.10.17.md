@@ -53,3 +53,20 @@ If a volume was correct but a mask drifted onto a divergent earlier-epoch grid, 
 `clarinet.services.image.conform_seg_to_grid(seg_path, grid_path)` to re-align the
 mask to the canonical series volume without re-conversion. This is also the remedy the
 Slicer set-op guard (#415) now points at when it refuses a mismatched input.
+
+## 5. Audit Slicer set-op call sites (#415)
+
+As part of the same fix, `clarinet/services/slicer/helper.py`'s
+`subtract_segmentations` / `binarize_and_split_islands` / `merge_as_pool` now raise
+`SlicerHelperError` by default when a non-empty input segmentation's reference
+geometry differs from the source volume grid, instead of silently re-gridding onto
+it. Genuinely-empty sources are still tolerated.
+
+Review your project's call sites for these three functions:
+
+- If a mismatch there was always a bug (stale/foreign segmentation reaching the
+  set-op), the new default is correct — fix the caller to conform the input first
+  (see step 4) rather than suppress the error.
+- If a call site intentionally relied on the old silent re-grid — e.g. deliberately
+  combining segmentations from a divergent earlier-epoch grid — pass `resample=True`
+  to keep the legacy behavior.
