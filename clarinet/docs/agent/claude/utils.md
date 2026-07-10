@@ -3,61 +3,61 @@ paths:
   - "plan/utils/**"
 ---
 
-# Раздел `plan/utils/`
+# The `plan/utils/` section
 
-Проектно-специфичные helper-модули, используемые pipeline-тасками, валидаторами, скриптами. Этот раздел не управляется фреймворком напрямую — его наполнение и структура полностью на ваше усмотрение, но конвенции ниже помогают сохранять чистоту.
+Project-specific helper modules used by pipeline tasks, validators, and scripts. This section isn't managed directly by the framework — its contents and structure are entirely up to you, but the conventions below help keep it clean.
 
-## Что класть сюда
+## What belongs here
 
-- **Shared-константы**: label-карты сегментов, имена категорий, пороги классификации.
+- **Shared constants**: segment label maps, category names, classification thresholds.
   ```python
   SEG_LABELS: dict[str, int] = {"mts": 1, "unclear": 2, "benign": 3}
   ```
-- **Файловые I/O-обёртки**: чтение/запись `.seg.nrrd` с segment metadata, чтение DICOM-метаданных, парсинг отчётов.
-- **Image-обработка**, не относящаяся к одной конкретной задаче: label converters, connected components, метрики сегментаций (Dice, Hausdorff), морфологические операции.
-- **Чистые helper-функции**, повторяющиеся между несколькими pipeline-тасками или валидаторами.
+- **File I/O wrappers**: reading/writing `.seg.nrrd` with segment metadata, reading DICOM metadata, parsing reports.
+- **Image processing** not tied to one specific task: label converters, connected components, segmentation metrics (Dice, Hausdorff), morphological operations.
+- **Pure helper functions** shared across several pipeline tasks or validators.
 
-## Что НЕ класть
+## What does NOT belong here
 
-- **API-вызовы к clarinet**. Это работа pipeline-таски через `ctx.client` — не helper-а. Helper не должен знать про БД и HTTP.
-- **Slicer-специфичную логику** (`slicer.util.getNode`, manipulation MRML-узлов). Её место — в `plan/scripts/` или `plan/validators/`. Helper в utils может быть импортирован любым модулем, включая Slicer-скрипты, но если он начинает дёргать `slicer` — это уже не helper, а часть Slicer-задачи.
-- **Бизнес-логику workflow** (создание записей, переходы статусов). Её место — в `plan/workflows/pipeline_flow.py`.
+- **API calls to clarinet**. That's the pipeline task's job via `ctx.client` — not a helper's. A helper shouldn't know about the DB or HTTP.
+- **Slicer-specific logic** (`slicer.util.getNode`, MRML node manipulation). That belongs in `plan/scripts/` or `plan/validators/`. A helper in `utils` can be imported by any module, including Slicer scripts, but once it starts touching `slicer` it's no longer a helper — it's part of a Slicer task.
+- **Workflow business logic** (creating records, status transitions). That belongs in `plan/workflows/pipeline_flow.py`.
 
-## Именование и структура
+## Naming and structure
 
-Тематические snake_case-файлы. Жёстких требований нет:
+Topical snake_case files. No hard requirements:
 
 ```
 plan/utils/
-├── __init__.py        # обычно пустой
+├── __init__.py        # usually empty
 ├── seg_utils.py       # read/write .seg.nrrd
-├── constants.py       # label-карты, пороги
+├── constants.py       # label maps, thresholds
 ├── image_io.py        # NIfTI/DICOM helpers
 └── metrics.py         # Dice, IoU, Hausdorff
 ```
 
-## Импорты из других разделов
+## Imports from other sections
 
-`plan/` доступен как пакет `clarinet_plan` (единственный корень — `config_tasks_path`); все импорты идут через этот префикс, `sys.path` фреймворк не трогает:
+`plan/` is available as the `clarinet_plan` package (single root — `config_tasks_path`); all imports go through this prefix, and the framework doesn't touch `sys.path`:
 
 ```python
-# В pipeline_flow.py (workflows/ — recordflow_paths)
+# In pipeline_flow.py (workflows/ — recordflow_paths)
 from clarinet_plan.utils.seg_utils import save_seg_nrrd, master_label_converter
 from clarinet_plan.definitions.record_types import master_model
-# внутри одного подпакета допустимы относительные: from ..utils.seg_utils import ...
+# relative imports are fine within the same subpackage: from ..utils.seg_utils import ...
 ```
 
-**Slicer-скрипты** (`plan/scripts/`, текст `slicer_result_validator`) исполняются **внутри процесса 3D Slicer**, где пакета `clarinet_plan` НЕТ — они должны быть самодостаточными (нужный helper-код инлайнить, не импортировать из `plan/utils/`). Python-валидаторы record-data (`plan/validators.py`, грузятся фреймворком) могут использовать `from clarinet_plan.utils... import ...`.
+**Slicer scripts** (`plan/scripts/`, and `slicer_result_validator` text) run **inside the 3D Slicer process**, where the `clarinet_plan` package does NOT exist — they must be self-contained (inline any needed helper code, don't import from `plan/utils/`). Python record-data validators (`plan/validators.py`, loaded by the framework) can use `from clarinet_plan.utils... import ...`.
 
-`plan/utils/__init__.py` может быть пустым — наличие файла делает структуру явной и переживает рефакторинги.
+`plan/utils/__init__.py` can be empty — having the file makes the structure explicit and survives refactors.
 
 ---
 
-## Формат `.seg.nrrd` (важный частный случай)
+## The `.seg.nrrd` format (an important special case)
 
-3D Slicer хранит сегментации в NRRD-формате с дополнительными полями в header — имена и label values сегментов. Если ваш проект работает с сегментациями, в `utils/` обычно есть обёртки read/write.
+3D Slicer stores segmentations in NRRD format with extra header fields — segment names and label values. If your project works with segmentations, `utils/` usually has read/write wrappers.
 
-### Обязательные поля header
+### Required header fields
 
 ```python
 header = {
@@ -69,27 +69,27 @@ header = {
 }
 ```
 
-### Метаданные сегментов
+### Segment metadata
 
-Для каждого сегмента (i = 0, 1, ...):
+For each segment (i = 0, 1, ...):
 
 ```python
 header[f"Segment{i}_ID"] = f"Segment_{i}"
-header[f"Segment{i}_Name"] = name           # имя для UI
-header[f"Segment{i}_LabelValue"] = str(lbl) # int label в массиве
-header[f"Segment{i}_Layer"] = "0"           # обычно "0"
+header[f"Segment{i}_Name"] = name           # name shown in the UI
+header[f"Segment{i}_LabelValue"] = str(lbl) # integer label in the array
+header[f"Segment{i}_Layer"] = "0"           # usually "0"
 ```
 
 ### Label converter
 
-Функция `(segment_name: str) -> int`, маппит имя в integer label value. Простейший случай — численные имена (`"1"` → `1`):
+A `(segment_name: str) -> int` function that maps a name to an integer label value. The simplest case is numeric names (`"1"` → `1`):
 
 ```python
 def master_label_converter(name: str) -> int:
     return int(name)
 ```
 
-Для категорий (`"mts"` → `1`):
+For categories (`"mts"` → `1`):
 
 ```python
 SEG_LABELS = {"mts": 1, "unclear": 2, "benign": 3}
@@ -97,7 +97,7 @@ def category_converter(name: str) -> int:
     return SEG_LABELS[name]
 ```
 
-### Минимальный read/write
+### Minimal read/write
 
 ```python
 import nrrd
@@ -139,16 +139,16 @@ def read_seg_nrrd_labels(path: str) -> dict[int, str]:
     return labels
 ```
 
-### Альтернатива: `clarinet.services.image.Segmentation`
+### Alternative: `clarinet.services.image.Segmentation`
 
-Фреймворк предоставляет numpy/nrrd-обёртку — её часто проще использовать, чем писать своё:
+The framework provides a numpy/nrrd wrapper — it's often simpler to use than rolling your own:
 
 ```python
 from clarinet.services.image import Segmentation
 
 seg = Segmentation(autolabel=False)
 seg.read(path)
-seg.img         # numpy 3D-массив
+seg.img         # 3D numpy array
 seg.spacing     # voxel spacing
 seg._origin
 seg._direction
@@ -156,4 +156,4 @@ seg.count       # voxel count
 seg.difference(other_seg, max_overlap_ratio=0.05)
 ```
 
-Используйте `Segmentation` для чтения и базовых операций; `seg_utils.save_seg_nrrd` — для записи с кастомными именами и label converter-ами, когда `Segmentation.write()` не подходит.
+Use `Segmentation` for reading and basic operations; `seg_utils.save_seg_nrrd` for writing with custom names and label converters, when `Segmentation.write()` doesn't fit.

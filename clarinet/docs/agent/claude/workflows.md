@@ -3,16 +3,16 @@ paths:
   - "plan/workflows/**"
 ---
 
-# Раздел `plan/workflows/`
+# The `plan/workflows/` section
 
-Содержит файлы вида `*_flow.py` (по умолчанию `pipeline_flow.py`), путь зашит в `settings.toml` (`recordflow_paths`). Каждый файл — две вещи в одном:
+Contains files shaped like `*_flow.py` (`pipeline_flow.py` by default), whose path is set in `settings.toml` (`recordflow_paths`). Each file is two things in one:
 
-1. **Pipeline-таски** — функции с декоратором `@pipeline_task`, выполняющиеся в воркерах TaskIQ.
-2. **RecordFlow DSL** — декларативные правила, связывающие триггеры событий с действиями (создание записи, запуск таски, инвалидация).
+1. **Pipeline tasks** — functions decorated with `@pipeline_task`, running in TaskIQ workers.
+2. **RecordFlow DSL** — declarative rules linking event triggers to actions (creating a record, running a task, invalidation).
 
-## Структура файла `pipeline_flow.py`
+## Structure of `pipeline_flow.py`
 
-Канонический порядок:
+Canonical order:
 
 ```python
 from __future__ import annotations
@@ -26,52 +26,52 @@ from clarinet_plan.definitions.record_types import segmentation, master_model
 
 F = Field()
 
-# 2. Pipeline task functions (все @pipeline_task вверху)
+# 2. Pipeline task functions (all @pipeline_task at the top)
 @pipeline_task()
 def my_task(...): ...
 
-# 3. Async callback functions для .call(...)
+# 3. Async callback functions for .call(...)
 async def my_callback(record, context, client): ...
 
-# 4. Flow declarations (по одной в скобках)
+# 4. Flow declarations (one per set of parentheses)
 (record("foo").on_finished().do_task(my_task))
 (record("bar").on_finished().call(my_callback))
 ```
 
-`plan/` доступен как пакет `clarinet_plan` (единственный корень — `config_tasks_path`); импортируйте record types через `clarinet_plan.definitions.record_types`. Внутри `workflows/` допустимы относительные импорты (`from .tasks import ...`). `sys.path` не используется. Кросс-flow импорты работают в любом порядке файлов.
+`plan/` is available as the `clarinet_plan` package (single root — `config_tasks_path`); import record types via `clarinet_plan.definitions.record_types`. Relative imports are allowed within `workflows/` (`from .tasks import ...`). `sys.path` is not used. Cross-flow imports work regardless of file order.
 
 ---
 
-## Часть A — Pipeline-таски (`@pipeline_task`)
+## Part A — Pipeline tasks (`@pipeline_task`)
 
-### Когда pipeline task, а когда RecordFlow action
+### Pipeline task vs. RecordFlow action
 
-- **Pipeline task** — долгая или тяжёлая работа, которую нужно изолировать в воркер: загрузка из PACS, конвертация DICOM → NIfTI, обработка изображений (skimage, SimpleITK), GPU-инференс, вызовы внешних API.
-- **RecordFlow action** (`create_record`, `update_record`, `invalidate_records`) — быстрая декларативная связка, выполняющаяся синхронно при срабатывании триггера.
+- **Pipeline task** — long or heavy work that needs to be isolated in a worker: loading from PACS, DICOM → NIfTI conversion, image processing (skimage, SimpleITK), GPU inference, calls to external APIs.
+- **RecordFlow action** (`create_record`, `update_record`, `invalidate_records`) — a fast declarative hookup that runs synchronously when the trigger fires.
 
-Если шаг занимает <50ms и не делает I/O — это action. Если читает файлы, дёргает БД, считает что-то на массивах — это task.
+If a step takes <50ms and does no I/O, it's an action. If it reads files, hits the DB, or crunches arrays, it's a task.
 
-### Декоратор
+### Decorator
 
 ```python
 @pipeline_task(queue="clarinet.dicom", auto_submit=False)
 async def my_task(msg: PipelineMessage, ctx: TaskContext) -> None: ...
 ```
 
-| Параметр | Назначение |
+| Parameter | Purpose |
 |---|---|
-| `queue` | Очередь TaskIQ. По умолчанию `"default"`. Встроенные: `"clarinet.dicom"` (DICOM-задачи). Можно завести свою через `pipeline_default_timeout` etc. в settings. |
-| `auto_submit` | Если `True` и таска возвращает `dict`, фреймворк автоматически вызовет `submit_record_data(msg.record_id, result)`. Удобно для коротких чистых функций. |
+| `queue` | The TaskIQ queue. Defaults to `"default"`. Built-in: `"clarinet.dicom"` (DICOM tasks). You can set up your own via `pipeline_default_timeout` etc. in settings. |
+| `auto_submit` | If `True` and the task returns a `dict`, the framework automatically calls `submit_record_data(msg.record_id, result)`. Convenient for short, pure functions. |
 
 ### Async vs sync
 
-- **Async** — для I/O, HTTP, БД, всех вызовов `ctx.client.*` и `ctx.records.*`. Получает `TaskContext`.
-- **Sync** — для CPU-bound работы (skimage, SimpleITK, vtk, blocking-библиотек). Получает `SyncTaskContext`. Фреймворк автоматически детектит sync-функцию и запускает её в треде, чтобы не блокировать event loop.
+- **Async** — for I/O, HTTP, DB, and all `ctx.client.*` / `ctx.records.*` calls. Receives `TaskContext`.
+- **Sync** — for CPU-bound work (skimage, SimpleITK, vtk, blocking libraries). Receives `SyncTaskContext`. The framework automatically detects a sync function and runs it in a thread so it doesn't block the event loop.
 
 ```python
 @pipeline_task()
 async def fetch_dicom(msg: PipelineMessage, ctx: TaskContext) -> None:
-    """Async — IO/HTTP/БД."""
+    """Async — I/O/HTTP/DB."""
     ...
 
 @pipeline_task()
@@ -88,31 +88,31 @@ class PipelineMessage:
     study_uid: str | None
     series_uid: str | None
     record_id: int | None
-    pipeline_id: str | None  # имя pipeline (для многошаговых)
+    pipeline_id: str | None  # pipeline name (for multi-step pipelines)
     step_index: int | None
-    payload: dict[str, Any]  # любые kwargs из .do_task(task, foo=bar)
+    payload: dict[str, Any]  # any kwargs from .do_task(task, foo=bar)
 ```
 
-Какие поля заполнены — зависит от триггера в DSL: `record("X").on_finished().do_task(my_task)` передаст `record_id` + поля DICOM-иерархии этой записи.
+Which fields are populated depends on the DSL trigger: `record("X").on_finished().do_task(my_task)` will pass `record_id` plus that record's DICOM-hierarchy fields.
 
-### Контексты задачи
+### Task contexts
 
-`TaskContext` (async) и `SyncTaskContext` (sync) дают доступ к:
+`TaskContext` (async) and `SyncTaskContext` (sync) give access to:
 
 #### `ctx.files` — `Files`
 
 ```python
-ctx.files.resolve(file_def) -> Path        # абсолютный путь к файлу
-ctx.files.exists(file_def) -> bool         # существует ли файл
-ctx.files.glob(file_def) -> list[Path]     # все файлы glob-коллекции (multiple=True)
-ctx.files.dir() -> Path                    # рабочая папка записи (на её уровне)
+ctx.files.resolve(file_def) -> Path        # absolute path to the file
+ctx.files.exists(file_def) -> bool         # does the file exist
+ctx.files.glob(file_def) -> list[Path]     # all files in a glob collection (multiple=True)
+ctx.files.dir() -> Path                    # the record's working folder (at its own level)
 ```
 
-`resolve`/`exists`/`glob` принимают `FileDef`-объект (импортированный из `record_types.py`) или строку с `name`.
+`resolve`/`exists`/`glob` accept either a `FileDef` object (imported from `record_types.py`) or a string `name`.
 
-`ctx.files` — экземпляр `Files`, привязанный к **собственной** записи таски
-(`msg.record_id`). Чтобы получить пути файлов **другой** записи, которая уже у вас
-на руках (родитель, перечитанная копия, запись другого пациента), используйте
+`ctx.files` is a `Files` instance bound to the task's **own** record
+(`msg.record_id`). To get file paths for **another** record you already have
+in hand (a parent, a re-fetched copy, another patient's record), use
 `ctx.files_for(record)`:
 
 ```python
@@ -122,33 +122,35 @@ if parents:
     mask = parent_files.resolve("liver_mask")
 ```
 
-`ctx.files_for` есть и в `TaskContext` (async), и в `SyncTaskContext` (sync) — это
-обёртка над конструктором `Files(record)` **без `parent`**. Сам `ctx.files`
-фреймворк строит как `Files(record, parent=parent)`, поэтому плейсхолдеры с
-fallback на родителя (`{user_id}`, `{origin_type}`, merge `{data.FIELD}`) у
-`ctx.files_for` могут резолвиться иначе — если parent-fallback нужен, постройте
-фасад сами: `Files(record, parent=parent_record)`. Тот же фасад доступен и вне
-таски (standalone-скрипты без `ctx`):
+`ctx.files_for` exists on both `TaskContext` (async) and `SyncTaskContext`
+(sync) — it's a wrapper around the `Files(record)` constructor **without**
+`parent`. The framework itself builds `ctx.files` as
+`Files(record, parent=parent)`, so placeholders that fall back to the parent
+(`{user_id}`, `{origin_type}`, merged `{data.FIELD}`) may resolve differently
+via `ctx.files_for` — if you need parent-fallback, build the facade yourself:
+`Files(record, parent=parent_record)`. The same facade is also available
+outside a task (standalone scripts without `ctx`):
 
 ```python
 from clarinet.files import Files
 
-files = Files(record)  # резолвер по записи (file-registry + working dirs)
+files = Files(record)  # resolver for a record (file-registry + working dirs)
 ```
 
-`Files(...)` принимает `RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead`.
-File-registry (а значит резолвинг по строке-имени, `resolve("mask")`) есть только
-у `RecordRead`; `resolve(file_def)` с самим `FileDef`-объектом и `.dir()` работают
-для любой сущности, чей уровень известен. Для поиска файла **по критериям**
-(а не по готовой записи) используйте `ctx.records.file_path(...)`.
+`Files(...)` accepts `RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead`.
+The file-registry (and hence resolving by string name, `resolve("mask")`) is
+only available on `RecordRead`; `resolve(file_def)` with the `FileDef` object
+itself, and `.dir()`, work for any entity whose level is known. To find a file
+**by criteria** (rather than from an already-fetched record), use
+`ctx.records.file_path(...)`.
 
-`Files(record)` работает в строгом режиме: для ещё не анонимизированной записи
-`AnonPathError` бросается уже **при создании** фасада (в конструкторе, не в
-`.resolve()`) — оборачивать в try/except нужно сам вызов `Files(record)`. Если
-нужен доступ к неанонимизированной раскладке
-(UX-превью, миграционные скрипты), стройте фасад в lenient-режиме —
-`Files(record, fallback=True)` либо `Files.for_reader(record)` (пробует строгий
-режим, при `AnonPathError` пересобирает с fallback на сырые UID).
+`Files(record)` runs in strict mode: for a not-yet-anonymized record,
+`AnonPathError` is raised already **at construction time** (in the
+constructor, not in `.resolve()`) — you need to wrap the `Files(record)` call
+itself in try/except. If you need access to the non-anonymized layout
+(UX previews, migration scripts), build the facade in lenient mode —
+`Files(record, fallback=True)` or `Files.for_reader(record)` (tries strict
+mode first, and on `AnonPathError` rebuilds with a raw-UID fallback).
 
 #### `ctx.records` — `RecordQuery`
 
@@ -160,17 +162,17 @@ await ctx.records.find(
 )  # -> list[RecordRead]
 ```
 
-Sync-вариант — без `await`.
+The sync variant — without `await`.
 
 #### `ctx.client` — `ClarinetClient`
 
-HTTP-клиент к собственному API проекта. Основные методы (полный список — в `clarinet/client.py`):
+An HTTP client to the project's own API. Main methods (full list — in `clarinet/client.py`):
 
 ```python
 await ctx.client.get_record(record_id)
 await ctx.client.find_records(record_type_name="segment-ct-single", **filters)
-# find_records возвращает только первую страницу; для агрегации по пациенту /
-# без series/study-фильтра — iter_records (пагинирует все страницы):
+# find_records only returns the first page; for per-patient aggregation /
+# queries without a series/study filter, use iter_records (paginates all pages):
 records = [r async for r in ctx.client.iter_records(patient_id=...)]
 await ctx.client.create_record(RecordCreate(...))
 await ctx.client.submit_record_data(record_id, data, status="finished")
@@ -182,27 +184,27 @@ await ctx.client.get_study(study_uid)
 await ctx.client.anonymize_patient(patient_id)
 ```
 
-Sync-аналог — `SyncPipelineClient` через `ctx.client` в sync-задачах.
+The sync counterpart — `SyncPipelineClient` via `ctx.client` in sync tasks.
 
-### Идемпотентность — обязательный контракт
+### Idempotency — a mandatory contract
 
-Каждая таска должна быть **идемпотентной**: повторный вызов с тем же сообщением не должен ничего ломать. Стандартный паттерн:
+Every task must be **idempotent**: calling it again with the same message must not break anything. Standard pattern:
 
 ```python
 @pipeline_task()
 def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
     if ctx.files.exists(master_model):
-        return  # уже сделано — выходим
+        return  # already done — exit
     ...
     save_seg_nrrd(...)
 ```
 
-Причины:
-- Воркер может ретраить таску при сбое (`pipeline_retry_count`, `pipeline_retry_delay`).
-- Cascade-инвалидация может пересоздать запись и снова поставить таску в очередь.
-- Ручной перезапуск pipeline для отладки.
+Reasons:
+- A worker may retry a task on failure (`pipeline_retry_count`, `pipeline_retry_delay`).
+- Cascade invalidation can recreate a record and re-queue the task.
+- Manual pipeline restarts for debugging.
 
-### Логирование
+### Logging
 
 ```python
 from clarinet.utils.logger import logger
@@ -210,21 +212,21 @@ logger.info(f"Processing record {msg.record_id}")
 logger.error(f"Failed to read {seg_path}: {exc}")
 ```
 
-Только f-strings, никогда `print()`, никогда `import loguru`.
+Only f-strings, never `print()`, never `import loguru`.
 
-### Встроенные таски
+### Built-in tasks
 
-- `convert_series_to_nifti` — конвертация DICOM-серии в NIfTI через C-GET. Очередь `clarinet.dicom`. Идемпотентна (проверяет `volume.nii.gz`).
-- `_convert_series_impl(msg, ctx)` — внутренняя функция для прямого использования внутри пользовательских задач (если нужно сразу в одной таске и подгрузить NIfTI, и сделать что-то ещё).
+- `convert_series_to_nifti` — converts a DICOM series to NIfTI via C-GET. Queue `clarinet.dicom`. Idempotent (checks `volume.nii.gz`).
+- `_convert_series_impl(msg, ctx)` — the internal function for direct use inside custom tasks (if you need to both load NIfTI and do something else in a single task).
 
-Имя пользовательской таски не должно совпадать со встроенной — иначе `register_task()` поднимет `PipelineConfigError`.
+A custom task's name must not collide with a built-in one — otherwise `register_task()` raises `PipelineConfigError`.
 
-### Минимальный пример
+### Minimal example
 
 ```python
 @pipeline_task()
 def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
-    """Создание мастер-модели по первой завершённой сегментации."""
+    """Create the master model from the first completed segmentation."""
     if ctx.files.exists(master_model):
         return
 
@@ -240,66 +242,66 @@ def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
 
 ---
 
-## Часть B — RecordFlow DSL
+## Part B — RecordFlow DSL
 
-> Полная справка по DSL — `{{CLARINET_DOCS}}/recordflow-dsl.md`. Здесь — компактный обзор для повседневной работы.
+> Full DSL reference — `{{CLARINET_DOCS}}/recordflow-dsl.md`. Here's a compact overview for everyday use.
 
-### Триггеры
+### Triggers
 
 ```python
-study().on_creation()        # пришло новое исследование
-series().on_creation()       # появилась новая серия
-patient().on_creation()      # новый пациент
+study().on_creation()        # a new study arrived
+series().on_creation()       # a new series appeared
+patient().on_creation()      # a new patient
 
-record("type-name").on_status("pending")    # запись перешла в данный статус
-record("type-name").on_finished()            # alias для on_status("finished")
-record("type-name").on_data_update()         # PATCH данных уже finished записи
+record("type-name").on_status("pending")    # a record transitioned to this status
+record("type-name").on_finished()            # alias for on_status("finished")
+record("type-name").on_data_update()         # PATCH of data on an already-finished record
 
-file(file_def).on_update()    # файл изменился (для cascade-инвалидации)
+file(file_def).on_update()    # the file changed (for cascade invalidation)
 ```
 
-`file(...)` принимает `FileDef`-объект или строку с `name`. Источник file-событий — `@pipeline_task` через middleware checksum-сравнения.
+`file(...)` accepts either a `FileDef` object or a string `name`. The source of file events is `@pipeline_task`, via checksum-comparison middleware.
 
-`on_status("pending")` срабатывает и при hard-инвалидации записи, которая уже была в `pending` — повторная инвалидация перезапускает флоу. Все действия таких флоу (`.do_task`, `.call`, и особенно `.add_record`) обязаны быть идемпотентными. Взаимные hard-инвалидации (A↔B или записи одного типа друг друга) — ошибка конфигурации: движок рвёт цикл с ERROR-логом `Invalidation cycle detected`.
+`on_status("pending")` also fires on hard invalidation of a record that was already `pending` — re-invalidating it restarts the flow. All actions in such flows (`.do_task`, `.call`, and especially `.add_record`) must be idempotent. Mutual hard invalidations (A↔B, or records of the same type invalidating each other) are a configuration error: the engine breaks the cycle and logs an ERROR, `Invalidation cycle detected`.
 
-### Условия
+### Conditions
 
 ```python
 F = Field()
 
-# Сравнение полей record.data
+# Comparing record.data fields
 .if_record(F.is_good == True)
-.if_record(F.confidence < 0.7, F.modality == "CT")  # AND-семантика
+.if_record(F.confidence < 0.7, F.modality == "CT")  # AND semantics
 .if_record(F.x == y, on_missing="raise")             # default "skip" → False
 
-# Pattern matching по полю
+# Pattern matching on a field
 .match(F.study_type)
     .case("CT").create_record("segment-ct")
     .case("MRI").create_record("segment-mri")
     .default().create_record("segment-unknown")
 ```
 
-`.match()` поглощает предыдущий `.if_record()` как guard. Stop-on-first-match. `.default()` срабатывает, только если ни один `case` не подошёл и guard истинен.
+`.match()` absorbs the preceding `.if_record()` as a guard. Stop-on-first-match. `.default()` fires only if no `case` matched and the guard is true.
 
-### Действия
+### Actions
 
 ```python
-.create_record("type1", "type2", inherit_user=False)   # одну или несколько
-.do_task(my_task, extra_payload_key="value")           # запустить @pipeline_task
-.pipeline("named_pipeline", **payload)                 # запустить named pipeline
-.call(async_callback)                                  # вызвать async-функцию
-.invalidate_records("type1", "type2", mode="hard")     # каскадная инвалидация
-.invalidate_all_records("type")                        # alias для одного типа
+.create_record("type1", "type2", inherit_user=False)   # one or several
+.do_task(my_task, extra_payload_key="value")           # run a @pipeline_task
+.pipeline("named_pipeline", **payload)                 # run a named pipeline
+.call(async_callback)                                  # call an async function
+.invalidate_records("type1", "type2", mode="hard")     # cascading invalidation
+.invalidate_all_records("type")                        # alias for a single type
 ```
 
 #### `.do_task` vs `.pipeline`
 
-- `.do_task(func)` — для однотшаговой задачи. Фреймворк автоматически создаёт одношаговый pipeline `_task:func_name` и дедуплицирует.
-- `.pipeline("name")` — для именованного многошагового pipeline (если вы построили `Pipeline("name").step(...).step(...)` в коде).
+- `.do_task(func)` — for a single-step job. The framework automatically creates a one-step pipeline `_task:func_name` and deduplicates it.
+- `.pipeline("name")` — for a named multi-step pipeline (if you've built `Pipeline("name").step(...).step(...)` in code).
 
-#### `.call(callback)` — когда DSL не хватает
+#### `.call(callback)` — when the DSL isn't enough
 
-Используется, когда нужен `parent_record_id` или сложная логика, не выражаемая в DSL:
+Used when you need `parent_record_id` or logic too complex to express in the DSL:
 
 ```python
 async def create_comparison_record(
@@ -310,7 +312,7 @@ async def create_comparison_record(
     await client.create_record(
         RecordCreate(
             record_type_name="compare-with-projection",
-            parent_record_id=record.id,  # привязка к триггеру как parent
+            parent_record_id=record.id,  # link to the trigger as parent
             patient_id=record.patient_id,
             study_uid=record.study_uid,
             series_uid=record.series_uid,
@@ -322,7 +324,7 @@ async def create_comparison_record(
 
 ### Cross-record references
 
-Сравнение полей **разных** записей (не self-referential):
+Comparing fields across **different** records (not self-referential):
 
 ```python
 record("ai-analysis").on_finished().if_(
@@ -330,15 +332,15 @@ record("ai-analysis").on_finished().if_(
 ).create_record("expert-check")
 ```
 
-`record("type").data.X` создаёт side-effect FlowRecord, который движок резолвит при оценке условия.
+`record("type").data.X` creates a side-effect FlowRecord that the engine resolves when evaluating the condition.
 
-### Типичные паттерны
+### Common patterns
 
 ```python
-# 1. На поступление исследования — создать первичный осмотр
+# 1. When a study arrives — create the initial check
 (study().on_creation().create_record("first-check"))
 
-# 2. После first-check — ветвление по типу исследования
+# 2. After first-check — branch by study type
 (
     record("first-check").on_finished()
     .if_record(F.is_good == True)
@@ -347,10 +349,10 @@ record("ai-analysis").on_finished().if_(
     .case("MRI").create_record("segment-mri-single")
 )
 
-# 3. Сегментация → автоматическое сравнение
+# 3. Segmentation → automatic comparison
 (record("segment-ct-single").on_finished().call(create_comparison_record))
 (record("compare-with-projection").on_status("pending").do_task(compare_w_projection))
 
-# 4. Cascade-инвалидация при изменении мастер-модели
+# 4. Cascade invalidation when the master model changes
 (file(master_model).on_update().invalidate_all_records("create-master-projection"))
 ```

@@ -1,46 +1,46 @@
 # Clarinet Research Project
 
-Это шаблон клинико-радиологического исследования на фреймворке [clarinet](https://github.com/radionest/clarinet). Документ всегда загружается в контекст агента и даёт обзор проекта; детали по каждому разделу — в `.claude/rules/clarinet/*.md` (автоматически подключаются при редактировании файлов в соответствующих папках).
+This is a clinical/radiology research project template built on the [clarinet](https://github.com/radionest/clarinet) framework. This document is always loaded into the agent's context and gives a project overview; details for each section are in `.claude/rules/clarinet/*.md` (auto-loaded when editing files in the corresponding folders).
 
-> Замените содержимое этого файла под своё исследование (название, описание, спецификации). Структура и API-ссылки ниже остаются актуальными.
+> Replace this file's contents with your own study (name, description, specifics). The structure and API references below stay accurate.
 
-## Что это за проект
+## What this project is
 
-`<Название исследования>` — `<краткое медицинское описание>`. Цель: `<гипотеза / диагностический endpoint>`.
+`<Study name>` — `<short medical description>`. Goal: `<hypothesis / diagnostic endpoint>`.
 
-Источник истины для метаданных проекта — `settings.toml` (имя, описание, base URL, кастомные роли).
+Source of truth for project metadata — `settings.toml` (name, description, base URL, custom roles).
 
-## Архитектура за 30 секунд
+## Architecture in 30 seconds
 
-Clarinet моделирует исследовательский pipeline через четыре сущности:
+Clarinet models a research pipeline through four entities:
 
-- **DICOM-иерархия** Patient → Study → Series — фреймворк сам импортирует исследования из PACS и анонимизирует.
-- **RecordType** — типизированный шаг workflow, привязанный к уровню иерархии (PATIENT/STUDY/SERIES). Описывает: какой роли врача показывать запись, какие файлы создаются как input/output, какая форма данных, какой Slicer-скрипт открывать.
-- **RecordFlow DSL** — декларативная оркестровка переходов между записями: «когда исследование пришло → создать first-check», «когда сегментация завершена → запустить projection и сравнение», «при изменении master-модели → инвалидировать зависимые записи».
-- **Pipeline tasks** — асинхронные функции, выполняющиеся в воркерах (RabbitMQ + TaskIQ): тяжёлая работа с DICOM, конвертация в NIfTI, обработка изображений, GPU-инференс.
+- **DICOM hierarchy** Patient → Study → Series — the framework imports studies from PACS and anonymizes them itself.
+- **RecordType** — a typed workflow step, bound to a hierarchy level (PATIENT/STUDY/SERIES). Describes: which doctor role sees the record, which files are created as input/output, what the data form looks like, which Slicer script to open.
+- **RecordFlow DSL** — declarative orchestration of transitions between records: "when a study arrives → create a first-check", "when a segmentation is finished → run projection and comparison", "when the master model changes → invalidate dependent records".
+- **Pipeline tasks** — async functions running in workers (RabbitMQ + TaskIQ): heavy DICOM work, conversion to NIfTI, image processing, GPU inference.
 
-Файлы привязаны к уровню DICOM-иерархии и резолвятся по паттернам с плейсхолдерами (`{study_uid}`, `{user_id}`, ...).
+Files are bound to a DICOM hierarchy level and resolved via patterns with placeholders (`{study_uid}`, `{user_id}`, ...).
 
-## Структура каталогов
+## Directory structure
 
 ```
 plan/
-├── definitions/        # FileDef + RecordDef — единственное место объявления типов
-├── workflows/          # @pipeline_task функции + RecordFlow DSL
-├── slicer_hydrators.py # Async-функции, инжектирующие переменные в Slicer-скрипты
-├── scripts/            # Bare Python-скрипты для 3D Slicer (интерактивная работа)
-├── validators/         # Bare Python-валидаторы, выполняющиеся после Slicer-задачи
-├── schemas/            # JSON Schema для record.data (валидация + UI-формы)
-└── utils/              # Проектно-специфичные helper-модули
+├── definitions/        # FileDef + RecordDef — the only place types are declared
+├── workflows/          # @pipeline_task functions + RecordFlow DSL
+├── slicer_hydrators.py # Async functions injecting variables into Slicer scripts
+├── scripts/            # Bare Python scripts for 3D Slicer (interactive work)
+├── validators/         # Bare Python validators running after a Slicer task
+├── schemas/            # JSON Schema for record.data (validation + UI forms)
+└── utils/              # Project-specific helper modules
 ```
 
-Все файлы `plan/` импортируются как подмодули пакета `clarinet_plan` (единственный корень — `config_tasks_path`), `sys.path` не используется.
+All files under `plan/` are imported as submodules of the `clarinet_plan` package (single root — `config_tasks_path`); `sys.path` is not used.
 
-Каждой подпапке соответствует rule-файл в `.claude/rules/clarinet/` с подробными конвенциями.
+Each subfolder has a corresponding rule file in `.claude/rules/clarinet/` with detailed conventions.
 
-## API clarinet — что откуда импортировать
+## clarinet API — what to import from where
 
-| Что нужно | Откуда |
+| What you need | Where from |
 |---|---|
 | `FileDef`, `FileRef`, `RecordDef` | `clarinet.flow` |
 | `pipeline_task`, `PipelineMessage`, `TaskContext`, `SyncTaskContext` | `clarinet.services.pipeline` |
@@ -48,76 +48,76 @@ plan/
 | `slicer_context_hydrator`, `SlicerHydrationContext` | `clarinet.services.slicer.context_hydration` |
 | `SlicerHelper` | `clarinet.services.slicer.helper` |
 | `ClarinetClient` | `clarinet.client` |
-| `RecordCreate`, `RecordRead`, `RecordStatus` | `clarinet.models` (RecordStatus — из `clarinet.models.base`) |
+| `RecordCreate`, `RecordRead`, `RecordStatus` | `clarinet.models` (`RecordStatus` — from `clarinet.models.base`) |
 | `RecordSearchCriteria` | `clarinet.repositories.record_repository` |
-| `Segmentation` (numpy/nrrd-обёртка) | `clarinet.services.image` |
-| `logger` | `clarinet.utils.logger` (никогда не импортировать loguru напрямую) |
+| `Segmentation` (numpy/nrrd wrapper) | `clarinet.services.image` |
+| `logger` | `clarinet.utils.logger` (never import loguru directly) |
 | `settings` | `clarinet.settings` |
 
-## Ключевые настройки `settings.toml`
+## Key `settings.toml` settings
 
 ```toml
-config_mode = "python"                                 # Python-режим конфигурации
-config_tasks_path = "./plan/"                          # Корневая папка (= корень пакета clarinet_plan)
+config_mode = "python"                                 # Python config mode
+config_tasks_path = "./plan/"                          # root folder (= root of the clarinet_plan package)
 config_record_types_file = "definitions/record_types.py"
-# config_context_hydrators_file по умолчанию "slicer_hydrators.py" (корень plan/)
-recordflow_paths = ["./plan/workflows"]                # Где искать *_flow.py (внутри config_tasks_path)
+# config_context_hydrators_file defaults to "slicer_hydrators.py" (root of plan/)
+recordflow_paths = ["./plan/workflows"]                # where to look for *_flow.py (inside config_tasks_path)
 
-recordflow_enabled = true                              # Включить движок RecordFlow
-pipeline_enabled = true                                # Включить TaskIQ-брокер (нужен RabbitMQ)
-frontend_enabled = true                                # Подключить frontend SPA
+recordflow_enabled = true                              # enable the RecordFlow engine
+pipeline_enabled = true                                # enable the TaskIQ broker (requires RabbitMQ)
+frontend_enabled = true                                # serve the frontend SPA
 
-extra_roles = ["doctor_CT", "surgeon"]                 # Кастомные роли поверх admin/user
+extra_roles = ["doctor_CT", "surgeon"]                 # custom roles on top of admin/user
 ```
 
-Все пути указываются **относительно `config_tasks_path`** (то есть `plan/`). Любая роль, упомянутая в `RecordDef.role`, должна быть в `extra_roles` (или быть стандартной: `admin`, `user`, `doctor`, `auto`, `expert`).
+All paths are given **relative to `config_tasks_path`** (i.e. `plan/`). Any role mentioned in `RecordDef.role` must be in `extra_roles` (or be one of the standard ones: `admin`, `user`, `doctor`, `auto`, `expert`).
 
-## Основные команды
+## Main commands
 
 ```bash
-cp .env.example .env                          # Заполнить секретами
-uv run clarinet db init                       # Инициализация БД + создание admin
-uv run clarinet run                           # Запуск API + frontend
-uv run clarinet worker                        # Pipeline воркер (все очереди)
-uv run clarinet worker --queues clarinet.dicom  # Конкретные очереди
-uv run clarinet ohif install                  # Установить OHIF Viewer (на /ohif)
-uv run clarinet rabbitmq status               # Состояние очередей
+cp .env.example .env                          # fill in secrets
+uv run clarinet db init                       # initialize the DB + create the admin
+uv run clarinet run                           # start the API + frontend
+uv run clarinet worker                        # pipeline worker (all queues)
+uv run clarinet worker --queues clarinet.dicom  # specific queues
+uv run clarinet ohif install                  # install OHIF Viewer (served at /ohif)
+uv run clarinet rabbitmq status               # queue status
 ```
 
-Полный список — `uv run clarinet --help` и `make help` в репозитории фреймворка.
+Full list — `uv run clarinet --help` and `make help` in the framework repository.
 
-## Конвенции именования
+## Naming conventions
 
-- **`RecordDef.name`** — kebab-case, 5-30 символов: `"first-check"`, `"segment-ct-single"`. Это идентификатор в DSL и URL.
-- **Python-переменные** — snake_case: `first_check = RecordDef(name="first-check", ...)`. Имя переменной может отличаться от `name`.
-- **Файлы scripts/validators** — snake_case, валидаторы с суффиксом `_validator`: `segment.py`, `segment_validator.py`.
-- **Schema-файлы** — `{record-type-name}.schema.json`: `first-check.schema.json` (kebab-case под `RecordDef.name`).
+- **`RecordDef.name`** — kebab-case, 5-30 characters: `"first-check"`, `"segment-ct-single"`. This is the identifier used in the DSL and the URL.
+- **Python variables** — snake_case: `first_check = RecordDef(name="first-check", ...)`. The variable name can differ from `name`.
+- **scripts/validators files** — snake_case, validators suffixed with `_validator`: `segment.py`, `segment_validator.py`.
+- **Schema files** — `{record-type-name}.schema.json`: `first-check.schema.json` (kebab-case matching `RecordDef.name`).
 - **Hydrator injection key** — snake_case: `@slicer_context_hydrator("best_series_from_first_check")`.
 
-## Сквозные правила
+## Cross-cutting rules
 
-- **Идемпотентность pipeline-тасок**. Каждая задача обязана проверять `ctx.files.exists(output_file_def)` и выходить рано, если результат уже есть. Причина: ретраи воркера, ручные перезапуски, cascade-инвалидация могут вызвать таску повторно.
-- **Логирование** — только `from clarinet.utils.logger import logger` с f-strings. Никогда `print()` и никогда `import loguru`.
-- **Slicer-скрипты — bare Python** в окружении 3D Slicer. Глобалы (`slicer`, `working_folder`, `output_file`, ...) инжектируются фреймворком; в начале каждого скрипта обязателен docstring с перечислением context vars.
-- **Async vs sync в pipeline-тасках**. Async — для I/O, HTTP, БД (ClarinetClient). Sync (`SyncTaskContext`) — для CPU-bound работы (skimage, SimpleITK, vtk); такие функции автоматически выполняются в треде.
-- **`asyncio.gather` запрещён на shared `ClarinetClient`/AsyncSession** — параллельные запросы блокируют друг друга на одном connection. Используйте последовательный `await` или создавайте отдельные клиенты.
+- **Pipeline task idempotency**. Every task must check `ctx.files.exists(output_file_def)` and return early if the result already exists. Reason: worker retries, manual restarts, and cascade invalidation can all trigger the task again.
+- **Logging** — only `from clarinet.utils.logger import logger` with f-strings. Never `print()` and never `import loguru`.
+- **Slicer scripts are bare Python** running inside the 3D Slicer environment. Globals (`slicer`, `working_folder`, `output_file`, ...) are injected by the framework; every script must start with a docstring listing the context vars.
+- **Async vs sync in pipeline tasks**. Async — for I/O, HTTP, the DB (ClarinetClient). Sync (`SyncTaskContext`) — for CPU-bound work (skimage, SimpleITK, vtk); such functions run automatically in a thread.
+- **`asyncio.gather` is forbidden on a shared `ClarinetClient`/AsyncSession** — concurrent requests block each other on the same connection. Use sequential `await` or create separate clients.
 
-## Куда смотреть за деталями
+## Where to look for details
 
-Rules этого проекта (автозагрузка по `paths` в frontmatter):
+This project's rules (auto-loaded via the `paths` frontmatter):
 
-- `.claude/rules/clarinet/definitions.md` — `FileDef`, `RecordDef`, паттерны путей, связи между разделами
+- `.claude/rules/clarinet/definitions.md` — `FileDef`, `RecordDef`, path patterns, links between sections
 - `.claude/rules/clarinet/workflows.md` — `@pipeline_task`, `TaskContext`, RecordFlow DSL
-- `.claude/rules/clarinet/slicer.md` — hydrators + Slicer-скрипты + валидаторы (всё связано через injection vars)
-- `.claude/rules/clarinet/schemas.md` — JSON Schema для record.data, conditional schemas, UI-хинты, общие `$defs` между файлами (`$ref`)
-- `.claude/rules/clarinet/utils.md` — helper-модули, формат `.seg.nrrd`
+- `.claude/rules/clarinet/slicer.md` — hydrators + Slicer scripts + validators (all linked via injection vars)
+- `.claude/rules/clarinet/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
+- `.claude/rules/clarinet/utils.md` — helper modules, the `.seg.nrrd` format
 
-Rules фреймворка (полные reference-доки, ставятся вместе с пакетом clarinet — пути ниже указывают на установленный пакет):
+Framework rules (full reference docs, installed alongside the clarinet package — the paths below point at the installed package):
 
-- `{{CLARINET_DOCS}}/recordflow-dsl.md` — полный API DSL с pattern matching
-- `{{CLARINET_DOCS}}/slicer-helper-api.md` — все методы `SlicerHelper` + VTK pitfalls
-- `{{CLARINET_DOCS}}/pipeline-ops.md` — настройки pipeline, тестирование, очереди
-- `{{CLARINET_DOCS}}/file-registry.md` — детали резолвинга паттернов файлов
-- `{{CLARINET_DOCS}}/project-setup.md` — обзор шаблонов, опции `clarinet init`
+- `{{CLARINET_DOCS}}/recordflow-dsl.md` — full DSL API with pattern matching
+- `{{CLARINET_DOCS}}/slicer-helper-api.md` — all `SlicerHelper` methods + VTK pitfalls
+- `{{CLARINET_DOCS}}/pipeline-ops.md` — pipeline settings, testing, queues
+- `{{CLARINET_DOCS}}/file-registry.md` — file pattern-resolution details
+- `{{CLARINET_DOCS}}/project-setup.md` — template overview, `clarinet init` options
 
-Production-пример: репозиторий `clarinet_nir_liver` (если доступен) — самое полное реальное использование шаблона.
+Production example: the `clarinet_nir_liver` repository (if available) — the most complete real-world use of this template.
