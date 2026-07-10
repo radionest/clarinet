@@ -12,10 +12,23 @@ SimpleITK's direction sign. It never imports ``dicom_volume`` (no import cycle).
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+import nibabel as nib
 import numpy as np
 import pydicom
+import SimpleITK as sitk
 
+from clarinet.exceptions.domain import ImageReadError
 from clarinet.utils.logger import logger
+
+_AXIAL_DOMINANCE_THRESHOLD = 0.8
+"""Minimum |head_dir[dominant_axis]| required to trust the axial "toward head" check.
+
+Below this the ground-truth slice normal is not cleanly aligned with the volume's
+slice axis (oblique gantry, or a coronal/sagittal series), so a sign-only check is
+not meaningful and detection refuses to judge (raises OrientationUnverifiable)."""
 
 
 def _read_ipp(path: str) -> np.ndarray:
@@ -73,3 +86,84 @@ def ground_truth_slice_geometry(
     new_direction[:, 2] = delta / norm
     true_origin = (float(ipp_first[0]), float(ipp_first[1]), float(ipp_first[2]))
     return true_origin, new_direction
+
+
+class OrientationUnverifiable(Exception):
+    """Ground-truth DICOM geometry could not be established for a series, so its
+    volume's orientation can be neither confirmed nor refuted. Callers must treat
+    this as "unknown" — never as "correct" — so a genuinely-flipped series is
+    surfaced for review instead of silently passing detection."""
+
+
+def _series_file_names(directory: Path) -> list[str]:
+    """GDCM's file order for the first series in ``directory`` (raises if none)."""
+    directory = Path(directory)
+    reader = sitk.ImageSeriesReader()
+    series_ids = reader.GetGDCMSeriesIDs(str(directory))
+    if not series_ids:
+        raise ImageReadError(f"No DICOM series found in {directory}")
+    names = reader.GetGDCMSeriesFileNames(str(directory), series_ids[0])
+    if not names:
+        raise ImageReadError(f"No DICOM files in series {series_ids[0]} of {directory}")
+    return list(names)
+
+
+def _head_direction_from_series(
+    directory: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (unit head-direction in LPS, IPP_first, IPP_last) for a series.
+
+    Head direction is the IOP slice normal forced to point toward +Z (feet→head);
+    first/last are per GDCM's own sort order, read directly via pydicom.
+    """
+    dicom_names = _series_file_names(directory)
+    first = pydicom.dcmread(dicom_names[0], stop_before_pixels=True)
+    last = pydicom.dcmread(dicom_names[-1], stop_before_pixels=True)
+    iop = [float(v) for v in first.ImageOrientationPatient]
+    normal = np.cross(np.array(iop[0:3]), np.array(iop[3:6]))
+    if normal[2] < 0:
+        normal = -normal
+    head_dir = normal / np.linalg.norm(normal)
+    ipp_first = np.array([float(v) for v in first.ImagePositionPatient])
+    ipp_last = np.array([float(v) for v in last.ImagePositionPatient])
+    return head_dir, ipp_first, ipp_last
+
+
+def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
+    """True iff the on-disk NIfTI's slice origin disagrees with the ground-truth
+    DICOM feet position (i.e. it was produced by the pre-#453 reader).
+
+    Idempotent: a corrected/remediated volume returns False, so re-running a
+    remediation script is safe. Reconstructs (origin, direction) from the NIfTI
+    affine (RAS→LPS, mirroring ``compute_roi_core``) and compares the origin to
+    the feet-end IPP within ``0.5 * slice_spacing``.
+
+    Raises ``OrientationUnverifiable`` when ground truth cannot be established
+    (unreadable/absent series, or a non-dominantly-axial series the sign check
+    cannot judge) — never silently reports "not misoriented" in those cases.
+    """
+    nii: Any = nib.load(str(volume_nifti))
+    affine = nii.affine
+    spacing = tuple(float(z) for z in nii.header.get_zooms()[:3])
+    lps = np.diag([-1.0, -1.0, 1.0])
+    direction = lps @ (affine[:3, :3] / np.array(spacing))
+    origin = np.asarray(lps @ affine[:3, 3], dtype=float)
+
+    try:
+        head_dir, ipp_first, ipp_last = _head_direction_from_series(Path(dicom_dir))
+    except Exception as exc:
+        raise OrientationUnverifiable(
+            f"cannot read ground-truth geometry for {dicom_dir}: {exc}"
+        ) from exc
+
+    dominant_axis = int(np.argmax(np.abs(direction[:, 2])))
+    if abs(head_dir[dominant_axis]) < _AXIAL_DOMINANCE_THRESHOLD:
+        raise OrientationUnverifiable(
+            f"series {dicom_dir} is not dominantly axial "
+            f"(head_dir={np.round(head_dir, 3).tolist()})"
+        )
+
+    proj_first = float(np.dot(ipp_first, head_dir))
+    proj_last = float(np.dot(ipp_last, head_dir))
+    feet = np.asarray(ipp_first if proj_first < proj_last else ipp_last, dtype=float)
+    return not np.allclose(origin, feet, atol=0.5 * spacing[2])

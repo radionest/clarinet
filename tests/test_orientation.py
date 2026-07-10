@@ -2,12 +2,18 @@
 
 from pathlib import Path
 
+import nibabel
 import numpy as np
 import pydicom
 import pydicom.uid
+import pytest
 from pydicom.dataset import FileDataset
 
-from clarinet.services.image.orientation import ground_truth_slice_geometry
+from clarinet.services.image.orientation import (
+    OrientationUnverifiable,
+    ground_truth_slice_geometry,
+    is_volume_misoriented,
+)
 
 
 def _write_slice(path: Path, ipp: tuple[float, float, float], iop=(1, 0, 0, 0, 1, 0), suid=None):
@@ -96,3 +102,63 @@ class TestGroundTruthSliceGeometry:
         o, dirn = (4.0, 4.0, 4.0), IDENTITY.copy()
         origin, direction = ground_truth_slice_geometry(names, 3.0, o, dirn)
         assert origin is o and direction is dirn
+
+
+def _nifti_with_lps_origin(path: Path, lps_origin, spacing=(1.0, 1.0, 3.0)):
+    """Write a NIfTI whose reconstructed LPS origin equals lps_origin and whose
+    slice column is +Z (dominant axis 2). affine[:3,3] (RAS) = LPS->RAS of origin."""
+    sx, sy, sz = spacing
+    affine = np.array(
+        [
+            [-sx, 0.0, 0.0, -lps_origin[0]],
+            [0.0, -sy, 0.0, -lps_origin[1]],
+            [0.0, 0.0, sz, lps_origin[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    data = np.zeros((4, 5, 3), dtype=np.int16)
+    nibabel.save(nibabel.Nifti1Image(data, affine, dtype=np.int16), str(path))
+
+
+class TestIsVolumeMisoriented:
+    def test_correct_volume_not_misoriented(self, tmp_path):
+        # Axial +Z series at Z = 0, 3, 6; feet end (min Z) = 0.
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0])
+        nii = tmp_path / "correct.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))  # origin at feet
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is False
+
+    def test_flipped_volume_misoriented(self, tmp_path):
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0])
+        nii = tmp_path / "flipped.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 6.0))  # origin at head end → wrong
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is True
+
+    def test_idempotent_after_correction(self, tmp_path):
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0])
+        nii = tmp_path / "remediated.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))  # a corrected volume
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is False
+
+    def test_one_slice_off_is_detected(self, tmp_path):
+        # Origin off by exactly one slice spacing (3 mm) — must exceed the 0.5*spacing tol.
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0])
+        nii = tmp_path / "off.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 3.0))
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is True
+
+    def test_non_axial_series_raises(self, tmp_path):
+        # Coronal series: IOP normal along +Y, so head_dir[2] ≈ 0 < threshold.
+        _series(tmp_path, "cor", [0.0, 3.0, 6.0], iop=(1, 0, 0, 0, 0, -1))
+        nii = tmp_path / "any.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))  # slice column +Z, dominant axis 2
+        with pytest.raises(OrientationUnverifiable):
+            is_volume_misoriented(nii, tmp_path / "cor")
+
+    def test_unreadable_series_raises(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        nii = tmp_path / "any.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))
+        with pytest.raises(OrientationUnverifiable):
+            is_volume_misoriented(nii, empty)
