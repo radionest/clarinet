@@ -8,6 +8,7 @@ import numpy as np
 import SimpleITK as sitk
 
 from clarinet.exceptions.domain import ImageReadError
+from clarinet.services.image.orientation import ground_truth_slice_geometry
 from clarinet.utils.logger import logger
 
 
@@ -75,6 +76,7 @@ def read_dicom_series(
     d = np.array(image.GetDirection()).reshape(3, 3)
     direction = np.ascontiguousarray(d[:, [1, 0, 2]])
 
+    origin, direction = ground_truth_slice_geometry(dicom_names, spacing[2], origin, direction)
     volume, origin, direction = _canonicalize_slice_axis(
         volume, spacing[2], origin, direction, directory.name
     )

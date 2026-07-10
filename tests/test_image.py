@@ -640,6 +640,37 @@ class TestDicomVolume:
         # slice IPP z=0 → physical (col, -row, 0) = (2, -1, 0) in LPS.
         np.testing.assert_array_almost_equal(phys[:3], [2.0, -1.0, 0.0], decimal=4)
 
+    def test_read_dicom_series_routes_through_ground_truth(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """read_dicom_series applies the IPP ground-truth correction (with the real
+        file order + slice spacing) before canonicalization, and the output stays
+        canonical."""
+        from clarinet.services.image import dicom_volume as dv
+
+        dcm_dir = tmp_path / "wire_series"
+        self._write_axial_series(
+            dcm_dir,
+            {0.0: np.full((4, 5), 10), 3.0: np.full((4, 5), 20)},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        calls: dict[str, object] = {}
+        real = dv.ground_truth_slice_geometry
+
+        def spy(dicom_names, slice_spacing, origin, direction):  # type: ignore[no-untyped-def]
+            calls["n"] = len(list(dicom_names))
+            calls["spacing"] = slice_spacing
+            return real(dicom_names, slice_spacing, origin, direction)
+
+        monkeypatch.setattr(dv, "ground_truth_slice_geometry", spy)
+
+        _volume, spacing, _origin, direction = read_dicom_series(dcm_dir)
+
+        assert calls["n"] == 2
+        assert calls["spacing"] == pytest.approx(spacing[2])
+        assert direction[2, 2] > 0  # still canonical (+Z slice axis)
+
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""
         dcm_dir = tmp_path / "rescale_dicom"
