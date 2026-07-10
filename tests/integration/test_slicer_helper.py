@@ -294,6 +294,24 @@ class TestSlicerHelperMethodsExist:
         hints = get_type_hints(SlicerHelper.setup_editor)
         assert type(None) in get_args(hints["effect"])
 
+    def test_setop_resample_param_defaults_false(self) -> None:
+        """The three set-ops expose resample=False (safe-by-default geometry guard)."""
+        import inspect
+
+        for name in ("subtract_segmentations", "binarize_and_split_islands", "merge_as_pool"):
+            sig = inspect.signature(getattr(SlicerHelper, name))
+            assert "resample" in sig.parameters, f"{name} missing resample param"
+            assert sig.parameters["resample"].default is False, f"{name} resample default"
+
+    def test_export_segments_labelmap_resample_param(self) -> None:
+        """The choke point accepts a keyword-only resample=False."""
+        import inspect
+
+        sig = inspect.signature(SlicerHelper._export_segments_labelmap)
+        param = sig.parameters["resample"]
+        assert param.default is False
+        assert param.kind == inspect.Parameter.KEYWORD_ONLY
+
 
 # --- SlicerHelper new methods: integration tests (require running Slicer) ---
 
@@ -687,3 +705,56 @@ __execResult = {"mismatch_raised": mismatch_raised, "match_ok": match_ok}
     result = await slicer_service.execute(slicer_url, script, context=context)
     assert result.get("mismatch_raised") is True
     assert result.get("match_ok") is True
+
+
+async def test_subtract_segmentations_guards_grid_mismatch(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """A seg whose recorded geometry mismatches the source volume grid raises by
+    default; resample=True re-grids a still-overlapping mask instead of raising."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+
+def _volume(name, dim):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', name)
+    arr = np.zeros((dim, dim, dim), dtype=np.int16)
+    arr[1:4, 1:4, 1:4] = 1
+    slicer.util.updateVolumeFromArray(node, arr)
+    node.SetOrigin(0.0, 0.0, 0.0)
+    return node
+
+s = SlicerHelper(working_folder)
+vol_ref = _volume('VolRef', 6)   # seg is recorded on this 6^3 grid
+vol_src = _volume('VolSrc', 8)   # source volume is a different 8^3 grid (dims mismatch, overlapping)
+
+seg = s.create_segmentation('MismatchSeg')
+seg.node.SetReferenceImageGeometryParameterFromVolumeNode(vol_ref)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'SeedLM')
+slicer.util.updateVolumeFromArray(lm, (slicer.util.arrayFromVolume(vol_ref) > 0).astype(np.uint8))
+lm.SetOrigin(0.0, 0.0, 0.0)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(lm, seg.node)
+slicer.mrmlScene.RemoveNode(lm)
+
+other = s.create_segmentation('Other')  # empty second operand (tolerated, exports first)
+s._image_node = vol_src
+
+raised = False
+try:
+    s.subtract_segmentations(seg, other)
+except Exception as exc:
+    raised = 'does not match the volume grid' in str(exc)
+
+bypassed = True
+try:
+    s.subtract_segmentations(seg, other, resample=True)
+except Exception:
+    bypassed = False
+
+__execResult = {'raised': raised, 'bypassed': bypassed}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert isinstance(result, dict)
+    assert result["raised"] is True
+    assert result["bypassed"] is True
