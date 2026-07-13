@@ -20,15 +20,18 @@ import numpy as np
 import pydicom
 import SimpleITK as sitk
 
-from clarinet.exceptions.domain import ImageReadError
+from clarinet.exceptions.domain import ImageError, ImageReadError
 from clarinet.utils.logger import logger
 
 _AXIAL_DOMINANCE_THRESHOLD = 0.8
-"""Minimum |head_dir[dominant_axis]| required to trust the axial "toward head" check.
+"""Minimum |head_dir[2]| (DICOM ground-truth slice normal's Z-component) required
+to trust the axial "toward head" check.
 
-Below this the ground-truth slice normal is not cleanly aligned with the volume's
-slice axis (oblique gantry, or a coronal/sagittal series), so a sign-only check is
-not meaningful and detection refuses to judge (raises OrientationUnverifiable)."""
+Below this the ground-truth slice normal is not cleanly aligned with the physical
+S/I axis (oblique gantry, or a coronal/sagittal series), so a sign-only check is
+not meaningful and detection refuses to judge (raises OrientationUnverifiable).
+Deliberately checked against the DICOM ground truth, not the NIfTI's own affine
+— see module docstring."""
 
 
 def _read_ipp(path: str) -> np.ndarray:
@@ -88,7 +91,7 @@ def ground_truth_slice_geometry(
     return true_origin, new_direction
 
 
-class OrientationUnverifiable(Exception):
+class OrientationUnverifiable(ImageError):
     """Ground-truth DICOM geometry could not be established for a series, so its
     volume's orientation can be neither confirmed nor refuted. Callers must treat
     this as "unknown" — never as "correct" — so a genuinely-flipped series is
@@ -134,9 +137,11 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
     DICOM feet position (i.e. it was produced by the pre-#453 reader).
 
     Idempotent: a corrected/remediated volume returns False, so re-running a
-    remediation script is safe. Reconstructs (origin, direction) from the NIfTI
-    affine (RAS→LPS, mirroring ``compute_roi_core``) and compares the origin to
-    the feet-end IPP within ``0.5 * slice_spacing``.
+    remediation script is safe. Reconstructs the origin from the NIfTI affine
+    (RAS→LPS, mirroring ``compute_roi_core``) and compares it to the feet-end
+    IPP within ``0.5 * slice_spacing``. The "is this axial?" guard is checked
+    against the DICOM ground truth (``head_dir``), never the NIfTI's own
+    affine — see module docstring.
 
     Raises ``OrientationUnverifiable`` when ground truth cannot be established
     (unreadable/absent series, or a non-dominantly-axial series the sign check
@@ -146,7 +151,6 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
     affine = nii.affine
     spacing = tuple(float(z) for z in nii.header.get_zooms()[:3])
     lps = np.diag([-1.0, -1.0, 1.0])
-    direction = lps @ (affine[:3, :3] / np.array(spacing))
     origin = np.asarray(lps @ affine[:3, 3], dtype=float)
 
     try:
@@ -156,8 +160,7 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
             f"cannot read ground-truth geometry for {dicom_dir}: {exc}"
         ) from exc
 
-    dominant_axis = int(np.argmax(np.abs(direction[:, 2])))
-    if abs(head_dir[dominant_axis]) < _AXIAL_DOMINANCE_THRESHOLD:
+    if abs(head_dir[2]) < _AXIAL_DOMINANCE_THRESHOLD:
         raise OrientationUnverifiable(
             f"series {dicom_dir} is not dominantly axial "
             f"(head_dir={np.round(head_dir, 3).tolist()})"

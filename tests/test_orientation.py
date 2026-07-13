@@ -120,6 +120,23 @@ def _nifti_with_lps_origin(path: Path, lps_origin, spacing=(1.0, 1.0, 3.0)):
     nibabel.save(nibabel.Nifti1Image(data, affine, dtype=np.int16), str(path))
 
 
+def _nifti_coronal_with_lps_origin(path: Path, lps_origin, spacing=(1.0, 1.0, 3.0)):
+    """Write a NIfTI whose reconstructed LPS origin equals lps_origin and whose
+    slice column is +Y (dominant axis 1) — a genuinely coronal-shaped volume,
+    unlike ``_nifti_with_lps_origin`` which is always axis-2 (axial)."""
+    sx, sy, sz = spacing
+    affine = np.array(
+        [
+            [-sx, 0.0, 0.0, -lps_origin[0]],
+            [0.0, 0.0, -sz, -lps_origin[1]],
+            [0.0, -sy, 0.0, lps_origin[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    data = np.zeros((4, 3, 5), dtype=np.int16)
+    nibabel.save(nibabel.Nifti1Image(data, affine, dtype=np.int16), str(path))
+
+
 class TestIsVolumeMisoriented:
     def test_correct_volume_not_misoriented(self, tmp_path):
         # Axial +Z series at Z = 0, 3, 6; feet end (min Z) = 0.
@@ -149,9 +166,13 @@ class TestIsVolumeMisoriented:
 
     def test_non_axial_series_raises(self, tmp_path):
         # Coronal series: IOP normal along +Y, so head_dir[2] ≈ 0 < threshold.
+        # The NIfTI is genuinely coronal too (slice column +Y, dominant axis 1) —
+        # a self-consistent conversion, not an axial-shaped fixture that would
+        # mask a guard bug keying off the NIfTI's own axis instead of the DICOM
+        # ground truth.
         _series(tmp_path, "cor", [0.0, 3.0, 6.0], iop=(1, 0, 0, 0, 0, -1))
         nii = tmp_path / "any.nii.gz"
-        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))  # slice column +Z, dominant axis 2
+        _nifti_coronal_with_lps_origin(nii, (0.0, 0.0, 0.0))
         with pytest.raises(OrientationUnverifiable):
             is_volume_misoriented(nii, tmp_path / "cor")
 
