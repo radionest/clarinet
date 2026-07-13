@@ -179,4 +179,7 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
     proj_first = float(np.dot(ipp_first, head_dir))
     proj_last = float(np.dot(ipp_last, head_dir))
     feet = np.asarray(ipp_first if proj_first < proj_last else ipp_last, dtype=float)
+    # 0.5 * spacing, not 1.0 * spacing: a full-slice-span tolerance sits exactly on the
+    # boundary for an "origin one slice-span off" misorientation (np.allclose treats
+    # |delta| == atol as equal), which would let that exact case slip past detection.
     return not np.allclose(origin, feet, atol=0.5 * spacing[2])

@@ -23,7 +23,7 @@
 - **Synchronous API**: all operations are CPU-bound; wrap with `asyncio.to_thread()` in pipeline tasks
 - **Segmentation dtype**: always `np.uint8` (max 255 labels)
 - **Isotropic threshold**: `_ISOTROPIC_Z_THRESHOLD = 200` — volumes with Z < 200 use spacing-aware morphology; larger volumes use ball structuring element for performance
-- **Exceptions**: `ImageError`, `ImageReadError`, `ImageWriteError` from `clarinet.exceptions.domain`
+- **Exceptions**: `ImageError`, `ImageReadError`, `ImageWriteError` from `clarinet.exceptions.domain`; `OrientationUnverifiable` (subclasses `ImageError`) from `orientation.py`
 - **RAM-lean reads (opt-in)**: `read(path, load_data=False)` → grid + `shape`/`has_data` only (the #452 lean path); `read(path, dtype=np.int16|bool|...)` casts once off-disk (no forced float64; `dtype=None` keeps float64). `read_slice(path, i, axis=2)` returns one 2-D slice; `dataobj` is a read-only NIfTI proxy. `unload()`/`close()`/`with Image() as im:` free the volume (and mmap) deterministically.
 - **LayeredSegmentation** (`layered_segmentation.py`): 4-D `(L,X,Y,Z)` overlapping-segment NRRD (Slicer format) over one shared 3-D grid — composition, not a 4-D `Segmentation`. `from_layers().save()` (raw, layer/list-axis-first — Slicer-native, fill-in-place; layers interleaved on disk) + `read_header`/`read_layer`/`read_layer_slice`/`iter_layers`. Default write: one segment per layer, label 1.
 

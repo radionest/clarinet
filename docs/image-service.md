@@ -325,6 +325,24 @@ Supports compressed (JPEG/JPEG2000/JPEG-LS), Enhanced multi-frame, and vendor-sp
 GDCM sorts slices by projection of `ImagePositionPatient` onto the slice direction (handles oblique acquisitions).
 Falls back to `InstanceNumber` when position metadata is unavailable.
 
+### Ground-Truth Slice-Axis Correction (#453)
+
+Before canonicalization, `ground_truth_slice_geometry` (`orientation.py`) recomputes the
+slice-axis sense and origin directly from the first/last file's `ImagePositionPatient`
+(read via pydicom, independent of SimpleITK). On long axial series with sub-mm spacing
+wobble, `GetDirection()`'s slice-axis sign can contradict the actual GDCM file order,
+producing an anatomically flipped volume; IPP is never inconsistent, so it is the
+authority. For a series SimpleITK already read correctly, the override is a no-op — the
+canonical grid stays byte-identical. It also returns the exact last-slice IPP, which
+canonicalization uses verbatim for the flipped origin instead of extrapolating
+`slice_spacing * (n - 1)` from a single nominal spacing value.
+
+`orientation.py` also exposes `is_volume_misoriented(volume_nifti, dicom_dir)`, a
+detection primitive for auditing already-converted volumes (see
+`clarinet/docs/migration-orientation-0.10.17.md`); it raises `OrientationUnverifiable`
+rather than guessing when ground truth can't be established (non-axial series,
+unreadable DICOM tags).
+
 ### Slice-Axis Canonicalization
 
 The reader normalizes the slice axis so it points along the **positive sense of its dominant
@@ -342,7 +360,7 @@ direction-only flip would mirror the data). No-op when the slice axis already po
 
 Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization:
 - `GetSpacing()` returns `(x, y, z)`, mapped to internal `(row=y, col=x, slice=z)`
-- `GetOrigin()` returns `(x, y, z)` in LPS — moved to the opposite slice end if the axis is flipped
+- `GetOrigin()` returns `(x, y, z)` in LPS, first overridden by the ground-truth IPP correction above — moved to the opposite slice end (the exact last-slice IPP, not an extrapolation) if the axis is flipped
 - `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention, then the slice column is sign-normalized
 
 `RescaleSlope`/`RescaleIntercept` are applied automatically by GDCM during `Execute()`.
@@ -355,6 +373,7 @@ Pulled from the resulting `sitk.Image`, then passed through slice-axis canonical
 |---|---|---|
 | `tests/test_image.py` | Unit tests — individual methods in isolation | 39 |
 | `tests/test_image_e2e.py` | E2E workflow tests — multi-step pipelines | 9 |
+| `tests/test_orientation.py` | Unit tests — `ground_truth_slice_geometry` / `is_volume_misoriented` | 12 |
 
 ### E2E Test Scenarios
 

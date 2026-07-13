@@ -66,25 +66,6 @@
   - `mask_patient_data` heals to `True` — strictly more masking (fail-safe).
   Set the affected flag explicitly in that type's config to keep the old value.
 
-### Fixed
-
-- **DICOM→NIfTI slice-axis orientation from ground-truth `ImagePositionPatient`
-  (#453).** `read_dicom_series` now recomputes the slice-axis sense and origin from
-  the first/last file's `ImagePositionPatient`
-  (`clarinet.services.image.orientation.ground_truth_slice_geometry`) before
-  canonicalization, instead of trusting SimpleITK's `GetDirection()` sign. On long
-  axial series with sub-mm spacing wobble SimpleITK could return a slice-axis sign
-  inconsistent with GDCM file order, producing an anatomically flipped volume.
-  Correctly-read series are byte-identical — only affected series change on
-  re-conversion. New `is_volume_misoriented(volume_nifti, dicom_dir)` detection
-  primitive backs the per-project migration (`clarinet/docs/migration-orientation-0.10.17.md`).
-- **Slicer set-ops fail fast on grid mismatch, not just empty export (#415).**
-  `subtract_segmentations` / `binarize_and_split_islands` / `merge_as_pool` now raise
-  `SlicerHelperError` when a non-empty input segmentation's reference geometry differs
-  from the source volume grid (a partially-overlapping foreign grid that previously
-  slipped past the empty-export guard). Pass `resample=True` to opt back into the
-  legacy re-grid behavior. Genuinely-empty sources are still tolerated.
-
 ### Added
 
 - `find_records` (`ClarinetClient` and the pipeline sync wrapper) now logs a
@@ -141,6 +122,22 @@
 - Project-template agent docs (`.claude/rules/workflows.md`) no longer document
   the `FileResolver` API removed in 0.7.0 — the `ctx.files` section is re-synced
   with the canonical `Files` facade docs shipped by `clarinet agent init`.
+- **DICOM→NIfTI slice-axis orientation from ground-truth `ImagePositionPatient`
+  (#453).** `read_dicom_series` now recomputes the slice-axis sense and origin from
+  the first/last file's `ImagePositionPatient`
+  (`clarinet.services.image.orientation.ground_truth_slice_geometry`) before
+  canonicalization, instead of trusting SimpleITK's `GetDirection()` sign. On long
+  axial series with sub-mm spacing wobble SimpleITK could return a slice-axis sign
+  inconsistent with GDCM file order, producing an anatomically flipped volume.
+  Correctly-read series are byte-identical — only affected series change on
+  re-conversion. New `is_volume_misoriented(volume_nifti, dicom_dir)` detection
+  primitive backs the per-project migration (`clarinet/docs/migration-orientation-0.10.17.md`).
+- **Slicer set-ops fail fast on grid mismatch, not just empty export (#415).**
+  `subtract_segmentations` / `binarize_and_split_islands` / `merge_as_pool` now raise
+  `SlicerHelperError` when a non-empty input segmentation's reference geometry differs
+  from the source volume grid (a partially-overlapping foreign grid that previously
+  slipped past the empty-export guard). Pass `resample=True` to opt back into the
+  legacy re-grid behavior. Genuinely-empty sources are still tolerated.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
