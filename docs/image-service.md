@@ -55,6 +55,26 @@ Image(template=None, copy_data=False, dtype=None)
 
 Voxel data is always preserved regardless of format conversion. Spacing loss is a metadata-only issue.
 
+### RAM-Lean Reads (opt-in)
+
+All read knobs are additive — the defaults (`load_data=True`, `dtype=None`) reproduce
+today's behavior exactly.
+
+| Knob | Effect |
+|---|---|
+| `read(path, load_data=False)` | Populates grid metadata + `shape` from the header only; `img` is left unloaded (`has_data` stays `False`). `nibabel.load()` is already lazy, so a NIfTI header read touches no data block; NRRD uses `nrrd.read_header()`. The #452 lean path — grid checks (`same_grid`, `affine_4x4`, `shape`) work without ever materializing voxels. |
+| `read(path, dtype=np.int16\|bool\|...)` | Casts once, off-disk: NIfTI loads via `np.asarray(dataobj, dtype=dtype)` (skips the `get_fdata()` float64 intermediate); NRRD casts pynrrd's native dtype via `astype(dtype, copy=False)`. `dtype=None` keeps the historical behavior — NIfTI `get_fdata()` (`float64`), NRRD native. |
+| `read_slice(path, index, *, axis=2, dtype=None)` | Returns a single 2-D slice without materializing the volume. NIfTI is lazy via `dataobj` (indexes before reading — only the slice's region is decoded); `.nii.gz` still sequential-decompresses up to `index` but returns one small array. NRRD has no lazy proxy, so it's a full read then index (rare in practice — NRRD segmentations go through `LayeredSegmentation`). Also populates grid metadata/`shape`, like `load_data=False`. |
+| `dataobj` | Read-only lazy array proxy (NIfTI only) for repeated windowed access after a metadata-only read (e.g. a streaming nonzero check). Raises `ImageError` for NRRD/DICOM — pynrrd has no lazy proxy, so there is nothing to expose. |
+| `unload()` | Drops the resident voxel array (frees up to a full `float64` volume) but keeps grid metadata/`shape` — the image stays usable for grid checks. |
+| `close()` | `unload()` plus drops the NIfTI lazy proxy (`_nifti_image`), releasing its mmap. Called by `__exit__`. |
+| `with Image() as im:` | Context-manager form of `close()` — deterministic free at block exit. |
+
+**`Segmentation` reads route at uint8.** `Segmentation.read_nifti`/`read_nrrd` force
+`dtype=np.uint8` when the caller doesn't pass one, so a mask read never passes through
+the `float64` `get_fdata()` path — the `img` setter already casts to `uint8`, so this is
+observably identical, just without the wasted float64 intermediate.
+
 ---
 
 ## Segmentation Class
@@ -185,6 +205,78 @@ seg.append(other, strategy=GreedyArgmax(AbsoluteOverlap(), direction="b_to_a"))
 ```
 
 Unmatched B components (no A partner found by the strategy) are silently dropped.
+
+---
+
+## LayeredSegmentation Class
+
+Models overlapping segments (e.g. `psoas` ⊆ `skeletal_muscle`) as a 4-D `(L, X, Y, Z)`
+`uint8` NRRD over one shared 3-D grid — the layout Slicer uses for multi-layer
+`.seg.nrrd` files. Lives in `layered_segmentation.py`
+(`from clarinet.services.image import LayeredSegmentation`). This is **composition,
+not a 4-D `Segmentation`**: each materialized layer is a normal 3-D array on the
+shared grid, so `Image`/`Segmentation`'s 3-D invariants stay 3-D.
+
+### Construction
+
+```python
+LayeredSegmentation.from_layers(
+    [(name, mask3d), ...],
+    spacing=(x, y, z), origin=(x, y, z), direction=direction_3x3,
+)
+```
+
+One segment per layer, label `1` — the only construction path currently offered. All
+masks must share the same 3-D shape; a mismatch or an empty `layers` list raises
+`ImageError`. `segments` (`list[tuple[name, layer_index, label_value]]`) is populated
+either way — by `from_layers` at construction, or by `read_header` from the file's
+`Segment{i}_*` header blocks.
+
+### NRRD Header Contract (Slicer format)
+
+| Header key | Value |
+|---|---|
+| `dimension` | `4` |
+| `sizes` | `[L, X, Y, Z]` — layer/list axis **first** |
+| `kinds` | `["list", "domain", "domain", "domain"]` |
+| `space directions` | row 0 is `nan` (the list axis has no direction); rows 1–3 are the 3×3 spatial directions |
+| `encoding` | `raw` |
+| `Segment{i}_Name` / `_LabelValue` / `_Layer` / `_ID` | per-segment metadata block, one per segment index `i` — `_Layer` maps the segment into the shared 4-D array (multiple non-overlapping segments may share a layer) |
+
+This is Slicer's native multi-layer `.seg.nrrd` layout, so **layers are interleaved
+byte-by-byte on disk** (F-order, layer axis fastest) — not layer-contiguous.
+
+### Writing
+
+`save(path)` pre-allocates the full 4-D `uint8` array once and fills each layer in
+place, releasing (`None`-ing out) each source mask as it goes — avoids the transient
+doubling `np.stack` would cause. **Single-use**: a `LayeredSegmentation` built via
+`from_layers` can only be `save()`d once — a second call raises `ImageWriteError`
+because the source arrays were already released on the first call.
+
+### Reading
+
+| Method | Returns | Voxels touched |
+|---|---|---|
+| `LayeredSegmentation.read_header(path)` | New instance with grid + `segments` populated | none — `nrrd.read_header()` only |
+| `read_layer(path, name_or_index)` | One 3-D layer array | full 4-D read, then indexed |
+| `read_layer_slice(path, name_or_index, index, *, axis=2)` | One 2-D slice of one layer | full 4-D read, then indexed |
+| `iter_layers(path)` | `Iterator[(name, layer_array)]` | one full 4-D read, shared across all yields |
+
+`name_or_index` resolves a `str` segment name through `segments` (→ its `_Layer`
+index), or takes an `int` layer index directly; an unknown name raises `ImageError`.
+
+**RAM behavior**: pynrrd has no lazy/seek proxy, so every read method above does one
+full 4-D `nrrd.read()` and then numpy-indexes the requested layer — the read floor is
+always one full 4-D `uint8` array, regardless of how many layers are actually needed.
+This is layout-agnostic (correct regardless of on-disk byte order) but not lazy. A
+seek-based per-layer reader that would avoid the full 4-D read is **out of scope
+here** and deferred to the follow-up issue
+[#454](https://github.com/radionest/clarinet/issues/454): because layers are
+interleaved rather than layer-contiguous, such a reader would need strided reads per
+layer, not one contiguous seek — so `encoding: raw` currently buys no read-side
+payoff (only extra disk, ~4.2 GB/file at max size). #454 will build the seek-based
+reader and re-evaluate `raw` vs `gzip` at that point.
 
 ---
 

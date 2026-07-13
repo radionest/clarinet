@@ -139,6 +139,63 @@ class TestImage:
         img.read(nifti_path)
         assert img.img.dtype == np.float32
 
+    def test_img_setter_avoids_copy_when_dtype_matches(self) -> None:
+        img = Image(dtype=np.int16)
+        arr = np.zeros((4, 4, 4), dtype=np.int16)
+        img.img = arr
+        assert img.img is arr  # already-correct dtype is not copied
+
+    def test_template_zeros_use_template_dtype(self, nrrd_path: Path) -> None:
+        src = Image()
+        src.read(nrrd_path, dtype=np.int16)  # int16 volume
+        blank = Image(template=src, copy_data=False)
+        assert blank.img.dtype == np.int16  # not float64
+        assert np.all(blank.img == 0)
+        assert blank.shape == src.shape
+
+    def test_template_zeros_from_metadata_only(self, nifti_path: Path) -> None:
+        meta = Image()
+        meta.read(nifti_path, load_data=False)  # no voxels
+        blank = Image(template=meta, dtype=np.uint8)  # force_dtype drives zeros dtype
+        assert blank.shape == (10, 12, 8)
+        assert blank.img.dtype == np.uint8
+        assert np.all(blank.img == 0)
+
+    def test_unload_keeps_grid_drops_voxels(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path)
+        img.unload()
+        assert img.has_data is False
+        assert img.shape == (10, 12, 8)  # grid survives
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+
+    def test_unload_frees_nibabel_fdata_cache(self, nifti_path: Path) -> None:
+        """Default read aliases img to nibabel's get_fdata cache; unload() must free it."""
+        img = Image()
+        img.read(nifti_path)  # dtype=None -> get_fdata() caches the float64 volume
+        assert img._nifti_image.in_memory is True
+        img.unload()
+        assert img.has_data is False
+        assert img._nifti_image.in_memory is False  # cached float64 volume actually freed
+        assert img.shape == (10, 12, 8)  # grid survives
+        _ = np.asarray(img.dataobj[0, 0, :])  # lazy proxy still usable after unload
+
+    def test_close_releases_proxy(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path, load_data=False)
+        assert img._nifti_image is not None
+        img.close()
+        assert img.has_data is False
+        with pytest.raises(ImageError, match="no lazy proxy"):
+            _ = img.dataobj  # proxy released
+
+    def test_context_manager_frees(self, nifti_path: Path) -> None:
+        with Image() as img:
+            img.read(nifti_path)
+            assert img.has_data is True
+        assert img.has_data is False
+        assert img._nifti_image is None
+
     def test_unsupported_extension(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "test.xyz"
         bad_file.write_text("not an image")
@@ -280,6 +337,117 @@ class TestImage:
         img.read_dicom_series(dicom_dir)
         with pytest.raises(ImageError, match="DICOM writing"):
             img.save("test")
+
+    def test_load_data_false_populates_grid_not_voxels(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path, load_data=False)
+        assert img.has_data is False
+        assert img.shape == (10, 12, 8)
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+        assert img.affine_4x4.shape == (4, 4)  # grid math works without voxels
+        with pytest.raises(ImageError, match="not loaded"):
+            _ = img.img
+
+    def test_load_data_false_same_grid_against_full_read(self, nifti_path: Path) -> None:
+        meta = Image()
+        meta.read(nifti_path, load_data=False)
+        full = Image()
+        full.read(nifti_path)
+        assert meta.same_grid(full)
+
+    def test_load_data_false_nrrd(self, nrrd_path: Path) -> None:
+        img = Image()
+        img.read(nrrd_path, load_data=False)
+        assert img.has_data is False
+        assert img.shape == (10, 12, 8)
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+
+    def test_has_data_true_after_full_read(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path)
+        assert img.has_data is True
+        assert img.shape == (10, 12, 8)
+
+    def test_dataobj_windows_after_metadata_read(self, nifti_path: Path) -> None:
+        full = Image()
+        full.read(nifti_path)
+        img = Image()
+        img.read(nifti_path, load_data=False)
+        # window a single voxel column via the proxy without loading the volume
+        windowed = np.asarray(img.dataobj[0, 0, :])
+        np.testing.assert_array_almost_equal(windowed, full.img[0, 0, :], decimal=4)
+        assert img.has_data is False
+
+    def test_dataobj_raises_for_nrrd(self, nrrd_path: Path) -> None:
+        img = Image()
+        img.read(nrrd_path, load_data=False)
+        with pytest.raises(ImageError, match="no lazy proxy"):
+            _ = img.dataobj
+
+    def test_template_derived_has_no_lazy_proxy(self, nifti_path: Path) -> None:
+        """A template-derived image must not expose the source's dataobj (stale voxels)."""
+        src = Image()
+        src.read(nifti_path, load_data=False)
+        assert src._nifti_image is not None  # source keeps its own proxy
+        derived = Image(template=src)
+        assert derived._nifti_image is None  # not inherited from the template
+        with pytest.raises(ImageError, match="no lazy proxy"):
+            _ = derived.dataobj
+        _ = np.asarray(src.dataobj[0, 0, :])  # source proxy still usable
+
+    def test_dtype_none_returns_float64_regression_guard(self, nifti_path: Path) -> None:
+        """Filtering callers depend on the float64 default staying float64."""
+        img = Image()
+        img.read(nifti_path)  # dtype=None
+        assert img.img.dtype == np.float64
+
+    def test_dtype_int16_casts_and_bypasses_get_fdata(
+        self, nifti_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(self: object, *a: object, **k: object) -> np.ndarray:
+            raise AssertionError("get_fdata() called on a dtype-controlled read")
+
+        monkeypatch.setattr(nibabel.Nifti1Image, "get_fdata", _boom)
+        img = Image()
+        img.read(nifti_path, dtype=np.int16)  # must not touch get_fdata
+        assert img.img.dtype == np.int16
+        assert img.shape == (10, 12, 8)
+
+    def test_dtype_bool_from_nifti(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path, dtype=bool)
+        assert img.img.dtype == np.bool_
+
+    def test_dtype_nrrd_casts_native(self, nrrd_path: Path) -> None:
+        img = Image()
+        img.read(nrrd_path, dtype=np.uint8)
+        assert img.img.dtype == np.uint8
+
+    def test_read_slice_matches_full_read(self, nifti_path: Path) -> None:
+        full = Image()
+        full.read(nifti_path)
+        img = Image()
+        sl = img.read_slice(nifti_path, 3, axis=2)
+        np.testing.assert_array_almost_equal(sl, full.img[:, :, 3], decimal=4)
+        assert sl.shape == (10, 12)
+        assert img.has_data is False  # slice read never materializes the volume
+        assert img.shape == (10, 12, 8)  # grid populated from the header
+
+    def test_read_slice_axis0(self, nifti_path: Path) -> None:
+        full = Image()
+        full.read(nifti_path)
+        sl = Image().read_slice(nifti_path, 2, axis=0)
+        np.testing.assert_array_almost_equal(sl, full.img[2, :, :], decimal=4)
+
+    def test_read_slice_dtype(self, nifti_path: Path) -> None:
+        sl = Image().read_slice(nifti_path, 0, dtype=np.int16)
+        assert sl.dtype == np.int16
+
+    def test_read_slice_nrrd(self, nrrd_path: Path) -> None:
+        full = Image()
+        full.read(nrrd_path)
+        sl = Image().read_slice(nrrd_path, 4, axis=2)
+        np.testing.assert_array_equal(sl, full.img[:, :, 4])
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1137,39 @@ class TestSegmentation:
         seg.read(nifti_path)
         out = seg.save("seg_output", tmp_path)
         assert out.exists()
+
+    def test_segmentation_read_avoids_float64(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A mask read must not route through float64 get_fdata()."""
+        data = np.zeros((6, 6, 4), dtype=np.float64)
+        data[1:3, 1:3, 1:3] = 2.0  # float NIfTI holding integer labels
+        path = tmp_path / "mask.nii.gz"
+        nibabel.save(nibabel.Nifti1Image(data, np.eye(4)), str(path))
+
+        def _boom(self: object, *a: object, **k: object) -> np.ndarray:
+            raise AssertionError("Segmentation read routed through float64 get_fdata()")
+
+        monkeypatch.setattr(nibabel.Nifti1Image, "get_fdata", _boom)
+        seg = Segmentation(autolabel=False)
+        seg.read(path)
+        assert seg.img.dtype == np.uint8
+        assert int(seg.img[2, 2, 2]) == 2  # values preserved through the uint8 cast
+
+    def test_segmentation_metadata_only_read(self, tmp_path: Path) -> None:
+        data = np.zeros((6, 6, 4), dtype=np.uint8)
+        path = tmp_path / "mask.seg.nrrd"
+        nrrd.write(str(path), data, {"space directions": np.eye(3), "space origin": np.zeros(3)})
+        seg = Segmentation(autolabel=False)
+        seg.read(path, load_data=False)
+        assert seg.has_data is False
+        assert seg.shape == (6, 6, 4)
+
+    def test_segmentation_explicit_dtype_override(self, nifti_path: Path) -> None:
+        """An explicit dtype= still wins over the uint8 default."""
+        seg = Segmentation(autolabel=False)
+        seg.read(nifti_path, dtype=np.int16)
+        assert seg.img.dtype == np.uint8  # Segmentation img setter always lands uint8
 
 
 # ---------------------------------------------------------------------------

@@ -71,6 +71,15 @@
 - `find_records` (`ClarinetClient` and the pipeline sync wrapper) now logs a
   warning when a wide-scope call (no `series_uid`/`study_uid` filter) is
   truncated at the first cursor page, pointing the caller at `iter_records`.
+- **RAM-lean `Image` reads (opt-in, additive).** `read`/`read_nifti`/`read_nrrd` take
+  `load_data=False` (grid + `shape`/`has_data` from the header only — the #452 fix) and
+  `dtype=` (cast once off-disk, no forced float64; `dtype=None` keeps float64 for
+  filtering). New `read_slice()` (single 2-D slice), read-only `dataobj` proxy (NIfTI),
+  and `unload()`/`close()`/context-manager for deterministic frees. `Segmentation`
+  reads now route at uint8 (a mask never passes through float64 — observably identical).
+- **`LayeredSegmentation`** — first-class 4-D overlapping-segment NRRD (Slicer format)
+  over one shared 3-D grid: `from_layers().save()` (raw, Slicer-native interleaved 4-D,
+  fill-in-place) and `read_header`/`read_layer`/`read_layer_slice`/`iter_layers`.
 
 ### Improved
 

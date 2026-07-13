@@ -92,6 +92,23 @@ class Segmentation(Image):
             self._img = vol.astype(np.uint8)
         self._region_props = None
 
+    def read_nifti(self, file_path: Path, *, load_data: bool = True, dtype: Any = None) -> None:
+        """Read a NIfTI mask, routing the underlying read at uint8 (never float64).
+
+        A mask never passes through ``get_fdata`` float64: the read casts once to uint8
+        (or an explicit ``dtype``). Observably identical to before — the ``img`` setter
+        already lands uint8.
+        """
+        super().read_nifti(
+            file_path, load_data=load_data, dtype=np.uint8 if dtype is None else dtype
+        )
+
+    def read_nrrd(self, file_path: Path, *, load_data: bool = True, dtype: Any = None) -> None:
+        """Read an NRRD mask, routing the underlying read at uint8 (never float64)."""
+        super().read_nrrd(
+            file_path, load_data=load_data, dtype=np.uint8 if dtype is None else dtype
+        )
+
     @property
     def label_props(self) -> list[_RegionProperties]:
         """Cached region properties for all labels."""
