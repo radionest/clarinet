@@ -384,6 +384,17 @@ class TestImage:
         with pytest.raises(ImageError, match="no lazy proxy"):
             _ = img.dataobj
 
+    def test_template_derived_has_no_lazy_proxy(self, nifti_path: Path) -> None:
+        """A template-derived image must not expose the source's dataobj (stale voxels)."""
+        src = Image()
+        src.read(nifti_path, load_data=False)
+        assert src._nifti_image is not None  # source keeps its own proxy
+        derived = Image(template=src)
+        assert derived._nifti_image is None  # not inherited from the template
+        with pytest.raises(ImageError, match="no lazy proxy"):
+            _ = derived.dataobj
+        _ = np.asarray(src.dataobj[0, 0, :])  # source proxy still usable
+
     def test_dtype_none_returns_float64_regression_guard(self, nifti_path: Path) -> None:
         """Filtering callers depend on the float64 default staying float64."""
         img = Image()

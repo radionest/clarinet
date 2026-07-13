@@ -214,28 +214,52 @@ class LayeredSegmentation:
 
     # -- voxel read --
 
-    def _resolve_layer_index(self, name_or_index: str | int) -> int:
-        """Map a segment name → its ``SegmentN_Layer`` index, or pass an int through."""
+    def _resolve_layer(self, name_or_index: str | int) -> tuple[int, int | None]:
+        """Map to ``(layer_index, label)``.
+
+        A segment ``name`` resolves to its ``SegmentN_Layer`` index **and** its
+        ``LabelValue`` — the label isolates it from any co-tenant segments Slicer packed
+        onto the same layer. An ``int`` is a direct layer index with no label filter
+        (the whole layer, co-tenants included).
+        """
         if isinstance(name_or_index, int):
-            return name_or_index
-        for name, layer, _label in self._segments:
+            return name_or_index, None
+        for name, layer, label in self._segments:
             if name == name_or_index:
-                return layer
+                return layer, label
         raise ImageError(f"no segment named {name_or_index!r}")
+
+    def _check_layer_index(self, data: np.ndarray, layer_index: int) -> None:
+        """Raise ``ImageError`` for an out-of-range layer index (no silent negative wrap)."""
+        num_layers = int(data.shape[0])
+        if not 0 <= layer_index < num_layers:
+            raise ImageError(f"layer index {layer_index} out of range [0, {num_layers})")
+
+    @staticmethod
+    def _isolate(arr: np.ndarray, label: int | None) -> np.ndarray:
+        """Zero co-tenant labels sharing the layer; keep this segment's own voxels.
+
+        ``label is None`` (int-index read) returns ``arr`` untouched. For a
+        one-segment-per-layer file (the ``from_layers`` default) this is a no-op — the
+        layer holds only ``label`` and 0.
+        """
+        return arr if label is None else np.where(arr == label, arr, 0)
 
     def read_layer(
         self, path: Path | str, name_or_index: str | int, *, dtype: Any = np.uint8
     ) -> np.ndarray:
-        """Return one 3-D layer as an array.
+        """Return one segment (by name) or one raw layer (by int index) as a 3-D array.
 
-        ``str`` resolves via segment name → ``SegmentN_Layer``; ``int`` is a direct layer
-        index. pynrrd has no lazy proxy, so the full 4-D array is read then indexed — the
-        *returned* array is bounded to a single layer, but pynrrd's own read is the whole
-        4-D (the accepted read floor).
+        A ``str`` resolves via segment name → ``SegmentN_Layer`` and returns **only that
+        segment's** voxels — co-tenant segments packed onto the same layer are zeroed, the
+        segment's own ``LabelValue`` preserved. An ``int`` is a direct layer index and
+        returns the whole layer unfiltered. pynrrd has no lazy proxy, so the full 4-D
+        array is read then indexed (the accepted read floor).
         """
-        layer_index = self._resolve_layer_index(name_or_index)
+        layer_index, label = self._resolve_layer(name_or_index)
         data = self._read_4d(path)
-        result: np.ndarray = data[layer_index].astype(dtype, copy=False)
+        self._check_layer_index(data, layer_index)
+        result: np.ndarray = self._isolate(data[layer_index], label).astype(dtype, copy=False)
         return result
 
     def read_layer_slice(
@@ -247,21 +271,27 @@ class LayeredSegmentation:
         axis: int = 2,
         dtype: Any = np.uint8,
     ) -> np.ndarray:
-        """Return one 2-D slice of one layer (non-lazy: full read then index)."""
-        layer_index = self._resolve_layer_index(name_or_index)
-        layer = self._read_4d(path)[layer_index]
+        """Return one 2-D slice of one segment/layer (non-lazy: full read then index)."""
+        layer_index, label = self._resolve_layer(name_or_index)
+        data = self._read_4d(path)
+        self._check_layer_index(data, layer_index)
+        layer = data[layer_index]
         slicer: list[Any] = [slice(None)] * layer.ndim
         slicer[axis] = index
-        result: np.ndarray = layer[tuple(slicer)].astype(dtype, copy=False)
+        result: np.ndarray = self._isolate(layer[tuple(slicer)], label).astype(dtype, copy=False)
         return result
 
     def iter_layers(
         self, path: Path | str, *, dtype: Any = np.uint8
     ) -> Iterator[tuple[str, np.ndarray]]:
-        """Yield ``(segment_name, layer_array)`` per segment (one 4-D read, shared)."""
+        """Yield ``(segment_name, segment_mask)`` per segment (one 4-D read, shared).
+
+        Each segment is isolated to its own ``LabelValue``, so two segments sharing a
+        layer yield distinct masks — not the same raw layer twice.
+        """
         data = self._read_4d(path)
-        for name, layer, _label in self._segments:
-            yield name, data[layer].astype(dtype, copy=False)
+        for name, layer, label in self._segments:
+            yield name, self._isolate(data[layer], label).astype(dtype, copy=False)
 
     def _read_4d(self, path: Path | str) -> np.ndarray:
         """Read the full 4-D voxel array (pynrrd native uint8, no lazy proxy)."""

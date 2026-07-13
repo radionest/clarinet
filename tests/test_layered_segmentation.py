@@ -20,6 +20,36 @@ def _overlapping_layers() -> tuple[np.ndarray, np.ndarray]:
     return psoas, skm
 
 
+def _packed_layer_nrrd(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Write a 4-D NRRD with two segments packed on ONE layer (labels 1 and 2).
+
+    Mimics Slicer's packing of non-overlapping segments onto a shared layer. Returns
+    the expected per-segment masks (``a`` = label-1 voxels, ``b`` = label-2 voxels).
+    """
+    shape = (6, 6, 4)
+    layer = np.zeros(shape, dtype=np.uint8)
+    layer[1:3, 1:3, 1:3] = 1  # segment "a"
+    layer[3:5, 3:5, 1:3] = 2  # segment "b" (disjoint from a)
+    data = layer[np.newaxis, ...]  # (1, X, Y, Z) — a single shared layer
+    space_dirs = np.vstack([np.full(3, np.nan), np.eye(3)])
+    header = {
+        "dimension": 4,
+        "space": "left-posterior-superior",
+        "kinds": ["list", "domain", "domain", "domain"],
+        "space directions": space_dirs,
+        "space origin": np.zeros(3),
+        "encoding": "raw",
+        "Segment0_Name": "a",
+        "Segment0_Layer": "0",
+        "Segment0_LabelValue": "1",
+        "Segment1_Name": "b",
+        "Segment1_Layer": "0",  # same layer as "a"
+        "Segment1_LabelValue": "2",
+    }
+    nrrd.write(str(path), data, header)
+    return np.where(layer == 1, layer, 0), np.where(layer == 2, layer, 0)
+
+
 class TestLayeredSegmentationWrite:
     def test_from_layers_save_header(self, tmp_path: Path) -> None:
         psoas, skm = _overlapping_layers()
@@ -180,3 +210,29 @@ class TestLayeredSegmentationRead:
         hdr = LayeredSegmentation.read_header(tmp_path / "rois.seg.nrrd")
         with pytest.raises(ImageError, match="no segment named"):
             hdr.read_layer(tmp_path / "rois.seg.nrrd", "nonexistent")
+
+    def test_read_layer_isolates_shared_layer_segments(self, tmp_path: Path) -> None:
+        """Two segments packed on one layer: a name read returns only that segment."""
+        path = tmp_path / "packed.seg.nrrd"
+        a_expected, b_expected = _packed_layer_nrrd(path)
+        hdr = LayeredSegmentation.read_header(path)
+        a = hdr.read_layer(path, "a")
+        b = hdr.read_layer(path, "b")
+        np.testing.assert_array_equal(a, a_expected)  # only label-1 voxels
+        np.testing.assert_array_equal(b, b_expected)  # only label-2, co-tenant zeroed
+        assert not np.any((a != 0) & (b != 0))  # disjoint — no co-tenant leak
+        raw = hdr.read_layer(path, 0)  # int index returns the raw shared layer
+        assert {int(v) for v in np.unique(raw)} == {0, 1, 2}
+        got = dict(hdr.iter_layers(path))  # distinct per-segment masks, not the layer twice
+        np.testing.assert_array_equal(got["a"], a_expected)
+        np.testing.assert_array_equal(got["b"], b_expected)
+
+    def test_read_layer_index_out_of_range_raises(self, tmp_path: Path) -> None:
+        """Bad int layer index → domain ImageError; a negative index must not numpy-wrap."""
+        path = tmp_path / "packed.seg.nrrd"
+        _packed_layer_nrrd(path)
+        hdr = LayeredSegmentation.read_header(path)
+        with pytest.raises(ImageError, match="out of range"):
+            hdr.read_layer(path, 99)
+        with pytest.raises(ImageError, match="out of range"):
+            hdr.read_layer(path, -1)

@@ -152,7 +152,9 @@ class Image:
             self.spacing = template.spacing
             self._origin = template._origin
             self._direction = template._direction.copy()
-            self._nifti_image = getattr(template, "_nifti_image", None)
+            # NOT inherited: a derived image's `img` holds freshly-computed voxels, not
+            # the template's on-disk data — copying the template's lazy proxy would make
+            # `dataobj` return stale source voxels. `_nifti_image` stays None (set above).
             self._nrrd_header = getattr(template, "_nrrd_header", None)
             self._filetype = template._filetype
             self._shape = template._shape
