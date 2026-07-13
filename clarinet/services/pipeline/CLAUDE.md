@@ -193,7 +193,13 @@ Writes go through `ClarinetClient` with the service token, fire-and-forget
 row insert), a late `retrying` PATCH never downgrades a terminal status,
 failures are logged and swallowed, pending writes are drained in
 `shutdown()`. Queue falls back to the broker's `queue_name` when the
-message has no `queue` label (first step, direct `kiq()`). Query via
+message has no `queue` label (first step, direct `kiq()`). Absent entity
+ids are written as NULL, never `''`: patient-less tasks carry the
+`PipelineMessage` required-`str` sentinel `""`, which `pre_execute`
+normalizes (`or None`) and `PipelineTaskRunCreate` re-normalizes at the
+POST boundary. `queue` is deliberately NOT normalized — workers
+legitimately send `""`, which is also why the schema must not inherit
+clarinet `BaseModel.empty_to_none`. Query via
 `GET /api/pipelines/runs` (admin) or `GET /api/records/{id}/runs`
 (record-scoped, identifiers masked per record masking policy). Downstream
 projects need an alembic migration for the new table.
