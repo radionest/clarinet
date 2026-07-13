@@ -19,7 +19,7 @@ For each finished conversion record, C-MOVE the series to a temp dir and call th
 framework detection primitive:
 
 ```python
-from clarinet.services.image.orientation import is_volume_misoriented, OrientationUnverifiable
+from clarinet.services.image import is_volume_misoriented, OrientationUnverifiable
 
 try:
     flipped = is_volume_misoriented(volume_nifti_path, dicom_temp_dir)

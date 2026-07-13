@@ -612,6 +612,30 @@ class TestDicomVolume:
         assert int(volume[0, 0, 0]) == 100
         assert int(volume[0, 0, -1]) == 160
 
+    def test_wobbly_spacing_correct_series_byte_identical(self, tmp_path: Path) -> None:
+        """A correctly-ordered (+Z, non-flip) series with irregular inter-slice
+        spacing (real-world sub-mm wobble, not the perfectly uniform spacing every
+        other fixture uses) must still be passed through byte-identical —
+        ground_truth_slice_geometry only reads the first/last file's IPP, so
+        intermediate wobble cannot perturb the computed origin/direction regardless
+        of how irregular the spacing is.
+        """
+        dcm_dir = tmp_path / "wobbly_series"
+        z_pixel_map = {0.0: 100, 3.0: 130, 5.5: 155, 9.5: 195}  # ascending, irregular spacing
+        self._write_axial_series(
+            dcm_dir,
+            {z: np.full((4, 5), v) for z, v in z_pixel_map.items()},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        volume, _spacing, origin, direction = read_dicom_series(dcm_dir)
+
+        # No flip: origin stays at the first (min-Z) slice, slice order unchanged.
+        assert direction[2, 2] > 0
+        assert pytest.approx(origin[2], abs=1e-6) == 0.0
+        assert int(volume[0, 0, 0]) == 100
+        assert int(volume[0, 0, -1]) == 195
+
     def test_canonicalization_preserves_geometry(self, tmp_path: Path) -> None:
         """Slice-axis canonicalisation flips the array, origin and direction
         together, so every voxel keeps its physical location — unlike a

@@ -758,3 +758,109 @@ __execResult = {'raised': raised, 'bypassed': bypassed}
     assert isinstance(result, dict)
     assert result["raised"] is True
     assert result["bypassed"] is True
+
+
+async def test_binarize_and_split_islands_guards_grid_mismatch(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """A seg whose recorded geometry mismatches the source volume grid raises by
+    default; resample=True re-grids a still-overlapping mask instead of raising."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+
+def _volume(name, dim):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', name)
+    arr = np.zeros((dim, dim, dim), dtype=np.int16)
+    arr[1:4, 1:4, 1:4] = 1
+    slicer.util.updateVolumeFromArray(node, arr)
+    node.SetOrigin(0.0, 0.0, 0.0)
+    return node
+
+s = SlicerHelper(working_folder)
+vol_ref = _volume('VolRef', 6)   # seg is recorded on this 6^3 grid
+vol_src = _volume('VolSrc', 8)   # source volume is a different 8^3 grid (dims mismatch, overlapping)
+
+seg = s.create_segmentation('MismatchSeg')
+seg.node.SetReferenceImageGeometryParameterFromVolumeNode(vol_ref)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'SeedLM')
+slicer.util.updateVolumeFromArray(lm, (slicer.util.arrayFromVolume(vol_ref) > 0).astype(np.uint8))
+lm.SetOrigin(0.0, 0.0, 0.0)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(lm, seg.node)
+slicer.mrmlScene.RemoveNode(lm)
+
+s._image_node = vol_src
+
+raised = False
+try:
+    s.binarize_and_split_islands(seg)
+except Exception as exc:
+    raised = 'does not match the volume grid' in str(exc)
+
+bypassed = True
+try:
+    s.binarize_and_split_islands(seg, output_name='_BinBypass', resample=True)
+except Exception:
+    bypassed = False
+
+__execResult = {'raised': raised, 'bypassed': bypassed}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert isinstance(result, dict)
+    assert result["raised"] is True
+    assert result["bypassed"] is True
+
+
+async def test_merge_as_pool_guards_grid_mismatch(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """A source seg whose recorded geometry mismatches the source volume grid
+    raises by default; resample=True re-grids a still-overlapping mask instead
+    of raising."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+
+def _volume(name, dim):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', name)
+    arr = np.zeros((dim, dim, dim), dtype=np.int16)
+    arr[1:4, 1:4, 1:4] = 1
+    slicer.util.updateVolumeFromArray(node, arr)
+    node.SetOrigin(0.0, 0.0, 0.0)
+    return node
+
+s = SlicerHelper(working_folder)
+vol_ref = _volume('VolRef', 6)   # source seg is recorded on this 6^3 grid
+vol_src = _volume('VolSrc', 8)   # source volume is a different 8^3 grid (dims mismatch, overlapping)
+
+source = s.create_segmentation('MismatchSource')
+source.node.SetReferenceImageGeometryParameterFromVolumeNode(vol_ref)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'SeedLM')
+slicer.util.updateVolumeFromArray(lm, (slicer.util.arrayFromVolume(vol_ref) > 0).astype(np.uint8))
+lm.SetOrigin(0.0, 0.0, 0.0)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(lm, source.node)
+slicer.mrmlScene.RemoveNode(lm)
+
+target = s.create_segmentation('MismatchTarget')
+s._image_node = vol_src
+
+raised = False
+try:
+    s.merge_as_pool(source, target)
+except Exception as exc:
+    raised = 'does not match the volume grid' in str(exc)
+
+bypassed = True
+try:
+    s.merge_as_pool(source, target, pool_name='_pool_bypass', resample=True)
+except Exception:
+    bypassed = False
+
+__execResult = {'raised': raised, 'bypassed': bypassed}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert isinstance(result, dict)
+    assert result["raised"] is True
+    assert result["bypassed"] is True

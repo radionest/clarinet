@@ -3,6 +3,7 @@
 from clarinet.services.image.coco2nii import COCODataset, coco_to_segmentation
 from clarinet.services.image.image import FileType, Image
 from clarinet.services.image.layered_segmentation import LayeredSegmentation
+from clarinet.services.image.orientation import OrientationUnverifiable, is_volume_misoriented
 from clarinet.services.image.segmentation import (
     PropName,
     Segmentation,
@@ -14,8 +15,10 @@ __all__ = [
     "FileType",
     "Image",
     "LayeredSegmentation",
+    "OrientationUnverifiable",
     "PropName",
     "Segmentation",
     "coco_to_segmentation",
     "conform_seg_to_grid",
+    "is_volume_misoriented",
 ]
