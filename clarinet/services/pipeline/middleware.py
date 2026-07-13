@@ -350,9 +350,12 @@ class AuditMiddleware(TaskiqMiddleware):
                     pipeline_id=labels.get("pipeline_id"),
                     step_index=step_index,
                     record_id=payload.get("record_id"),
-                    patient_id=payload.get("patient_id"),
-                    study_uid=payload.get("study_uid"),
-                    series_uid=payload.get("series_uid"),
+                    # '' is the PipelineMessage required-str sentinel (patient-less
+                    # tasks, e.g. report renders) — write NULL, not '', or the
+                    # patient FK rejects the row.
+                    patient_id=payload.get("patient_id") or None,
+                    study_uid=payload.get("study_uid") or None,
+                    series_uid=payload.get("series_uid") or None,
                     started_at=started_at,
                 )
             except Exception as e:
