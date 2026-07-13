@@ -16,7 +16,12 @@ MANAGED = Path(".claude") / "rules" / "clarinet"
 
 DOCS = Path(clarinet.__file__).resolve().parent / "docs"
 AGENT_CLAUDE = DOCS / "agent" / "claude"
-RULES_DIR = Path(clarinet.__file__).resolve().parent.parent / ".claude" / "rules"
+REPO_ROOT = Path(clarinet.__file__).resolve().parent.parent
+RULES_DIR = REPO_ROOT / ".claude" / "rules"
+PROJECT_TEMPLATE_RULES = REPO_ROOT / "examples" / "project_template" / ".claude" / "rules"
+PROJECT_TEMPLATE_CLAUDE_MD = REPO_ROOT / "examples" / "project_template" / ".claude" / "CLAUDE.md"
+
+_CYRILLIC_RE = re.compile(r"[Ѐ-ӿ]")
 
 SECTION_RULES = ["definitions", "workflows", "slicer", "schemas", "utils"]
 DEEP_DOCS = [
@@ -124,6 +129,26 @@ def test_cli_init_existing_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         handle_agent_command(args)
     assert exc.value.code == 1
+
+
+@pytest.mark.skipif(not RULES_DIR.is_dir(), reason="repo .claude/rules absent (installed wheel)")
+def test_translated_agent_docs_have_no_cyrillic() -> None:
+    """Regression guard for the Russian→English translation of agent-facing docs.
+
+    These docs have no byte-identical twin to diff against (unlike DEEP_DOCS), so this
+    just asserts no Cyrillic text creeps back in on a future edit.
+    """
+    files = [
+        *AGENT_CLAUDE.glob("*.md"),
+        RULES_DIR / "slicer-context.md",
+        PROJECT_TEMPLATE_CLAUDE_MD,
+        *PROJECT_TEMPLATE_RULES.glob("*.md"),
+    ]
+    assert len(files) >= 13
+    for md in files:
+        assert not _CYRILLIC_RE.search(md.read_text(encoding="utf-8")), (
+            f"{md} contains Cyrillic text"
+        )
 
 
 @pytest.mark.skipif(not RULES_DIR.is_dir(), reason="repo .claude/rules absent (installed wheel)")

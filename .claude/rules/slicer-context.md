@@ -78,18 +78,18 @@ async def hydrate_patient_first_study(record, context, ctx):
     return {"best_study_uid": first.anon_uid or first.study_uid}
 ```
 
-## exec scope в `_build_script` (`service.py`)
+## exec scope in `_build_script` (`service.py`)
 
-Slicer переиспользует один exec-namespace для всех HTTP-вызовов (см. guard `_current_helper` в helper.py). `_build_script` собирает скрипт так:
+Slicer reuses a single exec-namespace across all HTTP calls (see the `_current_helper` guard in helper.py). `_build_script` assembles the script as follows:
 
-1. **helper.py** исполняется на module-level — определения (`SlicerHelper`, `PacsHelper`, `_get_pacs_helper`, ...) живут в module globals; `__globals__` каждой helper-функции указывает туда же.
-2. **Context-переменные** инъецируются в module globals (`globals()[key] = value` внутри `_run()`): только так их видят helper-функции, читающие `globals()` (например `_get_pacs_helper()`). Инъекция в `_ns` для хелперов невидима — их `__globals__` фиксирован на module namespace.
-3. **Пользовательский скрипт** исполняется через `exec(code, _ns)`, где `_ns = dict(globals())` — плоская per-call копия (один dict = и globals, и locals):
-   - нет local-vs-global различия → паттерны `slicer = SlicerHelper(...)` не дают `UnboundLocalError`;
-   - тяжёлые VTK-объекты (~1-3 GB на том) остаются в `_ns` и собираются GC после вызова, не накапливаясь в переиспользуемом namespace;
-   - копия строится ПОСЛЕ инъекции — скрипт видит context-переменные.
-4. **Cleanup в `finally`**: инъецированные ключи удаляются из module globals после exec (в т.ч. при исключении в скрипте). Без этого context одного вызова (UID'ы записи, пути file_registry, PACS-параметры) утекал бы во все последующие скрипты и в ручные сессии консоли Слайсера; документированный fallback `PacsHelper.from_slicer()` остаётся достижимым.
+1. **helper.py** executes at module level — definitions (`SlicerHelper`, `PacsHelper`, `_get_pacs_helper`, ...) live in the module globals; each helper function's `__globals__` points there too.
+2. **Context variables** are injected into module globals (`globals()[key] = value` inside `_run()`): this is the only way helper functions that read `globals()` (e.g. `_get_pacs_helper()`) can see them. Injecting into `_ns` would be invisible to helpers — their `__globals__` is fixed to the module namespace.
+3. **The user script** executes via `exec(code, _ns)`, where `_ns = dict(globals())` — a flat per-call copy (a single dict serving as both globals and locals):
+   - no local-vs-global distinction → patterns like `slicer = SlicerHelper(...)` don't raise `UnboundLocalError`;
+   - heavy VTK objects (~1-3 GB per volume) stay in `_ns` and get garbage-collected after the call, instead of accumulating in the reused namespace;
+   - the copy is built AFTER injection — the script sees the context variables.
+4. **Cleanup in `finally`**: injected keys are removed from module globals after exec (including when the script raises). Without this, one call's context (record UIDs, file_registry paths, PACS parameters) would leak into every subsequent script and into manual Slicer console sessions; the documented `PacsHelper.from_slicer()` fallback remains reachable.
 
-Наружу пробрасывается только `globals()['__execResult']` — канал результата, который читает Slicer после выполнения скрипта. Этот ключ **удаляется из копии `_ns` перед exec** (`_ns.pop('__execResult', None)`), но НЕ в `finally`: пробрасывающая строка пишет результат в module globals, чтобы Slicer прочитал его *после* завершения скрипта — чистка в `finally` стёрла бы канал раньше. Без pop следующий вызов через `_ns = dict(globals())` унаследовал бы прошлый результат, и скрипт без присваивания `__execResult` вернул бы устаревший dict вместо `{}` (контракт «`{}`, если скрипт ничего не присвоил»).
+Only `globals()['__execResult']` is exposed outward — the result channel that Slicer reads after the script runs. This key **is removed from the `_ns` copy before exec** (`_ns.pop('__execResult', None)`), but NOT in `finally`: the line that publishes the result writes it into module globals so Slicer can read it *after* the script finishes — cleaning it up in `finally` would erase the channel too early. Without the pop, the next call's `_ns = dict(globals())` would inherit the previous result, and a script that never assigns `__execResult` would return the stale dict instead of `{}` (the contract is `{}` when the script assigns nothing).
 
-Юнит-тесты механики: `tests/test_slicer_build_script.py` — generated script исполняется в обычном dict без живого Слайсера (благодаря `_Dummy`-стабам helper.py). Файл намеренно в корне `tests/`: модуль `tests/integration/test_slicer_service.py` гейтится `_check_slicer` и в CI скипается целиком.
+Unit tests for this mechanism: `tests/test_slicer_build_script.py` — the generated script runs against a plain dict with no live Slicer (thanks to the `_Dummy` stubs in helper.py). The file deliberately lives at the `tests/` root: `tests/integration/test_slicer_service.py` is gated by `_check_slicer` and is skipped entirely in CI.

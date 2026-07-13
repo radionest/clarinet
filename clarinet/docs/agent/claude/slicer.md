@@ -5,23 +5,23 @@ paths:
   - "plan/validators/**"
 ---
 
-# Slicer-интеграция: hydrators / scripts / validators
+# Slicer integration: hydrators / scripts / validators
 
-Эти три раздела объединены, потому что они тесно связаны через **inject vars** — переменные, которые фреймворк передаёт в окружение Slicer-скрипта и валидатора. Hydrator вычисляет переменную; скрипт её использует; валидатор тоже её видит.
+These three sections are grouped together because they're tightly linked via **inject vars** — variables the framework passes into the environment of a Slicer script and its validator. A hydrator computes a variable; the script uses it; the validator sees it too.
 
 ```
-slicer_hydrators.py  →  вычисляют inject vars (plan root)
-scripts/    →  *.py (исполняются в 3D Slicer)   # используют inject vars
-validators/ →  *_validator.py                   # запускаются после скрипта, видят те же vars
+slicer_hydrators.py  →  compute inject vars (plan root)
+scripts/    →  *.py (run inside 3D Slicer)      # use inject vars
+validators/ →  *_validator.py                   # run after the script, see the same vars
 ```
 
 ---
 
-## Часть A — Hydrators (`plan/slicer_hydrators.py`)
+## Part A — Hydrators (`plan/slicer_hydrators.py`)
 
-Async-функции, которые перед запуском Slicer-скрипта обращаются к БД и возвращают словарь переменных, инжектируемых в Slicer. Один файл — `slicer_hydrators.py` (дефолт `config_context_hydrators_file`), лежит в корне `plan/`.
+Async functions that query the DB before a Slicer script runs and return a dict of variables to inject into Slicer. A single file — `slicer_hydrators.py` (the `config_context_hydrators_file` default), living at the root of `plan/`.
 
-### Декоратор и сигнатура
+### Decorator and signature
 
 ```python
 from typing import Any
@@ -56,59 +56,59 @@ async def hydrate_best_series_from_first_check(
     return {"best_series_uid": best_series}
 ```
 
-| Параметр | Что внутри |
+| Parameter | What's inside |
 |---|---|
-| `record` | `RecordRead` — запись, для которой собирается контекст |
-| `_context` | dict, накопленный предыдущими hydrator-ами + auto-injected переменные. Обычно не нужен (поэтому `_`); используется только в редких сценариях, когда один hydrator зависит от результата другого (например, для `working_folder`) |
-| `ctx` | `SlicerHydrationContext` с доступом к репозиториям |
+| `record` | `RecordRead` — the record the context is being assembled for |
+| `_context` | dict accumulated by previous hydrators + auto-injected variables. Usually not needed (hence the `_` prefix); used only in rare cases where one hydrator depends on another's result (e.g. for `working_folder`) |
+| `ctx` | `SlicerHydrationContext` with access to repositories |
 
-Имя в декораторе (`"best_series_from_first_check"`) — то, что указывается в `RecordDef.slicer_context_hydrators=[...]`. Должно совпадать символ в символ.
+The name in the decorator (`"best_series_from_first_check"`) is what you put in `RecordDef.slicer_context_hydrators=[...]`. It must match character-for-character.
 
 ### `SlicerHydrationContext`
 
 ```python
-ctx.study_repo.find_by_patient(patient_id)        # все study пациента
-ctx.study_repo.get_with_series(study_uid)         # study + загруженные series
-ctx.record_repo.get(record_id)                    # одна запись
-ctx.record_repo.find_by_criteria(criteria)        # сложный поиск
+ctx.study_repo.find_by_patient(patient_id)        # all of a patient's studies
+ctx.study_repo.get_with_series(study_uid)         # study + loaded series
+ctx.record_repo.get(record_id)                    # a single record
+ctx.record_repo.find_by_criteria(criteria)        # complex search
 ```
 
-`RecordSearchCriteria` поддерживает фильтры по `record_type_name`, `patient_id`, `study_uid`, `series_uid`, статусу и т. д. Полный список — `clarinet/repositories/record_repository.py`.
+`RecordSearchCriteria` supports filters by `record_type_name`, `patient_id`, `study_uid`, `series_uid`, status, etc. Full list — `clarinet/repositories/record_repository.py`.
 
-### Возврат
+### Return value
 
-`dict[str, Any]`. Ключи становятся **именами переменных** в Slicer-скрипте и валидаторе. Если данных недостаточно, возвращайте `{}` (не падайте) — фреймворк просто не добавит этих переменных, и скрипт сможет проверить их через `if best_series_uid is not None`.
+`dict[str, Any]`. The keys become **variable names** in the Slicer script and validator. If there isn't enough data, return `{}` (don't raise) — the framework simply won't add those variables, and the script can check for them via `if best_series_uid is not None`.
 
 ### Hydrator vs `slicer_script_args`
 
-- **Hydrator** — динамическое значение, требующее запроса в БД (UID лучшей серии, путь к файлу другого пациента).
-- **`slicer_script_args`** — статические константы, известные на момент описания `RecordDef` (цвета сегментов, режим редактора, brush size).
+- **Hydrator** — a dynamic value that requires a DB query (the best series' UID, another patient's file path).
+- **`slicer_script_args`** — static constants known at the time `RecordDef` is described (segment colors, editor mode, brush size).
 
 ---
 
-## Часть B — Slicer-скрипты (`plan/scripts/`)
+## Part B — Slicer scripts (`plan/scripts/`)
 
-Bare Python-скрипты, исполняющиеся в окружении 3D Slicer. Каждый файл — один тип задачи.
+Bare Python scripts that run inside the 3D Slicer environment. Each file is one task type.
 
-### Inject vars: что доступно в скрипте
+### Inject vars: what's available in the script
 
-**Авто-инжектируется фреймворком всегда**:
+**Always auto-injected by the framework**:
 
-| Переменная | Когда |
+| Variable | When |
 |---|---|
-| `working_folder` | `str` — абсолютный путь к рабочей папке записи (PATIENT/STUDY/SERIES) |
-| `output_file` | `str` — путь к **первому** `FileRef` с `role="output"` из `RecordDef.files` |
-| `study_uid` | `str` — DICOM Study UID (только для STUDY/SERIES-уровня) |
-| `series_uid` | `str` — DICOM Series UID (только для SERIES-уровня) |
-| `pacs_host`, `pacs_port`, `pacs_aet`, `pacs_login`, `pacs_password` | если PACS настроен в settings |
+| `working_folder` | `str` — absolute path to the record's working folder (PATIENT/STUDY/SERIES) |
+| `output_file` | `str` — path to the **first** `FileRef` with `role="output"` from `RecordDef.files` |
+| `study_uid` | `str` — DICOM Study UID (STUDY/SERIES level only) |
+| `series_uid` | `str` — DICOM Series UID (SERIES level only) |
+| `pacs_host`, `pacs_port`, `pacs_aet`, `pacs_login`, `pacs_password` | if PACS is configured in settings |
 
-**Hydrator-инжектируемые**: то, что вернули функции из `RecordDef.slicer_context_hydrators`.
+**Hydrator-injected**: whatever the functions in `RecordDef.slicer_context_hydrators` returned.
 
-**Пользовательские константы**: то, что указано в `RecordDef.slicer_script_args`.
+**User constants**: whatever is specified in `RecordDef.slicer_script_args`.
 
-### Обязательный docstring
+### Mandatory docstring
 
-В начале каждого скрипта — docstring с перечислением context vars. Это **контракт** между скриптом и фреймворком: агенту проще ориентироваться, валидатор получает те же vars, проверка соответствия RecordDef становится явной.
+At the top of every script — a docstring listing the context vars. This is a **contract** between the script and the framework: it makes it easier for the agent to orient itself, ensures the validator gets the same vars, and makes the correspondence with the `RecordDef` explicit.
 
 ```python
 """Slicer script — lesion segmentation on a single study.
@@ -124,16 +124,16 @@ Context variables (injected by build_slicer_context):
 
 ### `SlicerHelper`
 
-Основной helper для PACS / segmentation / layout / alignment. Полный API + VTK pitfalls — `{{CLARINET_DOCS}}/slicer-helper-api.md`. Базовый набор:
+The main helper for PACS / segmentation / layout / alignment. Full API + VTK pitfalls — `{{CLARINET_DOCS}}/slicer-helper-api.md`. Basic toolkit:
 
 ```python
 s = SlicerHelper(working_folder)
 
-# Загрузка из PACS (window = CT soft tissue)
+# Load from PACS (window = CT soft tissue)
 s.load_study_from_pacs(study_uid, window=(-200, 300))
 s.load_series_from_pacs(study_uid, series_uid, window=(-200, 300))
 
-# Сегментация
+# Segmentation
 seg = (
     s.create_segmentation("Segmentation")
     .add_segment("mts", (1.0, 0.0, 0.0))     # red
@@ -150,14 +150,14 @@ s.set_dual_layout(vol_a, vol_b, seg_a=..., seg_b=..., linked=False)
 s.annotate("Segment all lesions")
 s.add_view_shortcuts()
 
-# Выравнивание
+# Alignment
 align_tf = s.align_by_center(target, model, moving_segmentation=projection)
 s.refine_alignment_by_centroids(projection, master_seg, align_tf)
 ```
 
-### Идемпотентность
+### Idempotency
 
-Скрипт может быть открыт повторно (например, врач хочет дописать сегментацию). Поэтому стандартный паттерн — проверка существования output:
+A script may be reopened (e.g. a doctor wants to continue a segmentation). So the standard pattern is checking whether the output already exists:
 
 ```python
 import os
@@ -168,29 +168,29 @@ else:
     seg = s.create_segmentation("Segmentation").add_segment("mts", (1.0, 0.0, 0.0))
 ```
 
-### Типичные паттерны
+### Common patterns
 
-**Single-volume segmentation**: загрузить study (или одну серию), создать/загрузить сегментацию, настроить редактор, запустить.
+**Single-volume segmentation**: load the study (or a single series), create/load a segmentation, configure the editor, done.
 
-**Dual-volume comparison** (сравнение текущего исследования с референсным): `set_dual_layout(linked=False)` для независимой навигации в двух вьюпортах. Левый — модель, правый — целевая серия + проекция.
+**Dual-volume comparison** (comparing the current study against a reference): `set_dual_layout(linked=False)` for independent navigation in two viewports. Left — the model, right — the target series + projection.
 
-### Линт-комментарии
+### Lint comments
 
-Так как переменные инжектируются в глобальный namespace, mypy/ruff не знают об их существовании. На каждой строке использования добавляйте:
+Since the variables are injected into the global namespace, mypy/ruff don't know they exist. Add this on every line that uses them:
 
 ```python
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 ```
 
-`name-defined` отключает mypy, `F821` — pyflakes (undefined name).
+`name-defined` silences mypy, `F821` silences pyflakes (undefined name).
 
 ---
 
-## Часть C — Validators (`plan/validators/`)
+## Part C — Validators (`plan/validators/`)
 
-Bare Python-скрипты, исполняющиеся в Slicer **после** того, как пользователь нажал "сохранить". Доступны те же globals, что и в скрипте: `slicer`, hydrator vars, `output_file`. Дополнительно — built-in helper `export_segmentation`.
+Bare Python scripts that run in Slicer **after** the user clicks "save". The same globals as in the script are available: `slicer`, hydrator vars, `output_file`. Plus the built-in `export_segmentation` helper.
 
-### Базовый паттерн
+### Basic pattern
 
 ```python
 """Validator — check segment names and export the Segmentation node."""
@@ -210,25 +210,25 @@ if current != expected:
 export_segmentation("Segmentation", output_file)  # type: ignore[name-defined]  # noqa: F821
 ```
 
-Структура:
+Structure:
 
-1. `node = slicer.util.getNode("Name")` — взять MRML-узел.
-2. Валидация: имена сегментов, типы, соответствие предыдущему состоянию.
-3. `raise ValueError(...)` при проблеме — пользователь увидит ошибку и не сможет финализировать запись.
-4. `export_segmentation("Name", output_file)` — записать сегментацию в `.seg.nrrd` через built-in helper.
+1. `node = slicer.util.getNode("Name")` — get the MRML node.
+2. Validation: segment names, types, consistency with the previous state.
+3. `raise ValueError(...)` on a problem — the user will see the error and won't be able to finalize the record.
+4. `export_segmentation("Name", output_file)` — write the segmentation to `.seg.nrrd` via the built-in helper.
 
-### Типичные проверки
+### Common checks
 
-**Required segment set** — все нужные сегменты присутствуют:
+**Required segment set** — all needed segments are present:
 ```python
 expected = {"mts", "unclear", "benign"}
 if current != expected:
     raise ValueError(f"Expected {expected}, got {current}")
 ```
 
-**Auto-numbering** — для master-моделей с числовыми именами сегментов: дописать недостающие номера в пустые сегменты, проверить уникальность.
+**Auto-numbering** — for master models with numeric segment names: fill in missing numbers into empty segments, verify uniqueness.
 
-**Immutability** — если файл уже существует, проверить, что ни один существующий сегмент не исчез и не переименовался (защита от случайного разрушения исторических данных):
+**Immutability** — if the file already exists, verify that no existing segment has disappeared or been renamed (protects against accidentally destroying historical data):
 ```python
 import os, nrrd
 if os.path.isfile(output_file):
@@ -239,6 +239,6 @@ if os.path.isfile(output_file):
         raise ValueError(f"Cannot remove segments: {missing}")
 ```
 
-### Именование
+### Naming
 
-`{task_name}_validator.py` (например, `segment_validator.py` для скрипта `segment.py`). Связь через `RecordDef(slicer_result_validator="validators/segment_validator.py")`.
+`{task_name}_validator.py` (e.g. `segment_validator.py` for the `segment.py` script). Linked via `RecordDef(slicer_result_validator="validators/segment_validator.py")`.

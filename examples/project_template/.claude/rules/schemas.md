@@ -3,41 +3,41 @@ paths:
   - "plan/schemas/**"
 ---
 
-# Раздел `plan/schemas/`
+# The `plan/schemas/` section
 
-JSON Schema-документы, описывающие форму поля `record.data` для тех типов записей, у которых есть структурированные данные. Используются и для **валидации** на бэкенде, и для **генерации UI-форм** на фронтенде.
+JSON Schema documents describing the shape of the `record.data` field for record types that have structured data. Used both for **backend validation** and for **frontend UI-form generation**.
 
-## Именование и связь
+## Naming and linkage
 
-- **Имя файла**: `{record-type-name}.schema.json` — kebab-case, совпадает с `RecordDef.name`. Пример: `first-check.schema.json`.
-- **Расположение**: `plan/schemas/`.
-- **Связь с RecordDef**:
+- **File name**: `{record-type-name}.schema.json` — kebab-case, matching `RecordDef.name`. Example: `first-check.schema.json`.
+- **Location**: `plan/schemas/`.
+- **Link to RecordDef**:
   ```python
   RecordDef(
       name="first-check",
-      data_schema="schemas/first-check.schema.json",  # путь относительно plan/
+      data_schema="schemas/first-check.schema.json",  # path relative to plan/
       ...
   )
   ```
-- **Альтернатива** — inline `dict` прямо в `data_schema=...`. Используется для очень коротких схем (1-2 поля), но обычно schema-файл удобнее.
+- **Alternative** — an inline `dict` directly in `data_schema=...`. Used for very short schemas (1-2 fields), but a schema file is usually more convenient.
 
-Если `data_schema` не указано, фреймворк ищет sidecar-файл `<config_tasks_path>/schemas/<record-type-name>.schema.json` автоматически.
+If `data_schema` isn't specified, the framework automatically looks for the sidecar file `<config_tasks_path>/schemas/<record-type-name>.schema.json`.
 
-## Общие определения между файлами (`$ref`)
+## Shared definitions across files (`$ref`)
 
-Повторяющиеся под-схемы выносятся в отдельный файл и переиспользуются стандартным относительным `$ref`. При загрузке конфигурации clarinet **встраивает** внешнее определение в локальный `$defs` схемы (one-time bundling) — итоговая схема самодостаточна, поэтому и валидатор, и UI-форма видят обычный `#/$defs/...`.
+Repeated sub-schemas are extracted into a separate file and reused via a standard relative `$ref`. When clarinet loads the configuration, it **inlines** the external definition into the schema's local `$defs` (one-time bundling) — the resulting schema is self-contained, so both the validator and the UI form see a plain `#/$defs/...`.
 
-Общий файл (`plan/schemas/_common.schema.json`) держит определения в блоке `$defs`:
+The shared file (`plan/schemas/_common.schema.json`) keeps definitions in a `$defs` block:
 
 ```json
 {
   "$defs": {
-    "StudyType": { "type": "string", "title": "Тип исследования", "enum": ["CT", "MRI"] }
+    "StudyType": { "type": "string", "title": "Study type", "enum": ["CT", "MRI"] }
   }
 }
 ```
 
-Ссылка из схемы записи — относительным путём от каталога самой схемы:
+Referencing it from a record's schema — a relative path from the schema's own directory:
 
 ```json
 {
@@ -48,13 +48,13 @@ JSON Schema-документы, описывающие форму поля `reco
 }
 ```
 
-**Поддерживается:** именованные определения `<файл>#/$defs/<Имя>` (или `#/definitions/<Имя>`); внутри подтягиваются sibling-ссылки `#/$defs/*` из **того же** файла.
+**Supported:** named definitions `<file>#/$defs/<Name>` (or `#/definitions/<Name>`); sibling references `#/$defs/*` within the **same** file are also pulled in.
 
-**Не поддерживается** (даёт `ConfigLoadError` на старте): ссылка на файл целиком (`{"$ref": "_common.schema.json"}` без указателя); цепочки между файлами (общий файл сам `$ref`-ает третий); inline-`dict`-схема в Python не сканируется (там переиспользуйте композицию dict).
+**Not supported** (raises `ConfigLoadError` at startup): referencing a whole file (`{"$ref": "_common.schema.json"}` with no pointer); chains between files (a shared file itself `$ref`-ing a third file); an inline `dict` schema in Python is not scanned (reuse dict composition there instead).
 
-Конвенция: общие файлы с префиксом `_` или в подкаталоге `defs/` — чтобы отличать их от схем типов записей (`{record-type-name}.schema.json`).
+Convention: prefix shared files with `_` or place them in a `defs/` subdirectory — to distinguish them from record-type schemas (`{record-type-name}.schema.json`).
 
-## Базовая структура
+## Basic structure
 
 ```json
 {
@@ -67,11 +67,11 @@ JSON Schema-документы, описывающие форму поля `reco
 }
 ```
 
-Поддерживается полный JSON Schema (Draft 2020-12). Бэкенд использует библиотеку `jsonschema`, фронтенд — собственный form-builder.
+Full JSON Schema (Draft 2020-12) is supported. The backend uses the `jsonschema` library; the frontend has its own form-builder.
 
 ## Conditional schemas (`if/then/else`)
 
-Для зависимых полей: показывать/требовать одни поля только при определённом значении других.
+For dependent fields: show/require certain fields only when others have a specific value.
 
 ```json
 {
@@ -97,11 +97,11 @@ JSON Schema-документы, описывающие форму поля `reco
 }
 ```
 
-`unevaluatedProperties: false` запрещает поля, не описанные явно в `properties` (включая `then` ветки), — защита от опечаток.
+`unevaluatedProperties: false` forbids fields not explicitly described in `properties` (including in `then` branches) — a guard against typos.
 
-## `x-options` — UI-хинты
+## `x-options` — UI hints
 
-Кастомное расширение для подсказок form-builder-у. Игнорируется валидатором, но используется фронтендом.
+A custom extension providing hints to the form-builder. Ignored by the validator, but used by the frontend.
 
 ```json
 {
@@ -117,29 +117,29 @@ JSON Schema-документы, описывающие форму поля `reco
 }
 ```
 
-| `source` | UI-эффект |
+| `source` | UI effect |
 |---|---|
-| `study_series` | Селект из серий текущего study |
-| `users` | Селект из пользователей системы |
+| `study_series` | Select from the current study's series |
+| `users` | Select from system users |
 
-Список доступных источников расширяется фронтендом — смотрите репо frontend для актуального списка.
+The list of available sources is extended by the frontend — check the frontend repo for the current list.
 
-## Локализация (поле `title`)
+## Localization (the `title` field)
 
-Frontend использует `title` вместо имени поля для меток на форме. Пишите на любом языке проекта (русский — типично):
+The frontend uses `title` instead of the field name for form labels. Write it in whatever language your project uses (Russian is typical for this framework's clinical deployments):
 
 ```json
 {
   "lesions": {
     "type": "array",
-    "title": "Очаги",
+    "title": "Lesions",
     "items": {
       "type": "object",
       "properties": {
-        "lesion_num": { "type": "integer", "title": "Очаг №", "readOnly": true },
+        "lesion_num": { "type": "integer", "title": "Lesion #", "readOnly": true },
         "classification": {
           "type": "string",
-          "title": "Классификация",
+          "title": "Classification",
           "enum": ["metastasis", "cyst", "hemangioma"]
         }
       }
@@ -148,13 +148,13 @@ Frontend использует `title` вместо имени поля для м
 }
 ```
 
-## Read-only поля
+## Read-only fields
 
-Стандартный JSON Schema атрибут `readOnly: true` — поле показывается, но не редактируется. Используется для системных значений (`lesion_num`, заполняемый при создании записи).
+The standard JSON Schema attribute `readOnly: true` — the field is shown but not editable. Used for system values (`lesion_num`, populated when the record is created).
 
-## Вложенные массивы объектов
+## Nested arrays of objects
 
-Для коллекций (списки очагов, mappings, attendees):
+For collections (lists of lesions, mappings, attendees):
 
 ```json
 {
@@ -172,28 +172,28 @@ Frontend использует `title` вместо имени поля для м
 }
 ```
 
-## Полный пример
+## Full example
 
 ```json
 {
   "type": "object",
-  "title": "Заключение МДК",
+  "title": "MDT conclusion",
   "properties": {
     "lesions": {
       "type": "array",
-      "title": "Очаги",
+      "title": "Lesions",
       "items": {
         "type": "object",
         "properties": {
-          "lesion_num": { "type": "integer", "title": "Очаг №", "readOnly": true },
+          "lesion_num": { "type": "integer", "title": "Lesion #", "readOnly": true },
           "classification": {
             "type": "string",
-            "title": "Классификация",
+            "title": "Classification",
             "enum": ["metastasis", "unclear", "cyst", "hemangioma", "benign"]
           },
           "treatment": {
             "type": "string",
-            "title": "Лечение",
+            "title": "Treatment",
             "enum": ["resection", "ablation", "observation"]
           }
         },
@@ -202,13 +202,13 @@ Frontend использует `title` вместо имени поля для м
     },
     "attendees": {
       "type": "array",
-      "title": "Участники МДК",
+      "title": "MDT attendees",
       "items": { "type": "string" },
       "x-options": { "source": "users" }
     },
     "conclusion_text": {
       "type": "string",
-      "title": "Текст заключения"
+      "title": "Conclusion text"
     }
   },
   "required": ["lesions", "attendees"]
