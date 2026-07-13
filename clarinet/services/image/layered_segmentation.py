@@ -6,12 +6,15 @@ uint8 NRRD over one shared 3-D grid — the layout Slicer uses for multi-layer
 is a normal 3-D array on the shared grid, so ``Image``/``Segmentation`` 3-D invariants
 stay 3-D.
 
-Read side (``read_layer``/``read_layer_slice``/``iter_layers``) is added in a follow-up
-step; ``read_header`` + ``from_layers`` + ``save`` cover the write/metadata round-trip.
+Read side (``read_layer``/``read_layer_slice``/``iter_layers``) does a full 4-D
+``nrrd.read()`` then numpy-indexes the requested layer — layout-agnostic (correct
+regardless of on-disk byte order) but not lazy. A seek-based per-layer reader is
+deferred to #454.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Self
 
@@ -208,3 +211,63 @@ class LayeredSegmentation:
         if space_origin is not None:
             vals = space_origin[:3]
             self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
+
+    # -- voxel read --
+
+    def _resolve_layer_index(self, name_or_index: str | int) -> int:
+        """Map a segment name → its ``SegmentN_Layer`` index, or pass an int through."""
+        if isinstance(name_or_index, int):
+            return name_or_index
+        for name, layer, _label in self._segments:
+            if name == name_or_index:
+                return layer
+        raise ImageError(f"no segment named {name_or_index!r}")
+
+    def read_layer(
+        self, path: Path | str, name_or_index: str | int, *, dtype: Any = np.uint8
+    ) -> np.ndarray:
+        """Return one 3-D layer as an array.
+
+        ``str`` resolves via segment name → ``SegmentN_Layer``; ``int`` is a direct layer
+        index. pynrrd has no lazy proxy, so the full 4-D array is read then indexed — the
+        *returned* array is bounded to a single layer, but pynrrd's own read is the whole
+        4-D (the accepted read floor).
+        """
+        layer_index = self._resolve_layer_index(name_or_index)
+        data = self._read_4d(path)
+        result: np.ndarray = data[layer_index].astype(dtype, copy=False)
+        return result
+
+    def read_layer_slice(
+        self,
+        path: Path | str,
+        name_or_index: str | int,
+        index: int,
+        *,
+        axis: int = 2,
+        dtype: Any = np.uint8,
+    ) -> np.ndarray:
+        """Return one 2-D slice of one layer (non-lazy: full read then index)."""
+        layer_index = self._resolve_layer_index(name_or_index)
+        layer = self._read_4d(path)[layer_index]
+        slicer: list[Any] = [slice(None)] * layer.ndim
+        slicer[axis] = index
+        result: np.ndarray = layer[tuple(slicer)].astype(dtype, copy=False)
+        return result
+
+    def iter_layers(
+        self, path: Path | str, *, dtype: Any = np.uint8
+    ) -> Iterator[tuple[str, np.ndarray]]:
+        """Yield ``(segment_name, layer_array)`` per segment (one 4-D read, shared)."""
+        data = self._read_4d(path)
+        for name, layer, _label in self._segments:
+            yield name, data[layer].astype(dtype, copy=False)
+
+    def _read_4d(self, path: Path | str) -> np.ndarray:
+        """Read the full 4-D voxel array (pynrrd native uint8, no lazy proxy)."""
+        try:
+            data, _header = nrrd.read(str(Path(path)))
+        except Exception as e:
+            raise ImageReadError(f"Failed to read layered NRRD: {path}") from e
+        result: np.ndarray = data
+        return result

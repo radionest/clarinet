@@ -87,3 +87,70 @@ class TestLayeredSegmentationWrite:
         assert pytest.approx(hdr.spacing, abs=1e-4) == (0.9, 0.9, 2.5)
         assert pytest.approx(hdr.origin, abs=1e-4) == (10.0, 20.0, 30.0)
         assert {name for name, _layer, _label in hdr.segments} == {"psoas", "skeletal_muscle"}
+
+
+class TestLayeredSegmentationRead:
+    def test_round_trip_preserves_overlap(self, tmp_path: Path) -> None:
+        psoas, skm = _overlapping_layers()
+        LayeredSegmentation.from_layers(
+            [("psoas", psoas), ("skeletal_muscle", skm)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        ).save(tmp_path / "rois.seg.nrrd")
+
+        hdr = LayeredSegmentation.read_header(tmp_path / "rois.seg.nrrd")
+        ps = hdr.read_layer(tmp_path / "rois.seg.nrrd", "psoas")
+        sk = hdr.read_layer(tmp_path / "rois.seg.nrrd", "skeletal_muscle")
+        np.testing.assert_array_equal(ps, psoas)
+        np.testing.assert_array_equal(sk, skm)
+        # a shared voxel is nonzero in both layers — overlap preserved
+        assert ps[3, 3, 2] == 1 and sk[3, 3, 2] == 1
+
+    def test_read_layer_by_index(self, tmp_path: Path) -> None:
+        psoas, skm = _overlapping_layers()
+        LayeredSegmentation.from_layers(
+            [("psoas", psoas), ("skeletal_muscle", skm)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        ).save(tmp_path / "rois.seg.nrrd")
+        hdr = LayeredSegmentation.read_header(tmp_path / "rois.seg.nrrd")
+        np.testing.assert_array_equal(hdr.read_layer(tmp_path / "rois.seg.nrrd", 1), skm)
+
+    def test_read_layer_slice(self, tmp_path: Path) -> None:
+        psoas, skm = _overlapping_layers()
+        LayeredSegmentation.from_layers(
+            [("psoas", psoas), ("skeletal_muscle", skm)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        ).save(tmp_path / "rois.seg.nrrd")
+        hdr = LayeredSegmentation.read_header(tmp_path / "rois.seg.nrrd")
+        sl = hdr.read_layer_slice(tmp_path / "rois.seg.nrrd", "psoas", 2, axis=2)
+        np.testing.assert_array_equal(sl, psoas[:, :, 2])
+
+    def test_iter_layers(self, tmp_path: Path) -> None:
+        psoas, skm = _overlapping_layers()
+        LayeredSegmentation.from_layers(
+            [("psoas", psoas), ("skeletal_muscle", skm)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        ).save(tmp_path / "rois.seg.nrrd")
+        hdr = LayeredSegmentation.read_header(tmp_path / "rois.seg.nrrd")
+        got = dict(hdr.iter_layers(tmp_path / "rois.seg.nrrd"))
+        assert set(got) == {"psoas", "skeletal_muscle"}
+        np.testing.assert_array_equal(got["psoas"], psoas)
+
+    def test_read_layer_unknown_name_raises(self, tmp_path: Path) -> None:
+        psoas, skm = _overlapping_layers()
+        LayeredSegmentation.from_layers(
+            [("psoas", psoas), ("skeletal_muscle", skm)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        ).save(tmp_path / "rois.seg.nrrd")
+        hdr = LayeredSegmentation.read_header(tmp_path / "rois.seg.nrrd")
+        with pytest.raises(ImageError, match="no segment named"):
+            hdr.read_layer(tmp_path / "rois.seg.nrrd", "nonexistent")
