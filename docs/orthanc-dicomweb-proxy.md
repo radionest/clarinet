@@ -175,6 +175,12 @@ fast settings for `external` (see §1), and the shipped app-config enables OHIF'
 consider Orthanc transfer-syntax transcoding to a web-friendly syntax. The auth subrequest is
 cached, so it does not sit in the per-frame hot path.
 
+> **Existing installs need a refresh to pick this up.** The `studyPrefetcher` block ships in the
+> packaged template, but `clarinet ohif install` preserves an existing runtime `app-config.js`
+> (and the version guard short-circuits a same-version re-run), so a deployment whose OHIF dir
+> predates this feature keeps loading series lazily until you run `clarinet ohif install
+> --force-config` once (the §6 step 0 command; re-apply any hand-edits to `app-config.js` after).
+
 ## 6. Operations — switching a running deployment
 
 Concrete sequence to move an **already-deployed** Clarinet instance from `builtin` to
