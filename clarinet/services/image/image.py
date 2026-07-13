@@ -524,9 +524,14 @@ class Image:
         """Drop voxel data but keep grid metadata and ``shape``.
 
         Frees the resident array (up to a float64 volume) while leaving the image usable
-        for grid checks (``same_grid``, ``affine_4x4``, ``shape``).
+        for grid checks (``same_grid``, ``affine_4x4``, ``shape``) and the lazy NIfTI
+        ``dataobj`` proxy.
         """
         self._img = None
+        # The default (dtype=None) NIfTI read aliases self._img to nibabel's internal
+        # get_fdata() cache; dropping only our reference leaves the volume resident.
+        if self._nifti_image is not None:
+            self._nifti_image.uncache()
 
     def close(self) -> None:
         """Release voxel data **and** the lazy file proxy (mmap).

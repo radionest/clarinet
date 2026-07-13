@@ -169,6 +169,17 @@ class TestImage:
         assert img.shape == (10, 12, 8)  # grid survives
         assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
 
+    def test_unload_frees_nibabel_fdata_cache(self, nifti_path: Path) -> None:
+        """Default read aliases img to nibabel's get_fdata cache; unload() must free it."""
+        img = Image()
+        img.read(nifti_path)  # dtype=None -> get_fdata() caches the float64 volume
+        assert img._nifti_image.in_memory is True
+        img.unload()
+        assert img.has_data is False
+        assert img._nifti_image.in_memory is False  # cached float64 volume actually freed
+        assert img.shape == (10, 12, 8)  # grid survives
+        _ = np.asarray(img.dataobj[0, 0, :])  # lazy proxy still usable after unload
+
     def test_close_releases_proxy(self, nifti_path: Path) -> None:
         img = Image()
         img.read(nifti_path, load_data=False)
