@@ -190,3 +190,12 @@ class TestIsVolumeMisoriented:
         _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))
         with pytest.raises(OrientationUnverifiable):
             is_volume_misoriented(nii, empty)
+
+    def test_degenerate_iop_raises(self, tmp_path):
+        # Row == column direction cosines: cross product is zero, so the slice
+        # normal cannot be computed at all (degenerate/malformed IOP).
+        _series(tmp_path, "degeniop", [0.0, 3.0, 6.0], iop=(1, 0, 0, 1, 0, 0))
+        nii = tmp_path / "any.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))
+        with pytest.raises(OrientationUnverifiable):
+            is_volume_misoriented(nii, tmp_path / "degeniop")

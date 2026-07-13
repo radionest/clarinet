@@ -134,9 +134,12 @@ def _head_direction_from_series(
     last = pydicom.dcmread(dicom_names[-1], stop_before_pixels=True)
     iop = [float(v) for v in first.ImageOrientationPatient]
     normal = np.cross(np.array(iop[0:3]), np.array(iop[3:6]))
+    norm = float(np.linalg.norm(normal))
+    if norm == 0.0:
+        raise ValueError(f"degenerate ImageOrientationPatient {iop} (zero cross product)")
     if normal[2] < 0:
         normal = -normal
-    head_dir = normal / np.linalg.norm(normal)
+    head_dir = normal / norm
     ipp_first = np.array([float(v) for v in first.ImagePositionPatient])
     ipp_last = np.array([float(v) for v in last.ImagePositionPatient])
     return head_dir, ipp_first, ipp_last

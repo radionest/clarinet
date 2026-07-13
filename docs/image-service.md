@@ -371,9 +371,9 @@ Pulled from the resulting `sitk.Image`, then passed through slice-axis canonical
 
 | File | Scope | Count |
 |---|---|---|
-| `tests/test_image.py` | Unit tests — individual methods in isolation | 39 |
+| `tests/test_image.py` | Unit tests — individual methods in isolation | 125 |
 | `tests/test_image_e2e.py` | E2E workflow tests — multi-step pipelines | 9 |
-| `tests/test_orientation.py` | Unit tests — `ground_truth_slice_geometry` / `is_volume_misoriented` | 12 |
+| `tests/test_orientation.py` | Unit tests — `ground_truth_slice_geometry` / `is_volume_misoriented` | 13 |
 
 ### E2E Test Scenarios
 
