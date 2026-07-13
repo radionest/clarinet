@@ -112,7 +112,8 @@ class PipelineTaskRunCreate(SQLModel):
     started_at: datetime
 
     @field_validator("patient_id", "study_uid", "series_uid", mode="before")
-    def _empty_identifiers_to_none(cls, value: str | None) -> str | None:
+    @classmethod
+    def _empty_identifiers_to_none(cls, value: Any) -> Any:
         """Normalize the '' PipelineMessage sentinel to NULL so it can't hit the patient FK.
 
         Deliberately NOT inherited from clarinet BaseModel: blanket empty_to_none
@@ -171,3 +172,9 @@ class PipelineTaskRunFind(SQLModel):
     since: datetime | None = None
     skip: int = 0
     limit: int = 100
+
+    @field_validator("patient_id", mode="before")
+    @classmethod
+    def _empty_patient_filter_to_none(cls, value: Any) -> Any:
+        """Treat '' (empty query param) as no-filter — rows store NULL, never ''."""
+        return value or None

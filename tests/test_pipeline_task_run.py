@@ -267,6 +267,19 @@ class TestCreateSchemaEmptyIdentifiers:
         assert create.study_uid == "1.2.3"
         assert create.series_uid == "1.2.3.4"
 
+    def test_create_schema_keeps_empty_queue(self):
+        """queue is deliberately NOT normalized — workers legitimately send ""."""
+        create = PipelineTaskRunCreate(
+            id="tid-schema-queue",
+            task_name="t",
+            queue="",
+            started_at=datetime.now(UTC),
+        )
+        assert create.queue == ""
+
+    def test_find_schema_maps_empty_patient_filter_to_none(self):
+        assert PipelineTaskRunFind(patient_id="").patient_id is None
+
     @pytest.mark.asyncio
     async def test_create_run_api_normalizes_empty_identifiers(self, client):
         """DB-agnostic proof the '' sentinel cannot reach the patient FK."""

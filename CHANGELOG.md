@@ -145,9 +145,14 @@
   failed — no run row (the task itself was unaffected). The middleware now sends
   `NULL` for absent patient/study/series ids and `PipelineTaskRunCreate`
   re-normalizes `''` → `NULL` at the API boundary (covers stale workers
-  mid-rolling-upgrade). No framework-side backfill needed — every `''` insert
-  failed on the FK. Downstream-only: a prod DB that dropped the FK as a stopgap
-  must normalize `''` → `NULL` before re-adding it.
+  mid-rolling-upgrade); the `GET /api/pipelines/runs` `patient_id` filter now
+  treats `''` as absent. The empty patient-id path needs no backfill — those
+  inserts always failed on the FK — but `''` `study_uid`/`series_uid` values
+  from patient-level dispatches did insert historically: downstream projects
+  should normalize legacy rows (`UPDATE pipeline_task_run SET study_uid = NULL
+  WHERE study_uid = ''`, same for `series_uid`). A prod DB that dropped the
+  patient FK as a stopgap must also normalize `''` patient ids before
+  re-adding it.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
