@@ -88,6 +88,32 @@ class TestLayeredSegmentationWrite:
         assert pytest.approx(hdr.origin, abs=1e-4) == (10.0, 20.0, 30.0)
         assert {name for name, _layer, _label in hdr.segments} == {"psoas", "skeletal_muscle"}
 
+    def test_read_header_recovers_rotated_direction(self, tmp_path: Path) -> None:
+        """Non-identity, non-transpose-symmetric direction (90 deg about Z).
+
+        ``np.eye(3)`` is transpose-symmetric, so every other grid test would pass even
+        with a ``.T`` bug in the direction round-trip. This direction's transpose is a
+        different (the -90 deg) rotation, so a transpose bug would surface here.
+        """
+        psoas, skm = _overlapping_layers()
+        direction = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        LayeredSegmentation.from_layers(
+            [("psoas", psoas), ("skeletal_muscle", skm)],
+            spacing=(0.9, 0.9, 2.5),
+            origin=(10.0, 20.0, 30.0),
+            direction=direction,
+        ).save(tmp_path / "rot.seg.nrrd")
+
+        hdr = LayeredSegmentation.read_header(tmp_path / "rot.seg.nrrd")
+        np.testing.assert_array_almost_equal(hdr.direction, direction, decimal=5)
+        assert pytest.approx(hdr.spacing, abs=1e-4) == (0.9, 0.9, 2.5)
+        assert pytest.approx(hdr.origin, abs=1e-4) == (10.0, 20.0, 30.0)
+        assert hdr.shape == (8, 8, 6)
+
+        # voxel path unaffected by the rotated header
+        ps = hdr.read_layer(tmp_path / "rot.seg.nrrd", "psoas")
+        np.testing.assert_array_equal(ps, psoas)
+
 
 class TestLayeredSegmentationRead:
     def test_round_trip_preserves_overlap(self, tmp_path: Path) -> None:
