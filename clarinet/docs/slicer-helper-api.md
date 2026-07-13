@@ -42,9 +42,9 @@ paths:
 - `sync_segments(source_seg, target_seg, empty=False)` → `list[str]` — copy missing segments by name
 - `rename_segments(segmentation, prefix="NEW", color=None, start_from=1)` → `int`
 - `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int`
-- `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction
-- `binarize_and_split_islands(segmentation, output_name="_BinarizedIslands", min_island_size=1)` — merge + connected components split
-- `merge_as_pool(source_seg, target_seg, pool_name="_pool", color=(0.5, 0.5, 0.5))` — merge into single binary segment
+- `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None, resample=False)` — ROI-level subtraction. Default `resample=False` raises `SlicerHelperError` on a source-vs-volume grid mismatch; `resample=True` re-grids the mismatched input onto the reference extent (legacy behavior)
+- `binarize_and_split_islands(segmentation, output_name="_BinarizedIslands", min_island_size=1, resample=False)` — merge + connected components split. Same `resample` grid-mismatch behavior as `subtract_segmentations`
+- `merge_as_pool(source_seg, target_seg, pool_name="_pool", color=(0.5, 0.5, 0.5), resample=False)` — merge into single binary segment. Same `resample` grid-mismatch behavior as `subtract_segmentations`
 - `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True, orientation_a=None, orientation_b=None)` — side-by-side view with auto-detected orientation
 - `align_by_center(moving_volume, reference_volume, moving_segmentation=None, transform_name="AlignTransform")` → translation transform
 - `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — rigid-body from matched centroids

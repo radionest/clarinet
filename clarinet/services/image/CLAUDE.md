@@ -9,6 +9,7 @@
 | `layered_segmentation.py` | `LayeredSegmentation` — 4-D `(L,X,Y,Z)` overlapping-segment NRRD (Slicer format) over one shared 3-D grid |
 | `dicom_volume.py` | DICOM series → 3D numpy volume (used by `Image.read_dicom_series()`) |
 | `coco2nii.py` | COCO JSON polygon annotations → `Segmentation` |
+| `orientation.py` | Ground-truth DICOM slice-axis geometry from IPP; `is_volume_misoriented()` detection primitive |
 | `correspondence/` | Pluggable component-correspondence engine (measures x matching x set operations) backing the Segmentation set ops |
 
 ## Supported Formats
