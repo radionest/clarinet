@@ -1342,6 +1342,28 @@ class TestAuditMiddleware:
         assert kwargs["queue"] == ""
 
     @pytest.mark.asyncio
+    async def test_pre_execute_normalizes_empty_identifiers_to_none(self):
+        """Patient-less tasks (report renders) carry '' sentinels — audit must send NULL."""
+        from taskiq import TaskiqMessage
+
+        mw, mock_client = self._middleware()
+        msg = TaskiqMessage(
+            task_id="empty-ids-tid",
+            task_name="render_report",
+            labels={"queue": DEFAULT_QUEUE},
+            args=[{"patient_id": "", "study_uid": "", "series_uid": "", "record_id": None}],
+            kwargs={},
+        )
+
+        await mw.pre_execute(msg)
+        await mw.shutdown()
+
+        kwargs = mock_client.create_pipeline_run.call_args.kwargs
+        assert kwargs["patient_id"] is None
+        assert kwargs["study_uid"] is None
+        assert kwargs["series_uid"] is None
+
+    @pytest.mark.asyncio
     async def test_post_execute_succeeded(self):
         mw, mock_client = self._middleware()
 

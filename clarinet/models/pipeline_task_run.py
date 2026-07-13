@@ -8,7 +8,7 @@ HTTP API. Status values: ``running`` | ``succeeded`` | ``failed`` | ``retrying``
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import field_serializer
+from pydantic import field_serializer, field_validator
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlmodel import Column, Field, SQLModel
 
@@ -111,6 +111,17 @@ class PipelineTaskRunCreate(SQLModel):
     series_uid: str | None = Field(default=None, max_length=255)
     started_at: datetime
 
+    @field_validator("patient_id", "study_uid", "series_uid", mode="before")
+    @classmethod
+    def _empty_identifiers_to_none(cls, value: Any) -> Any:
+        """Normalize the '' PipelineMessage sentinel to NULL so it can't hit the patient FK.
+
+        Deliberately NOT inherited from clarinet BaseModel: blanket empty_to_none
+        would also null the required ``queue`` field (workers legitimately send "")
+        and reject the whole audit row.
+        """
+        return value or None
+
 
 class PipelineTaskRunUpdate(SQLModel):
     """Payload for ``PATCH /api/pipelines/runs/{task_id}`` (``post_execute``)."""
@@ -161,3 +172,9 @@ class PipelineTaskRunFind(SQLModel):
     since: datetime | None = None
     skip: int = 0
     limit: int = 100
+
+    @field_validator("patient_id", mode="before")
+    @classmethod
+    def _empty_patient_filter_to_none(cls, value: Any) -> Any:
+        """Treat '' (empty query param) as no-filter — rows store NULL, never ''."""
+        return value or None

@@ -236,6 +236,74 @@ class TestAuditClientSerialization:
         assert "pipeline_id" not in sent
 
 
+class TestCreateSchemaEmptyIdentifiers:
+    """'' entity ids (PipelineMessage required-str sentinel) must become NULL, not FK values."""
+
+    def test_create_schema_maps_empty_identifiers_to_none(self):
+        create = PipelineTaskRunCreate(
+            id="tid-schema-empty",
+            task_name="render_report",
+            queue="clarinet.quarto",
+            patient_id="",
+            study_uid="",
+            series_uid="",
+            started_at=datetime.now(UTC),
+        )
+        assert create.patient_id is None
+        assert create.study_uid is None
+        assert create.series_uid is None
+
+    def test_create_schema_keeps_real_identifiers(self):
+        create = PipelineTaskRunCreate(
+            id="tid-schema-real",
+            task_name="t",
+            queue="q",
+            patient_id="P1",
+            study_uid="1.2.3",
+            series_uid="1.2.3.4",
+            started_at=datetime.now(UTC),
+        )
+        assert create.patient_id == "P1"
+        assert create.study_uid == "1.2.3"
+        assert create.series_uid == "1.2.3.4"
+
+    def test_create_schema_keeps_empty_queue(self):
+        """queue is deliberately NOT normalized — workers legitimately send ""."""
+        create = PipelineTaskRunCreate(
+            id="tid-schema-queue",
+            task_name="t",
+            queue="",
+            started_at=datetime.now(UTC),
+        )
+        assert create.queue == ""
+
+    def test_find_schema_maps_empty_patient_filter_to_none(self):
+        assert PipelineTaskRunFind(patient_id="").patient_id is None
+
+    @pytest.mark.asyncio
+    async def test_create_run_api_normalizes_empty_identifiers(self, client):
+        """DB-agnostic proof the '' sentinel cannot reach the patient FK."""
+        from tests.utils.urls import PIPELINE_RUNS
+
+        resp = await client.post(
+            PIPELINE_RUNS,
+            json={
+                "id": "tid-empty-ids",
+                "task_name": "render_report",
+                "queue": "clarinet.quarto",
+                "patient_id": "",
+                "study_uid": "",
+                "series_uid": "",
+                "started_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["patient_id"] is None
+        assert data["study_uid"] is None
+        assert data["series_uid"] is None
+
+
 @pytest.mark.asyncio
 async def test_fingerprint_endpoint(client) -> None:
     from clarinet.services.pipeline.fingerprint import (

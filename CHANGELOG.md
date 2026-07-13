@@ -138,6 +138,21 @@
   Correctly-read series are byte-identical — only affected series change on
   re-conversion. New `is_volume_misoriented(volume_nifti, dicom_dir)` detection
   primitive backs the per-project migration (`clarinet/docs/migration-orientation-0.10.17.md`).
+- Pipeline audit rows for patient-less tasks (e.g. Quarto report renders) are no
+  longer lost. `PipelineMessage` declares `patient_id`/`study_uid` as required
+  `str`, so patient-less tasks carry `""` sentinels; `AuditMiddleware` forwarded
+  them verbatim, the `''` patient id violated the patient FK, and the audit POST
+  failed — no run row (the task itself was unaffected). The middleware now sends
+  `NULL` for absent patient/study/series ids and `PipelineTaskRunCreate`
+  re-normalizes `''` → `NULL` at the API boundary (covers stale workers
+  mid-rolling-upgrade); the `GET /api/pipelines/runs` `patient_id` filter now
+  treats `''` as absent. The empty patient-id path needs no backfill — those
+  inserts always failed on the FK — but `''` `study_uid`/`series_uid` values
+  from patient-level dispatches did insert historically: downstream projects
+  should normalize legacy rows (`UPDATE pipeline_task_run SET study_uid = NULL
+  WHERE study_uid = ''`, same for `series_uid`). A prod DB that dropped the
+  patient FK as a stopgap must also normalize `''` patient ids before
+  re-adding it.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
