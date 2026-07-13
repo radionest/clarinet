@@ -134,11 +134,9 @@ def test_packaged_template_has_prefetcher_and_sentinel():
     """The shipped OHIF template must keep both the studyPrefetcher block and
     the dataSources sentinel. Dropping the prefetcher silently regresses
     large-study loading back to lazy per-series; dropping the sentinel breaks
-    dataSources injection in serve_spa. Reads the repo-relative template so the
-    check is independent of how the package is installed."""
+    dataSources injection in serve_spa. Reads the source template directly
+    (not the installed/served copy), so it guards the packaged file itself."""
     from pathlib import Path
-
-    from clarinet.api.ohif_config import DATASOURCES_SENTINEL
 
     template = Path(__file__).resolve().parent.parent / "clarinet" / "ohif" / "app-config.js"
     text = template.read_text(encoding="utf-8")
