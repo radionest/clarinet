@@ -125,12 +125,16 @@ class LayeredSegmentation:
     # -- write --
 
     def save(self, path: Path | str) -> Path:
-        """Write the 4-D ``(L, X, Y, Z)`` uint8 NRRD (raw, layer-slowest).
+        """Write the 4-D ``(L, X, Y, Z)`` uint8 NRRD (raw, layer/list axis first).
 
         Pre-allocates the 4-D array once and fills each layer in place, releasing each
         source mask as it goes (avoids ``np.stack``'s transient doubling). Writes
-        ``encoding: raw`` with the layer axis slowest, so a future seek-based reader can
-        pull one layer's contiguous byte range.
+        ``encoding: raw`` with the layer/list axis first in ``sizes`` (``[L, X, Y, Z]``,
+        ``kinds`` list-first) — Slicer's native ``.seg.nrrd`` layout, so layers are
+        **interleaved** byte-by-byte on disk (F-order, layer axis fastest), not
+        layer-contiguous. A future per-layer reader (#454) therefore reads strided or the
+        whole 4-D array; ``encoding: raw`` gives no contiguous-seek advantage in this
+        layout (raw-vs-gzip to be re-evaluated in #454).
         """
         path = Path(path)
         num_layers = len(self._segments)
