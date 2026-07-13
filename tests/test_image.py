@@ -20,7 +20,7 @@ from clarinet.services.image import (
     conform_seg_to_grid,
 )
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
-from clarinet.services.image.dicom_volume import read_dicom_series
+from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -612,6 +612,30 @@ class TestDicomVolume:
         assert int(volume[0, 0, 0]) == 100
         assert int(volume[0, 0, -1]) == 160
 
+    def test_wobbly_spacing_correct_series_byte_identical(self, tmp_path: Path) -> None:
+        """A correctly-ordered (+Z, non-flip) series with irregular inter-slice
+        spacing (real-world sub-mm wobble, not the perfectly uniform spacing every
+        other fixture uses) must still be passed through byte-identical —
+        ground_truth_slice_geometry only reads the first/last file's IPP, so
+        intermediate wobble cannot perturb the computed origin/direction regardless
+        of how irregular the spacing is.
+        """
+        dcm_dir = tmp_path / "wobbly_series"
+        z_pixel_map = {0.0: 100, 3.0: 130, 5.5: 155, 9.5: 195}  # ascending, irregular spacing
+        self._write_axial_series(
+            dcm_dir,
+            {z: np.full((4, 5), v) for z, v in z_pixel_map.items()},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        volume, _spacing, origin, direction = read_dicom_series(dcm_dir)
+
+        # No flip: origin stays at the first (min-Z) slice, slice order unchanged.
+        assert direction[2, 2] > 0
+        assert pytest.approx(origin[2], abs=1e-6) == 0.0
+        assert int(volume[0, 0, 0]) == 100
+        assert int(volume[0, 0, -1]) == 195
+
     def test_canonicalization_preserves_geometry(self, tmp_path: Path) -> None:
         """Slice-axis canonicalisation flips the array, origin and direction
         together, so every voxel keeps its physical location — unlike a
@@ -639,6 +663,67 @@ class TestDicomVolume:
         # IOP rowdir(col index)=[1,0,0], coldir(row index)=[0,-1,0], 1 mm spacing,
         # slice IPP z=0 → physical (col, -row, 0) = (2, -1, 0) in LPS.
         np.testing.assert_array_almost_equal(phys[:3], [2.0, -1.0, 0.0], decimal=4)
+
+    def test_canonicalize_uses_exact_last_position_when_available(self) -> None:
+        """The flipped origin must be the exact ground-truth last-slice IPP, not a
+        slice_spacing * (n-1) extrapolation from a nominal spacing — which drifts
+        from the true position under real-world sub-mm inter-slice spacing wobble
+        (the population #453 targets), breaking is_volume_misoriented's idempotency
+        guarantee for an already-correctly-remediated, previously-flipped series."""
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        exact_last_ipp = (0.0, 0.0, -6.2)  # wobbly: != slice_spacing(3.0) * (n-1=2) = -6.0
+
+        _, new_origin, new_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "wobbly", exact_last_ipp
+        )
+
+        assert new_origin == exact_last_ipp
+        assert new_direction[2, 2] > 0
+
+    def test_canonicalize_falls_back_to_approximation_without_ground_truth(self) -> None:
+        """Without ground truth (exact_last_ipp=None, e.g. unreadable IPP tags),
+        falls back to the slice_spacing * (n-1) extrapolation — unchanged legacy
+        behavior, since there is no exact value available to use instead."""
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+
+        _, new_origin, _ = _canonicalize_slice_axis(volume, 3.0, origin, direction, "no_gt")
+
+        assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_read_dicom_series_routes_through_ground_truth(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """read_dicom_series applies the IPP ground-truth correction (with the real
+        file order + slice spacing) before canonicalization, and the output stays
+        canonical."""
+        from clarinet.services.image import dicom_volume as dv
+
+        dcm_dir = tmp_path / "wire_series"
+        self._write_axial_series(
+            dcm_dir,
+            {0.0: np.full((4, 5), 10), 3.0: np.full((4, 5), 20)},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        calls: dict[str, object] = {}
+        real = dv.ground_truth_slice_geometry
+
+        def spy(dicom_names, slice_spacing, origin, direction):  # type: ignore[no-untyped-def]
+            calls["n"] = len(list(dicom_names))
+            calls["spacing"] = slice_spacing
+            return real(dicom_names, slice_spacing, origin, direction)
+
+        monkeypatch.setattr(dv, "ground_truth_slice_geometry", spy)
+
+        _volume, spacing, _origin, direction = read_dicom_series(dcm_dir)
+
+        assert calls["n"] == 2
+        assert calls["spacing"] == pytest.approx(spacing[2])
+        assert direction[2, 2] > 0  # still canonical (+Z slice axis)
 
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""

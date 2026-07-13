@@ -1954,7 +1954,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
         return next_num
 
     def _export_segments_labelmap(
-        self, node: Any, tmp_name: str, *, what: str
+        self, node: Any, tmp_name: str, *, what: str, resample: bool = False
     ) -> tuple[Any, Any | None]:
         """Export all segments of *node* into a fresh temp labelmap volume.
 
@@ -1964,6 +1964,12 @@ class _SegmentEditMixin(_SlicerHelperBase):
         The caller owns the returned node and must ``RemoveNode()`` it; when
         the foreign-grid guard raises, the temp node is already removed.
 
+        Unless *resample* is set, a non-empty source is checked against the
+        source volume's grid before re-gridding (see
+        ``assert_segmentation_matches_volume``) — a partially-overlapping
+        misaligned grid would otherwise export non-empty-but-wrong voxels and
+        slip through the empty/foreign-grid guard below undetected.
+
         Returns:
             ``(labelmap_node, array)`` — the temp ``vtkMRMLLabelMapVolumeNode``
             and its voxels as a numpy array; the array is ``None`` when the
@@ -1972,8 +1978,13 @@ class _SegmentEditMixin(_SlicerHelperBase):
         Raises:
             SlicerHelperError: Empty export from a source that carries voxels —
                 a flipped/foreign grid that does not overlap the reference
-                extent (see ``_labelmap_array_or_raise``).
+                extent (see ``_labelmap_array_or_raise``); or, when *resample*
+                is False, a non-empty source whose recorded reference geometry
+                does not match the source volume's grid (see
+                ``assert_segmentation_matches_volume``).
         """
+        if not resample and _segmentation_has_voxels(node):
+            assert_segmentation_matches_volume(node, self._image_node)
         self._apply_reference_geometry(node)
         seg_logic = slicer.modules.segmentations.logic()
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", tmp_name)
@@ -1992,6 +2003,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
         output_name: str | None = None,
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Any:
         """ROI-level subtraction: remove segments from seg_a that overlap with seg_b.
 
@@ -2006,6 +2018,9 @@ class _SegmentEditMixin(_SlicerHelperBase):
             max_overlap: Maximum allowed overlap voxel count (segments with more are removed).
             max_overlap_ratio: Maximum allowed overlap ratio (overlap/total). Both
                                thresholds must be exceeded for removal when set.
+            resample: If True, skip the source-vs-volume geometry check and re-grid a
+                mismatched input onto the reference extent (legacy behavior). Default
+                False raises SlicerHelperError on a grid mismatch.
 
         Returns:
             The output segmentation node (new node if output_name, else seg_a node).
@@ -2017,11 +2032,11 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         # Export both with mode 0 (reference geometry extent) → same shape
         labelmap_b, arr_b = self._export_segments_labelmap(
-            node_b, "_sub_b", what="the subtracted segmentation (seg_b)"
+            node_b, "_sub_b", what="the subtracted segmentation (seg_b)", resample=resample
         )
         try:
             labelmap_a, arr_a = self._export_segments_labelmap(
-                node_a, "_sub_a", what="the base segmentation (seg_a)"
+                node_a, "_sub_a", what="the base segmentation (seg_a)", resample=resample
             )
         except SlicerHelperError:
             slicer.mrmlScene.RemoveNode(labelmap_b)
@@ -2077,6 +2092,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
         segmentation: SegmentationBuilder | Any,
         output_name: str = "_BinarizedIslands",
         min_island_size: int = 1,
+        resample: bool = False,
     ) -> Any:
         """Binarize all segments into one mask, then split into connected components.
 
@@ -2088,6 +2104,9 @@ class _SegmentEditMixin(_SlicerHelperBase):
             segmentation: Input segmentation (SegmentationBuilder or node).
             output_name: Name for the output segmentation node.
             min_island_size: Minimum island size in voxels (smaller removed).
+            resample: If True, skip the source-vs-volume geometry check and re-grid a
+                mismatched input onto the reference extent (legacy behavior). Default
+                False raises SlicerHelperError on a grid mismatch.
 
         Returns:
             A new vtkMRMLSegmentationNode with one segment per connected component.
@@ -2100,7 +2119,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         # Phase A — merge all segments into a single binary labelmap
         labelmap, arr = self._export_segments_labelmap(
-            node, "_bin_tmp", what="the segmentation to binarize"
+            node, "_bin_tmp", what="the segmentation to binarize", resample=resample
         )
         if arr is None:
             # Genuinely empty source — no islands to split. Return an empty node.
@@ -2148,6 +2167,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
         target_seg: SegmentationBuilder | Any,
         pool_name: str = "_pool",
         color: tuple[float, float, float] = (0.5, 0.5, 0.5),
+        resample: bool = False,
     ) -> None:
         """Merge all source segments into a single binary segment in the target.
 
@@ -2162,6 +2182,9 @@ class _SegmentEditMixin(_SlicerHelperBase):
             target_seg: Target segmentation (SegmentationBuilder or node).
             pool_name: Name for the pool segment in the target.
             color: RGB color tuple (0-1 range) for the pool segment.
+            resample: If True, skip the source-vs-volume geometry check and re-grid a
+                mismatched input onto the reference extent (legacy behavior). Default
+                False raises SlicerHelperError on a grid mismatch.
         """
         import numpy as np
 
@@ -2176,7 +2199,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         # Export source → binarize
         labelmap, arr = self._export_segments_labelmap(
-            source_node, "_pool_tmp", what="the pool source segmentation"
+            source_node, "_pool_tmp", what="the pool source segmentation", resample=resample
         )
         if arr is None:
             # Genuinely empty source — nothing to pool (pre-guard no-op).
