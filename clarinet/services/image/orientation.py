@@ -45,7 +45,7 @@ def ground_truth_slice_geometry(
     slice_spacing: float,
     origin: tuple[float, float, float],
     direction: np.ndarray,
-) -> tuple[tuple[float, float, float], np.ndarray]:
+) -> tuple[tuple[float, float, float], np.ndarray, tuple[float, float, float] | None]:
     """Override the slice-axis column and origin from IPP ground truth.
 
     ``dicom_names`` is the exact file order the reader passed to
@@ -60,12 +60,21 @@ def ground_truth_slice_geometry(
     reported direction sign contradicts its own IPP progression (the #453 bug)
     is changed.
 
+    Also returns the exact ``IPP_last`` (third element) when ground truth was
+    established, else ``None``. Canonicalization uses this verbatim as the
+    flipped origin instead of extrapolating ``slice_spacing * (n - 1)`` from a
+    single nominal spacing value — exact even when inter-slice spacing wobbles
+    across the series, which the extrapolation is not.
+
     Never raises: fewer than 2 files, missing/unreadable IPP, or a degenerate
-    (near-zero) delta → log a warning and return ``(origin, direction)``
+    (near-zero) delta → log a warning and return ``(origin, direction, None)``
     unchanged. ``slice_spacing`` sets the degeneracy floor (``0.5 * spacing``).
     """
     if len(dicom_names) < 2:
-        return origin, direction
+        logger.warning(
+            f"Fewer than 2 DICOM files ({len(dicom_names)}); leaving reader output unchanged"
+        )
+        return origin, direction, None
     try:
         ipp_first = _read_ipp(dicom_names[0])
         ipp_last = _read_ipp(dicom_names[-1])
@@ -74,7 +83,7 @@ def ground_truth_slice_geometry(
             f"Could not read IPP ground truth for slice-axis correction ({exc}); "
             f"leaving reader output unchanged"
         )
-        return origin, direction
+        return origin, direction, None
 
     delta = ipp_last - ipp_first
     norm = float(np.linalg.norm(delta))
@@ -83,12 +92,13 @@ def ground_truth_slice_geometry(
             f"Degenerate slice-axis delta ({norm:.4f} mm across the series); "
             f"leaving reader output unchanged"
         )
-        return origin, direction
+        return origin, direction, None
 
     new_direction = np.ascontiguousarray(direction.copy())
     new_direction[:, 2] = delta / norm
     true_origin = (float(ipp_first[0]), float(ipp_first[1]), float(ipp_first[2]))
-    return true_origin, new_direction
+    exact_last_ipp = (float(ipp_last[0]), float(ipp_last[1]), float(ipp_last[2]))
+    return true_origin, new_direction, exact_last_ipp
 
 
 class OrientationUnverifiable(ImageError):
@@ -138,10 +148,10 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
 
     Idempotent: a corrected/remediated volume returns False, so re-running a
     remediation script is safe. Reconstructs the origin from the NIfTI affine
-    (RAS→LPS, mirroring ``compute_roi_core``) and compares it to the feet-end
-    IPP within ``0.5 * slice_spacing``. The "is this axial?" guard is checked
-    against the DICOM ground truth (``head_dir``), never the NIfTI's own
-    affine — see module docstring.
+    (RAS→LPS, mirroring ``_LPS_TO_RAS`` in ``image.py``) and compares it to the
+    feet-end IPP within ``0.5 * slice_spacing``. The "is this axial?" guard is
+    checked against the DICOM ground truth (``head_dir``), never the NIfTI's
+    own affine — see module docstring.
 
     Raises ``OrientationUnverifiable`` when ground truth cannot be established
     (unreadable/absent series, or a non-dominantly-axial series the sign check

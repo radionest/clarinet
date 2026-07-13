@@ -76,9 +76,11 @@ def read_dicom_series(
     d = np.array(image.GetDirection()).reshape(3, 3)
     direction = np.ascontiguousarray(d[:, [1, 0, 2]])
 
-    origin, direction = ground_truth_slice_geometry(dicom_names, spacing[2], origin, direction)
+    origin, direction, exact_last_ipp = ground_truth_slice_geometry(
+        dicom_names, spacing[2], origin, direction
+    )
     volume, origin, direction = _canonicalize_slice_axis(
-        volume, spacing[2], origin, direction, directory.name
+        volume, spacing[2], origin, direction, directory.name, exact_last_ipp
     )
 
     logger.debug(
@@ -94,6 +96,7 @@ def _canonicalize_slice_axis(
     origin: tuple[float, float, float],
     direction: np.ndarray,
     name: str,
+    exact_last_position: tuple[float, float, float] | None = None,
 ) -> tuple[np.ndarray, tuple[float, float, float], np.ndarray]:
     """Normalise the slice axis to point along the +sense of its dominant axis.
 
@@ -122,6 +125,13 @@ def _canonicalize_slice_axis(
     series whose in-plane axes oppose the slice normal — this is valid (NIfTI /
     NRRD / ITK all support a negative-determinant direction), matches the
     pre-#221 reader, and no framework consumer depends on a positive determinant.
+
+    ``exact_last_position``, when given (DICOM IPP ground truth was established
+    by ``ground_truth_slice_geometry``), is used verbatim as the flipped origin
+    instead of extrapolating ``slice_spacing * (n_slices - 1)`` from a single
+    nominal spacing value — exact even when inter-slice spacing wobbles across
+    the series, which the extrapolation is not. Falls back to the extrapolation
+    when ``None`` (ground truth unavailable).
     """
     slice_dir = direction[:, 2]
     # argmax resolves a perfectly diagonal (equal-magnitude) slice normal to the
@@ -134,8 +144,11 @@ def _canonicalize_slice_axis(
         f"Canonicalizing DICOM slice axis in {name} "
         f"(flipping slice direction {np.round(slice_dir, 3).tolist()} to +{dominant}-axis)"
     )
-    n_slices = volume.shape[2]
-    new_origin = np.asarray(origin, dtype=float) + slice_dir * slice_spacing * (n_slices - 1)
+    if exact_last_position is not None:
+        new_origin = np.asarray(exact_last_position, dtype=float)
+    else:
+        n_slices = volume.shape[2]
+        new_origin = np.asarray(origin, dtype=float) + slice_dir * slice_spacing * (n_slices - 1)
     new_volume = np.ascontiguousarray(volume[:, :, ::-1])
     new_direction = direction.copy()
     new_direction[:, 2] = -new_direction[:, 2]

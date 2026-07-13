@@ -58,30 +58,35 @@ class TestGroundTruthSliceGeometry:
         names = _series(tmp_path, "asc", [0.0, 5.0, 10.0])
         wrong = IDENTITY.copy()
         wrong[:, 2] = [0.0, 0.0, -1.0]  # SimpleITK reported the wrong sign
-        origin, direction = ground_truth_slice_geometry(names, 5.0, (99.0, 99.0, 99.0), wrong)
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(
+            names, 5.0, (99.0, 99.0, 99.0), wrong
+        )
         np.testing.assert_allclose(direction[:, 2], [0.0, 0.0, 1.0], atol=1e-6)
         np.testing.assert_allclose(origin, [0.0, 0.0, 0.0], atol=1e-6)
+        np.testing.assert_allclose(exact_last_ipp, [0.0, 0.0, 10.0], atol=1e-6)
 
     def test_descending_ipp_direction_points_negative(self, tmp_path):
         names = _series(tmp_path, "desc", [10.0, 5.0, 0.0])
-        origin, direction = ground_truth_slice_geometry(
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(
             names, 5.0, (0.0, 0.0, 10.0), IDENTITY.copy()
         )
         np.testing.assert_allclose(direction[:, 2], [0.0, 0.0, -1.0], atol=1e-6)
         np.testing.assert_allclose(origin, [0.0, 0.0, 10.0], atol=1e-6)
+        np.testing.assert_allclose(exact_last_ipp, [0.0, 0.0, 0.0], atol=1e-6)
 
     def test_in_plane_columns_preserved(self, tmp_path):
         names = _series(tmp_path, "inplane", [0.0, 3.0])
         src = np.array([[1.0, 0.0, 9.0], [0.0, -1.0, 9.0], [0.0, 0.0, 9.0]])
-        _, direction = ground_truth_slice_geometry(names, 3.0, (0.0, 0.0, 0.0), src)
+        _, direction, _ = ground_truth_slice_geometry(names, 3.0, (0.0, 0.0, 0.0), src)
         np.testing.assert_allclose(direction[:, 0], src[:, 0], atol=1e-9)
         np.testing.assert_allclose(direction[:, 1], src[:, 1], atol=1e-9)
 
     def test_fewer_than_two_files_returns_unchanged(self, tmp_path):
         names = _series(tmp_path, "single", [0.0])
         o, d = (1.0, 2.0, 3.0), IDENTITY.copy()
-        origin, direction = ground_truth_slice_geometry(names, 3.0, o, d)
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(names, 3.0, o, d)
         assert origin is o and direction is d
+        assert exact_last_ipp is None
 
     def test_missing_ipp_returns_unchanged(self, tmp_path):
         d = tmp_path / "noipp"
@@ -94,14 +99,16 @@ class TestGroundTruthSliceGeometry:
             ds.save_as(str(p))
         names = [str(d / "s0.dcm"), str(d / "s1.dcm")]
         o, dirn = (7.0, 8.0, 9.0), IDENTITY.copy()
-        origin, direction = ground_truth_slice_geometry(names, 3.0, o, dirn)
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(names, 3.0, o, dirn)
         assert origin is o and direction is dirn
+        assert exact_last_ipp is None
 
     def test_degenerate_delta_returns_unchanged(self, tmp_path):
         names = _series(tmp_path, "degen", [4.0, 4.0])  # identical IPP → zero delta
         o, dirn = (4.0, 4.0, 4.0), IDENTITY.copy()
-        origin, direction = ground_truth_slice_geometry(names, 3.0, o, dirn)
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(names, 3.0, o, dirn)
         assert origin is o and direction is dirn
+        assert exact_last_ipp is None
 
 
 def _nifti_with_lps_origin(path: Path, lps_origin, spacing=(1.0, 1.0, 3.0)):

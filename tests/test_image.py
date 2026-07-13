@@ -20,7 +20,7 @@ from clarinet.services.image import (
     conform_seg_to_grid,
 )
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
-from clarinet.services.image.dicom_volume import read_dicom_series
+from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -639,6 +639,36 @@ class TestDicomVolume:
         # IOP rowdir(col index)=[1,0,0], coldir(row index)=[0,-1,0], 1 mm spacing,
         # slice IPP z=0 → physical (col, -row, 0) = (2, -1, 0) in LPS.
         np.testing.assert_array_almost_equal(phys[:3], [2.0, -1.0, 0.0], decimal=4)
+
+    def test_canonicalize_uses_exact_last_position_when_available(self) -> None:
+        """The flipped origin must be the exact ground-truth last-slice IPP, not a
+        slice_spacing * (n-1) extrapolation from a nominal spacing — which drifts
+        from the true position under real-world sub-mm inter-slice spacing wobble
+        (the population #453 targets), breaking is_volume_misoriented's idempotency
+        guarantee for an already-correctly-remediated, previously-flipped series."""
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        exact_last_ipp = (0.0, 0.0, -6.2)  # wobbly: != slice_spacing(3.0) * (n-1=2) = -6.0
+
+        _, new_origin, new_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "wobbly", exact_last_ipp
+        )
+
+        assert new_origin == exact_last_ipp
+        assert new_direction[2, 2] > 0
+
+    def test_canonicalize_falls_back_to_approximation_without_ground_truth(self) -> None:
+        """Without ground truth (exact_last_ipp=None, e.g. unreadable IPP tags),
+        falls back to the slice_spacing * (n-1) extrapolation — unchanged legacy
+        behavior, since there is no exact value available to use instead."""
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+
+        _, new_origin, _ = _canonicalize_slice_axis(volume, 3.0, origin, direction, "no_gt")
+
+        assert new_origin == (0.0, 0.0, -6.0)
 
     def test_read_dicom_series_routes_through_ground_truth(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
