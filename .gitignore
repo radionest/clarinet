@@ -86,3 +86,6 @@ docs/superpowers/
 !.claude/commands/
 !.claude/hooks/
 !.claude/settings.json
+
+# OpenSpec local spec store (Claude working memory, synced via doc-review gate)
+/openspec
