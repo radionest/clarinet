@@ -86,6 +86,15 @@
 - **`LayeredSegmentation`** — first-class 4-D overlapping-segment NRRD (Slicer format)
   over one shared 3-D grid: `from_layers().save()` (raw, Slicer-native interleaved 4-D,
   fill-in-place) and `read_header`/`read_layer`/`read_layer_slice`/`iter_layers`.
+- **Opt-in correspondence engine in Slicer scripts + `SlicerHelper.detect_overlaps`.**
+  `SlicerService.execute(..., include_correspondence=True)` prepends the image
+  `correspondence/` engine (flattened from live source, numpy-only) into the script
+  payload so it is callable inside Slicer; default `False` is unchanged. New
+  non-destructive `SlicerHelper.detect_overlaps(seg_a, seg_b, *, resample=False)`
+  returns one `{name_a, name_b, inter, size_a, size_b, dice, iou, centroid_distance_mm}`
+  dict per overlapping segment pair (`[]` when disjoint or a source is empty), reusing
+  the same reference-grid guards as `subtract_segmentations`; raises `SlicerHelperError`
+  unless the bundle was included. Additive — no new dependency.
 
 ### Improved
 
