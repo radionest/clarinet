@@ -19,7 +19,7 @@ def build_correspondence_bundle() -> str:
     """Return the correspondence engine's source, flattened and import-free.
 
     Concatenates ``inspect.getsource()`` of each module in ``_MODULES``,
-    dropping every ``from clarinet.services.image.correspondence ...`` import
+    dropping every ``from clarinet ...`` / ``import clarinet ...`` line
     (including multi-line parenthesized ones -- a naive single-line strip
     would leave dangling ``    Name,`` continuation lines and raise
     ``SyntaxError``) and every ``from __future__ import ...`` line. Result is
@@ -38,7 +38,7 @@ def build_correspondence_bundle() -> str:
                 if ")" in s:
                     skip_paren = False
                 continue
-            if s.startswith("from clarinet.services.image.correspondence"):
+            if s.startswith("from clarinet") or s.startswith("import clarinet"):
                 if "(" in s and ")" not in s:
                     skip_paren = True
                 continue

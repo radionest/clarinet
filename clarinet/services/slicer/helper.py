@@ -2109,8 +2109,10 @@ class _SegmentEditMixin(_SlicerHelperBase):
         Exports both segmentations to integer labelmaps with the same
         reference-geometry/grid-guard export as ``subtract_segmentations``, then
         delegates the pairwise overlap computation to the bundled
-        ``build_overlap_graph`` (see ``correspondence_bundle.py``). Neither input
-        segmentation is modified.
+        ``build_overlap_graph`` (see ``correspondence_bundle.py``). Neither input's
+        segment data is modified; as in ``subtract_segmentations``, the shared
+        export first sets each input's reference-geometry metadata to the source
+        volume.
 
         Args:
             seg_a: First segmentation (SegmentationBuilder or node).
@@ -2161,19 +2163,27 @@ class _SegmentEditMixin(_SlicerHelperBase):
         try:
             if arr_a is None or arr_b is None:  # genuinely-empty source (PR#413) → no-op
                 return []
-            sx, sy, sz = (
-                self._image_node.GetSpacing() if self._image_node is not None else (1.0, 1.0, 1.0)
-            )
+            # Spacing from the exported labelmap (arr_a's own grid) — definitionally
+            # correct; equals _image_node's on the shared-grid path, but avoids the
+            # None fallback and the coupling to the source-volume node.
+            sx, sy, sz = labelmap_a.GetSpacing()
             # Labelmap array axes are (z,y,x); GetSpacing() is (x,y,z) — reverse to match.
             graph = build_overlap_graph(arr_a, arr_b, spacing=(sz, sy, sx))
             names_a, names_b = get_segment_names(node_a), get_segment_names(node_b)
             results: list[dict[str, Any]] = []
             for e in graph.edges:
+                # Labels are the merged labelmap's sequential values (segment i → label i+1);
+                # guard the back-index so a non-sequential label fails diagnosably, not via IndexError.
+                if not (0 < e.a <= len(names_a) and 0 < e.b <= len(names_b)):
+                    raise SlicerHelperError(
+                        f"detect_overlaps: labelmap label out of range "
+                        f"(a={e.a}/{len(names_a)}, b={e.b}/{len(names_b)})."
+                    )
                 denom = e.size_a + e.size_b
                 union = denom - e.inter
                 results.append(
                     {
-                        "name_a": names_a[e.a - 1],  # merged labelmap: segment i → label i+1
+                        "name_a": names_a[e.a - 1],
                         "name_b": names_b[e.b - 1],
                         "inter": e.inter,
                         "size_a": e.size_a,
