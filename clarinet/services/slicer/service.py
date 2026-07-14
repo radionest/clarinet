@@ -5,6 +5,7 @@ from typing import Any
 
 from clarinet.exceptions import SlicerError
 from clarinet.services.slicer.client import SlicerClient
+from clarinet.services.slicer.correspondence_bundle import build_correspondence_bundle
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
@@ -56,6 +57,8 @@ class SlicerService:
         script: str,
         context: dict[str, Any] | None = None,
         request_timeout: float | None = None,
+        *,
+        include_correspondence: bool = False,
     ) -> dict[str, Any]:
         """Build and send a script to Slicer.
 
@@ -66,6 +69,11 @@ class SlicerService:
             script: User Python script to execute.
             context: Optional dict of variable assignments to inject.
             request_timeout: Optional HTTP timeout override (seconds).
+            include_correspondence: When True, prepend the flattened
+                correspondence-engine bundle (``build_overlap_graph`` et al.,
+                see ``correspondence_bundle.py``) so the script can call it
+                directly. Default False keeps scripts lean — most scripts
+                don't need it.
 
         Returns:
             The script's ``__execResult`` dict (or ``{}`` if the script did not
@@ -74,7 +82,9 @@ class SlicerService:
             — see ``clarinet/services/slicer/CLAUDE.md`` →
             "``__execResult`` Result-Merging Contract".
         """
-        full_script = self._build_script(script, context)
+        full_script = self._build_script(
+            script, context, include_correspondence=include_correspondence
+        )
         logger.debug(f"Sending script to Slicer at {slicer_url} ({len(full_script)} chars)")
         return await self._send(slicer_url, full_script, request_timeout)
 
@@ -148,7 +158,12 @@ class SlicerService:
         async with SlicerClient(slicer_url, timeout=effective_timeout) as client:
             return await client.execute(script)
 
-    def _build_script(self, script: str, context: dict[str, Any] | None) -> str:
+    def _build_script(
+        self,
+        script: str,
+        context: dict[str, Any] | None,
+        include_correspondence: bool = False,
+    ) -> str:
         """Combine helper + context + user script.
 
         Helper definitions (SlicerHelper, PacsHelper, etc.) stay in globals.
@@ -183,6 +198,15 @@ class SlicerService:
         previous result; without the pop, a script that assigns no
         ``__execResult`` returns the stale one via ``_ns.get(..., {})``, breaking
         the "``{}`` if the script did not assign one" contract.
+
+        **``include_correspondence`` inserts the bundle BETWEEN helper and
+        runner, never before the helper.** ``self._helper_source`` starts with
+        (docstring, then ``from __future__ import annotations``) — Slicer runs
+        Python 3.9, where that import must be the first statement of the exec
+        unit or ``X | None`` annotations raise ``TypeError`` at definition
+        time. ``build_correspondence_bundle()`` has its per-module future
+        imports stripped (Task 1), so placing it after the helper keeps
+        exactly one, legally positioned, future import in the composed script.
         """
         ctx_lines = "".join(
             f"    globals()[{key!r}] = {value!r}\n" for key, value in (context or {}).items()
@@ -202,4 +226,7 @@ def _run():
 _run()
 del _run"""
 
+        if include_correspondence:
+            bundle = build_correspondence_bundle()
+            return "\n".join([self._helper_source, "", bundle, "", runner])
         return "\n".join([self._helper_source, "", runner])

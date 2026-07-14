@@ -4,7 +4,7 @@
 
 HTTP-based integration with **3D Slicer** desktop application. Sends Python scripts to Slicer's built-in web server (`POST /slicer/exec`) and returns JSON responses. Router uses `build_slicer_context_async()` for DB-backed context hydration.
 
-## Architecture (5 files)
+## Architecture (6 files)
 
 | File | Role |
 |------|------|
@@ -13,6 +13,7 @@ HTTP-based integration with **3D Slicer** desktop application. Sends Python scri
 | `helper.py` | `SlicerHelper` DSL — runs **inside Slicer**, not in Clarinet. Read as text and sent as script payload |
 | `context.py` | `build_slicer_context()` (sync) + `build_slicer_context_async()` (async, with hydration) |
 | `context_hydration.py` | Decorator-based registry for async context enrichment hydrators |
+| `correspondence_bundle.py` | Flattens the image `correspondence/` engine to injectable text for opt-in Slicer bundling via `build_correspondence_bundle()` |
 
 **Flow:** Router → `build_slicer_context_async(record_read, session)` → sync `build_slicer_context()` + async hydrators → `SlicerService.execute()` → builds script (helper + context + user code) → `SlicerClient.execute()` → HTTP POST to Slicer
 
