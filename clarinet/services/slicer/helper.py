@@ -1636,6 +1636,16 @@ class _SegmentAnalysisMixin(_SlicerHelperBase):
         return self._apply_parent_transform(self._unwrap_node(segmentation), local)
 
 
+# TYPE_CHECKING-only: build_overlap_graph is never a real import at runtime — it
+# is concatenated as source text (see correspondence_bundle.py) and exec'd into
+# this module's globals only when the caller passes
+# execute(..., include_correspondence=True). detect_overlaps() below reads it
+# via globals() (see its guard there); this import exists solely so mypy can
+# resolve the name and type-check the call.
+if TYPE_CHECKING:
+    from clarinet.services.image.correspondence.graph import build_overlap_graph
+
+
 class _SegmentEditMixin(_SlicerHelperBase):
     def create_segmentation(self, name: str) -> SegmentationBuilder:
         """Create an empty segmentation node.
@@ -2086,6 +2096,88 @@ class _SegmentEditMixin(_SlicerHelperBase):
         for seg_id in segments_to_remove:
             vtk_seg_a.RemoveSegment(seg_id)
         return node_a
+
+    def detect_overlaps(
+        self,
+        seg_a: SegmentationBuilder | Any,
+        seg_b: SegmentationBuilder | Any,
+        *,
+        resample: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Non-destructive per-segment-pair overlap report between two segmentations.
+
+        Exports both segmentations to integer labelmaps with the same
+        reference-geometry/grid-guard export as ``subtract_segmentations``, then
+        delegates the pairwise overlap computation to the bundled
+        ``build_overlap_graph`` (see ``correspondence_bundle.py``). Neither input
+        segmentation is modified.
+
+        Args:
+            seg_a: First segmentation (SegmentationBuilder or node).
+            seg_b: Second segmentation (SegmentationBuilder or node).
+            resample: If True, skip the source-vs-volume geometry check and re-grid a
+                mismatched input onto the reference extent (legacy behavior). Default
+                False raises SlicerHelperError on a grid mismatch.
+
+        Returns:
+            One dict per overlapping segment pair (``inter > 0``): ``name_a``,
+            ``name_b``, ``inter``, ``size_a``, ``size_b``, ``dice``, ``iou``,
+            ``centroid_distance_mm``. Empty list when the segmentations are
+            disjoint, or when either source is genuinely empty.
+
+        Raises:
+            SlicerHelperError: The script was sent without the correspondence
+                bundle — call ``execute(..., include_correspondence=True)``; or
+                a grid mismatch was detected (see ``_export_segments_labelmap``).
+        """
+        if "build_overlap_graph" not in globals():
+            raise SlicerHelperError(
+                "detect_overlaps requires the correspondence bundle; "
+                "call execute(..., include_correspondence=True)."
+            )
+        node_a = self._unwrap_node(seg_a)
+        node_b = self._unwrap_node(seg_b)
+
+        labelmap_b, arr_b = self._export_segments_labelmap(
+            node_b, "_ov_b", what="seg_b", resample=resample
+        )
+        try:
+            labelmap_a, arr_a = self._export_segments_labelmap(
+                node_a, "_ov_a", what="seg_a", resample=resample
+            )
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap_b)
+            raise
+
+        try:
+            if arr_a is None or arr_b is None:  # genuinely-empty source (PR#413) → no-op
+                return []
+            sx, sy, sz = (
+                self._image_node.GetSpacing() if self._image_node is not None else (1.0, 1.0, 1.0)
+            )
+            # Labelmap array axes are (z,y,x); GetSpacing() is (x,y,z) — reverse to match.
+            graph = build_overlap_graph(arr_a, arr_b, spacing=(sz, sy, sx))
+            names_a, names_b = get_segment_names(node_a), get_segment_names(node_b)
+            results: list[dict[str, Any]] = []
+            for e in graph.edges:
+                denom = e.size_a + e.size_b
+                union = denom - e.inter
+                results.append(
+                    {
+                        "name_a": names_a[e.a - 1],  # merged labelmap: segment i → label i+1
+                        "name_b": names_b[e.b - 1],
+                        "inter": e.inter,
+                        "size_a": e.size_a,
+                        "size_b": e.size_b,
+                        "dice": (2 * e.inter / denom) if denom else 0.0,
+                        "iou": (e.inter / union) if union else 0.0,
+                        "centroid_distance_mm": e.centroid_distance,
+                    }
+                )
+            return results
+        finally:
+            slicer.mrmlScene.RemoveNode(labelmap_a)
+            slicer.mrmlScene.RemoveNode(labelmap_b)
 
     def binarize_and_split_islands(
         self,

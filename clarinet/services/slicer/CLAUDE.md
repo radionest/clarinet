@@ -74,7 +74,7 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 
 Full method API + VTK pitfalls: `.claude/rules/slicer-helper-api.md` (auto-loaded when editing `helper.py`).
 
-Key methods: `SlicerHelper(working_folder)`, `load_volume()`, `create_segmentation()`, `load_segmentation()`, `setup_editor()`, `load_study_from_pacs()`, `load_series_from_pacs()`, `set_dual_layout()`, `align_by_center()`, `setup_segment_focus_observer()`.
+Key methods: `SlicerHelper(working_folder)`, `load_volume()`, `create_segmentation()`, `load_segmentation()`, `setup_editor()`, `detect_overlaps()`, `load_study_from_pacs()`, `load_series_from_pacs()`, `set_dual_layout()`, `align_by_center()`, `setup_segment_focus_observer()`.
 
 `load_study_from_pacs()` and `load_series_from_pacs()` auto-set first `vtkMRMLScalarVolumeNode` as `_image_node`.
 
