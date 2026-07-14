@@ -9,6 +9,7 @@ annotations`` line, and exec'ing it in a fresh namespace must produce a
 working ``build_overlap_graph`` equivalent to the original package function.
 """
 
+import ast
 import re
 
 import numpy as np
@@ -24,7 +25,9 @@ def test_bundle_has_no_clarinet_imports() -> None:
         assert "from clarinet" not in line
         # Broader than the prefix check above: a bare `import clarinet.x`
         # (no leading "from") would evade it but still leave clarinet
-        # unimportable inside Slicer's bundled Python.
+        # unimportable inside Slicer's bundled Python. Deliberately strict:
+        # a comment or docstring merely mentioning clarinet also fails --
+        # keep the correspondence sources free of the token.
         assert not _CLARINET_TOKEN_RE.search(line.strip())
 
 
@@ -38,11 +41,30 @@ def test_bundle_has_at_most_one_future_import() -> None:
     assert len(future_imports) <= 1
 
 
+def test_bundle_parses_under_python_39_grammar() -> None:
+    """Tripwire for 3.10+ syntax drifting into the correspondence package.
+
+    Slicer's bundled Python is 3.9, but CI execs the bundle under the venv's
+    much newer interpreter -- a ``match`` statement or PEP 695 alias added to
+    ``correspondence/*.py`` would pass CI and break every opted-in Slicer
+    script at exec time. ``feature_version`` is best-effort and syntax-level
+    only: annotation-position unions are already safe (the bundle keeps
+    ``from __future__ import annotations``), while runtime-only 3.10isms
+    (e.g. a module-level ``Alias = int | None`` assignment) are covered
+    solely by the live-Slicer integration test.
+    """
+    ast.parse(build_correspondence_bundle(), feature_version=(3, 9))
+
+
 def test_bundle_execs_and_builds_overlap_graph() -> None:
     bundle = build_correspondence_bundle()
     ns: dict = {"__name__": "_bundle"}
     exec(bundle, ns)
     assert "build_overlap_graph" in ns
+    # The full engine surface must survive flattening, not just the graph
+    # builder: measures, matching strategies, and the render/correspond API.
+    for name in ("Dice", "GreedyArgmax", "correspond", "render"):
+        assert name in ns
 
     # Two 3-D labelmaps sharing exactly one voxel on exactly one (a-label,
     # b-label) pair: a's label 1 and b's label 1 both occupy (0, 0, 0).
