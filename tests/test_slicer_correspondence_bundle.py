@@ -9,15 +9,23 @@ annotations`` line, and exec'ing it in a fresh namespace must produce a
 working ``build_overlap_graph`` equivalent to the original package function.
 """
 
+import re
+
 import numpy as np
 
 from clarinet.services.slicer.correspondence_bundle import build_correspondence_bundle
+
+_CLARINET_TOKEN_RE = re.compile(r"\bclarinet\b")
 
 
 def test_bundle_has_no_clarinet_imports() -> None:
     bundle = build_correspondence_bundle()
     for line in bundle.splitlines():
         assert "from clarinet" not in line
+        # Broader than the prefix check above: a bare `import clarinet.x`
+        # (no leading "from") would evade it but still leave clarinet
+        # unimportable inside Slicer's bundled Python.
+        assert not _CLARINET_TOKEN_RE.search(line.strip())
 
 
 def test_bundle_has_at_most_one_future_import() -> None:

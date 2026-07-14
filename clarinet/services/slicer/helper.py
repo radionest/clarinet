@@ -2129,6 +2129,15 @@ class _SegmentEditMixin(_SlicerHelperBase):
             SlicerHelperError: The script was sent without the correspondence
                 bundle — call ``execute(..., include_correspondence=True)``; or
                 a grid mismatch was detected (see ``_export_segments_labelmap``).
+
+        Note:
+            3D Slicer reuses one exec-namespace across all HTTP calls in a
+            session, so once any script sends ``execute(...,
+            include_correspondence=True)``, the bundle's symbols (including
+            ``build_overlap_graph``) persist in that namespace and are never
+            popped. The guard above is therefore session-order-dependent: it
+            will not raise in a session where a prior script already opted
+            in, even when the current script omits the bundle.
         """
         if "build_overlap_graph" not in globals():
             raise SlicerHelperError(

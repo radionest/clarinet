@@ -166,3 +166,14 @@ def test_build_script_with_correspondence_opt_in(slicer_service: SlicerService) 
     assert full.count("from __future__ import annotations") == 1
     assert full.index("from __future__") < full.index("def build_overlap_graph")
     compile(full, "<t2>", "exec")
+
+    # compile() alone doesn't exercise this: production sends this exact
+    # composed unit to Slicer, where it runs under helper.py's top-level
+    # future import — stringized annotations route the bundle's
+    # @dataclass(frozen=True) classes through dataclasses._is_type ->
+    # sys.modules.get(cls.__module__).__dict__. __name__="__main__" mirrors
+    # how Slicer execs scripts; a synthetic module name absent from
+    # sys.modules would raise AttributeError there instead.
+    ns: dict[str, object] = {"__name__": "__main__"}
+    exec(compile(full, "<composed>", "exec"), ns)
+    assert "build_overlap_graph" in ns
