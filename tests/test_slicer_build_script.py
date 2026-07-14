@@ -144,3 +144,36 @@ def test_build_script_user_can_shadow_helper_names(slicer_service: SlicerService
     ns = {}
     exec(full, ns)
     assert ns["__execResult"]["x"] == "_Dummy"
+
+
+def test_build_script_without_correspondence_by_default(slicer_service: SlicerService) -> None:
+    """Default include_correspondence=False must not add the bundle text."""
+    full = slicer_service._build_script("pass", None)
+    assert "def build_overlap_graph" not in full
+
+
+def test_build_script_with_correspondence_opt_in(slicer_service: SlicerService) -> None:
+    """include_correspondence=True prepends the bundle after the helper.
+
+    The composed unit must still carry exactly one ``from __future__ import
+    annotations`` — helper.py's top-of-file import, which must precede the
+    bundle (Task 1 strips the bundle's own future imports) so Slicer's
+    Python 3.9 interpreter evaluates ``X | None`` annotations lazily instead
+    of raising ``TypeError`` at definition time.
+    """
+    full = slicer_service._build_script("pass", None, include_correspondence=True)
+    assert "def build_overlap_graph" in full
+    assert full.count("from __future__ import annotations") == 1
+    assert full.index("from __future__") < full.index("def build_overlap_graph")
+    compile(full, "<t2>", "exec")
+
+    # compile() alone doesn't exercise this: production sends this exact
+    # composed unit to Slicer, where it runs under helper.py's top-level
+    # future import — stringized annotations route the bundle's
+    # @dataclass(frozen=True) classes through dataclasses._is_type ->
+    # sys.modules.get(cls.__module__).__dict__. __name__="__main__" mirrors
+    # how Slicer execs scripts; a synthetic module name absent from
+    # sys.modules would raise AttributeError there instead.
+    ns: dict[str, object] = {"__name__": "__main__"}
+    exec(compile(full, "<composed>", "exec"), ns)
+    assert "build_overlap_graph" in ns
