@@ -100,10 +100,10 @@ will not silently degrade into an untracked run.
 > **Never name your wrapper `anonymize_study_pipeline`.** Task names are
 > `{settings.pipeline_task_namespace}:{function_name}` — the bare function name,
 > *not* module-qualified. A project task sharing a built-in's function name
-> registers under the same key and `register_task()` raises `PipelineConfigError`,
-> which fails **startup** — the worker exits and the API refuses to start. Importing
-> `run_anonymization` is by itself enough to register the built-in, since both live
-> in `clarinet.services.dicom.pipeline`. Pick a distinct name
+> registers under the same key, and `register_task()` rejects it with
+> `PipelineConfigError`. Here the clash is unavoidable: importing `run_anonymization`
+> already registers the built-in, since both live in
+> `clarinet.services.dicom.pipeline`. Pick a distinct name
 > (`anonymize_study_with_type`, `anonymize_and_tag`, ...). The same rule applies
 > to every built-in — see `workflows.md` § Built-in tasks.
 
