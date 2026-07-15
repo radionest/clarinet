@@ -55,7 +55,7 @@ from clarinet.services.dicom.pipeline import anonymize_study_pipeline
     .do_task(anonymize_study_pipeline, send_to_pacs=True)
 )
 
-# branch on the result
+# continue once anonymization finishes — fires on the skip branch too (both land `finished`)
 (record("anonymize-study").on_finished().create_record("segment-ct-single"))
 ```
 
@@ -97,13 +97,17 @@ rather than calling `.get()` straight on `.data`.
 `ValueError` when `msg.record_id` is None — it is record-aware by contract and
 will not silently degrade into an untracked run.
 
+**Your wrapper only runs when a flow dispatches it.** The HTTP endpoint above
+dispatches the *built-in* directly, so a study anonymized that way gets no
+`extra_record_data` — its Record carries the framework fields only. If you also
+expose the endpoint, don't assume your project fields are always present (a flow
+matching `F.study_type` simply won't fire for those studies).
+
 > **Never name your wrapper `anonymize_study_pipeline`.** Task names are
 > `{settings.pipeline_task_namespace}:{function_name}` — the bare function name,
 > *not* module-qualified. A project task sharing a built-in's function name
 > registers under the same key, and `register_task()` rejects it with
-> `PipelineConfigError`. Here the clash is unavoidable: importing `run_anonymization`
-> already registers the built-in, since both live in
-> `clarinet.services.dicom.pipeline`. Pick a distinct name
+> `PipelineConfigError`. Pick a distinct name
 > (`anonymize_study_with_type`, `anonymize_and_tag`, ...). The same rule applies
 > to every built-in — see `workflows.md` § Built-in tasks.
 

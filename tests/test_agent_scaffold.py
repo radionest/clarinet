@@ -41,6 +41,20 @@ def test_payload_files_present() -> None:
         assert (DOCS / f"{name}.md").is_file()
 
 
+def test_project_template_ships_same_section_rules() -> None:
+    """The research template is a second delivery path and must not fall behind.
+
+    ``clarinet init --template research`` copies this tree verbatim, so a rule
+    added to the agent-docs payload without a template twin silently reaches no
+    template-created project. The cyrillic check globs ``*.md`` and so passes
+    vacuously for a missing file; this asserts presence. Content parity is not
+    covered here — the twins differ by their deep-doc link form.
+    """
+    assert PROJECT_TEMPLATE_CLAUDE_MD.is_file()
+    for name in SECTION_RULES:
+        assert (PROJECT_TEMPLATE_RULES / f"{name}.md").is_file()
+
+
 def test_no_unresolved_clarinet_repo_links() -> None:
     for md in AGENT_CLAUDE.glob("*.md"):
         assert "<clarinet>" not in md.read_text(encoding="utf-8"), md
