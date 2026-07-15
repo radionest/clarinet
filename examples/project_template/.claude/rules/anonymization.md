@@ -131,8 +131,9 @@ The task is idempotent — safe to re-fire. It skips (writing `skipped: true`) w
 - this run is not upgrading to PACS (either it already sent, or it isn't sending now).
 
 So a re-run *is* performed after a previous failure, or when a run that only saved
-to disk is repeated with `send_to_pacs=True`. Note the skip branch reports
-`anon_patient_id=None` — no fresh hash is produced for work already done.
+to disk is repeated with `send_to_pacs=True`. On the skip branch the **returned**
+`AnonymizationResult.anon_patient_id` is `None` — no fresh id is computed for work
+already done. That is a field of the return value; it never appears in `record.data`.
 
 If the failure ratio reaches `settings.anon_failure_threshold`, the whole run
 raises `AnonymizationFailedError` instead of reporting partial success.
