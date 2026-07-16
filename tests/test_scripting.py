@@ -208,6 +208,14 @@ def test_sync_function_rejected() -> None:
             """Sync body unsupported."""
 
 
+def test_var_args_rejected() -> None:
+    with pytest.raises(TypeError, match="args"):
+
+        @script()
+        async def main(ctx: ScriptCtx, *records: str) -> None:
+            """Var args unsupported."""
+
+
 def test_entry_is_callable_and_exposes_app() -> None:
     @script()
     async def main(ctx: ScriptCtx) -> None:
@@ -322,3 +330,16 @@ def test_acceptance_dry_run_vs_commit() -> None:
     assert written == [1, 2, 3, 4]
     assert "created: 4" in real.output
     assert "rerun with --commit" not in real.output
+
+
+def test_entry_call_runs_app(monkeypatch, capsys) -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+        ctx.tally.count("checked")
+
+    monkeypatch.setattr(sys, "argv", ["main"])
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == 0
+    assert "checked: 1" in capsys.readouterr().out
