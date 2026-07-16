@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from clarinet.models.study import Series, Study
     from clarinet.services.dicom.models import RetrieveResult
 
-from clarinet.exceptions.domain import AnonymizationFailedError
+from clarinet.exceptions.domain import AnonymizationFailedError, AnonymizationSendError
 from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.repositories.patient_repository import PatientRepository
@@ -157,6 +157,8 @@ class AnonymizationService:
 
         Raises:
             AnonymizationFailedError: If per-patient mode and patient has no anon_id
+            AnonymizationSendError: If settings.anon_fail_on_send_error is set and
+                any destination reported C-STORE failures.
         """
         do_save = save_to_disk if save_to_disk is not None else settings.anon_save_to_disk
         do_send = send_to_pacs if send_to_pacs is not None else settings.anon_send_to_pacs
@@ -304,6 +306,12 @@ class AnonymizationService:
                     f"{total_failed}/{total_instances} instances failed "
                     f"(threshold: {settings.anon_failure_threshold:.0%})"
                 )
+
+        # Raise BEFORE persisting study.anon_uid: the orchestrator skip-guard
+        # then sees an unfinished study and a retry cleanly redoes the run
+        # (per-series anon_uids already written are salt-deterministic).
+        if settings.anon_fail_on_send_error and any(total_send_failed_by_node.values()):
+            raise AnonymizationSendError(total_send_failed_by_node)
 
         # Update study anon_uid in DB
         await self.study_repo.update_anon_uid(study, anon_study_uid)

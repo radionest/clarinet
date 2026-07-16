@@ -395,3 +395,25 @@ async def test_send_counts_per_node_when_one_fails() -> None:
     }
     assert result.instances_send_failed == 2
     study_repo.update_anon_uid.assert_awaited_once()  # regression: send errors stay non-fatal by default
+
+
+@pytest.mark.asyncio
+async def test_fail_on_send_error_raises_before_study_anon_uid() -> None:
+    """anon_fail_on_send_error=True → AnonymizationSendError; study anon_uid NOT persisted."""
+    from clarinet.exceptions.domain import AnonymizationSendError
+
+    series = _make_series("1.2.3.4.5.6")
+    service, dicom_client, study_repo = _make_service(series=[series])
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+    dicom_client.store_instances_batch = AsyncMock(side_effect=ConnectionError("down"))
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings, anon_fail_on_send_error=True)
+        with pytest.raises(AnonymizationSendError) as excinfo:
+            await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    assert excinfo.value.failed_by_node == {"MAIN@h1:104": 1}
+    study_repo.update_anon_uid.assert_not_awaited()
