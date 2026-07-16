@@ -160,6 +160,8 @@ def script() -> Callable[[ScriptFn], ScriptEntry]:
                 f"@script function {fn.__name__!r} must take `ctx: ScriptCtx` "
                 f"as its first parameter"
             )
+        if not inspect.iscoroutinefunction(fn):
+            raise TypeError(f"@script function {fn.__name__!r} must be `async def`")
         custom = params[1:]
         for param in custom:
             if param.kind in (

@@ -200,6 +200,14 @@ def test_var_kwargs_rejected() -> None:
             """Var kwargs unsupported."""
 
 
+def test_sync_function_rejected() -> None:
+    with pytest.raises(TypeError, match="async"):
+
+        @script()
+        def main(ctx: ScriptCtx) -> None:  # type: ignore[arg-type]
+            """Sync body unsupported."""
+
+
 def test_entry_is_callable_and_exposes_app() -> None:
     @script()
     async def main(ctx: ScriptCtx) -> None:
