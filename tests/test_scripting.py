@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import io
+import sys
+from unittest import mock
+
+import pytest
+
 from clarinet.scripting import ScriptCtx, Tally
 
 
@@ -54,3 +60,26 @@ def test_hit_limit_boundary() -> None:
 def test_would_line(capsys) -> None:
     ScriptCtx().would("invalidate record 7")
     assert capsys.readouterr().out == "[dry-run] would invalidate record 7\n"
+
+
+def test_confirm_yes_flag_skips_prompt(monkeypatch) -> None:
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("must not prompt"))
+    assert ScriptCtx(yes=True).confirm("proceed?") is True
+
+
+def test_confirm_non_tty_refuses(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # isatty() -> False
+    assert ScriptCtx().confirm("proceed?") is False
+    assert "--yes" in capsys.readouterr().out
+
+
+def test_confirm_tty_prompts(monkeypatch) -> None:
+    fake_stdin = mock.Mock()
+    fake_stdin.isatty.return_value = True
+    monkeypatch.setattr(sys, "stdin", fake_stdin)
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
+    assert ScriptCtx().confirm("proceed?") is True
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "no")
+    assert ScriptCtx().confirm("proceed?") is False

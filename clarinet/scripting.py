@@ -21,6 +21,7 @@ Usage::
 
 from __future__ import annotations
 
+import sys
 from collections import Counter
 
 import typer
@@ -81,3 +82,17 @@ class ScriptCtx:
     def would(self, msg: str) -> None:
         """Uniform dry-run line: ``[dry-run] would <msg>``."""
         typer.echo(f"[dry-run] would {msg}")
+
+    def confirm(self, msg: str) -> bool:
+        """Operator gate for destructive steps; ``--yes`` pre-approves.
+
+        Refuses (returns False) instead of blocking when stdin is not a TTY —
+        an unattended run must never hang on ``input()``.
+        """
+        if self.yes:
+            return True
+        if not sys.stdin.isatty():
+            typer.echo(f"{msg} — refusing without --yes (stdin is not a TTY)")
+            return False
+        answer = input(f"{msg} Type 'yes' to proceed: ")
+        return answer.strip().lower() == "yes"
