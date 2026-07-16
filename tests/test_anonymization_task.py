@@ -588,7 +588,55 @@ async def test_orchestrator_series_uids_bypasses_skip_guard() -> None:
     assert anon_service.anonymize_study.await_args.kwargs["series_uids"] == ["1.2.3.4"]
     submitted = client.submit_record_data.await_args.args[1]
     assert submitted["send_failed_by_node"] == {"MAIN@h1:104": 0}
+    assert submitted["series_uids"] == ["1.2.3.4"]
     assert result is anon_result
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_whole_study_after_subset_run_not_skipped() -> None:
+    """A subset run's record marker (series_uids) forces a later whole-study run to re-run."""
+    from clarinet.services.dicom.models import AnonymizationResult
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = "9.9.9"
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "finished"
+    record.data = {
+        "anon_study_uid": "9.9.9",
+        "sent_to_pacs": False,
+        "series_uids": ["1.2.3.4"],
+    }
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.9.9",
+        series_count=2,
+        series_anonymized=2,
+        instances_anonymized=10,
+        instances_failed=0,
+        send_failed_by_node={"MAIN@h1:104": 0},
+    )
+    anon_service = AsyncMock()
+    anon_service.anonymize_study = AsyncMock(return_value=anon_result)
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+    )
+
+    anon_service.anonymize_study.assert_awaited_once()
+    submitted = client.update_record_data.await_args.args[1]
+    assert "series_uids" not in submitted
 
 
 @pytest.mark.asyncio

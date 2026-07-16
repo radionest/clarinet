@@ -132,10 +132,12 @@ class AnonymizationOrchestrator:
             raise
 
         if record_id is not None:
-            await self._submit(
-                record_id,
-                self._record_data_from_result(result, extra_record_data),
-            )
+            data = self._record_data_from_result(result, extra_record_data)
+            if series_uids is not None:
+                # Marker for _already_done: this record's completion is
+                # subset-granular and cannot prove whole-study coverage.
+                data["series_uids"] = list(series_uids)
+            await self._submit(record_id, data)
 
         return result
 
@@ -148,13 +150,18 @@ class AnonymizationOrchestrator:
         """Return existing anon_study_uid when anonymization is already complete.
 
         Re-running is allowed when the previous attempt errored, or when this
-        run sends to PACS but the previous one did not.
+        run sends to PACS but the previous one did not. A previous subset run
+        (record data carries series_uids) never counts as done.
         """
         if study.anon_uid is None:
             return None
         record = await self.client.get_record(record_id)
         prev_data = record.data or {}
         if "error" in prev_data:
+            return None
+        if "series_uids" in prev_data:
+            # Previous completed run was a series subset — the study-granular
+            # anon_uid cannot prove whole-study coverage.
             return None
         if do_send and not prev_data.get("sent_to_pacs", False):
             return None
