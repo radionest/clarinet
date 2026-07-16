@@ -8,7 +8,7 @@ and by the built-in :func:`anonymize_study_pipeline` pipeline task.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +43,7 @@ class AnonymizationOrchestrator:
         send_to_pacs: bool | None = None,
         per_study_patient_id: bool | None = None,
         extra_record_data: dict[str, Any] | None = None,
+        series_uids: Sequence[str] | None = None,
     ) -> AnonymizationResult:
         """Run anonymization with optional Record tracking.
 
@@ -64,6 +65,9 @@ class AnonymizationOrchestrator:
                 already done in a previous run, so no fresh hash is produced.
             extra_record_data: Project-specific fields merged into the Record
                 ``data`` payload (success, skip, and error branches).
+            series_uids: Restrict to these series and BYPASS the skip-guard —
+                study.anon_uid is study-granular and cannot prove the requested
+                series were processed by the earlier run.
 
         Raises:
             Exception: any error from DICOM anonymization is re-raised after
@@ -78,7 +82,7 @@ class AnonymizationOrchestrator:
             # the Record failed instead of leaving it stuck in pending/inwork.
             study = await self.client.get_study(study_uid)
 
-            if record_id is not None:
+            if record_id is not None and series_uids is None:
                 already_anon_uid = await self._already_done(study, record_id, do_send)
                 if already_anon_uid is not None:
                     logger.info(f"Study {study_uid} already anonymized, skipping")
@@ -108,6 +112,7 @@ class AnonymizationOrchestrator:
                 save_to_disk=do_save,
                 send_to_pacs=do_send,
                 per_study_patient_id=per_study_patient_id,
+                series_uids=series_uids,
             )
         except Exception as exc:
             # Catch every exception so the tracking Record is marked failed
@@ -179,6 +184,7 @@ class AnonymizationOrchestrator:
             "instances_anonymized": result.instances_anonymized,
             "instances_failed": result.instances_failed,
             "instances_send_failed": result.instances_send_failed,
+            "send_failed_by_node": result.send_failed_by_node,
             "sent_to_pacs": result.sent_to_pacs,
             "series_count": result.series_count,
             "series_anonymized": result.series_anonymized,
