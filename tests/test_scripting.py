@@ -6,6 +6,7 @@ import io
 import sys
 from unittest import mock
 
+import click
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -183,7 +184,9 @@ def test_limit_zero_rejected() -> None:
 
     result = runner.invoke(main.app, ["--limit", "0"])
     assert result.exit_code != 0
-    assert "--limit" in result.output
+    # CI (GITHUB_ACTIONS) makes typer render usage errors with ANSI styling
+    # interleaved inside option names — compare against the unstyled text.
+    assert "--limit" in click.unstyle(result.output)
 
 
 def test_positional_argument_supported() -> None:
@@ -313,10 +316,13 @@ def test_help_contract() -> None:
 
     result = runner.invoke(main.app, ["--help"])
     assert result.exit_code == 0
-    assert "Backfill sample for help test" in result.output
+    # Styled rendering (rich, forced under GITHUB_ACTIONS/TERM) interleaves
+    # ANSI codes inside option names — assert on the unstyled text.
+    plain = click.unstyle(result.output)
+    assert "Backfill sample for help test" in plain
     for opt in ("--commit", "--limit", "--yes", "--api-base", "--series"):
-        assert opt in result.output
-    assert "token" not in result.output.lower()
+        assert opt in plain
+    assert "token" not in plain.lower()
 
 
 def test_framed_run_never_builds_client_unasked() -> None:
