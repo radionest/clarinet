@@ -472,3 +472,73 @@ async def test_fail_on_send_error_raises_before_study_anon_uid() -> None:
 
     assert excinfo.value.failed_by_node == {"MAIN@h1:104": 1}
     study_repo.update_anon_uid.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_series_uids_restricts_processing() -> None:
+    """Only the requested series is retrieved; counters keep their semantics."""
+    series_a = _make_series("1.2.3.4.5.1")
+    series_b = _make_series("1.2.3.4.5.2")
+    service, dicom_client, _ = _make_service(series=[series_a, series_b])
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", series_uids=["1.2.3.4.5.2"])
+
+    dicom_client.get_series_to_memory.assert_awaited_once()
+    assert dicom_client.get_series_to_memory.await_args.kwargs["series_uid"] == "1.2.3.4.5.2"
+    assert result.series_count == 2  # whole study
+    assert result.series_anonymized == 1  # actually processed
+    assert result.series_skipped == 0  # filter-excluded only; unrequested is neither
+
+
+@pytest.mark.asyncio
+async def test_series_uids_absent_uid_raises_naming_it() -> None:
+    series_a = _make_series("1.2.3.4.5.1")
+    service, dicom_client, _ = _make_service(series=[series_a])
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        with pytest.raises(AnonymizationFailedError, match=r"not in study.*9\.9\.9\.absent"):
+            await service.anonymize_study("1.2.3.4.5", series_uids=["9.9.9.absent"])
+
+    dicom_client.get_series_to_memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_series_uids_filter_excluded_raises_with_reason() -> None:
+    """SeriesFilter reads its OWN module settings — patch series_filter.settings too."""
+    series_sr = _make_series("1.2.3.4.5.9", modality="SR")
+    service, dicom_client, _ = _make_service(series=[series_sr])
+
+    with (
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as filter_settings,
+    ):
+        _patch_settings(mock_settings)
+        filter_settings.series_filter_excluded_modalities = ["SR"]
+        filter_settings.series_filter_min_instance_count = 0
+        filter_settings.series_filter_unknown_modality_policy = "include"
+        filter_settings.series_filter_excluded_descriptions = []
+        with pytest.raises(AnonymizationFailedError, match="excluded by series filter") as excinfo:
+            await service.anonymize_study("1.2.3.4.5", series_uids=["1.2.3.4.5.9"])
+
+    assert "1.2.3.4.5.9" in str(excinfo.value)
+    dicom_client.get_series_to_memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_series_uids_empty_list_raises() -> None:
+    series_a = _make_series("1.2.3.4.5.1")
+    service, dicom_client, _ = _make_service(series=[series_a])
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        with pytest.raises(AnonymizationFailedError, match="empty"):
+            await service.anonymize_study("1.2.3.4.5", series_uids=[])
+
+    dicom_client.get_series_to_memory.assert_not_awaited()

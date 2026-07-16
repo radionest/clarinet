@@ -146,6 +146,7 @@ class AnonymizationService:
         save_to_disk: bool | None = None,
         send_to_pacs: bool | None = None,
         per_study_patient_id: bool | None = None,
+        series_uids: Sequence[str] | None = None,
     ) -> AnonymizationResult:
         """Anonymize a study: fetch from PACS, anonymize, distribute.
 
@@ -161,12 +162,17 @@ class AnonymizationService:
                 When True, PatientID/PatientName are set to a per-study 8-hex
                 hash (sha256(salt:study_uid)) — different across studies of the
                 same patient, preventing PACS-side correlation.
+            series_uids: Restrict the run to these series (None = whole study).
+                Empty, unknown, or filter-excluded selections raise — a subset
+                request is never silently narrowed.
 
         Returns:
             Anonymization result with statistics
 
         Raises:
-            AnonymizationFailedError: If per-patient mode and patient has no anon_id
+            AnonymizationFailedError: If per-patient mode and patient has no anon_id,
+                or if series_uids is empty / names series absent from the study /
+                names filter-excluded series.
             AnonymizationSendError: If settings.anon_fail_on_send_error is set and
                 any destination reported C-STORE failures.
         """
@@ -233,15 +239,38 @@ class AnonymizationService:
                 + ", ".join(f"{fi.item.series_uid} ({fi.reason})" for fi in filter_result.excluded)
             )
 
+        included = filter_result.included
+        if series_uids is not None:
+            requested = set(series_uids)  # silent dedupe of duplicates
+            if not requested:
+                raise AnonymizationFailedError(
+                    "series_uids is empty — refusing to anonymize nothing"
+                )
+            known = {s.series_uid for s in series_list}
+            missing = sorted(requested - known)
+            if missing:
+                raise AnonymizationFailedError(
+                    f"requested series not in study {study_uid}: {', '.join(missing)}"
+                )
+            excluded_reasons = {fi.item.series_uid: fi.reason for fi in filter_result.excluded}
+            conflicts = sorted(requested & excluded_reasons.keys())
+            if conflicts:
+                details = ", ".join(f"{uid} ({excluded_reasons[uid]})" for uid in conflicts)
+                raise AnonymizationFailedError(
+                    f"requested series excluded by series filter: {details}"
+                )
+            included = [s for s in filter_result.included if s.series_uid in requested]
+
         logger.info(
             f"Anonymizing study {study_uid} → {anon_study_uid} "
-            f"({len(filter_result.included)}/{series_count} series, "
+            f"({len(included)}/{series_count} series"
+            f"{', requested subset' if series_uids is not None else ''}, "
             f"save_to_disk={do_save}, send_to_pacs={do_send})"
         )
 
         pending_tasks: list[asyncio.Task[_DistributionResult]] = []
 
-        for series in filter_result.included:
+        for series in included:
             # 1. C-GET with retry — strictly sequential (one PACS association at a time)
             result = await self._retrieve_series(study_uid, series)
             if result is None:
@@ -338,7 +367,7 @@ class AnonymizationService:
             anon_study_uid=anon_study_uid,
             anon_patient_id=anon_patient_id,
             series_count=series_count,
-            series_anonymized=len(filter_result.included),
+            series_anonymized=len(included),
             series_skipped=len(filter_result.excluded),
             instances_anonymized=total_anonymized,
             instances_failed=total_failed,
