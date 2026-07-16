@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from clarinet.client import ClarinetAPIError, ClarinetClient
 from clarinet.models.base import RecordStatus
-from clarinet.services.anonymization_service import AnonymizationService
+from clarinet.services.anonymization_service import AnonymizationService, extra_pacs_from_settings
 from clarinet.services.dicom.models import AnonymizationResult
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
@@ -267,6 +267,7 @@ def build_anonymization_service(client: ClarinetClient) -> AnonymizationService:
         series_repo=SeriesRepoAdapter(client),  # type: ignore[arg-type]
         dicom_client=dicom_client,
         pacs=pacs,
+        extra_pacs=extra_pacs_from_settings(),
     )
 
 

@@ -10,6 +10,61 @@ from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom.models import BackgroundAnonymizationStatus, DicomNode
 
 
+def test_extra_pacs_from_settings_converts_nodes() -> None:
+    from clarinet.services.anonymization_service import extra_pacs_from_settings
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        mock_settings.anon_extra_pacs_nodes = [
+            MagicMock(aet="A", host="h1", port=104),
+            MagicMock(aet="B", host="h2", port=11112),
+        ]
+        nodes = extra_pacs_from_settings()
+
+    assert nodes == [
+        DicomNode(aet="A", host="h1", port=104),
+        DicomNode(aet="B", host="h2", port=11112),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_di_factory_wires_extra_pacs() -> None:
+    """The HTTP DI path must honor anon_extra_pacs_nodes like the pipeline path does."""
+    from clarinet.api.dependencies import get_anonymization_service
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        mock_settings.anon_extra_pacs_nodes = [MagicMock(aet="X", host="h", port=1)]
+        service = await get_anonymization_service(
+            AsyncMock(),
+            AsyncMock(),
+            AsyncMock(),
+            AsyncMock(),
+            DicomNode(aet="MAIN", host="h1", port=104),
+        )
+
+    assert service.destinations[1:] == [DicomNode(aet="X", host="h", port=1)]
+
+
+def test_build_anonymization_service_wires_extra_pacs() -> None:
+    from clarinet.services.dicom.orchestrator import build_anonymization_service
+
+    with (
+        patch("clarinet.services.dicom.orchestrator.settings") as orch_settings,
+        patch("clarinet.services.anonymization_service.settings") as anon_settings,
+    ):
+        orch_settings.dicom_aet = "AET"
+        orch_settings.dicom_max_pdu = 16384
+        orch_settings.pacs_aet = "MAIN"
+        orch_settings.pacs_host = "h1"
+        orch_settings.pacs_port = 104
+        anon_settings.anon_extra_pacs_nodes = [MagicMock(aet="X", host="h2", port=1)]
+        service = build_anonymization_service(MagicMock())
+
+    assert service.destinations == [
+        DicomNode(aet="MAIN", host="h1", port=104),
+        DicomNode(aet="X", host="h2", port=1),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_create_anonymization_service_yields_service() -> None:
     """create_anonymization_service yields a service with HTTP-backed repos."""

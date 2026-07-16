@@ -45,6 +45,16 @@ def _node_label(node: DicomNode) -> str:
     return f"{node.aet}@{node.host}:{node.port}"
 
 
+def extra_pacs_from_settings() -> list[DicomNode]:
+    """Extra C-STORE destinations from ``settings.anon_extra_pacs_nodes``.
+
+    The single conversion point for every construction path (pipeline
+    orchestrator, raw worker factory, HTTP DI factory) — the setting must
+    never apply on one path and silently do nothing on another.
+    """
+    return [DicomNode(aet=n.aet, host=n.host, port=n.port) for n in settings.anon_extra_pacs_nodes]
+
+
 class AnonymizationService:
     """Orchestrates DICOM anonymization: PACS → memory → distribute → DB.
 

@@ -32,7 +32,7 @@ from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
 from clarinet.repositories.user_repository import UserRepository
 from clarinet.services.admin_service import AdminService
-from clarinet.services.anonymization_service import AnonymizationService
+from clarinet.services.anonymization_service import AnonymizationService, extra_pacs_from_settings
 from clarinet.services.dicom import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
@@ -373,7 +373,14 @@ async def get_anonymization_service(
     pacs: PacsNodeDep,
 ) -> AnonymizationService:
     """Get anonymization service instance."""
-    return AnonymizationService(study_repo, patient_repo, series_repo, client, pacs)
+    return AnonymizationService(
+        study_repo,
+        patient_repo,
+        series_repo,
+        client,
+        pacs,
+        extra_pacs=extra_pacs_from_settings(),
+    )
 
 
 AnonymizationServiceDep = Annotated[AnonymizationService, Depends(get_anonymization_service)]
