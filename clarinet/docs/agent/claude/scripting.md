@@ -60,7 +60,7 @@ positional argument, with default → `--option`. The first parameter is always
 | `--commit` | off | Actually write. **Default is always dry-run** — never invert this. |
 | `--limit N` | none | Cap the run. The script decides what N counts (checked/created/affected) via `ctx.hit_limit(count)`. |
 | `--yes` | off | Pre-approve `ctx.confirm(...)` prompts (for non-interactive runs). |
-| `--api-base URL` | none | Override `settings.effective_api_base_url`. The service token is settings/env only — never a flag. |
+| `--api-base URL` | none | Override `settings.effective_api_base_url`. The service token is settings/env only — never a flag. The token is attached to whatever host this points at — only use trusted bases. |
 
 ## ScriptCtx API
 
