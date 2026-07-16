@@ -7,9 +7,13 @@ import sys
 from unittest import mock
 
 import pytest
+import typer
+from typer.testing import CliRunner
 
-from clarinet.scripting import ScriptCtx, Tally
+from clarinet.scripting import ScriptCtx, Tally, script
 from clarinet.settings import settings
+
+runner = CliRunner()
 
 
 def test_tally_counts_and_getitem() -> None:
@@ -128,3 +132,78 @@ def test_no_client_when_untouched() -> None:
         ctx.tally.count("checked")
         assert ctx.hit_limit(5) is False
         # reaching here without AssertionError = no construction happened
+
+
+def test_custom_option_passthrough() -> None:
+    seen: dict[str, object] = {}
+
+    @script()
+    async def main(ctx: ScriptCtx, series: str | None = None) -> None:
+        """Sample framed script."""
+        seen["commit"] = ctx.commit
+        seen["series"] = series
+
+    result = runner.invoke(main.app, ["--series", "1.2.3"])
+    assert result.exit_code == 0
+    assert seen == {"commit": False, "series": "1.2.3"}
+
+
+def test_standard_options_reach_ctx() -> None:
+    seen: dict[str, object] = {}
+
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+        seen.update(commit=ctx.commit, limit=ctx.limit, yes=ctx.yes, api_base=ctx.api_base)
+
+    result = runner.invoke(
+        main.app, ["--commit", "--limit", "5", "--yes", "--api-base", "http://x"]
+    )
+    assert result.exit_code == 0
+    assert seen == {"commit": True, "limit": 5, "yes": True, "api_base": "http://x"}
+
+
+def test_positional_argument_supported() -> None:
+    seen: dict[str, object] = {}
+
+    @script()
+    async def main(ctx: ScriptCtx, xlsx: str) -> None:
+        """With a required positional argument."""
+        seen["xlsx"] = xlsx
+
+    result = runner.invoke(main.app, ["cohort.xlsx"])
+    assert result.exit_code == 0
+    assert seen["xlsx"] == "cohort.xlsx"
+
+
+def test_collision_raises_at_decoration_time() -> None:
+    with pytest.raises(TypeError, match="commit"):
+
+        @script()
+        async def main(ctx: ScriptCtx, commit: bool = False) -> None:
+            """Colliding parameter."""
+
+
+def test_first_param_must_be_ctx() -> None:
+    with pytest.raises(TypeError, match="ctx"):
+
+        @script()
+        async def main(series: str) -> None:
+            """Missing ctx."""
+
+
+def test_var_kwargs_rejected() -> None:
+    with pytest.raises(TypeError, match="kwargs"):
+
+        @script()
+        async def main(ctx: ScriptCtx, **kwargs: str) -> None:
+            """Var kwargs unsupported."""
+
+
+def test_entry_is_callable_and_exposes_app() -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+
+    assert callable(main)
+    assert isinstance(main.app, typer.Typer)

@@ -21,9 +21,12 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import sys
 from collections import Counter
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
@@ -121,3 +124,110 @@ class ScriptCtx:
                 verify_ssl=settings.api_verify_ssl,
             )
         return self._client
+
+
+type ScriptFn = Callable[..., Coroutine[Any, Any, None]]
+
+_STANDARD_OPTIONS = ("commit", "limit", "yes", "api_base")
+
+
+class ScriptEntry:
+    """Callable CLI entry point; ``.app`` is exposed for CliRunner tests."""
+
+    def __init__(self, app: typer.Typer) -> None:
+        self.app = app
+
+    def __call__(self) -> None:
+        self.app()
+
+
+def script() -> Callable[[ScriptFn], ScriptEntry]:
+    """Wrap an async script body into a single-command typer app.
+
+    The body's first parameter must be ``ctx: ScriptCtx``; its remaining
+    parameters become CLI parameters (typer inference: no default -> argument,
+    default -> option), merged with the standard options ``--commit``,
+    ``--limit``, ``--yes``, ``--api-base``. See the module docstring for the
+    target script shape.
+    """
+
+    def decorator(fn: ScriptFn) -> ScriptEntry:
+        # eval_str resolves `from __future__ import annotations` strings in the
+        # downstream script's namespace — typer needs real annotation objects.
+        params = list(inspect.signature(fn, eval_str=True).parameters.values())
+        if not params or params[0].name != "ctx":
+            raise TypeError(
+                f"@script function {fn.__name__!r} must take `ctx: ScriptCtx` "
+                f"as its first parameter"
+            )
+        custom = params[1:]
+        for param in custom:
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                raise TypeError(
+                    f"@script does not support *args/**kwargs (parameter {param.name!r})"
+                )
+        collisions = sorted({p.name for p in custom} & set(_STANDARD_OPTIONS))
+        if collisions:
+            raise TypeError(f"@script parameter(s) collide with standard options: {collisions}")
+
+        standard = [
+            inspect.Parameter(
+                "commit",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=False,
+                annotation=Annotated[
+                    bool,
+                    typer.Option("--commit", help="Actually write changes (default: dry-run)."),
+                ],
+            ),
+            inspect.Parameter(
+                "limit",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Annotated[
+                    int | None,
+                    typer.Option(
+                        "--limit", help="Cap the run; the script decides what is counted."
+                    ),
+                ],
+            ),
+            inspect.Parameter(
+                "yes",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=False,
+                annotation=Annotated[
+                    bool, typer.Option("--yes", help="Skip interactive confirmation prompts.")
+                ],
+            ),
+            inspect.Parameter(
+                "api_base",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Annotated[
+                    str | None,
+                    typer.Option("--api-base", help="Override the settings-derived API base URL."),
+                ],
+            ),
+        ]
+
+        def cli_body(**kwargs: Any) -> None:
+            ctx = ScriptCtx(
+                commit=kwargs.pop("commit"),
+                limit=kwargs.pop("limit"),
+                yes=kwargs.pop("yes"),
+                api_base=kwargs.pop("api_base"),
+            )
+            asyncio.run(fn(ctx, **kwargs))
+
+        cli_body.__signature__ = inspect.Signature([*custom, *standard])  # type: ignore[attr-defined]
+        cli_body.__doc__ = fn.__doc__
+        cli_body.__name__ = fn.__name__
+
+        app = typer.Typer(add_completion=False)
+        app.command()(cli_body)
+        return ScriptEntry(app)
+
+    return decorator
