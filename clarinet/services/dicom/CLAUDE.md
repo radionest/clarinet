@@ -110,7 +110,7 @@ send failure raises `AnonymizationSendError(failed_by_node)` (subclass of
 `AnonymizationFailedError`) BEFORE `study.anon_uid` persists, so a retry redoes
 the run cleanly.
 
-Skip-guard policy: `study.anon_uid is set` AND `prev Record data has no error` AND `(sent_to_pacs already true OR not sending this run)` → skip. Re-run is always permitted after a previous error or when this run upgrades to send-to-PACS. Subset runs (`series_uids is not None`) bypass the guard entirely — the study-granular `anon_uid` cannot prove the requested series were processed.
+Skip-guard policy: `study.anon_uid is set` AND `prev Record data has no error` AND `(sent_to_pacs already true OR not sending this run)` → skip. Re-run is always permitted after a previous error or when this run upgrades to send-to-PACS. Subset runs (`series_uids is not None`) bypass the guard entirely — the study-granular `anon_uid` cannot prove the requested series were processed. The mirror caveat: a subset run still persists the study-granular `anon_uid`, so a later whole-study run on the same record (same send flag) will be skipped by the guard even though unrequested series were never anonymized — don't mix subset and whole-study runs on one record.
 
 The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking Record by `settings.anon_record_type_name` (default `"anonymize-study"`); when present, sync mode runs the orchestrator and background mode dispatches `anonymize_study_pipeline` (or in-process orchestrator when `pipeline_enabled=False`); without a Record, sync runs raw and background returns 404.
 
