@@ -34,6 +34,8 @@ dicom/
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |
+| `anon_extra_pacs_nodes` | `[]` | Extra C-STORE destinations for anonymized instances (TOML `[[anon_extra_pacs_nodes]]` tables with aet/host/port; env as JSON string) |
+| `anon_fail_on_send_error` | `False` | Raise `AnonymizationSendError` on any C-STORE failure, before the study anon_uid persists |
 
 Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 
@@ -76,7 +78,7 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 - **`operations.py`**: `store_instances_batch(config, datasets)` → `BatchStoreResult` (sync, one `ae.associate()`, loops `send_c_store`)
 - **`client.py`**: `store_instances_batch(datasets, peer)` → async wrapper via `asyncio.to_thread()`
 - **`models.py`**: `BatchStoreResult(total_sent, total_failed, failed_sop_uids)`
-- Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution
+- Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution — sequentially to every node in `self.destinations` (`pacs` + `extra_pacs`); failures are counted per node (`aet@host:port` keys) and one node's failure never aborts the rest
 
 ## Association Semaphore
 
@@ -90,7 +92,25 @@ Three entry points, all sharing the same `AnonymizationService` for raw DICOM wo
 - **`AnonymizationOrchestrator`** (`orchestrator.py`) — wraps the service with skip-guard, idempotent Patient anonymization, and Record submission. On success: PATCH (`update_record_data`) when the Record is already finished, POST (`submit_record_data`) otherwise. On **any** unhandled exception (domain, network, runtime) raised anywhere in the flow — including pre-flight `get_study` and Patient anonymization — the orchestrator marks the Record `failed` (with `error` field), then re-raises so retry/DLQ middleware see it. For finished records the failed transition uses PATCH + `update_record_status` to avoid the 409 from POST. Use via `create_anonymization_orchestrator(client=...)` async context manager.
 - **`anonymize_study_pipeline`** (`pipeline.py`) — built-in `@pipeline_task` that runs the orchestrator with the worker's `ctx.client`. Downstream wraps this with `run_anonymization(msg, ctx, extra_record_data={...})` to add project-specific Record fields.
 
-Skip-guard policy: `study.anon_uid is set` AND `prev Record data has no error` AND `(sent_to_pacs already true OR not sending this run)` → skip. Re-run is always permitted after a previous error or when this run upgrades to send-to-PACS.
+Series subset: `anonymize_study(..., series_uids=[...])` restricts the run to an
+explicit selection; empty / unknown / filter-excluded selections raise
+`AnonymizationFailedError` naming each offending UID (+ filter reason) — a subset
+request is never silently narrowed. `AnonymizationOrchestrator.run` and
+`run_anonymization` pass `series_uids` through kwarg-only (deliberately not read
+from `msg.payload`).
+
+Multi-PACS fan-out: `AnonymizationService(..., extra_pacs=[DicomNode(...)])`, or
+`settings.anon_extra_pacs_nodes` wired on every construction path via
+`extra_pacs_from_settings()` (orchestrator/worker factory AND the HTTP DI
+factory). `pacs` keeps its dual role (C-GET source + first destination); extras
+are store-only. Per-node failure counts land in
+`AnonymizationResult.send_failed_by_node` (and the Record data);
+`instances_send_failed` stays the sum. With `anon_fail_on_send_error=True`, any
+send failure raises `AnonymizationSendError(failed_by_node)` (subclass of
+`AnonymizationFailedError`) BEFORE `study.anon_uid` persists, so a retry redoes
+the run cleanly.
+
+Skip-guard policy: `study.anon_uid is set` AND `prev Record data has no error` AND `(sent_to_pacs already true OR not sending this run)` → skip. Re-run is always permitted after a previous error or when this run upgrades to send-to-PACS. Subset runs (`series_uids is not None`) bypass the guard entirely — the study-granular `anon_uid` cannot prove the requested series were processed.
 
 The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking Record by `settings.anon_record_type_name` (default `"anonymize-study"`); when present, sync mode runs the orchestrator and background mode dispatches `anonymize_study_pipeline` (or in-process orchestrator when `pipeline_enabled=False`); without a Record, sync runs raw and background returns 404.
 

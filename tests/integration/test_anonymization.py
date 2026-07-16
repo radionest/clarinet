@@ -32,6 +32,7 @@ def mock_anon_settings() -> Generator[tuple[MagicMock, MagicMock], None, None]:
         anon_settings.anon_per_study_patient_id_hex_length = 8
         anon_settings.anon_id_prefix = "CLARINET"
         anon_settings.anon_failure_threshold = 0.5
+        anon_settings.anon_fail_on_send_error = False
         anon_settings.dicom_cget_max_retries = 1
         anon_settings.dicom_cget_retry_backoff = 0.0
 
