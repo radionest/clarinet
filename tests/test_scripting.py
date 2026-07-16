@@ -94,6 +94,7 @@ class _FakeClient:
     def __init__(self, base_url: str, **kwargs: object) -> None:
         self.base_url = base_url
         self.kwargs = kwargs
+        self.client = mock.Mock(is_closed=False)
 
 
 def test_client_lazy_cached_and_settings_based(monkeypatch) -> None:
@@ -134,6 +135,18 @@ def test_no_client_when_untouched() -> None:
         # reaching here without AssertionError = no construction happened
 
 
+def test_client_recreated_after_close(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "api_base_url", "http://x/api")
+    with mock.patch("clarinet.client.ClarinetClient", _FakeClient):
+        ctx = ScriptCtx()
+        first = ctx.client
+        assert ctx.client is first
+        first.client.is_closed = True
+        second = ctx.client
+    assert second is not first
+    assert isinstance(second, _FakeClient)
+
+
 def test_custom_option_passthrough() -> None:
     seen: dict[str, object] = {}
 
@@ -161,6 +174,16 @@ def test_standard_options_reach_ctx() -> None:
     )
     assert result.exit_code == 0
     assert seen == {"commit": True, "limit": 5, "yes": True, "api_base": "http://x"}
+
+
+def test_limit_zero_rejected() -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+
+    result = runner.invoke(main.app, ["--limit", "0"])
+    assert result.exit_code != 0
+    assert "--limit" in result.output
 
 
 def test_positional_argument_supported() -> None:
@@ -214,6 +237,14 @@ def test_var_args_rejected() -> None:
         @script()
         async def main(ctx: ScriptCtx, *records: str) -> None:
             """Var args unsupported."""
+
+
+def test_positional_only_rejected() -> None:
+    with pytest.raises(TypeError, match="positional-only"):
+
+        @script()
+        async def main(ctx: ScriptCtx, xlsx: str, /) -> None:
+            """Positional-only unsupported."""
 
 
 def test_entry_is_callable_and_exposes_app() -> None:

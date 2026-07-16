@@ -112,9 +112,10 @@ class ScriptCtx:
         Lazy on purpose: filesystem/Slicer-only scripts never construct one
         (and never import ``clarinet.client``). ``--api-base`` overrides the
         settings-derived base URL; the service token comes from settings/env
-        only — never from a CLI flag.
+        only — never from a CLI flag. Re-entering after ``async with`` closed
+        the previous client builds a fresh one.
         """
-        if self._client is None:
+        if self._client is None or self._client.client.is_closed:
             from clarinet.client import ClarinetClient
             from clarinet.settings import settings
 
@@ -167,9 +168,11 @@ def script() -> Callable[[ScriptFn], ScriptEntry]:
             if param.kind in (
                 inspect.Parameter.VAR_POSITIONAL,
                 inspect.Parameter.VAR_KEYWORD,
+                inspect.Parameter.POSITIONAL_ONLY,
             ):
                 raise TypeError(
-                    f"@script does not support *args/**kwargs (parameter {param.name!r})"
+                    f"@script does not support *args/**kwargs/positional-only parameters "
+                    f"(parameter {param.name!r})"
                 )
         collisions = sorted({p.name for p in custom} & set(_STANDARD_OPTIONS))
         if collisions:
@@ -192,7 +195,9 @@ def script() -> Callable[[ScriptFn], ScriptEntry]:
                 annotation=Annotated[
                     int | None,
                     typer.Option(
-                        "--limit", help="Cap the run; the script decides what is counted."
+                        "--limit",
+                        min=1,
+                        help="Cap the run; the script decides what is counted.",
                     ),
                 ],
             ),
