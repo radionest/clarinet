@@ -220,7 +220,15 @@ def script() -> Callable[[ScriptFn], ScriptEntry]:
                 yes=kwargs.pop("yes"),
                 api_base=kwargs.pop("api_base"),
             )
+            # No blanket try/except: an escaping exception must stay visible
+            # (traceback + non-zero exit), not be dressed up as a clean summary.
             asyncio.run(fn(ctx, **kwargs))
+            typer.echo("")
+            for line in ctx.tally.summary_lines():
+                typer.echo(line)
+            if not ctx.commit:
+                typer.echo("DRY-RUN: rerun with --commit to write changes.")
+            raise typer.Exit(code=1 if ctx.tally.failed else 0)
 
         cli_body.__signature__ = inspect.Signature([*custom, *standard])  # type: ignore[attr-defined]
         cli_body.__doc__ = fn.__doc__

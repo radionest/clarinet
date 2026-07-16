@@ -207,3 +207,110 @@ def test_entry_is_callable_and_exposes_app() -> None:
 
     assert callable(main)
     assert isinstance(main.app, typer.Typer)
+
+
+def test_summary_and_dry_run_hint() -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+        ctx.tally.count("checked", 3)
+        ctx.would("invalidate record 7")
+
+    result = runner.invoke(main.app, [])
+    assert result.exit_code == 0
+    assert "[dry-run] would invalidate record 7" in result.output
+    assert "checked: 3" in result.output
+    assert "rerun with --commit" in result.output
+
+
+def test_commit_run_has_no_hint() -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+        ctx.tally.count("created")
+
+    result = runner.invoke(main.app, ["--commit"])
+    assert result.exit_code == 0
+    assert "created: 1" in result.output
+    assert "rerun with --commit" not in result.output
+
+
+def test_failures_exit_one() -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+        ctx.tally.fail("record 7", "API 500")
+
+    result = runner.invoke(main.app, [])
+    assert result.exit_code == 1
+    assert "failed: 1" in result.output
+    assert "record 7: API 500" in result.output
+
+
+def test_uncaught_exception_propagates() -> None:
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Sample."""
+        raise RuntimeError("boom")
+
+    result = runner.invoke(main.app, [])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+    assert "rerun with --commit" not in result.output  # no clean summary after a crash
+
+
+def test_help_contract() -> None:
+    @script()
+    async def main(ctx: ScriptCtx, series: str | None = None) -> None:
+        """Backfill sample for help test."""
+
+    result = runner.invoke(main.app, ["--help"])
+    assert result.exit_code == 0
+    assert "Backfill sample for help test" in result.output
+    for opt in ("--commit", "--limit", "--yes", "--api-base", "--series"):
+        assert opt in result.output
+    assert "token" not in result.output.lower()
+
+
+def test_framed_run_never_builds_client_unasked() -> None:
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ClarinetClient must not be constructed")
+
+    @script()
+    async def main(ctx: ScriptCtx) -> None:
+        """Filesystem-only script."""
+        ctx.tally.count("checked")
+
+    with mock.patch("clarinet.client.ClarinetClient", _boom):
+        result = runner.invoke(main.app, [])
+    assert result.exit_code == 0
+
+
+def test_acceptance_dry_run_vs_commit() -> None:
+    """End-to-end shape of a real backfill: iterate, gate writes, tally, limit."""
+    written: list[int] = []
+
+    @script()
+    async def backfill(ctx: ScriptCtx, prefix: str = "rec") -> None:
+        """Create missing reviews."""
+        for record_id in (1, 2, 3, 4):
+            if ctx.hit_limit(ctx.tally["created"]):
+                break
+            if not ctx.commit:
+                ctx.would(f"create review for {prefix}-{record_id}")
+                ctx.tally.count("created")
+                continue
+            written.append(record_id)
+            ctx.tally.count("created")
+
+    dry = runner.invoke(backfill.app, ["--limit", "2"])
+    assert dry.exit_code == 0
+    assert written == []
+    assert dry.output.count("[dry-run] would") == 2
+    assert "created: 2" in dry.output
+
+    real = runner.invoke(backfill.app, ["--commit"])
+    assert real.exit_code == 0
+    assert written == [1, 2, 3, 4]
+    assert "created: 4" in real.output
+    assert "rerun with --commit" not in real.output
