@@ -23,8 +23,12 @@ from __future__ import annotations
 
 import sys
 from collections import Counter
+from typing import TYPE_CHECKING
 
 import typer
+
+if TYPE_CHECKING:
+    from clarinet.client import ClarinetClient
 
 
 class Tally:
@@ -70,6 +74,7 @@ class ScriptCtx:
         self.yes = yes
         self.api_base = api_base
         self.tally = Tally()
+        self._client: ClarinetClient | None = None
 
     def hit_limit(self, count: int) -> bool:
         """True iff ``--limit`` was given and ``count`` reached it.
@@ -96,3 +101,23 @@ class ScriptCtx:
             return False
         answer = input(f"{msg} Type 'yes' to proceed: ")
         return answer.strip().lower() == "yes"
+
+    @property
+    def client(self) -> ClarinetClient:
+        """Lazy ``ClarinetClient`` from settings; enter it with ``async with``.
+
+        Lazy on purpose: filesystem/Slicer-only scripts never construct one
+        (and never import ``clarinet.client``). ``--api-base`` overrides the
+        settings-derived base URL; the service token comes from settings/env
+        only — never from a CLI flag.
+        """
+        if self._client is None:
+            from clarinet.client import ClarinetClient
+            from clarinet.settings import settings
+
+            self._client = ClarinetClient(
+                base_url=self.api_base or settings.effective_api_base_url,
+                service_token=settings.effective_service_token,
+                verify_ssl=settings.api_verify_ssl,
+            )
+        return self._client
