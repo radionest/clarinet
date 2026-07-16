@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,7 +37,12 @@ from clarinet.utils.logger import logger
 class _DistributionResult:
     """Result of a background distribution task (disk save + C-STORE)."""
 
-    send_failed: int = 0
+    send_failed_by_node: dict[str, int] = field(default_factory=dict)
+
+
+def _node_label(node: DicomNode) -> str:
+    """Stable per-destination key — two destinations may share an AET."""
+    return f"{node.aet}@{node.host}:{node.port}"
 
 
 class AnonymizationService:
@@ -47,7 +53,8 @@ class AnonymizationService:
         patient_repo: Patient repository
         series_repo: Series repository
         dicom_client: Async DICOM client
-        pacs: PACS node configuration
+        pacs: PACS node configuration (C-GET source and first C-STORE destination)
+        extra_pacs: Additional store-only C-STORE destinations (never used for retrieval)
     """
 
     def __init__(
@@ -57,12 +64,15 @@ class AnonymizationService:
         series_repo: SeriesRepository,
         dicom_client: DicomClient,
         pacs: DicomNode,
+        extra_pacs: Sequence[DicomNode] = (),
     ):
         self.study_repo = study_repo
         self.patient_repo = patient_repo
         self.series_repo = series_repo
         self.dicom_client = dicom_client
+        # Dual role: C-GET retrieve source AND first C-STORE destination.
         self.pacs = pacs
+        self.destinations = [pacs, *extra_pacs]
 
     async def _retrieve_series(
         self,
@@ -186,7 +196,7 @@ class AnonymizationService:
         series_count = len(series_list)
         total_anonymized = 0
         total_failed = 0
-        total_send_failed = 0
+        total_send_failed_by_node: dict[str, int] = {}
 
         # Filter series
         series_filter = SeriesFilter()
@@ -277,8 +287,13 @@ class AnonymizationService:
             for r in dist_results:
                 if isinstance(r, BaseException):
                     logger.error(f"Distribution task failed: {r}")
-                else:
-                    total_send_failed += r.send_failed
+                    continue
+                for node_label, n_failed in r.send_failed_by_node.items():
+                    total_send_failed_by_node[node_label] = (
+                        total_send_failed_by_node.get(node_label, 0) + n_failed
+                    )
+
+        total_send_failed = sum(total_send_failed_by_node.values())
 
         # Check failure threshold
         total_instances = total_anonymized + total_failed
@@ -310,6 +325,7 @@ class AnonymizationService:
             instances_anonymized=total_anonymized,
             instances_failed=total_failed,
             instances_send_failed=total_send_failed,
+            send_failed_by_node=total_send_failed_by_node,
             output_dir=output_dir,
             sent_to_pacs=do_send,
             skipped_series=skipped_info,
@@ -341,34 +357,36 @@ class AnonymizationService:
             do_send: Whether to send to PACS
 
         Returns:
-            Distribution result with send failure count
+            Distribution result with per-node send failure counts
         """
-        tasks: list[asyncio.Task[int]] = []
+        save_task: asyncio.Task[int] | None = None
+        send_task: asyncio.Task[dict[str, int]] | None = None
         if do_save:
-            tasks.append(
-                asyncio.create_task(
-                    self._save_series_to_disk(
-                        datasets,
-                        patient,
-                        study,
-                        series,
-                        anon_patient_id,
-                        anon_study_uid,
-                        anon_series_uid,
-                    )
+            save_task = asyncio.create_task(
+                self._save_series_to_disk(
+                    datasets,
+                    patient,
+                    study,
+                    series,
+                    anon_patient_id,
+                    anon_study_uid,
+                    anon_series_uid,
                 )
             )
         if do_send:
-            tasks.append(asyncio.create_task(self._send_series_to_pacs(datasets)))
+            send_task = asyncio.create_task(self._send_series_to_pacs(datasets))
 
         result = _DistributionResult()
-        if tasks:
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for tr in task_results:
-                if isinstance(tr, int):
-                    result.send_failed += tr
-                elif isinstance(tr, BaseException):
-                    logger.error(f"Distribution sub-task failed: {tr}")
+        if save_task is not None:
+            try:
+                await save_task
+            except Exception as exc:
+                logger.error(f"Distribution sub-task failed: {exc}")
+        if send_task is not None:
+            try:
+                result.send_failed_by_node = await send_task
+            except Exception as exc:
+                logger.error(f"Distribution sub-task failed: {exc}")
         return result
 
     async def _save_series_to_disk(
@@ -421,21 +439,28 @@ class AnonymizationService:
         await asyncio.gather(*save_tasks)
         return 0
 
-    async def _send_series_to_pacs(self, datasets: list[Dataset]) -> int:
-        """Send all datasets for one series via batch C-STORE.
+    async def _send_series_to_pacs(self, datasets: list[Dataset]) -> dict[str, int]:
+        """Batch C-STORE one series to every destination, sequentially.
+
+        A failure on one node never aborts the remaining nodes: a raised
+        exception counts the whole series as failed for that node only.
 
         Args:
             datasets: Anonymized DICOM datasets
 
         Returns:
-            Number of failed sends
+            Failed-send counts keyed by ``aet@host:port`` node label
         """
-        try:
-            batch_result = await self.dicom_client.store_instances_batch(datasets, self.pacs)
-            return batch_result.total_failed
-        except Exception:
-            logger.exception("Failed to batch C-STORE anonymized series to PACS")
-            return len(datasets)
+        counts: dict[str, int] = {}
+        for node in self.destinations:
+            label = _node_label(node)
+            try:
+                batch_result = await self.dicom_client.store_instances_batch(datasets, node)
+                counts[label] = batch_result.total_failed
+            except Exception:
+                logger.exception(f"Failed to batch C-STORE anonymized series to {label}")
+                counts[label] = len(datasets)
+        return counts
 
     @staticmethod
     def _write_dataset(dataset: Dataset, file_path: Path) -> None:

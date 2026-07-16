@@ -7,7 +7,7 @@ from pydicom import Dataset
 
 from clarinet.exceptions.domain import AnonymizationFailedError
 from clarinet.services.anonymization_service import AnonymizationService
-from clarinet.services.dicom.models import BackgroundAnonymizationStatus
+from clarinet.services.dicom.models import BackgroundAnonymizationStatus, DicomNode
 
 
 @pytest.mark.asyncio
@@ -260,3 +260,138 @@ def test_anonymization_result_send_failed_by_node_defaults_empty() -> None:
         instances_failed=0,
     )
     assert result.send_failed_by_node == {}
+
+
+def _good_dataset() -> Dataset:
+    ds = Dataset()
+    ds.PatientID = "REAL_PAT"
+    ds.PatientName = "Real^Name"
+    ds.StudyInstanceUID = "1.2.3.4.5"
+    ds.SeriesInstanceUID = "1.2.3.4.5.6"
+    ds.SOPInstanceUID = "1.2.3.100"
+    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    return ds
+
+
+def _make_series(uid: str, modality: str = "CT") -> MagicMock:
+    s = MagicMock()
+    s.series_uid = uid
+    s.modality = modality
+    s.series_description = "Axial"
+    s.instance_count = None
+    return s
+
+
+def _make_service(
+    *,
+    series: list[MagicMock],
+    extra_pacs: list[DicomNode] | None = None,
+) -> tuple[AnonymizationService, AsyncMock, AsyncMock]:
+    """Service over mocked repos/client. Returns (service, dicom_client, study_repo)."""
+    mock_study = MagicMock()
+    mock_study.patient_id = 1
+    mock_study.series = series
+
+    mock_patient = MagicMock()
+    mock_patient.anon_id = "ANON_001"
+    mock_patient.anon_name = "AnonName"
+
+    study_repo = AsyncMock()
+    study_repo.get_with_series = AsyncMock(return_value=mock_study)
+    study_repo.update_anon_uid = AsyncMock()
+
+    patient_repo = AsyncMock()
+    patient_repo.get = AsyncMock(return_value=mock_patient)
+
+    series_repo = AsyncMock()
+    series_repo.update_anon_uid = AsyncMock()
+
+    dicom_client = AsyncMock()
+
+    service = AnonymizationService(
+        study_repo=study_repo,
+        patient_repo=patient_repo,
+        series_repo=series_repo,
+        dicom_client=dicom_client,
+        pacs=DicomNode(aet="MAIN", host="h1", port=104),
+        extra_pacs=extra_pacs or [],
+    )
+    return service, dicom_client, study_repo
+
+
+def _patch_settings(mock_settings: MagicMock, **overrides: object) -> None:
+    """Defaults for the anonymization_service settings mock.
+
+    anon_fail_on_send_error MUST be set explicitly: an unset MagicMock
+    attribute is truthy and would trip the fail-fast branch.
+    """
+    mock_settings.anon_save_to_disk = False
+    mock_settings.anon_send_to_pacs = False
+    mock_settings.anon_per_study_patient_id = False
+    mock_settings.anon_uid_salt = "test-salt"
+    mock_settings.anon_failure_threshold = 0.5
+    mock_settings.anon_fail_on_send_error = False
+    mock_settings.dicom_cget_max_retries = 1
+    mock_settings.storage_path = "/tmp/test"
+    for key, value in overrides.items():
+        setattr(mock_settings, key, value)
+
+
+@pytest.mark.asyncio
+async def test_send_fans_out_to_every_destination() -> None:
+    """store_instances_batch is called once per destination; counts keyed aet@host:port."""
+    series = _make_series("1.2.3.4.5.6")
+    extra = [
+        DicomNode(aet="EXTRA", host="h2", port=104),
+        DicomNode(aet="MAIN", host="h3", port=104),
+    ]
+    service, dicom_client, _ = _make_service(series=[series], extra_pacs=extra)
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+    dicom_client.store_instances_batch = AsyncMock(return_value=MagicMock(total_failed=0))
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    sent_nodes = [call.args[1] for call in dicom_client.store_instances_batch.await_args_list]
+    assert sent_nodes == service.destinations  # [MAIN@h1, EXTRA@h2, MAIN@h3], in order
+    assert result.send_failed_by_node == {
+        "MAIN@h1:104": 0,
+        "EXTRA@h2:104": 0,
+        "MAIN@h3:104": 0,  # same AET as MAIN@h1 — distinct key, counts never merge
+    }
+    assert result.instances_send_failed == 0
+
+
+@pytest.mark.asyncio
+async def test_send_counts_per_node_when_one_fails() -> None:
+    """A failing node counts its own failures, never aborts the rest; run completes (default non-fatal)."""
+    series = _make_series("1.2.3.4.5.6")
+    extra = [DicomNode(aet="BAD", host="h2", port=104), DicomNode(aet="TAIL", host="h3", port=104)]
+    service, dicom_client, study_repo = _make_service(series=[series], extra_pacs=extra)
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+
+    async def store(datasets: list[Dataset], node: DicomNode) -> MagicMock:
+        if node.aet == "BAD":
+            raise ConnectionError("association refused")
+        return MagicMock(total_failed=1 if node.aet == "TAIL" else 0)
+
+    dicom_client.store_instances_batch = AsyncMock(side_effect=store)
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    assert result.send_failed_by_node == {
+        "MAIN@h1:104": 0,
+        "BAD@h2:104": 1,  # exception → whole series (1 dataset) counted failed
+        "TAIL@h3:104": 1,  # batch-reported failure count
+    }
+    assert result.instances_send_failed == 2
+    study_repo.update_anon_uid.assert_awaited_once()  # regression: send errors stay non-fatal by default
