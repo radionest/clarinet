@@ -255,6 +255,20 @@ class AnonymizationService:
             # empty — subset stats must not report unrequested exclusions.
             excluded = [fi for fi in filter_result.excluded if fi.item.series_uid in requested]
 
+        # Snapshot skip-report primitives before any commit: update_anon_uid()
+        # below runs session.refresh(study), whose refresh-expire cascade
+        # (cascade_delete=True on Study.series) expires child Series — reading
+        # expired ORM attrs on an AsyncSession raises MissingGreenlet.
+        skipped_series = [
+            SkippedSeriesInfo(
+                series_uid=fi.item.series_uid,
+                modality=fi.item.modality,
+                series_description=fi.item.series_description,
+                reason=fi.reason,
+            )
+            for fi in excluded
+        ]
+
         logger.info(
             f"Anonymizing study {study_uid} → {anon_study_uid} "
             f"({len(included)}/{series_count} series"
@@ -369,15 +383,7 @@ class AnonymizationService:
             send_failed_by_node=total_send_failed_by_node,
             output_dir=output_dir,
             sent_to_pacs=do_send,
-            skipped_series=[
-                SkippedSeriesInfo(
-                    series_uid=fi.item.series_uid,
-                    modality=fi.item.modality,
-                    series_description=fi.item.series_description,
-                    reason=fi.reason,
-                )
-                for fi in excluded
-            ],
+            skipped_series=skipped_series,
         )
 
     async def _distribute_series(
