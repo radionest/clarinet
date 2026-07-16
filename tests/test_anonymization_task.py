@@ -684,6 +684,41 @@ async def test_orchestrator_whole_study_drops_reserved_series_uids_key() -> None
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_skip_path_drops_reserved_series_uids_key() -> None:
+    """The skip branch must strip a caller-supplied series_uids marker too."""
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = "9.9.9"
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "finished"
+    record.data = {"anon_study_uid": "9.9.9", "sent_to_pacs": False}
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_service = AsyncMock()
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+        extra_record_data={"series_uids": ["x"], "study_type": "CT"},
+    )
+
+    anon_service.anonymize_study.assert_not_awaited()
+    submitted = client.update_record_data.await_args.args[1]
+    assert submitted["skipped"] is True
+    assert submitted["study_type"] == "CT"
+    assert "series_uids" not in submitted
+
+
+@pytest.mark.asyncio
 async def test_series_uids_subset_skip_stats_exclude_unrequested() -> None:
     """A subset run must not report a whole-study filter exclusion outside the requested set."""
     series_ct = _make_series("1.2.3.4.5.1")

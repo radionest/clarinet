@@ -23,6 +23,16 @@ if TYPE_CHECKING:
     from clarinet.models.study import StudyRead
 
 
+def _strip_reserved_series_uids(data: dict[str, Any]) -> None:
+    """Drop the reserved ``series_uids`` marker key from a whole-study payload, in place."""
+    if "series_uids" in data:
+        del data["series_uids"]
+        logger.warning(
+            "Dropped reserved key 'series_uids' from extra_record_data "
+            "on a whole-study anonymization run"
+        )
+
+
 class AnonymizationOrchestrator:
     """Wraps ``AnonymizationService`` with Record-aware bookkeeping."""
 
@@ -86,14 +96,13 @@ class AnonymizationOrchestrator:
                 already_anon_uid = await self._already_done(study, record_id, do_send)
                 if already_anon_uid is not None:
                     logger.info(f"Study {study_uid} already anonymized, skipping")
-                    await self._submit(
-                        record_id,
-                        {
-                            "skipped": True,
-                            "anon_study_uid": already_anon_uid,
-                            **(extra_record_data or {}),
-                        },
-                    )
+                    skip_data = {
+                        "skipped": True,
+                        "anon_study_uid": already_anon_uid,
+                        **(extra_record_data or {}),
+                    }
+                    _strip_reserved_series_uids(skip_data)
+                    await self._submit(record_id, skip_data)
                     return AnonymizationResult(
                         study_uid=study_uid,
                         anon_study_uid=already_anon_uid,
@@ -138,15 +147,10 @@ class AnonymizationOrchestrator:
                 # subset-granular and cannot prove whole-study coverage.
                 data["series_uids"] = list(series_uids)
             else:
-                if "series_uids" in data:
-                    # Reserved marker key: its presence tells _already_done the
-                    # record's completion is subset-granular. A whole-study run
-                    # must never carry it, even via extra_record_data.
-                    del data["series_uids"]
-                    logger.warning(
-                        "Dropped reserved key 'series_uids' from extra_record_data "
-                        "on a whole-study anonymization run"
-                    )
+                # Reserved marker key: its presence tells _already_done the
+                # record's completion is subset-granular. A whole-study run
+                # must never carry it, even via extra_record_data.
+                _strip_reserved_series_uids(data)
             await self._submit(record_id, data)
 
         return result
