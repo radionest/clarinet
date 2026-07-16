@@ -510,7 +510,7 @@ class TestFindRecordsTruncation:
         assert len(records) == 2
         warning = next(m for m in caplog.messages if "find_records truncated at first page" in m)
         assert "patient_id" in warning  # key stays, so truncation is still observable
-        assert test_patient.id not in warning  # but the value (PII) must not be logged
+        assert str(test_patient.id) not in warning  # but the value (PII) must not be logged
 
 
 class TestHighLevelMethods:
