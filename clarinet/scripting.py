@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from collections import Counter
 
+import typer
+
 
 class Tally:
     """Named counters plus failure records for one script run.
@@ -49,3 +51,33 @@ class Tally:
         lines.append(f"failed: {len(self.failed)}")
         lines.extend(f"  {item}: {detail}" for item, detail in self.failed)
         return lines
+
+
+class ScriptCtx:
+    """Runtime context handed to a framed script body as its first argument."""
+
+    def __init__(
+        self,
+        *,
+        commit: bool = False,
+        limit: int | None = None,
+        yes: bool = False,
+        api_base: str | None = None,
+    ) -> None:
+        self.commit = commit
+        self.limit = limit
+        self.yes = yes
+        self.api_base = api_base
+        self.tally = Tally()
+
+    def hit_limit(self, count: int) -> bool:
+        """True iff ``--limit`` was given and ``count`` reached it.
+
+        What ``count`` counts (checked / created / affected) is the script's
+        decision — the frame never applies the limit itself.
+        """
+        return self.limit is not None and count >= self.limit
+
+    def would(self, msg: str) -> None:
+        """Uniform dry-run line: ``[dry-run] would <msg>``."""
+        typer.echo(f"[dry-run] would {msg}")
