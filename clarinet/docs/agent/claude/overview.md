@@ -36,6 +36,10 @@ plan/
 
 All files under `plan/` are imported as submodules of the `clarinet_plan` package (single root — `config_tasks_path`); `sys.path` is not used.
 
+Operational one-shot scripts (backfills, repairs) live outside `plan/` in the
+project-root `scripts/` directory and use the `clarinet.scripting` frame — see
+`scripting.md`.
+
 Each subfolder has a corresponding rule file in `.claude/rules/clarinet/` with detailed conventions.
 
 ## clarinet API — what to import from where
