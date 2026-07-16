@@ -491,6 +491,27 @@ class TestFindRecordsTruncation:
         assert "patient_id" in warning
         assert "None" not in warning
 
+    @pytest.mark.asyncio
+    async def test_find_records_warning_omits_filter_values(
+        self,
+        clarinet_client: ClarinetClient,
+        admin_user: User,
+        test_patient: Patient,
+        test_study: Study,
+        test_session: AsyncSession,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Warning logs filter keys only — never values, which can carry PII (#458)."""
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
+        await self._seed_three_records(test_session, test_patient, test_study)
+
+        records = await clarinet_client.find_records(patient_id=test_patient.id, limit=2)
+
+        assert len(records) == 2
+        warning = next(m for m in caplog.messages if "find_records truncated at first page" in m)
+        assert "patient_id" in warning  # key stays, so truncation is still observable
+        assert test_patient.id not in warning  # but the value (PII) must not be logged
+
 
 class TestHighLevelMethods:
     """Test high-level convenience methods with real server."""

@@ -957,10 +957,12 @@ class ClarinetClient:
             and limit != 1
             and not (filters.get("series_uid") or filters.get("study_uid"))
         ):
-            active_filters = {k: v for k, v in filters.items() if v is not None}
+            # Log filter keys only, never values: filters can carry PII
+            # (patient_id/MRN) and this is application-log output (#458).
+            active_filter_keys = [k for k, v in filters.items() if v is not None]
             logger.warning(
                 f"find_records truncated at first page (limit={limit}, "
-                f"filters={active_filters}); use iter_records to aggregate all matches"
+                f"filter_keys={active_filter_keys}); use iter_records to aggregate all matches"
             )
         return page.items
 
