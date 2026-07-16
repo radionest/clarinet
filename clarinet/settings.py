@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import BaseModel, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -86,6 +86,19 @@ def _derive_service_token(password: str) -> str:
         SERVICE_TOKEN_SALT,
         iterations=SERVICE_TOKEN_PBKDF2_ITERATIONS,
     ).hex()
+
+
+class PacsNodeSettings(BaseModel):
+    """C-STORE destination for anonymized instances.
+
+    Structurally mirrors ``services.dicom.models.DicomNode``; duplicated
+    deliberately — ``services/dicom/__init__.py`` imports settings, so
+    settings importing ``services.dicom.models`` would be circular.
+    """
+
+    aet: str
+    host: str
+    port: int
 
 
 class Settings(BaseSettings):
@@ -345,6 +358,10 @@ class Settings(BaseSettings):
     anon_per_study_patient_id: bool = False  # Use per-study SHA-256 hash as PatientID/PatientName
     anon_per_study_patient_id_hex_length: int = 8  # Hex slice length for per-study hash
     anon_record_type_name: str = "anonymize-study"  # RecordType tracking anonymization
+    anon_extra_pacs_nodes: list[
+        PacsNodeSettings
+    ] = []  # extra C-STORE destinations for anonymized instances
+    anon_fail_on_send_error: bool = False  # raise AnonymizationSendError on any C-STORE failure
 
     # C-GET retry settings
     dicom_cget_max_retries: int = 3

@@ -258,6 +258,15 @@ class AnonymizationFailedError(BusinessRuleViolationError):
         super().__init__(f"Anonymization failed: {reason}")
 
 
+class AnonymizationSendError(AnonymizationFailedError):
+    """C-STORE to one or more destinations failed and anon_fail_on_send_error is set."""
+
+    def __init__(self, failed_by_node: dict[str, int]):
+        self.failed_by_node = failed_by_node
+        nodes = ", ".join(f"{node}: {n} failed" for node, n in failed_by_node.items() if n)
+        super().__init__(f"C-STORE send failures — {nodes}")
+
+
 # Record-specific exceptions (formerly Task)
 class RecordNotFoundError(EntityNotFoundError):
     """Raised when a record is not found."""

@@ -234,3 +234,29 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
 
     assert result.instances_anonymized == 1
     assert result.instances_failed == 0
+
+
+def test_anonymization_send_error_names_nodes_and_counts() -> None:
+    """AnonymizationSendError subclasses AnonymizationFailedError and names failing nodes."""
+    from clarinet.exceptions.domain import AnonymizationSendError
+
+    err = AnonymizationSendError({"A@h1:104": 3, "B@h2:104": 0})
+
+    assert isinstance(err, AnonymizationFailedError)
+    assert err.failed_by_node == {"A@h1:104": 3, "B@h2:104": 0}
+    assert "A@h1:104" in str(err)
+    assert "3" in str(err)
+    assert "B@h2:104" not in str(err)  # zero-count nodes are not named
+
+
+def test_anonymization_result_send_failed_by_node_defaults_empty() -> None:
+    from clarinet.services.dicom.models import AnonymizationResult
+
+    result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.8.7",
+        series_count=0,
+        instances_anonymized=0,
+        instances_failed=0,
+    )
+    assert result.send_failed_by_node == {}
