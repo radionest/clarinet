@@ -223,16 +223,6 @@ class AnonymizationService:
             to_criteria=SeriesFilterCriteria.from_series,
         )
 
-        skipped_info = [
-            SkippedSeriesInfo(
-                series_uid=fi.item.series_uid,
-                modality=fi.item.modality,
-                series_description=fi.item.series_description,
-                reason=fi.reason,
-            )
-            for fi in filter_result.excluded
-        ]
-
         if filter_result.excluded:
             logger.info(
                 f"Filtered out {len(filter_result.excluded)} series: "
@@ -240,6 +230,7 @@ class AnonymizationService:
             )
 
         included = filter_result.included
+        excluded = filter_result.excluded
         if series_uids is not None:
             requested = set(series_uids)  # silent dedupe of duplicates
             if not requested:
@@ -260,6 +251,9 @@ class AnonymizationService:
                     f"requested series excluded by series filter: {details}"
                 )
             included = [s for s in filter_result.included if s.series_uid in requested]
+            # Requested ∩ filter-excluded raised above, so this is provably
+            # empty — subset stats must not report unrequested exclusions.
+            excluded = [fi for fi in filter_result.excluded if fi.item.series_uid in requested]
 
         logger.info(
             f"Anonymizing study {study_uid} → {anon_study_uid} "
@@ -368,14 +362,22 @@ class AnonymizationService:
             anon_patient_id=anon_patient_id,
             series_count=series_count,
             series_anonymized=len(included),
-            series_skipped=len(filter_result.excluded),
+            series_skipped=len(excluded),
             instances_anonymized=total_anonymized,
             instances_failed=total_failed,
             instances_send_failed=total_send_failed,
             send_failed_by_node=total_send_failed_by_node,
             output_dir=output_dir,
             sent_to_pacs=do_send,
-            skipped_series=skipped_info,
+            skipped_series=[
+                SkippedSeriesInfo(
+                    series_uid=fi.item.series_uid,
+                    modality=fi.item.modality,
+                    series_description=fi.item.series_description,
+                    reason=fi.reason,
+                )
+                for fi in excluded
+            ],
         )
 
     async def _distribute_series(

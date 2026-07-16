@@ -640,6 +640,78 @@ async def test_orchestrator_whole_study_after_subset_run_not_skipped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_whole_study_drops_reserved_series_uids_key() -> None:
+    """A whole-study run must never carry a caller-supplied series_uids marker through."""
+    from clarinet.services.dicom.models import AnonymizationResult
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = None  # guard falls through — not "already done"
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "pending"
+    record.data = {}
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.9.9",
+        series_count=2,
+        series_anonymized=2,
+        instances_anonymized=10,
+        instances_failed=0,
+        send_failed_by_node={},
+    )
+    anon_service = AsyncMock()
+    anon_service.anonymize_study = AsyncMock(return_value=anon_result)
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+        extra_record_data={"series_uids": ["x"], "study_type": "CT"},
+    )
+
+    submitted = client.submit_record_data.await_args.args[1]
+    assert "series_uids" not in submitted
+    assert submitted["study_type"] == "CT"
+
+
+@pytest.mark.asyncio
+async def test_series_uids_subset_skip_stats_exclude_unrequested() -> None:
+    """A subset run must not report a whole-study filter exclusion outside the requested set."""
+    series_ct = _make_series("1.2.3.4.5.1")
+    series_sr = _make_series("1.2.3.4.5.9", modality="SR")
+    service, dicom_client, _ = _make_service(series=[series_ct, series_sr])
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+
+    with (
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as filter_settings,
+    ):
+        _patch_settings(mock_settings)
+        filter_settings.series_filter_excluded_modalities = ["SR"]
+        filter_settings.series_filter_min_instance_count = 0
+        filter_settings.series_filter_unknown_modality_policy = "include"
+        filter_settings.series_filter_excluded_descriptions = []
+        result = await service.anonymize_study("1.2.3.4.5", series_uids=["1.2.3.4.5.1"])
+
+    assert result.series_count == 2
+    assert result.series_anonymized == 1
+    assert result.series_skipped == 0
+    assert result.skipped_series == []
+
+
+@pytest.mark.asyncio
 async def test_run_anonymization_series_uids_kwarg_only() -> None:
     """series_uids passes through as a kwarg; a payload key must NOT smuggle a selection."""
     from clarinet.services.dicom.pipeline import run_anonymization

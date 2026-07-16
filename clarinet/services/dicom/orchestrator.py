@@ -137,6 +137,16 @@ class AnonymizationOrchestrator:
                 # Marker for _already_done: this record's completion is
                 # subset-granular and cannot prove whole-study coverage.
                 data["series_uids"] = list(series_uids)
+            else:
+                if "series_uids" in data:
+                    # Reserved marker key: its presence tells _already_done the
+                    # record's completion is subset-granular. A whole-study run
+                    # must never carry it, even via extra_record_data.
+                    del data["series_uids"]
+                    logger.warning(
+                        "Dropped reserved key 'series_uids' from extra_record_data "
+                        "on a whole-study anonymization run"
+                    )
             await self._submit(record_id, data)
 
         return result
