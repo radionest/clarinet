@@ -115,6 +115,7 @@ This project's rules (auto-loaded via the `paths` frontmatter):
 - `.claude/rules/clarinet/slicer.md` — hydrators + Slicer scripts + validators (all linked via injection vars)
 - `.claude/rules/clarinet/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
 - `.claude/rules/clarinet/utils.md` — helper modules, the `.seg.nrrd` format
+- `.claude/rules/clarinet/scripting.md` — the `clarinet.scripting` frame for operational scripts in root `scripts/`
 
 Framework rules (full reference docs, installed alongside the clarinet package — the paths below point at the installed package):
 
