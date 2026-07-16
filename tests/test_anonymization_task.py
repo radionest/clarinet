@@ -1,5 +1,6 @@
 """Unit tests for clarinet.services.dicom.tasks + dispatch helpers."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -588,3 +589,37 @@ async def test_orchestrator_series_uids_bypasses_skip_guard() -> None:
     submitted = client.submit_record_data.await_args.args[1]
     assert submitted["send_failed_by_node"] == {"MAIN@h1:104": 0}
     assert result is anon_result
+
+
+@pytest.mark.asyncio
+async def test_run_anonymization_series_uids_kwarg_only() -> None:
+    """series_uids passes through as a kwarg; a payload key must NOT smuggle a selection."""
+    from clarinet.services.dicom.pipeline import run_anonymization
+
+    msg = MagicMock()
+    msg.record_id = 7
+    msg.study_uid = "1.2.3"
+    msg.payload = {"series_uids": ["1.2.3.4"]}  # flow payloads are authoring-time constants
+
+    orch = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_orchestrator(client=None):
+        yield orch
+
+    with (
+        patch(
+            "clarinet.services.dicom.pipeline.create_anonymization_orchestrator",
+            fake_orchestrator,
+        ),
+        patch("clarinet.services.dicom.pipeline.settings") as mock_settings,
+    ):
+        mock_settings.anon_save_to_disk = False
+        mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_per_study_patient_id = False
+
+        await run_anonymization(msg, MagicMock())
+        assert orch.run.await_args.kwargs["series_uids"] is None  # payload key ignored
+
+        await run_anonymization(msg, MagicMock(), series_uids=["5.5.5"])
+        assert orch.run.await_args.kwargs["series_uids"] == ["5.5.5"]
