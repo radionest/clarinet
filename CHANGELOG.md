@@ -95,6 +95,15 @@
   dict per overlapping segment pair (`[]` when disjoint or a source is empty), reusing
   the same reference-grid guards as `subtract_segmentations`; raises `SlicerHelperError`
   unless the bundle was included. Additive — no new dependency.
+- **`clarinet.scripting` frame for downstream operational scripts.** New
+  `@script` decorator + `ScriptCtx` (`from clarinet.scripting import script,
+  ScriptCtx`) synthesize a single-command typer app with standard options
+  `--commit`/`--limit`/`--yes`/`--api-base`, an `asyncio.run` bridge, tally
+  summary, and exit codes (1 on recorded failures). Safe default: scripts are
+  dry-run unless `--commit`. Lazy `ctx.client` builds a `ClarinetClient` from
+  settings only when touched; the service token is never a CLI flag. `typer`
+  becomes a hard dependency; a downstream-author doc page ships via
+  `clarinet agent init/update`. Additive — no existing behavior changes.
 
 ### Improved
 
