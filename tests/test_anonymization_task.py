@@ -1,5 +1,6 @@
 """Unit tests for clarinet.services.dicom.tasks + dispatch helpers."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,7 +8,62 @@ from pydicom import Dataset
 
 from clarinet.exceptions.domain import AnonymizationFailedError
 from clarinet.services.anonymization_service import AnonymizationService
-from clarinet.services.dicom.models import BackgroundAnonymizationStatus
+from clarinet.services.dicom.models import BackgroundAnonymizationStatus, DicomNode
+
+
+def test_extra_pacs_from_settings_converts_nodes() -> None:
+    from clarinet.services.anonymization_service import extra_pacs_from_settings
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        mock_settings.anon_extra_pacs_nodes = [
+            MagicMock(aet="A", host="h1", port=104),
+            MagicMock(aet="B", host="h2", port=11112),
+        ]
+        nodes = extra_pacs_from_settings()
+
+    assert nodes == [
+        DicomNode(aet="A", host="h1", port=104),
+        DicomNode(aet="B", host="h2", port=11112),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_di_factory_wires_extra_pacs() -> None:
+    """The HTTP DI path must honor anon_extra_pacs_nodes like the pipeline path does."""
+    from clarinet.api.dependencies import get_anonymization_service
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        mock_settings.anon_extra_pacs_nodes = [MagicMock(aet="X", host="h", port=1)]
+        service = await get_anonymization_service(
+            AsyncMock(),
+            AsyncMock(),
+            AsyncMock(),
+            AsyncMock(),
+            DicomNode(aet="MAIN", host="h1", port=104),
+        )
+
+    assert service.destinations[1:] == [DicomNode(aet="X", host="h", port=1)]
+
+
+def test_build_anonymization_service_wires_extra_pacs() -> None:
+    from clarinet.services.dicom.orchestrator import build_anonymization_service
+
+    with (
+        patch("clarinet.services.dicom.orchestrator.settings") as orch_settings,
+        patch("clarinet.services.anonymization_service.settings") as anon_settings,
+    ):
+        orch_settings.dicom_aet = "AET"
+        orch_settings.dicom_max_pdu = 16384
+        orch_settings.pacs_aet = "MAIN"
+        orch_settings.pacs_host = "h1"
+        orch_settings.pacs_port = 104
+        anon_settings.anon_extra_pacs_nodes = [MagicMock(aet="X", host="h2", port=1)]
+        service = build_anonymization_service(MagicMock())
+
+    assert service.destinations == [
+        DicomNode(aet="MAIN", host="h1", port=104),
+        DicomNode(aet="X", host="h2", port=1),
+    ]
 
 
 @pytest.mark.asyncio
@@ -234,3 +290,491 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
 
     assert result.instances_anonymized == 1
     assert result.instances_failed == 0
+
+
+def test_anonymization_send_error_names_nodes_and_counts() -> None:
+    """AnonymizationSendError subclasses AnonymizationFailedError and names failing nodes."""
+    from clarinet.exceptions.domain import AnonymizationSendError
+
+    err = AnonymizationSendError({"A@h1:104": 3, "B@h2:104": 0})
+
+    assert isinstance(err, AnonymizationFailedError)
+    assert err.failed_by_node == {"A@h1:104": 3, "B@h2:104": 0}
+    assert "A@h1:104" in str(err)
+    assert "3" in str(err)
+    assert "B@h2:104" not in str(err)  # zero-count nodes are not named
+
+
+def test_anonymization_result_send_failed_by_node_defaults_empty() -> None:
+    from clarinet.services.dicom.models import AnonymizationResult
+
+    result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.8.7",
+        series_count=0,
+        instances_anonymized=0,
+        instances_failed=0,
+    )
+    assert result.send_failed_by_node == {}
+
+
+def _good_dataset() -> Dataset:
+    ds = Dataset()
+    ds.PatientID = "REAL_PAT"
+    ds.PatientName = "Real^Name"
+    ds.StudyInstanceUID = "1.2.3.4.5"
+    ds.SeriesInstanceUID = "1.2.3.4.5.6"
+    ds.SOPInstanceUID = "1.2.3.100"
+    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    return ds
+
+
+def _make_series(uid: str, modality: str = "CT") -> MagicMock:
+    s = MagicMock()
+    s.series_uid = uid
+    s.modality = modality
+    s.series_description = "Axial"
+    s.instance_count = None
+    return s
+
+
+def _make_service(
+    *,
+    series: list[MagicMock],
+    extra_pacs: list[DicomNode] | None = None,
+) -> tuple[AnonymizationService, AsyncMock, AsyncMock]:
+    """Service over mocked repos/client. Returns (service, dicom_client, study_repo)."""
+    mock_study = MagicMock()
+    mock_study.patient_id = 1
+    mock_study.series = series
+
+    mock_patient = MagicMock()
+    mock_patient.anon_id = "ANON_001"
+    mock_patient.anon_name = "AnonName"
+
+    study_repo = AsyncMock()
+    study_repo.get_with_series = AsyncMock(return_value=mock_study)
+    study_repo.update_anon_uid = AsyncMock()
+
+    patient_repo = AsyncMock()
+    patient_repo.get = AsyncMock(return_value=mock_patient)
+
+    series_repo = AsyncMock()
+    series_repo.update_anon_uid = AsyncMock()
+
+    dicom_client = AsyncMock()
+
+    service = AnonymizationService(
+        study_repo=study_repo,
+        patient_repo=patient_repo,
+        series_repo=series_repo,
+        dicom_client=dicom_client,
+        pacs=DicomNode(aet="MAIN", host="h1", port=104),
+        extra_pacs=extra_pacs or [],
+    )
+    return service, dicom_client, study_repo
+
+
+def _patch_settings(mock_settings: MagicMock, **overrides: object) -> None:
+    """Defaults for the anonymization_service settings mock.
+
+    anon_fail_on_send_error MUST be set explicitly: an unset MagicMock
+    attribute is truthy and would trip the fail-fast branch.
+    """
+    mock_settings.anon_save_to_disk = False
+    mock_settings.anon_send_to_pacs = False
+    mock_settings.anon_per_study_patient_id = False
+    mock_settings.anon_uid_salt = "test-salt"
+    mock_settings.anon_failure_threshold = 0.5
+    mock_settings.anon_fail_on_send_error = False
+    mock_settings.dicom_cget_max_retries = 1
+    mock_settings.storage_path = "/tmp/test"
+    for key, value in overrides.items():
+        setattr(mock_settings, key, value)
+
+
+@pytest.mark.asyncio
+async def test_send_fans_out_to_every_destination() -> None:
+    """store_instances_batch is called once per destination; counts keyed aet@host:port."""
+    series = _make_series("1.2.3.4.5.6")
+    extra = [
+        DicomNode(aet="EXTRA", host="h2", port=104),
+        DicomNode(aet="MAIN", host="h3", port=104),
+    ]
+    service, dicom_client, _ = _make_service(series=[series], extra_pacs=extra)
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+    dicom_client.store_instances_batch = AsyncMock(return_value=MagicMock(total_failed=0))
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    sent_nodes = [call.args[1] for call in dicom_client.store_instances_batch.await_args_list]
+    assert sent_nodes == service.destinations  # [MAIN@h1, EXTRA@h2, MAIN@h3], in order
+    assert result.send_failed_by_node == {
+        "MAIN@h1:104": 0,
+        "EXTRA@h2:104": 0,
+        "MAIN@h3:104": 0,  # same AET as MAIN@h1 — distinct key, counts never merge
+    }
+    assert result.instances_send_failed == 0
+
+
+@pytest.mark.asyncio
+async def test_send_counts_per_node_when_one_fails() -> None:
+    """A failing node counts its own failures, never aborts the rest; run completes (default non-fatal)."""
+    series = _make_series("1.2.3.4.5.6")
+    extra = [DicomNode(aet="BAD", host="h2", port=104), DicomNode(aet="TAIL", host="h3", port=104)]
+    service, dicom_client, study_repo = _make_service(series=[series], extra_pacs=extra)
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+
+    async def store(datasets: list[Dataset], node: DicomNode) -> MagicMock:
+        if node.aet == "BAD":
+            raise ConnectionError("association refused")
+        return MagicMock(total_failed=1 if node.aet == "TAIL" else 0)
+
+    dicom_client.store_instances_batch = AsyncMock(side_effect=store)
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    assert result.send_failed_by_node == {
+        "MAIN@h1:104": 0,
+        "BAD@h2:104": 1,  # exception → whole series (1 dataset) counted failed
+        "TAIL@h3:104": 1,  # batch-reported failure count
+    }
+    assert result.instances_send_failed == 2
+    study_repo.update_anon_uid.assert_awaited_once()  # regression: send errors stay non-fatal by default
+
+
+@pytest.mark.asyncio
+async def test_fail_on_send_error_raises_before_study_anon_uid() -> None:
+    """anon_fail_on_send_error=True → AnonymizationSendError; study anon_uid NOT persisted."""
+    from clarinet.exceptions.domain import AnonymizationSendError
+
+    series = _make_series("1.2.3.4.5.6")
+    service, dicom_client, study_repo = _make_service(series=[series])
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+    dicom_client.store_instances_batch = AsyncMock(side_effect=ConnectionError("down"))
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings, anon_fail_on_send_error=True)
+        with pytest.raises(AnonymizationSendError) as excinfo:
+            await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    assert excinfo.value.failed_by_node == {"MAIN@h1:104": 1}
+    study_repo.update_anon_uid.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_series_uids_restricts_processing() -> None:
+    """Only the requested series is retrieved; counters keep their semantics."""
+    series_a = _make_series("1.2.3.4.5.1")
+    series_b = _make_series("1.2.3.4.5.2")
+    service, dicom_client, _ = _make_service(series=[series_a, series_b])
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", series_uids=["1.2.3.4.5.2"])
+
+    dicom_client.get_series_to_memory.assert_awaited_once()
+    assert dicom_client.get_series_to_memory.await_args.kwargs["series_uid"] == "1.2.3.4.5.2"
+    assert result.series_count == 2  # whole study
+    assert result.series_anonymized == 1  # actually processed
+    assert result.series_skipped == 0  # filter-excluded only; unrequested is neither
+
+
+@pytest.mark.asyncio
+async def test_series_uids_absent_uid_raises_naming_it() -> None:
+    series_a = _make_series("1.2.3.4.5.1")
+    service, dicom_client, _ = _make_service(series=[series_a])
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        with pytest.raises(AnonymizationFailedError, match=r"not in study.*9\.9\.9\.absent"):
+            await service.anonymize_study("1.2.3.4.5", series_uids=["9.9.9.absent"])
+
+    dicom_client.get_series_to_memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_series_uids_filter_excluded_raises_with_reason() -> None:
+    """SeriesFilter reads its OWN module settings — patch series_filter.settings too."""
+    series_sr = _make_series("1.2.3.4.5.9", modality="SR")
+    service, dicom_client, _ = _make_service(series=[series_sr])
+
+    with (
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as filter_settings,
+    ):
+        _patch_settings(mock_settings)
+        filter_settings.series_filter_excluded_modalities = ["SR"]
+        filter_settings.series_filter_min_instance_count = 0
+        filter_settings.series_filter_unknown_modality_policy = "include"
+        filter_settings.series_filter_excluded_descriptions = []
+        with pytest.raises(AnonymizationFailedError, match="excluded by series filter") as excinfo:
+            await service.anonymize_study("1.2.3.4.5", series_uids=["1.2.3.4.5.9"])
+
+    assert "1.2.3.4.5.9" in str(excinfo.value)
+    dicom_client.get_series_to_memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_series_uids_empty_list_raises() -> None:
+    series_a = _make_series("1.2.3.4.5.1")
+    service, dicom_client, _ = _make_service(series=[series_a])
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        with pytest.raises(AnonymizationFailedError, match="empty"):
+            await service.anonymize_study("1.2.3.4.5", series_uids=[])
+
+    dicom_client.get_series_to_memory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_series_uids_bypasses_skip_guard() -> None:
+    """A subset run executes even when study.anon_uid was set by a prior whole-study run."""
+    from clarinet.services.dicom.models import AnonymizationResult
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = "9.9.9"  # whole-study run would be skipped by _already_done
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "pending"
+    record.data = {}
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.9.9",
+        series_count=2,
+        series_anonymized=1,
+        instances_anonymized=10,
+        instances_failed=0,
+        send_failed_by_node={"MAIN@h1:104": 0},
+    )
+    anon_service = AsyncMock()
+    anon_service.anonymize_study = AsyncMock(return_value=anon_result)
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    result = await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+        series_uids=["1.2.3.4"],
+    )
+
+    anon_service.anonymize_study.assert_awaited_once()
+    assert anon_service.anonymize_study.await_args.kwargs["series_uids"] == ["1.2.3.4"]
+    submitted = client.submit_record_data.await_args.args[1]
+    assert submitted["send_failed_by_node"] == {"MAIN@h1:104": 0}
+    assert submitted["series_uids"] == ["1.2.3.4"]
+    assert result is anon_result
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_whole_study_after_subset_run_not_skipped() -> None:
+    """A subset run's record marker (series_uids) forces a later whole-study run to re-run."""
+    from clarinet.services.dicom.models import AnonymizationResult
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = "9.9.9"
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "finished"
+    record.data = {
+        "anon_study_uid": "9.9.9",
+        "sent_to_pacs": False,
+        "series_uids": ["1.2.3.4"],
+    }
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.9.9",
+        series_count=2,
+        series_anonymized=2,
+        instances_anonymized=10,
+        instances_failed=0,
+        send_failed_by_node={"MAIN@h1:104": 0},
+    )
+    anon_service = AsyncMock()
+    anon_service.anonymize_study = AsyncMock(return_value=anon_result)
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+    )
+
+    anon_service.anonymize_study.assert_awaited_once()
+    submitted = client.update_record_data.await_args.args[1]
+    assert "series_uids" not in submitted
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_whole_study_drops_reserved_series_uids_key() -> None:
+    """A whole-study run must never carry a caller-supplied series_uids marker through."""
+    from clarinet.services.dicom.models import AnonymizationResult
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = None  # guard falls through — not "already done"
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "pending"
+    record.data = {}
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_result = AnonymizationResult(
+        study_uid="1.2.3",
+        anon_study_uid="9.9.9",
+        series_count=2,
+        series_anonymized=2,
+        instances_anonymized=10,
+        instances_failed=0,
+        send_failed_by_node={},
+    )
+    anon_service = AsyncMock()
+    anon_service.anonymize_study = AsyncMock(return_value=anon_result)
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+        extra_record_data={"series_uids": ["x"], "study_type": "CT"},
+    )
+
+    submitted = client.submit_record_data.await_args.args[1]
+    assert "series_uids" not in submitted
+    assert submitted["study_type"] == "CT"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_skip_path_drops_reserved_series_uids_key() -> None:
+    """The skip branch must strip a caller-supplied series_uids marker too."""
+    from clarinet.services.dicom.orchestrator import AnonymizationOrchestrator
+
+    study = MagicMock()
+    study.anon_uid = "9.9.9"
+    study.patient_id = "P1"
+
+    record = MagicMock()
+    record.status = "finished"
+    record.data = {"anon_study_uid": "9.9.9", "sent_to_pacs": False}
+
+    client = AsyncMock()
+    client.get_study = AsyncMock(return_value=study)
+    client.get_record = AsyncMock(return_value=record)
+
+    anon_service = AsyncMock()
+
+    orch = AnonymizationOrchestrator(anon_service, client)
+    await orch.run(
+        "1.2.3",
+        record_id=7,
+        save_to_disk=False,
+        send_to_pacs=False,
+        extra_record_data={"series_uids": ["x"], "study_type": "CT"},
+    )
+
+    anon_service.anonymize_study.assert_not_awaited()
+    submitted = client.update_record_data.await_args.args[1]
+    assert submitted["skipped"] is True
+    assert submitted["study_type"] == "CT"
+    assert "series_uids" not in submitted
+
+
+@pytest.mark.asyncio
+async def test_series_uids_subset_skip_stats_exclude_unrequested() -> None:
+    """A subset run must not report a whole-study filter exclusion outside the requested set."""
+    series_ct = _make_series("1.2.3.4.5.1")
+    series_sr = _make_series("1.2.3.4.5.9", modality="SR")
+    service, dicom_client, _ = _make_service(series=[series_ct, series_sr])
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+
+    with (
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as filter_settings,
+    ):
+        _patch_settings(mock_settings)
+        filter_settings.series_filter_excluded_modalities = ["SR"]
+        filter_settings.series_filter_min_instance_count = 0
+        filter_settings.series_filter_unknown_modality_policy = "include"
+        filter_settings.series_filter_excluded_descriptions = []
+        result = await service.anonymize_study("1.2.3.4.5", series_uids=["1.2.3.4.5.1"])
+
+    assert result.series_count == 2
+    assert result.series_anonymized == 1
+    assert result.series_skipped == 0
+    assert result.skipped_series == []
+
+
+@pytest.mark.asyncio
+async def test_run_anonymization_series_uids_kwarg_only() -> None:
+    """series_uids passes through as a kwarg; a payload key must NOT smuggle a selection."""
+    from clarinet.services.dicom.pipeline import run_anonymization
+
+    msg = MagicMock()
+    msg.record_id = 7
+    msg.study_uid = "1.2.3"
+    msg.payload = {"series_uids": ["1.2.3.4"]}  # flow payloads are authoring-time constants
+
+    orch = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_orchestrator(client=None):
+        yield orch
+
+    with (
+        patch(
+            "clarinet.services.dicom.pipeline.create_anonymization_orchestrator",
+            fake_orchestrator,
+        ),
+        patch("clarinet.services.dicom.pipeline.settings") as mock_settings,
+    ):
+        mock_settings.anon_save_to_disk = False
+        mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_per_study_patient_id = False
+
+        await run_anonymization(msg, MagicMock())
+        assert orch.run.await_args.kwargs["series_uids"] is None  # payload key ignored
+
+        await run_anonymization(msg, MagicMock(), series_uids=["5.5.5"])
+        assert orch.run.await_args.kwargs["series_uids"] == ["5.5.5"]

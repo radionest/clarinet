@@ -179,6 +179,7 @@ class AnonymizationResult(BaseModel):
     instances_anonymized: int
     instances_failed: int
     instances_send_failed: int = 0
+    send_failed_by_node: dict[str, int] = Field(default_factory=dict)
     output_dir: str | None = None
     sent_to_pacs: bool = False
     skipped_series: list[SkippedSeriesInfo] = Field(default_factory=list)

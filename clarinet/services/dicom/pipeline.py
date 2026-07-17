@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from clarinet.services.dicom.models import AnonymizationResult
@@ -15,6 +16,7 @@ async def run_anonymization(
     ctx: TaskContext,
     *,
     extra_record_data: dict[str, Any] | None = None,
+    series_uids: Sequence[str] | None = None,
 ) -> AnonymizationResult:
     """Run record-aware anonymization through the framework orchestrator.
 
@@ -25,6 +27,11 @@ async def run_anonymization(
 
     Reads ``send_to_pacs`` and ``save_to_disk`` from ``msg.payload``, falling
     back to the corresponding ``settings.anon_*`` defaults.
+
+    ``series_uids`` is kwarg-only and deliberately NOT read from
+    ``msg.payload``: payload keys are flow-authoring-time constants, while a
+    series selection is per-record dynamic data owned by the downstream
+    wrapper task.
 
     Raises:
         ValueError: when ``msg.record_id`` is None — this helper is record-aware
@@ -48,6 +55,7 @@ async def run_anonymization(
             send_to_pacs=do_send,
             per_study_patient_id=do_per_study,
             extra_record_data=extra_record_data,
+            series_uids=series_uids,
         )
 
 

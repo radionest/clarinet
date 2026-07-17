@@ -74,6 +74,21 @@
 
 ### Added
 
+- **Series-subset anonymization + multi-PACS C-STORE fan-out.**
+  `AnonymizationService.anonymize_study(..., series_uids=[...])` restricts a run
+  to an explicit series selection, with strict validation — empty / unknown /
+  filter-excluded UIDs raise `AnonymizationFailedError` naming each offending
+  UID. `AnonymizationOrchestrator.run` and `run_anonymization` pass
+  `series_uids` through kwarg-only (never read from `msg.payload`). A subset
+  run still persists the study-granular `anon_uid` but marks its Record data
+  with `series_uids`, so the skip-guard treats it as not-done and a later
+  whole-study run on the same record re-runs instead of being wrongly
+  skipped. Separately, `settings.anon_extra_pacs_nodes` wires extra C-STORE
+  destinations on every construction path (orchestrator/worker factory and
+  the HTTP DI factory); per-node failure counts land in
+  `AnonymizationResult.send_failed_by_node`, and the opt-in
+  `settings.anon_fail_on_send_error` raises the new `AnonymizationSendError`
+  before `study.anon_uid` persists.
 - `find_records` (`ClarinetClient` and the pipeline sync wrapper) now logs a
   warning when a wide-scope call (no `series_uid`/`study_uid` filter) is
   truncated at the first cursor page, pointing the caller at `iter_records`.

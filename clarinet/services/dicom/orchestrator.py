@@ -8,19 +8,29 @@ and by the built-in :func:`anonymize_study_pipeline` pipeline task.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from clarinet.client import ClarinetAPIError, ClarinetClient
 from clarinet.models.base import RecordStatus
-from clarinet.services.anonymization_service import AnonymizationService
+from clarinet.services.anonymization_service import AnonymizationService, extra_pacs_from_settings
 from clarinet.services.dicom.models import AnonymizationResult
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models.study import StudyRead
+
+
+def _strip_reserved_series_uids(data: dict[str, Any]) -> None:
+    """Drop the reserved ``series_uids`` marker key from a whole-study payload, in place."""
+    if "series_uids" in data:
+        del data["series_uids"]
+        logger.warning(
+            "Dropped reserved key 'series_uids' from extra_record_data "
+            "on a whole-study anonymization run"
+        )
 
 
 class AnonymizationOrchestrator:
@@ -43,6 +53,7 @@ class AnonymizationOrchestrator:
         send_to_pacs: bool | None = None,
         per_study_patient_id: bool | None = None,
         extra_record_data: dict[str, Any] | None = None,
+        series_uids: Sequence[str] | None = None,
     ) -> AnonymizationResult:
         """Run anonymization with optional Record tracking.
 
@@ -64,6 +75,9 @@ class AnonymizationOrchestrator:
                 already done in a previous run, so no fresh hash is produced.
             extra_record_data: Project-specific fields merged into the Record
                 ``data`` payload (success, skip, and error branches).
+            series_uids: Restrict to these series and BYPASS the skip-guard —
+                study.anon_uid is study-granular and cannot prove the requested
+                series were processed by the earlier run.
 
         Raises:
             Exception: any error from DICOM anonymization is re-raised after
@@ -78,18 +92,17 @@ class AnonymizationOrchestrator:
             # the Record failed instead of leaving it stuck in pending/inwork.
             study = await self.client.get_study(study_uid)
 
-            if record_id is not None:
+            if record_id is not None and series_uids is None:
                 already_anon_uid = await self._already_done(study, record_id, do_send)
                 if already_anon_uid is not None:
                     logger.info(f"Study {study_uid} already anonymized, skipping")
-                    await self._submit(
-                        record_id,
-                        {
-                            "skipped": True,
-                            "anon_study_uid": already_anon_uid,
-                            **(extra_record_data or {}),
-                        },
-                    )
+                    skip_data = {
+                        "skipped": True,
+                        "anon_study_uid": already_anon_uid,
+                        **(extra_record_data or {}),
+                    }
+                    _strip_reserved_series_uids(skip_data)
+                    await self._submit(record_id, skip_data)
                     return AnonymizationResult(
                         study_uid=study_uid,
                         anon_study_uid=already_anon_uid,
@@ -108,6 +121,7 @@ class AnonymizationOrchestrator:
                 save_to_disk=do_save,
                 send_to_pacs=do_send,
                 per_study_patient_id=per_study_patient_id,
+                series_uids=series_uids,
             )
         except Exception as exc:
             # Catch every exception so the tracking Record is marked failed
@@ -127,10 +141,17 @@ class AnonymizationOrchestrator:
             raise
 
         if record_id is not None:
-            await self._submit(
-                record_id,
-                self._record_data_from_result(result, extra_record_data),
-            )
+            data = self._record_data_from_result(result, extra_record_data)
+            if series_uids is not None:
+                # Marker for _already_done: this record's completion is
+                # subset-granular and cannot prove whole-study coverage.
+                data["series_uids"] = list(series_uids)
+            else:
+                # Reserved marker key: its presence tells _already_done the
+                # record's completion is subset-granular. A whole-study run
+                # must never carry it, even via extra_record_data.
+                _strip_reserved_series_uids(data)
+            await self._submit(record_id, data)
 
         return result
 
@@ -143,13 +164,18 @@ class AnonymizationOrchestrator:
         """Return existing anon_study_uid when anonymization is already complete.
 
         Re-running is allowed when the previous attempt errored, or when this
-        run sends to PACS but the previous one did not.
+        run sends to PACS but the previous one did not. A previous subset run
+        (record data carries series_uids) never counts as done.
         """
         if study.anon_uid is None:
             return None
         record = await self.client.get_record(record_id)
         prev_data = record.data or {}
         if "error" in prev_data:
+            return None
+        if "series_uids" in prev_data:
+            # Previous completed run was a series subset — the study-granular
+            # anon_uid cannot prove whole-study coverage.
             return None
         if do_send and not prev_data.get("sent_to_pacs", False):
             return None
@@ -179,6 +205,7 @@ class AnonymizationOrchestrator:
             "instances_anonymized": result.instances_anonymized,
             "instances_failed": result.instances_failed,
             "instances_send_failed": result.instances_send_failed,
+            "send_failed_by_node": result.send_failed_by_node,
             "sent_to_pacs": result.sent_to_pacs,
             "series_count": result.series_count,
             "series_anonymized": result.series_anonymized,
@@ -267,6 +294,7 @@ def build_anonymization_service(client: ClarinetClient) -> AnonymizationService:
         series_repo=SeriesRepoAdapter(client),  # type: ignore[arg-type]
         dicom_client=dicom_client,
         pacs=pacs,
+        extra_pacs=extra_pacs_from_settings(),
     )
 
 

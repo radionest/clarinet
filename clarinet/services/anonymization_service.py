@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from clarinet.models.study import Series, Study
     from clarinet.services.dicom.models import RetrieveResult
 
-from clarinet.exceptions.domain import AnonymizationFailedError
+from clarinet.exceptions.domain import AnonymizationFailedError, AnonymizationSendError
 from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.repositories.patient_repository import PatientRepository
@@ -36,7 +37,22 @@ from clarinet.utils.logger import logger
 class _DistributionResult:
     """Result of a background distribution task (disk save + C-STORE)."""
 
-    send_failed: int = 0
+    send_failed_by_node: dict[str, int] = field(default_factory=dict)
+
+
+def _node_label(node: DicomNode) -> str:
+    """Stable per-destination key — two destinations may share an AET."""
+    return f"{node.aet}@{node.host}:{node.port}"
+
+
+def extra_pacs_from_settings() -> list[DicomNode]:
+    """Extra C-STORE destinations from ``settings.anon_extra_pacs_nodes``.
+
+    The single conversion point for every construction path (pipeline
+    orchestrator, raw worker factory, HTTP DI factory) — the setting must
+    never apply on one path and silently do nothing on another.
+    """
+    return [DicomNode(aet=n.aet, host=n.host, port=n.port) for n in settings.anon_extra_pacs_nodes]
 
 
 class AnonymizationService:
@@ -47,7 +63,8 @@ class AnonymizationService:
         patient_repo: Patient repository
         series_repo: Series repository
         dicom_client: Async DICOM client
-        pacs: PACS node configuration
+        pacs: PACS node configuration (C-GET source and first C-STORE destination)
+        extra_pacs: Additional store-only C-STORE destinations (never used for retrieval)
     """
 
     def __init__(
@@ -57,12 +74,15 @@ class AnonymizationService:
         series_repo: SeriesRepository,
         dicom_client: DicomClient,
         pacs: DicomNode,
+        extra_pacs: Sequence[DicomNode] = (),
     ):
         self.study_repo = study_repo
         self.patient_repo = patient_repo
         self.series_repo = series_repo
         self.dicom_client = dicom_client
+        # Dual role: C-GET retrieve source AND first C-STORE destination.
         self.pacs = pacs
+        self.destinations = [pacs, *extra_pacs]
 
     async def _retrieve_series(
         self,
@@ -126,6 +146,7 @@ class AnonymizationService:
         save_to_disk: bool | None = None,
         send_to_pacs: bool | None = None,
         per_study_patient_id: bool | None = None,
+        series_uids: Sequence[str] | None = None,
     ) -> AnonymizationResult:
         """Anonymize a study: fetch from PACS, anonymize, distribute.
 
@@ -141,12 +162,19 @@ class AnonymizationService:
                 When True, PatientID/PatientName are set to a per-study 8-hex
                 hash (sha256(salt:study_uid)) — different across studies of the
                 same patient, preventing PACS-side correlation.
+            series_uids: Restrict the run to these series (None = whole study).
+                Empty, unknown, or filter-excluded selections raise — a subset
+                request is never silently narrowed.
 
         Returns:
             Anonymization result with statistics
 
         Raises:
-            AnonymizationFailedError: If per-patient mode and patient has no anon_id
+            AnonymizationFailedError: If per-patient mode and patient has no anon_id,
+                or if series_uids is empty / names series absent from the study /
+                names filter-excluded series.
+            AnonymizationSendError: If settings.anon_fail_on_send_error is set and
+                any destination reported C-STORE failures.
         """
         do_save = save_to_disk if save_to_disk is not None else settings.anon_save_to_disk
         do_send = send_to_pacs if send_to_pacs is not None else settings.anon_send_to_pacs
@@ -186,7 +214,7 @@ class AnonymizationService:
         series_count = len(series_list)
         total_anonymized = 0
         total_failed = 0
-        total_send_failed = 0
+        total_send_failed_by_node: dict[str, int] = {}
 
         # Filter series
         series_filter = SeriesFilter()
@@ -195,31 +223,62 @@ class AnonymizationService:
             to_criteria=SeriesFilterCriteria.from_series,
         )
 
-        skipped_info = [
-            SkippedSeriesInfo(
-                series_uid=fi.item.series_uid,
-                modality=fi.item.modality,
-                series_description=fi.item.series_description,
-                reason=fi.reason,
-            )
-            for fi in filter_result.excluded
-        ]
-
         if filter_result.excluded:
             logger.info(
                 f"Filtered out {len(filter_result.excluded)} series: "
                 + ", ".join(f"{fi.item.series_uid} ({fi.reason})" for fi in filter_result.excluded)
             )
 
+        included = filter_result.included
+        excluded = filter_result.excluded
+        if series_uids is not None:
+            requested = set(series_uids)  # silent dedupe of duplicates
+            if not requested:
+                raise AnonymizationFailedError(
+                    "series_uids is empty — refusing to anonymize nothing"
+                )
+            known = {s.series_uid for s in series_list}
+            missing = sorted(requested - known)
+            if missing:
+                raise AnonymizationFailedError(
+                    f"requested series not in study {study_uid}: {', '.join(missing)}"
+                )
+            excluded_reasons = {fi.item.series_uid: fi.reason for fi in filter_result.excluded}
+            conflicts = sorted(requested & excluded_reasons.keys())
+            if conflicts:
+                details = ", ".join(f"{uid} ({excluded_reasons[uid]})" for uid in conflicts)
+                raise AnonymizationFailedError(
+                    f"requested series excluded by series filter: {details}"
+                )
+            included = [s for s in filter_result.included if s.series_uid in requested]
+            # Requested ∩ filter-excluded raised above, so this is provably
+            # empty — subset stats must not report unrequested exclusions.
+            excluded = [fi for fi in filter_result.excluded if fi.item.series_uid in requested]
+
+        # Snapshot skip-report primitives before any commit: update_anon_uid()
+        # below runs session.refresh(study), whose refresh-expire cascade
+        # (cascade_delete=True on Study.series) expires child Series — reading
+        # expired ORM attrs on an AsyncSession raises MissingGreenlet.
+        skipped_series = [
+            SkippedSeriesInfo(
+                series_uid=fi.item.series_uid,
+                modality=fi.item.modality,
+                series_description=fi.item.series_description,
+                reason=fi.reason,
+            )
+            for fi in excluded
+        ]
+
         logger.info(
             f"Anonymizing study {study_uid} → {anon_study_uid} "
-            f"({len(filter_result.included)}/{series_count} series, "
+            f"({len(included)}/{series_count} series"
+            f"{', requested subset' if series_uids is not None else ''}, "
             f"save_to_disk={do_save}, send_to_pacs={do_send})"
         )
 
         pending_tasks: list[asyncio.Task[_DistributionResult]] = []
 
-        for series in filter_result.included:
+        for series in included:
             # 1. C-GET with retry — strictly sequential (one PACS association at a time)
             result = await self._retrieve_series(study_uid, series)
             if result is None:
@@ -277,8 +336,13 @@ class AnonymizationService:
             for r in dist_results:
                 if isinstance(r, BaseException):
                     logger.error(f"Distribution task failed: {r}")
-                else:
-                    total_send_failed += r.send_failed
+                    continue
+                for node_label, n_failed in r.send_failed_by_node.items():
+                    total_send_failed_by_node[node_label] = (
+                        total_send_failed_by_node.get(node_label, 0) + n_failed
+                    )
+
+        total_send_failed = sum(total_send_failed_by_node.values())
 
         # Check failure threshold
         total_instances = total_anonymized + total_failed
@@ -289,6 +353,12 @@ class AnonymizationService:
                     f"{total_failed}/{total_instances} instances failed "
                     f"(threshold: {settings.anon_failure_threshold:.0%})"
                 )
+
+        # Raise BEFORE persisting study.anon_uid: the orchestrator skip-guard
+        # then sees an unfinished study and a retry cleanly redoes the run
+        # (per-series anon_uids already written are salt-deterministic).
+        if settings.anon_fail_on_send_error and any(total_send_failed_by_node.values()):
+            raise AnonymizationSendError(total_send_failed_by_node)
 
         # Update study anon_uid in DB
         await self.study_repo.update_anon_uid(study, anon_study_uid)
@@ -305,14 +375,15 @@ class AnonymizationService:
             anon_study_uid=anon_study_uid,
             anon_patient_id=anon_patient_id,
             series_count=series_count,
-            series_anonymized=len(filter_result.included),
-            series_skipped=len(filter_result.excluded),
+            series_anonymized=len(included),
+            series_skipped=len(excluded),
             instances_anonymized=total_anonymized,
             instances_failed=total_failed,
             instances_send_failed=total_send_failed,
+            send_failed_by_node=total_send_failed_by_node,
             output_dir=output_dir,
             sent_to_pacs=do_send,
-            skipped_series=skipped_info,
+            skipped_series=skipped_series,
         )
 
     async def _distribute_series(
@@ -341,34 +412,36 @@ class AnonymizationService:
             do_send: Whether to send to PACS
 
         Returns:
-            Distribution result with send failure count
+            Distribution result with per-node send failure counts
         """
-        tasks: list[asyncio.Task[int]] = []
+        save_task: asyncio.Task[int] | None = None
+        send_task: asyncio.Task[dict[str, int]] | None = None
         if do_save:
-            tasks.append(
-                asyncio.create_task(
-                    self._save_series_to_disk(
-                        datasets,
-                        patient,
-                        study,
-                        series,
-                        anon_patient_id,
-                        anon_study_uid,
-                        anon_series_uid,
-                    )
+            save_task = asyncio.create_task(
+                self._save_series_to_disk(
+                    datasets,
+                    patient,
+                    study,
+                    series,
+                    anon_patient_id,
+                    anon_study_uid,
+                    anon_series_uid,
                 )
             )
         if do_send:
-            tasks.append(asyncio.create_task(self._send_series_to_pacs(datasets)))
+            send_task = asyncio.create_task(self._send_series_to_pacs(datasets))
 
         result = _DistributionResult()
-        if tasks:
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for tr in task_results:
-                if isinstance(tr, int):
-                    result.send_failed += tr
-                elif isinstance(tr, BaseException):
-                    logger.error(f"Distribution sub-task failed: {tr}")
+        if save_task is not None:
+            try:
+                await save_task
+            except Exception as exc:
+                logger.error(f"Distribution sub-task failed: {exc}")
+        if send_task is not None:
+            try:
+                result.send_failed_by_node = await send_task
+            except Exception as exc:
+                logger.error(f"Distribution sub-task failed: {exc}")
         return result
 
     async def _save_series_to_disk(
@@ -421,21 +494,28 @@ class AnonymizationService:
         await asyncio.gather(*save_tasks)
         return 0
 
-    async def _send_series_to_pacs(self, datasets: list[Dataset]) -> int:
-        """Send all datasets for one series via batch C-STORE.
+    async def _send_series_to_pacs(self, datasets: list[Dataset]) -> dict[str, int]:
+        """Batch C-STORE one series to every destination, sequentially.
+
+        A failure on one node never aborts the remaining nodes: a raised
+        exception counts the whole series as failed for that node only.
 
         Args:
             datasets: Anonymized DICOM datasets
 
         Returns:
-            Number of failed sends
+            Failed-send counts keyed by ``aet@host:port`` node label
         """
-        try:
-            batch_result = await self.dicom_client.store_instances_batch(datasets, self.pacs)
-            return batch_result.total_failed
-        except Exception:
-            logger.exception("Failed to batch C-STORE anonymized series to PACS")
-            return len(datasets)
+        counts: dict[str, int] = {}
+        for node in self.destinations:
+            label = _node_label(node)
+            try:
+                batch_result = await self.dicom_client.store_instances_batch(datasets, node)
+                counts[label] = batch_result.total_failed
+            except Exception:
+                logger.exception(f"Failed to batch C-STORE anonymized series to {label}")
+                counts[label] = len(datasets)
+        return counts
 
     @staticmethod
     def _write_dataset(dataset: Dataset, file_path: Path) -> None:
