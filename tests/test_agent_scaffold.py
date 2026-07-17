@@ -23,7 +23,15 @@ PROJECT_TEMPLATE_CLAUDE_MD = REPO_ROOT / "examples" / "project_template" / ".cla
 
 _CYRILLIC_RE = re.compile(r"[Ѐ-ӿ]")
 
-SECTION_RULES = ["definitions", "workflows", "anonymization", "slicer", "schemas", "utils"]
+SECTION_RULES = [
+    "definitions",
+    "workflows",
+    "anonymization",
+    "slicer",
+    "schemas",
+    "utils",
+    "scripting",
+]
 DEEP_DOCS = [
     "recordflow-dsl",
     "slicer-helper-api",

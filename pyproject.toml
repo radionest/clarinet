@@ -53,6 +53,7 @@ dependencies = [
     "openpyxl>=3.1",
     "orjson>=3.10.0",
     "pyyaml>=6.0",
+    "typer>=0.15",
     # Quarto report kernel (*.qmd python chunks): the unconditional imports of
     # quarto's bundled jupyter engine (nbformat, nbclient, jupyter_client) plus
     # the kernel itself (ipykernel) and pandas, which the docs promise to chunk

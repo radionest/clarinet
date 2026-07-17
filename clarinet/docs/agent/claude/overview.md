@@ -36,6 +36,10 @@ plan/
 
 All files under `plan/` are imported as submodules of the `clarinet_plan` package (single root — `config_tasks_path`); `sys.path` is not used.
 
+Operational one-shot scripts (backfills, repairs) live outside `plan/` in the
+project-root `scripts/` directory and use the `clarinet.scripting` frame — see
+`scripting.md`.
+
 Each subfolder has a corresponding rule file in `.claude/rules/clarinet/` with detailed conventions.
 
 ## clarinet API — what to import from where
@@ -112,6 +116,7 @@ This project's rules (auto-loaded via the `paths` frontmatter):
 - `.claude/rules/clarinet/slicer.md` — hydrators + Slicer scripts + validators (all linked via injection vars)
 - `.claude/rules/clarinet/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
 - `.claude/rules/clarinet/utils.md` — helper modules, the `.seg.nrrd` format
+- `.claude/rules/clarinet/scripting.md` — the `clarinet.scripting` frame for operational scripts in root `scripts/`
 
 Framework rules (full reference docs, installed alongside the clarinet package — the paths below point at the installed package):
 
