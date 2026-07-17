@@ -142,13 +142,17 @@ def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str
 
 
 @pipeline_task(queue=settings.dicom_queue_name)
-async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> None:
+async def anonymize_study_with_type(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Anonymize the study and tag the Record with the project's study_type.
 
     Thin wrapper over the framework's :func:`run_anonymization` helper that
     looks up ``study_type`` from the related ``first-check`` record (project
     knowledge) and passes it as ``extra_record_data`` so it lands in the
     anonymize-study Record's ``data`` payload.
+
+    Must NOT be named ``anonymize_study_pipeline``: task names are
+    ``{namespace}:{function_name}``, so re-using the built-in's name makes
+    ``register_task()`` raise ``PipelineConfigError`` once ``have_dicom`` is on.
     """
     from clarinet.services.dicom.pipeline import run_anonymization
 
@@ -374,7 +378,7 @@ async def create_view_nifti_record(
 (
     record("anonymize-study")
     .on_status("pending")
-    .do_task(anonymize_study_pipeline, send_to_pacs=True)
+    .do_task(anonymize_study_with_type, send_to_pacs=True)
 )
 
 # After anonymization → create segmentations by study_type

@@ -218,8 +218,10 @@ Only f-strings, never `print()`, never `import loguru`.
 
 - `convert_series_to_nifti` — converts a DICOM series to NIfTI via C-GET. Queue `clarinet.dicom`. Idempotent (checks `volume.nii.gz`).
 - `_convert_series_impl(msg, ctx)` — the internal function for direct use inside custom tasks (if you need to both load NIfTI and do something else in a single task).
+- `anonymize_study_pipeline` — Record-aware DICOM anonymization: PACS → anonymize → distribute → submit to the Record. Queue `clarinet.dicom`. Requires `msg.record_id`. See `anonymization.md`.
+- `prefetch_dicom_web` — prefetches a study into the DICOMweb disk cache via C-GET. Queue `clarinet.dicom`. Requires `msg.study_uid`. Idempotent.
 
-A custom task's name must not collide with a built-in one — otherwise `register_task()` raises `PipelineConfigError`.
+A custom task's name must not collide with a built-in one — otherwise `register_task()` raises `PipelineConfigError`. The collision is on the **bare function name**: task names are `{namespace}:{function_name}`, not module-qualified, so a `plan/` task re-using a built-in's function name is rejected as soon as anything imports that built-in. See `anonymization.md` for the trap people hit most.
 
 ### Minimal example
 

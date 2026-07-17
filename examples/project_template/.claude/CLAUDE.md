@@ -108,6 +108,7 @@ This project's rules (auto-loaded via the `paths` frontmatter):
 
 - `.claude/rules/definitions.md` — `FileDef`, `RecordDef`, path patterns, links between sections
 - `.claude/rules/workflows.md` — `@pipeline_task`, `TaskContext`, RecordFlow DSL
+- `.claude/rules/anonymization.md` — the `anonymize-study` record, built-in task, `anon_*` settings, operator CLI
 - `.claude/rules/slicer.md` — hydrators + Slicer scripts + validators (all linked via injection vars)
 - `.claude/rules/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
 - `.claude/rules/utils.md` — helper modules, the `.seg.nrrd` format

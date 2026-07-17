@@ -119,6 +119,15 @@
   settings only when touched; the service token is never a CLI flag. `typer`
   becomes a hard dependency; a downstream-author doc page ships via
   `clarinet agent init/update`. Additive — no existing behavior changes.
+- **Anonymization guide in the downstream agent-docs bundle.** `clarinet agent init|update`
+  now installs `.claude/rules/clarinet/anonymization.md`: the `anonymize-study` RecordDef,
+  wiring `anonymize_study_pipeline` into a flow, adding project fields via
+  `run_anonymization(..., extra_record_data=...)`, the `record.data` success/skip/error
+  branches, the skip-guard, the `anon_*` settings, and the `anon migrate-paths` /
+  `anon scrub-db` operator commands. `workflows.md` § Built-in tasks gains
+  `anonymize_study_pipeline` and `prefetch_dicom_web`, and now spells out that task-name
+  collisions are on the **bare function name** (`{namespace}:{function_name}`, not
+  module-qualified). The `research` project template ships the same doc.
 
 ### Improved
 
@@ -149,6 +158,15 @@
 
 ### Fixed
 
+- The demo's anonymization wrapper (`examples/demo`) no longer shadows the built-in
+  task. It was named `anonymize_study_pipeline`, and `@pipeline_task` derives
+  `task_name` as `{namespace}:{function_name}` — not module-qualified — so it
+  registered under the same key as the framework built-in and `register_task()`
+  raised `PipelineConfigError`. The demo only escaped this because `have_dicom`
+  defaults to `false`; draining its own `dicom` queue requires a worker with
+  `have_dicom = true`, which imports the built-in and collides, so the example could
+  not run the task it demonstrates. Renamed to `anonymize_study_with_type`. The
+  underlying collision-by-bare-name design is tracked in #466.
 - RecordFlow patient-scope context is no longer silently truncated at the first
   cursor page. `RecordFlowEngine._get_record_context` and the
   `call_registered_callable` pipeline task aggregated records via
