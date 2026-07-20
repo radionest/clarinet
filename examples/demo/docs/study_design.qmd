@@ -63,7 +63,7 @@ Performed by Group A inspectors (2 independent assessments).
 
 This stage determines:
 - Whether the study is suitable for further work
-- Modality type (CT, UT, CT-HD, UT-HD, MCT, baseline archive)
+- Modality type (CT, UT, CT-HD, UT-HD, MCT, CT-archive)
 - **Reference series** — the series with the fewest artifacts and the most reference landmarks, on which defects will be marked
 
 Defects are searched across all available series, but marking is only done on the reference series.

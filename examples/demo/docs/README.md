@@ -249,7 +249,7 @@ async def lifecycle_open(ctx: RecordContext) -> list[str]:
     """Return additional study UIDs to load in OHIF viewer."""
     archive_studies = await ctx.client.find_studies(
         patient_id=ctx.patient_id,
-        study_type="baseline archive",
+        study_type="CT-archive",
     )
     return [s.study_uid for s in archive_studies]
 ```

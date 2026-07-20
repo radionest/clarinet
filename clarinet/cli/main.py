@@ -84,7 +84,7 @@ storage_path = "./data"
 secret_key = "change-this-secret-key-in-production"
 
 # ── Roles ────────────────────────────────────────────
-# extra_roles = []             # e.g. ["doctor_CT", "surgeon"]
+# extra_roles = []             # e.g. ["inspector", "technician"]
 
 # ── Admin ────────────────────────────────────────────
 # admin_username = "admin"
