@@ -12,8 +12,7 @@ paths:
 
 ```bash
 clarinet init my_project --template research    # Research scaffold with .claude/ docs for agents (Python config, plan/)
-clarinet init my_project --template bigliver    # Full liver template (Python config, workflows, pipeline)
-clarinet init my_project --template demo        # Simple demo (JSON/TOML config)
+clarinet init my_project --template demo        # NDT comparative-study demo (Python config, workflows, pipeline)
 clarinet init my_project                        # Bare skeleton
 clarinet init --list-templates                  # Show available templates
 ```

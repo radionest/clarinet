@@ -1,12 +1,12 @@
 # Clarinet Research Project
 
-This is a clinical/radiology research project template built on the [clarinet](https://github.com/...) framework. This document is always loaded into the agent's context and gives a project overview; details for each section are in `.claude/rules/*.md` (auto-loaded when editing files in the corresponding folders).
+This is a research project template built on the [clarinet](https://github.com/...) framework. This document is always loaded into the agent's context and gives a project overview; details for each section are in `.claude/rules/*.md` (auto-loaded when editing files in the corresponding folders).
 
 > Replace this file's contents with your own study (name, description, specifics). The structure and API references below stay accurate.
 
 ## What this project is
 
-`<Study name>` — `<short medical description>`. Goal: `<hypothesis / diagnostic endpoint>`.
+`<Study name>` — `<short description>`. Goal: `<hypothesis / study endpoint>`.
 
 Source of truth for project metadata — `settings.toml` (name, description, base URL, custom roles).
 
@@ -15,7 +15,7 @@ Source of truth for project metadata — `settings.toml` (name, description, bas
 Clarinet models a research pipeline through four entities:
 
 - **DICOM hierarchy** Patient → Study → Series — the framework imports studies from PACS and anonymizes them itself.
-- **RecordType** — a typed workflow step, bound to a hierarchy level (PATIENT/STUDY/SERIES). Describes: which doctor role sees the record, which files are created as input/output, what the data form looks like, which Slicer script to open.
+- **RecordType** — a typed workflow step, bound to a hierarchy level (PATIENT/STUDY/SERIES). Describes: which inspector role sees the record, which files are created as input/output, what the data form looks like, which Slicer script to open.
 - **RecordFlow DSL** — declarative orchestration of transitions between records: "when a study arrives → create a first-check", "when a segmentation is finished → run projection and comparison", "when the master model changes → invalidate dependent records".
 - **Pipeline tasks** — async functions running in workers (RabbitMQ + TaskIQ): heavy DICOM work, conversion to NIfTI, image processing, GPU inference.
 
@@ -67,7 +67,7 @@ recordflow_enabled = true                              # enable the RecordFlow e
 pipeline_enabled = true                                # enable the TaskIQ broker (requires RabbitMQ)
 frontend_enabled = true                                # serve the frontend SPA
 
-extra_roles = ["doctor_CT", "surgeon"]                 # custom roles on top of admin/user
+extra_roles = ["inspector_CT", "technician"]           # custom roles on top of admin/user
 ```
 
 All paths are given **relative to `config_tasks_path`** (i.e. `plan/`). Any role mentioned in `RecordDef.role` must be in `extra_roles` (or be one of the standard ones: `admin`, `user`, `doctor`, `auto`, `expert`).
