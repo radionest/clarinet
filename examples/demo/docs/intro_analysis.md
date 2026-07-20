@@ -46,7 +46,7 @@ meaningful once observer error is separated from detectability limits.
 Even destructive sectioning only samples the fragment actually removed
 during repair — indications outside that fragment are never verified
 against ground truth. This mirrors the incomplete-verification problem in
-any study where the reference standard (surgical/destructive) only covers
+any study where the reference standard (destructive) only covers
 part of the object under test. The master model's iterative,
 multi-modality construction is this study's answer to that same
 constraint: rather than requiring a single perfect reference, it builds

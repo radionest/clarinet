@@ -16,7 +16,7 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 example_segmentation = FileDef(
     pattern="example_{user_id}.seg.nrrd",
     level="STUDY",
-    description="Example: per-inspector segmentation file at study level",
+    description="Example: per-doctor segmentation file at study level",
 )
 
 

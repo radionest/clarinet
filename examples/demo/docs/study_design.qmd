@@ -108,7 +108,7 @@ Performed by the expert after the first completed CT segmentation with archive d
 
 Performed by the expert for each new modality (UT, CT-HD, UT-HD, MCT).
 
-In 3D Slicer, the expert views the reference series of the target modality and the CT with the master model overlaid. Each ROI from the master model is placed, in turn, into the target modality series' coordinate space. If a defect isn't visible on the target modality, the ROI is placed based on anatomical landmarks. Locating a defect on the target modality study isn't limited to the reference series — other series of that study can also be viewed.
+In 3D Slicer, the expert views the reference series of the target modality and the CT with the master model overlaid. Each ROI from the master model is placed, in turn, into the target modality series' coordinate space. If a defect isn't visible on the target modality, the ROI is placed based on geometric/structural landmarks. Locating a defect on the target modality study isn't limited to the reference series — other series of that study can also be viewed.
 
 On save, the projection is validated: its segment names must exactly match the master model's segment names (i.e. every defect from the master model is represented, and no extra ones are added).
 

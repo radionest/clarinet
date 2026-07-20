@@ -36,7 +36,7 @@ One study per modality (except baseline archive). No direct segmentation on the 
 2. **Anonymization** (automatic) — on passing QA
 3. **Defect segmentation** (manual, modality-specific inspector role, 2 independent reads) — OHIF + Slicer, labels: defect/indeterminate/cosmetic. Order: CT, UT, CT-HD, UT-HD, MCT, then CT+archive; 2-day gap or 10 other studies between an inspector's modalities
 4. **Master model construction** — after first completed CT-with-archive segmentation; connected-components labeling
-5. **Master model projection** (manual, expert) — per modality; auto for CT (copy), manual placement (anatomical landmarks if not visible) for others; validated names must match master model
+5. **Master model projection** (manual, expert) — per modality; auto for CT (copy), manual placement (geometric/structural landmarks if not visible) for others; validated names must match master model
 6. **Comparison** (automatic) — per-ROI overlap: match / missed (→ second review) / additional (→ master model update); run per segmentation
 7. **Second review** — inspector classifies missed defects: defect / indeterminate / cosmetic / invisible; single output file, merged across iterations
 8. **Master model update** (expert) — triggered by additional defects; auto-numbered; one active task at a time; immutable defect numbers; hash-checked against race with in-flight projections
