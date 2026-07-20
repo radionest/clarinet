@@ -1686,7 +1686,7 @@ class TestSegmentMetadataRoundtrip:
                 "Segment0_LabelValue": "1",
                 "Segment0_Color": "1 0 0",
                 "Segment0_Extent": "1 3 1 3 1 3",
-                "Segment1_Name": "tumor",
+                "Segment1_Name": "defect_b",
                 "Segment1_LabelValue": "2",
             },
         )
@@ -1696,7 +1696,7 @@ class TestSegmentMetadataRoundtrip:
         seg.save_as(out_path, FileType.NRRD)
 
         _, header = nrrd.read(str(out_path))
-        assert _label_to_name(header) == {1: "part_body", 2: "tumor"}
+        assert _label_to_name(header) == {1: "part_body", 2: "defect_b"}
         assert header.get("Segment0_Color") == "1 0 0"
         assert not any("Extent" in k for k in header)  # grid-dependent dropped on write
 
@@ -1705,8 +1705,8 @@ class TestSegmentMetadataRoundtrip:
         seg_path = tmp_path / "inspector.seg.nrrd"
         ref_path = tmp_path / "volume.nrrd"
         data = np.zeros((8, 8, 8), dtype=np.uint8)
-        data[2:5, 2:5, 2:5] = 1  # mts
-        data[2:5, 2:5, 5:7] = 3  # benign
+        data[2:5, 2:5, 2:5] = 1  # defect
+        data[2:5, 2:5, 5:7] = 3  # cosmetic
         nrrd.write(
             str(seg_path),
             data,
@@ -1714,11 +1714,11 @@ class TestSegmentMetadataRoundtrip:
                 "space": "left-posterior-superior",
                 "space directions": np.eye(3),
                 "space origin": np.zeros(3),
-                "Segment0_Name": "mts",
+                "Segment0_Name": "defect",
                 "Segment0_LabelValue": "1",
                 "Segment0_Layer": "0",
                 "Segment0_Extent": "2 4 2 4 2 4",
-                "Segment1_Name": "benign",
+                "Segment1_Name": "cosmetic",
                 "Segment1_LabelValue": "3",
                 "Segment1_Layer": "0",
             },
@@ -1737,7 +1737,7 @@ class TestSegmentMetadataRoundtrip:
         assert conform_seg_to_grid(seg_path, ref_path) is True
         out_data, header = nrrd.read(str(seg_path))
         assert sorted(int(x) for x in np.unique(out_data) if x) == [1, 3]  # labels survive
-        assert _label_to_name(header) == {1: "mts", 3: "benign"}  # names survive
+        assert _label_to_name(header) == {1: "defect", 3: "cosmetic"}  # names survive
         assert not any("Extent" in k for k in header)  # stale grid extent dropped
 
     def test_reindex_carries_source_metadata(self, tmp_path: Path) -> None:
@@ -1748,11 +1748,11 @@ class TestSegmentMetadataRoundtrip:
         data[2:5, 2:5, 6:9] = 2
         src = _make_seg(shape=shape, data=data)
         src._nrrd_header = {
-            "Segment0_Name": "mts",
+            "Segment0_Name": "defect",
             "Segment0_LabelValue": "1",
             "Segment0_Color": "1 0 0",
             "Segment0_Extent": "2 4 2 4 2 4",
-            "Segment1_Name": "benign",
+            "Segment1_Name": "cosmetic",
             "Segment1_LabelValue": "2",
             "Segment1_Extent": "2 4 2 4 6 8",
         }
@@ -1763,7 +1763,7 @@ class TestSegmentMetadataRoundtrip:
         src.reindex_to(target).save_as(out_path, FileType.NRRD)
         out_data, header = nrrd.read(str(out_path))
         assert {int(v) for v in np.unique(out_data) if v} == {1, 2}  # both labels resampled
-        assert _label_to_name(header) == {1: "mts", 2: "benign"}
+        assert _label_to_name(header) == {1: "defect", 2: "cosmetic"}
         assert header.get("Segment0_Color") == "1 0 0"
         assert not any("Extent" in k for k in header)  # grid-dependent dropped
 
@@ -1771,36 +1771,36 @@ class TestSegmentMetadataRoundtrip:
         """A label dropped by intersection loses its metadata on save; survivors renumber."""
         shape = (10, 10, 10)
         data = np.zeros(shape, dtype=np.uint8)
-        data[1:4, 1:4, 1:4] = 1  # mts
-        data[6:9, 6:9, 6:9] = 2  # benign
+        data[1:4, 1:4, 1:4] = 1  # defect
+        data[6:9, 6:9, 6:9] = 2  # cosmetic
         a = _make_seg(shape=shape, data=data)
         a._nrrd_header = {
-            "Segment0_Name": "mts",
+            "Segment0_Name": "defect",
             "Segment0_LabelValue": "1",
-            "Segment1_Name": "benign",
+            "Segment1_Name": "cosmetic",
             "Segment1_LabelValue": "2",
         }
         other_data = np.zeros(shape, dtype=np.uint8)
-        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the mts blob
+        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the defect blob
         other = _make_seg(shape=shape, data=other_data)
 
         out_path = tmp_path / "inter.seg.nrrd"
         a.intersection(other, min_overlap=1).save_as(out_path, FileType.NRRD)
         out_data, header = nrrd.read(str(out_path))
-        assert {int(v) for v in np.unique(out_data) if v} == {1}  # benign dropped
-        assert _label_to_name(header) == {1: "mts"}  # renumbered, benign pruned
+        assert {int(v) for v in np.unique(out_data) if v} == {1}  # cosmetic dropped
+        assert _label_to_name(header) == {1: "defect"}  # renumbered, cosmetic pruned
 
     def test_union_drops_segment_names(self, tmp_path: Path) -> None:
         """union relabels into components — original per-label names no longer apply."""
         shape = (10, 10, 10)
         data = np.zeros(shape, dtype=np.uint8)
-        data[1:4, 1:4, 1:4] = 1  # mts
-        data[6:9, 6:9, 6:9] = 3  # benign
+        data[1:4, 1:4, 1:4] = 1  # defect
+        data[6:9, 6:9, 6:9] = 3  # cosmetic
         a = _make_seg(shape=shape, data=data)
         a._nrrd_header = {
-            "Segment0_Name": "mts",
+            "Segment0_Name": "defect",
             "Segment0_LabelValue": "1",
-            "Segment1_Name": "benign",
+            "Segment1_Name": "cosmetic",
             "Segment1_LabelValue": "3",
         }
         other = _make_seg(shape=shape, data=np.zeros(shape, dtype=np.uint8))
@@ -1816,23 +1816,23 @@ class TestSegmentMetadataRoundtrip:
         (else a survivor inherits an unrelated name, cf. #397)."""
         shape = (10, 10, 10)
         data = np.zeros(shape, dtype=np.uint8)
-        data[1:4, 1:4, 1:4] = 1  # mts: overlaps other -> matched -> dropped
-        data[6:9, 6:9, 6:9] = 2  # benign: no overlap -> kept, relabeled to 1
+        data[1:4, 1:4, 1:4] = 1  # defect: overlaps other -> matched -> dropped
+        data[6:9, 6:9, 6:9] = 2  # cosmetic: no overlap -> kept, relabeled to 1
         a = _make_seg(shape=shape, data=data)
         a._nrrd_header = {
-            "Segment0_Name": "mts",
+            "Segment0_Name": "defect",
             "Segment0_LabelValue": "1",
-            "Segment1_Name": "benign",
+            "Segment1_Name": "cosmetic",
             "Segment1_LabelValue": "2",
         }
         other_data = np.zeros(shape, dtype=np.uint8)
-        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the mts blob
+        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the defect blob
         other = _make_seg(shape=shape, data=other_data)
 
         out_path = tmp_path / "symdiff.seg.nrrd"
         a.symmetric_difference(other).save_as(out_path, FileType.NRRD)
         out_data, header = nrrd.read(str(out_path))
-        assert {int(v) for v in np.unique(out_data) if v} == {1}  # only benign survives
+        assert {int(v) for v in np.unique(out_data) if v} == {1}  # only cosmetic survives
         assert not any(k.startswith("Segment") for k in header)  # stale names dropped
 
 

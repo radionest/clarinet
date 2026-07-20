@@ -631,7 +631,7 @@ inspector = _seg_with_blob('Inspector', np.s_[8:17, 8:17, 8:17])
 missed = s.subtract_segmentations(projection, inspector, output_name='_Missed')
 missed_segments = missed.GetSegmentation().GetNumberOfSegments()
 
-classification = s.create_segmentation('Classification').add_segment('mts', (1, 0, 0))
+classification = s.create_segmentation('Classification').add_segment('defect', (1, 0, 0))
 
 # All three must tolerate the now-empty `missed` (pre-fix they raised an opaque error).
 s.subtract_segmentations(missed, classification, max_overlap_ratio=0.05)

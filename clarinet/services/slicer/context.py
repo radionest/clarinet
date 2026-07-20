@@ -32,7 +32,7 @@ def build_template_vars(record: RecordRead) -> dict[str, Any]:
     (``{study_anon_uid}``, ``{patient_id}`` etc.).
 
     UX layer — falls back to raw UIDs when anonymization has not yet
-    propagated, so the Slicer UI keeps rendering text for the doctor
+    propagated, so the Slicer UI keeps rendering text for the inspector
     even on records that predate the anonymization run. Backend tasks
     that need a strict anonymized path use ``Files(record)`` directly.
 
@@ -181,7 +181,7 @@ def build_slicer_context(
     # (`PacsHelper.retrieve_study(study_uid)` / `.retrieve_series(...)`).
     # On anonymized studies the PACS holds them under ``anon_uid``; on a
     # not-yet-anonymized study it still holds them under the raw UID.
-    # Fall back so the doctor can open in-flight records too.
+    # Fall back so the inspector can open in-flight records too.
     if record_level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         context["study_uid"] = (
             record.study.anon_uid if record.study else record.study_anon_uid

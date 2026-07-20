@@ -212,5 +212,5 @@ class TestBrowserTitle:
 
     def test_explicit_title_overrides_project_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CLARINET_PROJECT_NAME", "demo_ndt")
-        monkeypatch.setenv("CLARINET_PROJECT_TITLE", "НИР Артериография печени")
-        assert Settings().browser_title == "НИР Артериография печени"
+        monkeypatch.setenv("CLARINET_PROJECT_TITLE", "НИР Дефектоскопия")
+        assert Settings().browser_title == "НИР Дефектоскопия"
