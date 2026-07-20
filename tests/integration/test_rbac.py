@@ -474,7 +474,7 @@ async def test_study_date_and_description_masked_for_non_admin(
     must reach the client as the ISO string ``"1976-01-01"``.
     """
     test_patient.auto_id = 123
-    test_study.study_description = "CT ANGIO LIVER - IVANOV I.I."
+    test_study.study_description = "CT SCAN PART - BATCH 003"
     test_session.add(test_patient)
     test_session.add(test_study)
     await test_session.commit()

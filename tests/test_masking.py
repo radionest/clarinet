@@ -742,7 +742,7 @@ class TestMaskRecords:
             auto_id=1,
             study_anon_uid="9.8.7.6.5.4.3.2",
             study_date=date(2025, 1, 17),
-            study_description="CT ANGIO LIVER - IVANOV",
+            study_description="CT SCAN PART - BATCH 002",
             series_uid=None,
             series_anon_uid=None,
         )
