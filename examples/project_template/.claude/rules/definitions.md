@@ -19,7 +19,7 @@ These three classes fully describe the file types and workflow steps. All behavi
 master_model = FileDef(
     pattern="master_model.seg.nrrd",
     level="PATIENT",
-    description="Master model — one ROI per lesion with unique number",
+    description="Master model — one ROI per defect with unique number",
 )
 ```
 
@@ -36,7 +36,7 @@ master_model = FileDef(
 | Placeholder | Value |
 |---|---|
 | `{patient_id}`, `{study_uid}`, `{series_uid}` | Identifiers from the DICOM hierarchy (anonymized) |
-| `{user_id}` | ID of the user who created the record (for "per-doctor" files) |
+| `{user_id}` | ID of the user who created the record (for "per-inspector" files) |
 | `{origin_type}` | `record.record_type_name` — lets you name files after the originating record type |
 | `{data.FIELD}` | A field from `record.data` |
 
@@ -70,10 +70,10 @@ FileRef(segmentation, role="input") # named
 ```python
 segment_ct = RecordDef(
     name="segment-ct-single",
-    description="CT lesion segmentation — single study only",
+    description="CT defect segmentation — single study only",
     label="CT segment (single)",
     level="STUDY",
-    role="doctor_CT",
+    role="inspector_CT",
     min_records=2,
     max_records=4,
     slicer_script="scripts/segment.py",
@@ -123,7 +123,7 @@ All paths are relative to `config_tasks_path` (`plan/`), not to the current `rec
 
 ## Common mistakes
 
-- **A custom role not in `settings.toml`**. `RecordDef(role="surgeon")` without `extra_roles = [..., "surgeon"]` will fail during config loading.
+- **A custom role not in `settings.toml`**. `RecordDef(role="technician")` without `extra_roles = [..., "technician"]` will fail during config loading.
 - **A schema path relative to `definitions/`**. `data_schema="../schemas/X.schema.json"` is wrong — the path is relative to `plan/`, not `plan/definitions/`. Correct: `"schemas/X.schema.json"`.
 - **Slicer fields without files**. You set `slicer_script="scripts/foo.py"` but there's no such file — the config loads fine, but the task run will break.
 - **A file's `level` deeper than the record's level**. You can't set a SERIES-level file as input to a STUDY record (it doesn't know which series to read).
@@ -139,7 +139,7 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 segmentation = FileDef(
     pattern="segmentation_{user_id}.seg.nrrd",  # name depends on the user
     level="STUDY",                                # lives in the study folder
-    description="Doctor lesion segmentation",
+    description="Inspector defect segmentation",
 )
 
 # --- Record types ---
@@ -159,7 +159,7 @@ segment_ct = RecordDef(
     name="segment-ct-single",
     label="CT segment",
     level="STUDY",
-    role="doctor_CT",                              # must be in extra_roles
+    role="inspector_CT",                           # must be in extra_roles
     min_records=2,
     max_records=4,
     slicer_script="scripts/segment.py",
