@@ -1,12 +1,11 @@
-"""Pipeline flow: Liver metastasis segmentation study.
+"""Pipeline flow: NDT comparative defect-detection study.
 
-Workflow for multi-modality segmentation, master model management,
+Workflow for multi-modality defect segmentation, master model management,
 projection comparison, and second review.
 
 See README.md for full business logic description.
 
-This version uses the implemented RecordFlow/Pipeline DSL
-(as opposed to demo_liver/ which uses aspirational syntax).
+This version uses the implemented RecordFlow/Pipeline DSL.
 """
 
 from __future__ import annotations
@@ -37,17 +36,17 @@ if TYPE_CHECKING:
 F = Field()
 
 # ---------------------------------------------------------------------------
-# Pipeline tasks (выполняются в воркерах)
+# Pipeline tasks (run in workers)
 # ---------------------------------------------------------------------------
 
 
 @pipeline_task()
 def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
-    """Создание мастер-модели по первой завершённой КТ-сегментации.
+    """Build the master model from the first completed CT segmentation.
 
-    Берёт сегментацию врача, бинаризует все ненулевые вокселы,
-    разделяет на connected components с уникальными номерами,
-    сохраняет как .seg.nrrd с именованными сегментами.
+    Takes the inspector's segmentation, binarizes all non-zero voxels,
+    splits into connected components with unique numbers, and saves
+    as .seg.nrrd with named segments.
     """
     if ctx.files.exists(master_model):
         return
@@ -63,7 +62,7 @@ def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
 
     seg = Segmentation(autolabel=False)
     seg.read(seg_path)
-    # Бинаризация: все категории (mts/unclear/benign) → единый foreground
+    # Binarize: all categories (defect/indeterminate/cosmetic) → single foreground
     labeled = label(seg.img > 0).astype(np.uint8)
     unique = sorted(int(lbl) for lbl in np.unique(labeled) if lbl != 0)
     names = [str(lbl) for lbl in unique]
@@ -81,18 +80,19 @@ def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
 
 @pipeline_task()
 async def auto_project_ct(msg: PipelineMessage, ctx: TaskContext) -> None:
-    """Авто-создание проекции для КТ — копия мастер-модели.
+    """Auto-create the projection for CT — a copy of the master model.
 
-    Для КТ-исследований проекция совпадает с мастер-моделью (та же
-    координатная система). Для не-КТ запись остаётся в pending для эксперта.
+    For CT studies, the projection matches the master model (same
+    coordinate system). For non-CT studies the record stays pending
+    for the expert.
     """
     assert msg.record_id is not None
 
-    # Определяем тип исследования из first_check
+    # Determine study type from first_check
     first_checks = await ctx.records.find("first-check", study_uid=msg.study_uid)
     study_type = (first_checks[0].data or {}).get("study_type") if first_checks else None
     if study_type != "CT":
-        return  # Не КТ → оставляем в pending для эксперта
+        return  # Not CT → leave pending for the expert
 
     master_path = ctx.files.resolve(master_model)
     proj_path = ctx.files.resolve(master_projection)
@@ -104,11 +104,11 @@ async def auto_project_ct(msg: PipelineMessage, ctx: TaskContext) -> None:
 
 @pipeline_task(auto_submit=True)
 def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str, Any]:
-    """Автоматическое сравнение сегментации врача с проекцией мастер-модели.
+    """Automatically compare the inspector's segmentation with the master model projection.
 
-    Для каждого ROI проверяет пересечение:
-    - пересечение есть → один и тот же очаг
-    - пересечения нет → false negative или false positive
+    For each ROI, checks for overlap:
+    - overlap exists → same defect
+    - no overlap → false negative or false positive
 
     Returns dict with comparison results — auto-submitted via ``auto_submit``.
     """
@@ -117,8 +117,8 @@ def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str
     seg_path = ctx.files.resolve(segmentation)
     proj_path = ctx.files.resolve(master_projection)
 
-    # Бинаризация сегментации врача перед labeling:
-    # mts/unclear/benign → единый foreground → connected components
+    # Binarize the inspector's segmentation before labeling:
+    # defect/indeterminate/cosmetic → single foreground → connected components
     raw = Segmentation(autolabel=False)
     raw.read(seg_path)
     seg = Segmentation(autolabel=True)
@@ -127,11 +127,11 @@ def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str
     proj = Segmentation(autolabel=False)  # preserve master model labels
     proj.read(proj_path)
 
-    # Очаги на проекции, не найденные врачом
+    # Defects on the projection not found by the inspector
     fn = proj.difference(seg)
-    false_negative = [{"lesion_num": int(lbl)} for lbl in np.unique(fn.img) if lbl != 0]
+    false_negative = [{"defect_num": int(lbl)} for lbl in np.unique(fn.img) if lbl != 0]
 
-    # Очаги врача, отсутствующие на проекции
+    # Inspector's defects absent from the projection
     fp = seg.difference(proj)
 
     return {
@@ -280,34 +280,34 @@ async def unblock_second_reviews(
         await client.check_record_files(review.id)
 
 
-async def create_resection_report(
+async def create_repair_report(
     record: RecordRead,
     context: dict[str, Any],  # noqa: ARG001
     client: ClarinetClient,
 ) -> None:
-    """Create ``resection-report`` prefilled with lesions from resection-plan."""
+    """Create ``repair-report`` prefilled with defects from repair-plan."""
     from clarinet.models import RecordCreate
 
     plan_data = record.data or {}
-    raw_lesions = plan_data.get("lesions")
-    if not isinstance(raw_lesions, list):
-        raw_lesions = []
+    raw_defects = plan_data.get("defects")
+    if not isinstance(raw_defects, list):
+        raw_defects = []
 
     prefill: dict[str, Any] = {
-        "lesions": [
-            {"lesion_num": lesion["lesion_num"], "cluster": lesion.get("cluster")}
-            for lesion in raw_lesions
-            if isinstance(lesion, dict) and "lesion_num" in lesion
+        "defects": [
+            {"defect_num": defect["defect_num"], "cluster": defect.get("cluster")}
+            for defect in raw_defects
+            if isinstance(defect, dict) and "defect_num" in defect
         ],
-        "additional_lesions": [],
+        "additional_defects": [],
     }
 
     await client.create_record(
         RecordCreate(
-            record_type_name="resection-report",
+            record_type_name="repair-report",
             patient_id=record.patient_id,
             data=prefill,
-            context_info=f"Created by flow from resection-plan (id={record.id})",
+            context_info=f"Created by flow from repair-plan (id={record.id})",
         )
     )
 
@@ -358,10 +358,10 @@ async def create_view_nifti_record(
 
 
 # ---------------------------------------------------------------------------
-# Flow: создание записей по результатам first-check
+# Flow: record creation from first-check results
 # ---------------------------------------------------------------------------
 
-# При поступлении нового исследования создаётся first-check
+# A new study arriving creates a first-check
 (study().on_creation().create_record("first-check"))
 
 # first-check → anonymize-study (instead of direct segmentation creation)
@@ -388,63 +388,63 @@ async def create_view_nifti_record(
     .match(F.study_type)
     .case("CT")
     .create_record("segment-ct-single", "segment-ct-with-archive")
-    .case("MRI")
-    .create_record("segment-mri-single")
-    .case("CT-AG")
-    .create_record("segment-ctag-single")
-    .case("MRI-AG")
-    .create_record("segment-mriag-single")
-    .case("PDCT-AG")
-    .create_record("segment-pdctag-single")
+    .case("UT")
+    .create_record("segment-ut-single")
+    .case("CT-HD")
+    .create_record("segment-ct-hd-single")
+    .case("UT-HD")
+    .create_record("segment-ut-hd-single")
+    .case("MCT")
+    .create_record("segment-mct-single")
 )
 
 # ---------------------------------------------------------------------------
-# Flow: после завершения сегментации
+# Flow: after segmentation completes
 # ---------------------------------------------------------------------------
 
-# Список всех типов сегментации (single-варианты)
+# All single-variant segmentation types
 SEGMENT_TYPES = [
     "segment-ct-single",
-    "segment-mri-single",
-    "segment-ctag-single",
-    "segment-mriag-single",
-    "segment-pdctag-single",
+    "segment-ut-single",
+    "segment-ct-hd-single",
+    "segment-ut-hd-single",
+    "segment-mct-single",
 ]
 
 for seg_type in SEGMENT_TYPES:
-    # Создание проекции мастер-модели на серию сегментации
+    # Create the master model projection onto the segmentation's series
     (record(seg_type).on_finished().call(create_projection_record))
-    # Каждая сегментация создаёт compare-with-projection, привязанный к себе как parent
+    # Each segmentation creates a compare-with-projection, bound to itself as parent
     (record(seg_type).on_finished().call(create_comparison_record))
 
-# segment-ct-with-archive тоже запускает проекцию и сравнение
+# segment-ct-with-archive also triggers projection and comparison
 (record("segment-ct-with-archive").on_finished().call(create_projection_record))
 (record("segment-ct-with-archive").on_finished().call(create_comparison_record))
 
-# Создание мастер-модели по первой завершённой КТ-сегментации с архивом
+# Build the master model from the first completed CT-with-archive segmentation
 (record("segment-ct-with-archive").on_finished().do_task(init_master_model))
 
 # ---------------------------------------------------------------------------
-# Flow: авто-проекция для КТ при создании записи
+# Flow: auto-projection for CT on record creation
 # ---------------------------------------------------------------------------
 
 (record("create-master-projection").on_status("pending").do_task(auto_project_ct))
 
 # ---------------------------------------------------------------------------
-# Flow: после завершения проекции -> разблокировка сравнений
+# Flow: after projection completes -> unblock comparisons
 # ---------------------------------------------------------------------------
 
 (record("create-master-projection").on_finished().call(unblock_comparisons))
 (record("create-master-projection").on_finished().call(unblock_second_reviews))
 
-# Автозаполнение compare-with-projection при создании (role=auto)
+# Auto-fill compare-with-projection on creation (role=auto)
 (record("compare-with-projection").on_status("pending").do_task(compare_w_projection))
 
 # ---------------------------------------------------------------------------
-# Flow: по результатам сравнения
+# Flow: reacting to comparison results
 # ---------------------------------------------------------------------------
 
-# false_positive > 0 -> создать update-master-model
+# false_positive > 0 -> create update-master-model
 (
     record("compare-with-projection")
     .on_finished()
@@ -452,7 +452,7 @@ for seg_type in SEGMENT_TYPES:
     .create_record("update-master-model")
 )
 
-# Любые расхождения -> second-review для врача (callback for parent_record_id)
+# Any discrepancy -> second-review for the inspector (callback for parent_record_id)
 (
     record("compare-with-projection")
     .on_finished()
@@ -461,31 +461,31 @@ for seg_type in SEGMENT_TYPES:
 )
 
 # ---------------------------------------------------------------------------
-# Flow: инвалидация проекций при обновлении мастер-модели
+# Flow: invalidate projections when the master model is updated
 # ---------------------------------------------------------------------------
 
 (file("master_model").on_update().invalidate_all_records("create-master-projection"))
 
 # ---------------------------------------------------------------------------
-# Flow: стадии 10-14 (MDK → хирургия → гистология)
+# Flow: stages 10-14 (MRB → repair → metallography)
 # ---------------------------------------------------------------------------
 
-# MDK conclusion → resection-model (expert creates 3D model)
-(record("mdk-conclusion").on_finished().create_record("resection-model"))
+# MRB conclusion → repair-model (expert creates 3D model)
+(record("mrb-conclusion").on_finished().create_record("repair-model"))
 
-# resection-model → resection-plan (expert plans resection zones)
-(record("resection-model").on_finished().create_record("resection-plan"))
+# repair-model → repair-plan (expert plans repair zones)
+(record("repair-model").on_finished().create_record("repair-plan"))
 
-# resection-plan → resection-report (prefilled with lesion list for surgeon)
-(record("resection-plan").on_finished().call(create_resection_report))
+# repair-plan → repair-report (prefilled with defect list for technician)
+(record("repair-plan").on_finished().call(create_repair_report))
 
-# Intraop: if additional lesions found → update master model
+# In-process: if additional defects found → update master model
 (
-    record("intraop-protocol")
+    record("repair-protocol")
     .on_finished()
     .if_record(F.additionally_found > 0)
     .create_record("update-master-model")
 )
 
-# Note: retrospective-semiotics (stage 8) — created manually by coordinator
-# after 4-7 week washout period (no automatic trigger)
+# Note: retrospective-characterization (stage 8) — created manually by coordinator
+# after a blind-reassessment interval (no automatic trigger)

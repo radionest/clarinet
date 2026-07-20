@@ -18,8 +18,8 @@ import numpy as np
 # Label maps
 # ---------------------------------------------------------------------------
 
-SEG_LABELS: dict[str, int] = {"mts": 1, "unclear": 2, "benign": 3}
-REVIEW_LABELS: dict[str, int] = {"mts": 1, "unclear": 2, "benign": 3, "invisible": 4}
+SEG_LABELS: dict[str, int] = {"defect": 1, "indeterminate": 2, "cosmetic": 3}
+REVIEW_LABELS: dict[str, int] = {"defect": 1, "indeterminate": 2, "cosmetic": 3, "invisible": 4}
 
 
 def master_label_converter(name: str) -> int:
