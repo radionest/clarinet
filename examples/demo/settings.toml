@@ -1,6 +1,6 @@
 project_name = "NDT Comparative Study"
 project_description = "Comparative evaluation of non-destructive testing (NDT) imaging modalities for internal-defect detection in cast parts"
-extra_roles = ["inspector_CT", "inspector_UT", "inspector_MCT", "inspector_CT-HD", "mrb", "technician", "analyst"]
+extra_roles = ["inspector", "inspector_CT", "inspector_UT", "inspector_MCT", "inspector_CT-HD", "mrb", "technician", "analyst"]
 debug = true
 log_level = "DEBUG"
 log_console_level = "INFO"
