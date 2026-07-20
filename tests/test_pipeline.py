@@ -1194,11 +1194,11 @@ class TestQueueNamespacing:
 
     def test_custom_project_name_namespaces_all_queues(self, monkeypatch):
         """A custom project_name produces a namespaced queue set."""
-        monkeypatch.setattr(settings, "project_name", "Liver Project")
-        assert settings.default_queue_name == "liver_project.default"
-        assert settings.gpu_queue_name == "liver_project.gpu"
-        assert settings.dicom_queue_name == "liver_project.dicom"
-        assert settings.dlq_queue_name == "liver_project.dead_letter"
+        monkeypatch.setattr(settings, "project_name", "Demo Project")
+        assert settings.default_queue_name == "demo_project.default"
+        assert settings.gpu_queue_name == "demo_project.gpu"
+        assert settings.dicom_queue_name == "demo_project.dicom"
+        assert settings.dlq_queue_name == "demo_project.dead_letter"
 
     def test_decorator_binds_to_namespaced_queue(self, monkeypatch):
         """@pipeline_task() registers on the project-namespaced default queue."""
@@ -1209,10 +1209,10 @@ class TestQueueNamespacing:
         reset_brokers()  # next get_broker_for(...) creates a fresh broker
 
         @pipeline_task()
-        async def liver_default_task(msg, ctx):
+        async def demo_default_task(msg, ctx):
             pass
 
-        assert liver_default_task._pipeline_queue == "liver.default"
+        assert demo_default_task._pipeline_queue == "liver.default"
         assert is_registered("liver.default")
         assert "liver.default" in get_all_brokers()
 

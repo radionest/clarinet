@@ -595,9 +595,9 @@ async def test_setop_tolerates_emptied_source(
     slicer_service: SlicerService,
     slicer_url: str,
 ) -> None:
-    """nir_liver second_review flow: a subtract empties the source, set-ops tolerate it.
+    """NDT demo second_review flow: a subtract empties the source, set-ops tolerate it.
 
-    Reproduces the regression: when the doctor covers every projected lesion,
+    Reproduces the regression: when the inspector covers every projected defect,
     `missed` becomes empty and feeds merge_as_pool / subtract / binarize. These
     must no-op (with a warning), not raise.
     """
@@ -625,10 +625,10 @@ def _seg_with_blob(name, sl):
 
 
 projection = _seg_with_blob('Projection', np.s_[10:15, 10:15, 10:15])
-doctor = _seg_with_blob('Doctor', np.s_[8:17, 8:17, 8:17])
+inspector = _seg_with_blob('Inspector', np.s_[8:17, 8:17, 8:17])
 
-# Doctor fully covers the projected ROI → ROI-level subtract empties the result.
-missed = s.subtract_segmentations(projection, doctor, output_name='_Missed')
+# Inspector fully covers the projected ROI → ROI-level subtract empties the result.
+missed = s.subtract_segmentations(projection, inspector, output_name='_Missed')
 missed_segments = missed.GetSegmentation().GetNumberOfSegments()
 
 classification = s.create_segmentation('Classification').add_segment('mts', (1, 0, 0))

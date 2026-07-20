@@ -184,7 +184,7 @@ async def _seed_graph(session: AsyncSession) -> dict[str, str]:
 
     rt = make_record_type(name="first-check", data_schema=_SCHEMA)
     session.add(rt)
-    user = make_user(email="doctor@hospital.com", is_superuser=False)
+    user = make_user(email="inspector@example.com", is_superuser=False)
     admin = make_user(email="admin@clarinet.ru", is_superuser=True)
     session.add(user)
     session.add(admin)
@@ -318,7 +318,7 @@ async def test_scrub_db_end_to_end(test_session: AsyncSession) -> None:
 
     user_emails = (await test_session.execute(select(User.email))).scalars().all()
     assert meta["admin_email"] in user_emails  # superuser kept
-    assert any(e.endswith("@example.invalid") for e in user_emails)  # doctor scrubbed
+    assert any(e.endswith("@example.invalid") for e in user_emails)  # inspector scrubbed
     hashes = (await test_session.execute(select(User.hashed_password))).scalars().all()
     assert all(h == "!scrubbed-no-login!" for h in hashes)  # credentials blanked (all roles)
 

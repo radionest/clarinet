@@ -1682,7 +1682,7 @@ class TestSegmentMetadataRoundtrip:
                 "space": "left-posterior-superior",
                 "space directions": np.eye(3),
                 "space origin": np.zeros(3),
-                "Segment0_Name": "liver",
+                "Segment0_Name": "part_body",
                 "Segment0_LabelValue": "1",
                 "Segment0_Color": "1 0 0",
                 "Segment0_Extent": "1 3 1 3 1 3",
@@ -1696,13 +1696,13 @@ class TestSegmentMetadataRoundtrip:
         seg.save_as(out_path, FileType.NRRD)
 
         _, header = nrrd.read(str(out_path))
-        assert _label_to_name(header) == {1: "liver", 2: "tumor"}
+        assert _label_to_name(header) == {1: "part_body", 2: "tumor"}
         assert header.get("Segment0_Color") == "1 0 0"
         assert not any("Extent" in k for k in header)  # grid-dependent dropped on write
 
     def test_conform_preserves_segment_names(self, tmp_path: Path) -> None:
         """conform_seg_to_grid round-trips Name/LabelValue across a Z-flip resample."""
-        seg_path = tmp_path / "doctor.seg.nrrd"
+        seg_path = tmp_path / "inspector.seg.nrrd"
         ref_path = tmp_path / "volume.nrrd"
         data = np.zeros((8, 8, 8), dtype=np.uint8)
         data[2:5, 2:5, 2:5] = 1  # mts

@@ -112,8 +112,8 @@ class TestAnonIdPrefixValidator:
         assert Settings().anon_id_prefix == ""
 
     def test_alphanumeric_with_separators_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "NIR_LIVER-V2")
-        assert Settings().anon_id_prefix == "NIR_LIVER-V2"
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "DEMO-NDT-V2")
+        assert Settings().anon_id_prefix == "DEMO-NDT-V2"
 
     def test_rejects_non_ascii(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "кириллица")
@@ -205,12 +205,12 @@ class TestBrowserTitle:
     """`browser_title` controls the SPA <title>; falls back to project_name."""
 
     def test_falls_back_to_project_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CLARINET_PROJECT_NAME", "nir_liver")
+        monkeypatch.setenv("CLARINET_PROJECT_NAME", "demo_ndt")
         s = Settings()
         assert s.project_title is None
-        assert s.browser_title == "nir_liver"
+        assert s.browser_title == "demo_ndt"
 
     def test_explicit_title_overrides_project_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CLARINET_PROJECT_NAME", "nir_liver")
+        monkeypatch.setenv("CLARINET_PROJECT_NAME", "demo_ndt")
         monkeypatch.setenv("CLARINET_PROJECT_TITLE", "НИР Артериография печени")
         assert Settings().browser_title == "НИР Артериография печени"

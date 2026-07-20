@@ -255,7 +255,7 @@ def test_standard_vars_patient_level(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_study_level_falls_back_for_unanon_study(mock_settings):
     """Slicer is the UI layer — open in-flight records under the raw UID
-    instead of refusing the request, so the doctor can review data that
+    instead of refusing the request, so the inspector can review data that
     has not been anonymized yet.
     """
     mock_settings.storage_path = "/storage"
