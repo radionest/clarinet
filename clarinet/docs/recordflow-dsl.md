@@ -40,7 +40,7 @@ paths:
 record("first_check").on_finished().if_record(F.is_good == True)
     .match(F.study_type)
     .case("CT").create_record("seg_CT_single", "seg_CT_archive")
-    .case("MRI").create_record("seg_MRI_single")
+    .case("UT").create_record("seg_UT_single")
     .default().create_record("seg_unknown")
 ```
 
@@ -82,7 +82,7 @@ Two patterns for referencing record data fields:
 
 ```python
 # Cross-record: explicit record type name (creates side-effect FlowRecord)
-record('report').data.findings.tumor_size
+record('report').data.findings.defect_size
 record('report').d.field_name               # Shorthand
 
 # Self-referential: Field proxy for triggering record's own data

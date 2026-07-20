@@ -119,7 +119,7 @@ in hand (a parent, a re-fetched copy, another patient's record), use
 parents = await ctx.records.find("study-root", study_uid=msg.study_uid)
 if parents:
     parent_files = ctx.files_for(parents[0])  # -> Files
-    mask = parent_files.resolve("liver_mask")
+    mask = parent_files.resolve("part_mask")
 ```
 
 `ctx.files_for` exists on both `TaskContext` (async) and `SyncTaskContext`
@@ -279,7 +279,7 @@ F = Field()
 # Pattern matching on a field
 .match(F.study_type)
     .case("CT").create_record("segment-ct")
-    .case("MRI").create_record("segment-mri")
+    .case("UT").create_record("segment-ut")
     .default().create_record("segment-unknown")
 ```
 
@@ -330,7 +330,7 @@ Comparing fields across **different** records (not self-referential):
 
 ```python
 record("ai-analysis").on_finished().if_(
-    record("ai-analysis").data.diagnosis != record("doctor-review").data.diagnosis
+    record("ai-analysis").data.classification != record("inspector-review").data.classification
 ).create_record("expert-check")
 ```
 
@@ -348,7 +348,7 @@ record("ai-analysis").on_finished().if_(
     .if_record(F.is_good == True)
     .match(F.study_type)
     .case("CT").create_record("segment-ct-single")
-    .case("MRI").create_record("segment-mri-single")
+    .case("UT").create_record("segment-ut-single")
 )
 
 # 3. Segmentation → automatic comparison

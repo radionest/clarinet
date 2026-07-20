@@ -111,7 +111,7 @@ Bare Python scripts that run inside the 3D Slicer environment. Each file is one 
 At the top of every script — a docstring listing the context vars. This is a **contract** between the script and the framework: it makes it easier for the agent to orient itself, ensures the validator gets the same vars, and makes the correspondence with the `RecordDef` explicit.
 
 ```python
-"""Slicer script — lesion segmentation on a single study.
+"""Slicer script — defect segmentation on a single study.
 
 Context variables (injected by build_slicer_context):
     working_folder: Absolute path to the working directory (auto).
@@ -136,8 +136,8 @@ s.load_series_from_pacs(study_uid, series_uid, window=(-200, 300))
 # Segmentation
 seg = (
     s.create_segmentation("Segmentation")
-    .add_segment("mts", (1.0, 0.0, 0.0))     # red
-    .add_segment("benign", (0.0, 1.0, 0.0))  # green
+    .add_segment("defect", (1.0, 0.0, 0.0))       # red
+    .add_segment("cosmetic", (0.0, 1.0, 0.0))     # green
 )
 seg = s.load_segmentation(output_file, "Segmentation")
 s.copy_segments(src_seg, dst_seg, empty=True)
@@ -147,7 +147,7 @@ s.sync_segments(src_seg, dst_seg, empty=True)
 s.setup_editor(seg, effect="Paint", brush_size=5.0)
 s.set_layout("axial")
 s.set_dual_layout(vol_a, vol_b, seg_a=..., seg_b=..., linked=False)
-s.annotate("Segment all lesions")
+s.annotate("Segment all defects")
 s.add_view_shortcuts()
 
 # Alignment
@@ -157,7 +157,7 @@ s.refine_alignment_by_centroids(projection, master_seg, align_tf)
 
 ### Idempotency
 
-A script may be reopened (e.g. a doctor wants to continue a segmentation). So the standard pattern is checking whether the output already exists:
+A script may be reopened (e.g. an inspector wants to continue a segmentation). So the standard pattern is checking whether the output already exists:
 
 ```python
 import os
@@ -165,7 +165,7 @@ import os
 if os.path.isfile(output_file):
     seg = s.load_segmentation(output_file, "Segmentation")
 else:
-    seg = s.create_segmentation("Segmentation").add_segment("mts", (1.0, 0.0, 0.0))
+    seg = s.create_segmentation("Segmentation").add_segment("defect", (1.0, 0.0, 0.0))
 ```
 
 ### Common patterns
@@ -198,7 +198,7 @@ Bare Python scripts that run in Slicer **after** the user clicks "save". The sam
 node = slicer.util.getNode("Segmentation")  # type: ignore[name-defined]  # noqa: F821
 seg = node.GetSegmentation()
 
-expected = {"mts", "unclear", "benign"}
+expected = {"defect", "indeterminate", "cosmetic"}
 current = set()
 for i in range(seg.GetNumberOfSegments()):
     sid = seg.GetNthSegmentID(i)
@@ -221,7 +221,7 @@ Structure:
 
 **Required segment set** — all needed segments are present:
 ```python
-expected = {"mts", "unclear", "benign"}
+expected = {"defect", "indeterminate", "cosmetic"}
 if current != expected:
     raise ValueError(f"Expected {expected}, got {current}")
 ```

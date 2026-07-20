@@ -55,7 +55,7 @@ Every plan file imports as a `clarinet_plan.` submodule off this single root
 project_name = "My Study"
 root_url = "/my_study"                          # Sub-path prefix
 api_base_url = "http://127.0.0.1:8111/my_study/api"
-extra_roles = ["doctor", "surgeon"]             # Custom roles beyond admin/user
+extra_roles = ["inspector", "technician"]       # Custom roles beyond admin/user
 
 config_mode = "python"                          # "toml" (default) or "python"
 config_tasks_path = "./plan/"                   # Root for config files

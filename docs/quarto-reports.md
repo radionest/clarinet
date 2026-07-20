@@ -43,8 +43,8 @@ single `reference.docx`. The command refuses to overwrite an existing one unless
 `--force` is set, so adding a second report to an already-scaffolded folder is
 safe — the existing styles file is kept.
 
-**`--from-docx` scrubs author content, keeps the letterhead.** A clinical
-document used as a branding template can carry patient data far beyond the main
+**`--from-docx` scrubs author content, keeps the letterhead.** A source
+document used as a branding template can carry sensitive personal data far beyond the main
 body, so the import strips it thoroughly. **Scrubbed:** the document body;
 footnotes and endnotes; comments (text *and* reviewer names in `w:author` /
 `w:initials`) and the `people.xml` roster; document authorship and metadata in
