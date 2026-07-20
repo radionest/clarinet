@@ -20,14 +20,14 @@ if pool_seg_id is not None:
         scalars = labelmap.GetPointData().GetScalars()
         if scalars is not None and vtk_to_numpy(scalars).any():
             raise ValueError(
-                "Not all missed lesions have been classified. "
+                "Not all missed defects have been classified. "
                 "Use Islands tool to assign remaining _pool islands to a category."
             )
 
     seg.RemoveSegment(pool_seg_id)
 
 # Validate segment names
-expected = {"mts", "unclear", "benign", "invisible"}
+expected = {"defect", "indeterminate", "cosmetic", "invisible"}
 current = set()
 for i in range(seg.GetNumberOfSegments()):
     sid = seg.GetNthSegmentID(i)

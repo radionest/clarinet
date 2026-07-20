@@ -3,7 +3,7 @@
 node = slicer.util.getNode("Segmentation")  # type: ignore[name-defined]  # noqa: F821
 seg = node.GetSegmentation()
 
-expected = {"mts", "unclear", "benign"}
+expected = {"defect", "indeterminate", "cosmetic"}
 current = set()
 for i in range(seg.GetNumberOfSegments()):
     sid = seg.GetNthSegmentID(i)

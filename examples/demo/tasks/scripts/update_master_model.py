@@ -3,9 +3,9 @@
 Dual-layout mode (when projection data available):
     Left: CT reference volume + master model segmentation.
     Right: Target modality volume + projection with computed NEW_* false-positive ROIs.
-    Expert marks NEW_* lesions from the right panel onto the master model on the left.
+    Expert marks NEW_* defects from the right panel onto the master model on the left.
 
-Single-layout fallback (intraop trigger, no projection):
+Single-layout fallback (in-process trigger, no projection):
     CT volume + master model segmentation in axial view.
 
 Auto-numbering happens at save/validation (master_model_validator.py),
@@ -15,13 +15,13 @@ Context variables (injected by build_slicer_context):
     working_folder: Absolute path to the working directory (auto).
     master_model: Path to the master model segmentation file (auto, from file_registry).
     output_file: Same as master_model (auto, first OUTPUT file).
-    best_study_uid: Anon UID of the patient's first study (from patient_first_study).
+    best_study_uid: Anon UID of the part's first study (from patient_first_study).
     model_study_uid: CT reference study anon UID (from model_series_for_projection).
     model_series_uid: CT reference series anon UID (from model_series_for_projection).
     target_study_uid: Target study anon UID (from projection_for_update).
     target_series_uid: Target series anon UID (from projection_for_update).
     projection_path: Path to master projection segmentation (from projection_for_update).
-    doctor_segmentation_path: Path to doctor's segmentation (from projection_for_update).
+    inspector_segmentation_path: Path to inspector's segmentation (from projection_for_update).
     pacs_*: PACS connection parameters (auto).
 """
 
@@ -41,7 +41,7 @@ s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 has_projection = False
 try:
     _proj_path = projection_path  # type: ignore[name-defined]
-    _doc_path = doctor_segmentation_path  # type: ignore[name-defined]
+    _doc_path = inspector_segmentation_path  # type: ignore[name-defined]
     if os.path.isfile(_proj_path) and os.path.isfile(_doc_path):
         has_projection = True
 except NameError:
@@ -78,21 +78,21 @@ if has_projection:
     # 4. Load projection segmentation (ref geometry from target_vol)
     projection = s.load_segmentation(projection_path, "Projection")  # type: ignore[name-defined]  # noqa: F821
 
-    # 5. Load doctor's segmentation (ref geometry from target_vol — same coord space)
-    doctor_seg = s.load_segmentation(doctor_segmentation_path, "DoctorSeg")  # type: ignore[name-defined]  # noqa: F821
+    # 5. Load inspector's segmentation (ref geometry from target_vol — same coord space)
+    inspector_seg = s.load_segmentation(inspector_segmentation_path, "InspectorSeg")  # type: ignore[name-defined]  # noqa: F821
 
-    # 6. Binarize + split doctor's segmentation into connected components
-    doctor_islands = s.binarize_and_split_islands(doctor_seg, output_name="_DocIslands")
-    slicer.mrmlScene.RemoveNode(doctor_seg)  # type: ignore[name-defined]
+    # 6. Binarize + split inspector's segmentation into connected components
+    inspector_islands = s.binarize_and_split_islands(inspector_seg, output_name="_InspIslands")
+    slicer.mrmlScene.RemoveNode(inspector_seg)  # type: ignore[name-defined]
 
     # 7. Compute NEW_* false positives — ROI-level difference
-    fp_node = s.subtract_segmentations(doctor_islands, projection, output_name="_FP_tmp")
+    fp_node = s.subtract_segmentations(inspector_islands, projection, output_name="_FP_tmp")
     if fp_node.GetSegmentation().GetNumberOfSegments() > 0:
         s.rename_segments(fp_node, prefix="NEW", color=(1.0, 1.0, 0.0))
         s.copy_segments(fp_node, projection)  # filled → right panel
         s.copy_segments(fp_node, master_seg, empty=True)  # empty → left panel
     slicer.mrmlScene.RemoveNode(fp_node)  # type: ignore[name-defined]
-    slicer.mrmlScene.RemoveNode(doctor_islands)  # type: ignore[name-defined]
+    slicer.mrmlScene.RemoveNode(inspector_islands)  # type: ignore[name-defined]
 
     # 8. Side-by-side: model CT + master (left) | target + projection with NEW_* (right)
     s.set_dual_layout(model_vol, target_vol, seg_a=master_seg, seg_b=projection, linked=False)
@@ -117,10 +117,10 @@ if has_projection:
     s.add_view_shortcuts()
 
     # 13. Annotation
-    s.annotate("Update master model \u2014 mark NEW lesions from right panel")
+    s.annotate("Update master model — mark NEW defects from right panel")
 
 else:
-    # === SINGLE LAYOUT FALLBACK (intraop trigger) ===
+    # === SINGLE LAYOUT FALLBACK (in-process trigger) ===
 
     # Load CT volume
     try:
@@ -144,4 +144,4 @@ else:
     s.set_layout("axial")
     s.add_view_shortcuts()
 
-    s.annotate("Update master model \u2014 add new ROIs")
+    s.annotate("Update master model — add new ROIs")
