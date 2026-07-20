@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "title": "Repair report",
+  "properties": {
+    "defects": {
+      "type": "array",
+      "title": "Defects from master model",
+      "items": {
+        "type": "object",
+        "properties": {
+          "defect_num": {
+            "type": "integer",
+            "title": "Defect #",
+            "readOnly": true
+          },
+          "cluster": {
+            "type": "integer",
+            "title": "Cluster",
+            "description": "Repair cluster number (empty = not repaired)"
+          }
+        },
+        "required": ["defect_num"]
+      }
+    },
+    "additional_defects": {
+      "type": "array",
+      "title": "Additional defects",
+      "description": "Defects found during repair, absent from the master model",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "cluster": {
+            "type": "integer",
+            "title": "Cluster"
+          }
+        }
+      }
+    }
+  },
+  "required": ["defects"]
+}

@@ -3,7 +3,7 @@
     "properties": {
         "is_good": {
             "type": "boolean",
-            "description": "Whether the study is suitable for the trial"
+            "description": "Whether the study is suitable for the demo"
         }
     },
     "required": ["is_good"],
@@ -14,12 +14,12 @@
         "properties": {
             "study_type": {
                 "type": "string",
-                "enum": ["CT-archive", "CT", "MRI", "CT-AG", "MRI-AG", "PDCT-AG"],
+                "enum": ["CT-archive", "CT", "UT", "CT-HD", "UT-HD", "MCT"],
                 "description": "Modality type"
             },
             "best_series": {
                 "type": "string",
-                "description": "DICOM UID of the best series for metastasis visualization",
+                "description": "DICOM UID of the best series for defect visualization",
                 "x-options": {"source": "study_series"}
             }
         },
