@@ -1,67 +1,55 @@
-intro_analysisКонечно. Вот подборка литературных источников, которые поддерживают ключевые тезисы вашего введения. Я сгруппировал их по методологическим проблемам, которые вы обозначили в дизайне.
+# Methodology notes: absence of an absolute ground truth in NDT defect detection
 
-## Сводная таблица релевантных источников
+This study's master-model design addresses a well-documented problem in
+non-destructive testing (NDT) reliability research: there is rarely an
+absolute, independently verifiable ground truth for whether a given
+indication is a true defect.
 
-| Методологическая проблема | Ключевая ссылка | Краткое обоснование релевантности |
-| :--- | :--- | :--- |
-| **Парадокс золотого стандарта** | Aeffner et al.  | Прямое обсуждение проблемы использования субъективной экспертной оценки как референса для объективных методов. |
-| **Смещение при отсутствии истины** | Jha et al. ; блог WashU  | Разработка статистических методов (NGS) для оценки точности измерений, когда "истина" (gold standard) недоступна. |
-| **Ошибки включения (incorporation/integration bias)** | Kuya et al.  | Наглядная демонстрация того, как использование экспертного мнения в качестве референса может искажать (завышать или занижать) оценку чувствительности и специфичности диагностического теста. |
-| **Когнитивные искажения (якорение)** | Flores-Cordova et al.  | Клинический пример, иллюстрирующий, как предварительная информация (УЗИ, холедохолитиаз) приводит к "якорению" и отсрочке правильного диагноза (метастазы меланомы). |
-| **Проблемы верификации очагов в печени** | Winkler et al. (аппарат)  | Пример использования клинического наблюдения (динамики) и дополнительных методов как референс-стандарта, что подчеркивает сложность создания "золотого стандарта" в гепатологии. |
-| **Сложности дифференциальной диагностики в печени** | Обзор по ГЦК ; Обзор по иммунотерапии  | Детально описывают проблему "маскировки" — другие злокачественные и доброкачественные образования (холангиокарцинома, гемангиомы), которые могут имитировать ГЦК, что обосновывает необходимость мультимодального подхода. |
+## The "true-state" problem in POD studies
 
----
+Probability-of-Detection (POD) methodology (see MIL-HDBK-1823A, the
+standard reference for NDT reliability assessment) faces the same paradox
+as expert-scored image analysis in other fields: using an expert's call as
+the reference standard to validate a more objective or more sensitive
+method is circular when the expert's call is itself uncertain. This is why
+POD studies typically require an independent "truth" determination —
+destructive sectioning, a higher-fidelity reference modality, or a
+consensus panel — rather than a single inspector's read.
 
-## Детальная разбивка по разделам введения
+## Incorporation bias across modalities
 
-### 1. Проблема отсутствия абсолютного «золотого стандарта» (Парадокс золотого стандарта)
+When a study evaluates multiple NDT modalities on the same part, showing
+an inspector the result of one modality before they read another
+introduces incorporation bias: knowledge of a prior finding can inflate
+apparent sensitivity of the later read (a missed indication on the second
+modality gets excused as "already known") or deflate its apparent
+specificity (an indication only visible on the more sensitive modality
+gets miscounted as a false call). This is the direct justification for
+this study's strict modality isolation and controlled viewing sequence —
+inspectors read the least sensitive method first and are not shown prior
+results until their independent read is submitted.
 
-Ваш тезис о том, что субъективная эксперта или наблюдение в динамике не являются идеальным референсом, находит прямое подтверждение в литературе.
+## Masking / false-call sources
 
-*   **Aeffner, F., Wilson, K., Martin, N. T., et al. (2017). The Gold Standard Paradox in Digital Image Analysis: Manual Versus Automated Scoring as Ground Truth.** *Archives of Pathology & Laboratory Medicine*.
-    *   **Цитата:** "Парадокс этой стратегии валидации заключается в том, что количественный анализ изображений (tIA) часто используется для помощи патологам в оценке сложных биомаркеров именно потому, что он более объективен и воспроизводим, чем ручная оценка, и позволяет преодолеть известные погрешности визуальной оценки тканей человеком."
-    *   **Как использовать:** Эта работа идеально подходит для обоснования первой проблемы. Она напрямую говорит о том, что использование мнения эксперта как "золотого стандарта" для валидации более объективных методов является парадоксальным. Это напрямую подтверждает необходимость создания суррогатного стандарта, такого как ваша мастер-модель.
+A method that resolves finer detail than the reference standard will
+surface indications the reference can't confirm or deny. Rather than
+discarding those as noise, this design routes them through the
+**second-review** stage, which separates two distinct causes: a *method
+limitation* (the defect genuinely isn't resolvable on that modality —
+classified "invisible") from an *observer miss* (the defect is visible but
+was skipped — classified defect/indeterminate/cosmetic). Distinguishing
+these is standard practice in POD analysis, where "hit/miss" data is only
+meaningful once observer error is separated from detectability limits.
 
-*   **Jha, A. K., et al. (2016). A no-gold-standard technique for objective assessment of quantitative nuclear-medicine imaging methods.** *Physics in Medicine and Biology*.  и блог лаборатории Jha
-    *   **Суть:** Эти источники описывают математические подходы (No-Gold-Standard techniques) для оценки точности количественных методов визуализации, когда истинное значение (ground truth) неизвестно.
-    *   **Как использовать:** Это техническое обоснование того, что научное сообщество признает проблему отсутствия золотого стандарта и активно ищет пути ее решения. Ваш дизайн с итеративной мастер-моделью — это клинико-организационная реализация похожей идеи.
+## Incomplete verification
 
-### 2. Проблема "Интегративного знания" (Incorporation/Integration Bias)
-
-Ваш тезис о том, что знание результатов КТ искажает оценку МРТ, является классическим примером систематической ошибки.
-
-*   **Kuya, K., et al. (2023). Representative figures of biased diagnostic performance when expert-determined standards are applied as ground truth in the reader study.** *Korean Journal of Radiology*.
-    *   **Рисунок 3** в этой статье прямо иллюстрирует вашу мысль. Авторы показывают, что если использовать "экспертный стандарт" вместо истинного клинического (патология), то можно как **завысить чувствительность** (ложноотрицательный результат эксперта станет истинноотрицательным), так и **занизить специфичность** (истинноположительный результат эксперта станет ложноположительным) .
-    *   **Как использовать:** Это сильная визуальная и концептуальная поддержка вашего утверждения о том, что опора на мнение эксперта искажает результаты. Это обосновывает вашу строгую изоляцию модальностей и контроль последовательности их просмотра.
-
-*   **Flores-Cordova, E., et al. (2023). Anchoring Bias in the Evaluation of Cholestasis: When Gallstone Disease Delays the Diagnosis of Hepatic Infiltration by Metastatic Melanoma.** *The American Journal of Gastroenterology*.
-    *   **Суть:** Клинический случай, где диагноз был поставлен неверно из-за "якорения" на первоначальных данных УЗИ (камни в желчном пузыре), что привело к задержке диагностики диффузной инфильтрации печени метастазами меланомы.
-    *   **Как использовать:** Хотя это не исследование диагностических методов, случай отлично иллюстрирует силу когнитивных искажений и влияние предшествующей информации (контекста) на интерпретацию. Это служит отличной метафорой и обоснованием для того, почему врачи в вашем исследовании на этапе первичной сегментации должны видеть только текущее исследование.
-
-### 3. Проблема "Неполной истины" и "Маскировки" (Mimickers)
-
-Ваш тезис о том, что новые методы могут видеть больше, но их находки ошибочно классифицируются как ложноположительные, связан с проблемой дифференциальной диагностики.
-
-*   **Обзор по диагностике ГЦК (KoreaMed Synapse, 2025).**
-    *   **Цитата:** В разделе про внутрипеченочную холангиокарциному (ICC): "ICC... может демонстрировать несвязанное с мишенью APHE с вымыванием или без него и может быть отнесена к категории определенного или вероятного ГЦК по данным визуализации (Рис. 1). Это совпадение отражает общие факторы риска между ГЦК и ICC... что осложняет дифференциальную диагностику в группах высокого риска" . Далее авторы объясняют, как критерии LI-RADS специально настроены на минимизацию ложноположительных диагнозов ICC, жертвуя чувствительностью .
-    *   **Как использовать:** Этот обзор — кладезь информации. Он показывает, что проблема ложноположительных находок (например, ICC, маскирующейся под ГЦК) — это реальная клиническая и исследовательская дилемма. Это обосновывает необходимость вашего этапа **«Пересмотра»**, где врач классифицирует пропущенный очаг, и **итеративного обновления мастер-модели**, чтобы включить в нее те очаги, которые видны только на более чувствительных методах, но являются истинными.
-
-### 4. Проблема сложности верификации в печени
-
-Ваш начальный тезис о том, что патология всего органа недоступна, а хирургия удаляет лишь часть очагов, подтверждается реальными протоколами исследований.
-
-*   **Critical appraisal: Winkler N, et al. 2013 (cancer.org.au).**
-    *   **Суть:** В этом критическом разборе исследования по диагностике метастазов меланомы в печени описан использованный референс-стандарт. Это было **клиническое наблюдение** (стабильность в течение 2 лет, изменения на фоне роста других метастазов) и использование дополнительных методов (МРТ, ПЭТ) для "характеризации" очагов .
-    *   **Как использовать:** Это прямое доказательство того, что в реальных исследованиях исследователям приходится использовать составной и несовершенный референс-стандарт. Это подчеркивает актуальность и сложность проблемы, которую решает ваш дизайн. Вы не просто придумываете сложности, а предлагаете более строгий способ работы с этой неизбежной реальностью.
-
-### Резюме для вашего введения
-
-Вы можете использовать эти ссылки следующим образом:
-
-1.  Начать с признания проблемы: "Отсутствие абсолютного «золотого стандарта» для верификации каждого очага является фундаментальным ограничением в исследованиях метастазов печени, что в литературе описывается как «парадокс золотого стандарта» ".
-2.  При обсуждении **интегративного смещения**: "Классические дизайны страдают от систематической ошибки, известной как incorporation bias, когда знание результатов одного метода искажает оценку другого, что может приводить как к завышению, так и к занижению диагностических показателей . Известны клинические случаи, когда предшествующая информация («якорение») напрямую приводила к диагностическим ошибкам ".
-3.  При обсуждении **проблемы неполной истины**: "Проблема усугубляется существованием «маскирующихся» образований, таких как внутрипеченочная холангиокарцинома, которая может имитировать типичную картину ГЦК и становиться источником ложноположительных заключений ".
-4.  В части про **несовершенство существующих референсов**: "Исследователи вынуждены прибегать к составным и несовершенным стандартам верификации, таким как клиническое наблюдение в динамике , что делает предлагаемый подход с динамической мастер-моделью особенно актуальным".
-
-Это позволит вам не просто описать проблемы, но и подкрепить каждую из них авторитетной научной ссылкой.
+Even destructive sectioning only samples the fragment actually removed
+during repair — indications outside that fragment are never verified
+against ground truth. This mirrors the incomplete-verification problem in
+any study where the reference standard (surgical/destructive) only covers
+part of the object under test. The master model's iterative,
+multi-modality construction is this study's answer to that same
+constraint: rather than requiring a single perfect reference, it builds
+one incrementally from the most reliable available signal at each stage,
+consistent with how POD reliability programs bootstrap a working "truth"
+data set when no absolute one exists.

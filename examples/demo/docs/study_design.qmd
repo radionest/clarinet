@@ -1,20 +1,17 @@
 ---
-title: "Исследование диагностической эффективности методов лучевой диагностики в выявлении метастазов печени"
-subtitle: "Дизайн клинического исследования"
+title: "Comparative Diagnostic Effectiveness Study of NDT Imaging Modalities for Internal-Defect Detection"
+subtitle: "Study design"
 author:
-  - name: "Clarinet Research Team"
+  - name: "Clarinet Demo Team"
 date: today
 date-format: "D MMMM YYYY"
-lang: ru
-language:
-  title-block-author-single: "Автор"
-  title-block-published: "Дата"
+lang: en
 
 format:
   docx:
     toc: true
     toc-depth: 3
-    toc-title: "Содержание"
+    toc-title: "Contents"
     number-sections: true
     number-depth: 3
     highlight-style: github
@@ -22,300 +19,298 @@ format:
     fig-height: 14
 ---
 
-## Цель исследования
+## Objective
 
-Оценка диагностической эффективности различных методов лучевой диагностики в выявлении метастазов печени.
+Evaluate the diagnostic effectiveness of different non-destructive testing (NDT) imaging modalities in detecting internal defects.
 
-## Участники исследования
+## Participants
 
-1. **Главный исследователь (монитор)** — 1 рентгенолог с опытом работы в лучевой диагностике печени не менее 5 лет
-2. **Группа А** — врачи-рентгенологи с опытом работы в лучевой диагностике печени не менее 5 лет
-3. **Группа Б** — 2 врача-рентгенолога с опытом просмотра КТ ангиографии не менее 1 года
-4. **Группа В** — рентгенхирурги с опытом работы в печени не менее 5 лет
-5. **Эксперт** — специалист, создающий и обновляющий эталонную мастер-модель
+1. **Lead Inspector (monitor)** — 1 CT/UT inspector with at least 5 years' NDT experience
+2. **Group A** — inspectors with at least 5 years' NDT experience
+3. **Group B** — 2 inspectors with at least 1 year of CT-HD viewing experience
+4. **Group C** — repair technicians with at least 5 years' experience
+5. **Expert** — specialist who creates and updates the reference master model
 
-## Изучаемые модальности
+## Modalities studied
 
-Пациент при соответствии критериям включения поступает на операцию. За 3 дня до операции ему выполняются:
-- **КТ** — компьютерная томография с внутривенным контрастированием
-- **МРТ** — магнитно-резонансная томография с внутривенным контрастированием
-- **КТ-АГ** — КТ ангиография
-- **МРТ-АГ** — МРТ ангиография
-- **ПДКТ-АГ** — позитронно-эмиссионная компьютерная томография ангиография
+When a part meets the inclusion criteria, it is scheduled for a repair operation. Shortly before the repair operation, the following scans are performed on it:
+- **CT** — industrial computed tomography
+- **UT** — ultrasonic volumetric scan
+- **CT-HD** — high-resolution/enhanced CT
+- **UT-HD** — high-resolution UT
+- **MCT** — micro-CT
 
-Дополнительно:
-- **КТ-архив** — предыдущие КТ, выполненные до химиотерапии (может быть несколько исследований)
+Additionally:
+- **Baseline archive** — prior CT scans of the same part, taken before an earlier repair/rework cycle (there may be several such studies)
 
-Каждая модальность представлена **одним** исследованием (кроме КТ-архива). Сегментация непосредственно на КТ-архив не выполняется. Однако сегментация КТ и КТ-АГ осуществляется в двух вариантах: изолированной серии и совместно с КТ архивом.
+Each modality is represented by **one** study (except the baseline archive). Segmentation is not performed directly on the baseline archive. However, CT segmentation is done in two variants: as an isolated series, and together with the baseline archive.
 
-## Основная концепция: мастер-модель
+## Core concept: master model
 
-**Мастер-модель** — эталонная сегментация всех выявленных очагов у пациента, где каждый очаг расположен в отдельной зоне интереса (ROI) с уникальным номером.
+The **master model** is a reference segmentation of all defects detected in a part, where each defect occupies a separate region of interest (ROI) with a unique number.
 
-Основой мастер-модели является первая КТ пациента с завершённой сегментацией. Координатная сетка (число пикселей, размеры пикселей, точка отсчёта) определяется эталонной серией из первичной оценки качества и остаётся неизменной.
+The master model's basis is the part's first CT with a completed segmentation. The coordinate grid (pixel count, pixel spacing, coordinate origin) is defined by the reference series from the initial quality assessment and remains unchanged.
 
-Мастер-модель создаётся один раз и дополняется новыми очагами по мере их обнаружения на исследованиях других модальностей. Каждый новый очаг получает уникальный номер.
+The master model is created once and is extended with new defects as they're found on studies from other modalities. Each new defect gets a unique number.
 
-Для каждой модальности (МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ) создаётся **проекция** мастер-модели — перенос очагов из координатного пространства КТ в координатное пространство этой модальности.
+For each modality (UT, CT-HD, UT-HD, MCT), a **projection** of the master model is created — transferring defects from the CT coordinate space into that modality's coordinate space.
 
-## Этапы исследования
+## Study stages
 
-### 1. Оценка качества (ручное)
+### 1. Quality assessment (manual)
 
-Выполняется врачами-рентгенологами группы А (2 независимые оценки)
+Performed by Group A inspectors (2 independent assessments).
 
-На этом этапе определяется:
-- Пригодность исследования для дальнейшей работы
-- Тип модальности (КТ, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ, КТ-архив)
-- **Эталонная серия** — серия с наименьшим числом артефактов и наибольшим числом анатомических ориентиров, на которой будет выполняться разметка очагов
+This stage determines:
+- Whether the study is suitable for further work
+- Modality type (CT, UT, CT-HD, UT-HD, MCT, baseline archive)
+- **Reference series** — the series with the fewest artifacts and the most reference landmarks, on which defects will be marked
 
-Поиск очагов осуществляется на всех доступных сериях, но разметка выполняется только на эталонной серии.
+Defects are searched across all available series, but marking is only done on the reference series.
 
-### 2. Анонимизация (автоматически)
+### 2. Anonymization (automatic)
 
-Выполняется автоматически при прохождении проверки качества. Все персональные данные пациента заменяются на анонимные идентификаторы.
+Runs automatically once the study passes quality assessment. All part-identifying data is replaced with anonymous identifiers.
 
-### 3. Сегментация очагов (ручное)
+### 3. Defect segmentation (manual)
 
-**Кто выполняет:** врачи соответствующей специализации в зависимости от модальности
+**Who performs it:** inspectors with the corresponding modality specialization
 
-- КТ → врачи со специализацией в КТ
-- МРТ → врачи со специализацией в МРТ
-- КТ-АГ → врачи со специализацией в КТ-ангиографии
-- МРТ-АГ → врачи со специализацией в МРТ
-- ПДКТ-АГ → врачи со специализацией в ПДКТ
+- CT → inspectors specializing in CT
+- UT → inspectors specializing in UT
+- CT-HD → inspectors specializing in CT-HD
+- UT-HD → inspectors specializing in UT (no separate UT-HD specialization role exists)
+- MCT → inspectors specializing in MCT
 
-Каждое исследование размечается двумя врачами независимо
+Each study is marked by two inspectors independently.
 
-**Доступная информация:**
+**Available information:**
 
-- Для КТ (стандартный контекст): только текущее исследование
-- Для КТ (расширенный контекст): текущее исследование + все КТ-архивы пациента
-- Для других модальностей: только текущее исследование
+- CT (standard context): only the current study
+- CT (extended context): current study + all baseline archive studies for the part
+- Other modalities: only the current study
 
-**Процесс:**
+**Process:**
 
-1. Врач просматривает анонимизированное исследование в OHIF viewer
-2. Загружает эталонную серию в 3D Slicer
-3. Размечает очаги в трёх категориях: метастазы, неопределённые образования, доброкачественные образования
+1. The inspector views the anonymized study in the OHIF viewer
+2. Loads the reference series in 3D Slicer
+3. Marks defects in three categories: defect, indeterminate, cosmetic
 
-Особенности этапа, в том что оценка КТ с данными архива проводится всегда после того как им проведена оценка одиночного исследования. Если врач допускается к оценке нескольких модальностей, то модальности ему демонстрируются в последовательности от потенциально менее чувствительного метода до более чувствительного: КТ, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ, КТ с архивом. Между оценками одним врачем разных модальностей должно пройти не менее 2х дней, либо врачем должно быть оценено не менее 10 других исследований.
+A feature of this stage is that assessment of CT with archive data always happens after the assessment of the isolated study has been completed. If an inspector is assigned to assess several modalities, the modalities are presented in order from the potentially least sensitive method to the most sensitive: CT, UT, CT-HD, UT-HD, MCT, CT with archive. At least 2 days must pass between one inspector's assessments of different modalities, or the inspector must have assessed at least 10 other studies in between.
 
-Сегментация выполняется на эталонной серии, но врач может просматривать все доступные серии.
+Segmentation is performed on the reference series, but the inspector may view all available series.
 
-### 4. Первичное построение мастер-модели
+### 4. Initial master model construction
 
-Производится экспертом после завершения первой КТ-сегментации с данными архива (любого из врачей). Координатная сетка для модели определяется эталонной серией для КТ. Каждый очаг из сегментации получает отдельную метку соответстующую его уникальному номеру.
+Performed by the expert after the first completed CT segmentation with archive data (from any inspector). The coordinate grid for the model is defined by the CT reference series. Each defect in the segmentation gets a separate label matching its unique number.
 
-### 5. Построение проекции мастер-модели (ручное)
+### 5. Master model projection (manual)
 
-Производится экспертом для каждой новой модальности (МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ).
+Performed by the expert for each new modality (UT, CT-HD, UT-HD, MCT).
 
-В 3D Slicer эксперт просматривает эталонные серии целевой модальности и КТ с нанесенной на ней мастер-моделью. По очереди наносит ROI с мастер-модели на координатное пространство серии целевой модальности.
-Если очаг не виден на целевой модальности то ROI наносится исходя из анатомических ориентиров. Для определения расположения очага на исследоании целевой модальности необязательно использовать только эталонную серию, также можно просматриать другие серии этого исследоания.
+In 3D Slicer, the expert views the reference series of the target modality and the CT with the master model overlaid. Each ROI from the master model is placed, in turn, into the target modality series' coordinate space. If a defect isn't visible on the target modality, the ROI is placed based on anatomical landmarks. Locating a defect on the target modality study isn't limited to the reference series — other series of that study can also be viewed.
 
-При сохранении разметка проекции мастер модели валидируется на предмет наличия всех очагов и того что никакой из очагов не представлен двумя отдельно лежащими ROI.
+On save, the projection is validated: its segment names must exactly match the master model's segment names (i.e. every defect from the master model is represented, and no extra ones are added).
 
-### 6. Сравнение проекции и сегментации (автоматически)
+### 6. Comparing projection and segmentation (automatic)
 
-Сопоставление сегментации серии каждой из модальностей с мастер-моделью осуществляется через проекции. Производится автоматическое попиксельное сравнение сегментации и проекции. Совпадениями считается пересечения ROI более чем на 5% их объёма.
+Matching each modality's series segmentation to the master model is done via projections. An automatic per-ROI comparison of segmentation and projection is performed: for each ROI, the pipeline checks for overlap — overlap present means the same defect; no overlap means a false negative or false positive.
 
-Таким образом очаги могут быть классифицированы на: выявленные, пропущенные, дополнительно выявленные. К дополнительно выявленным очагам относятся очаги которые были выявлены при сегментации, но отсутствуют на мастер-модели.
+Defects can thus be classified as: detected, missed, or additionally detected. Additionally detected defects are ones found during segmentation but absent from the master model.
 
-При наличии дополнительно выявленных очагов исследование переходит к этапу обновления мастер-модели.
+When additionally detected defects are present, the study moves to the master model update stage.
 
-При наличии пропущенных очагов врач, который осуществлял сегментацию переходит к этапу "Пересмотр".
+When missed defects are present, the inspector who performed the segmentation moves to the "Second review" stage.
 
-Этот этап выполняется для каждой сегментации независимо (если 2 врача выполнили 2 сегментации то проводится 2 сравнения).
+This stage runs for each segmentation independently (if 2 inspectors produced 2 segmentations, 2 comparisons are run).
 
-### 7. Пересмотр
+### 7. Second review
 
-Выполняет врач, чья сегментация расходится с проекцией мастер-модели. Врач получает изображение эталонной серии в 3D Slicer с нанесенными очагми из проекции, которые врач пропустил (каждый под своим номером).  Задача врача отнести очаг к одной из четырех категорий: метастазы, неясные, доброкачественные, невидимые.
+Performed by the inspector whose segmentation diverges from the master model projection. The inspector gets the reference series image in 3D Slicer with the defects from the projection that they missed (each under its own number). Their task is to assign each defect to one of four categories: defect, indeterminate, cosmetic, invisible.
 
-Эта задача всегда выполняется врачем, в сегментации которого выявлены расхождения. Врач не знает по данным какой модальности очаг был выявлен и как был охарактеризоан, ему известна только зона интереса на проекции мастер-модели. Если в результате обновления мастер-модели были выявлены новые расхождения, то задача инвалидируется и её требуется решить заново, но уже для новых очагов. Все результаты этого этапа сохраняются в единственный файл вне зависимости от числа итераций.
+This task is always performed by the inspector whose segmentation showed the discrepancies. The inspector doesn't know which modality the defect was found on or how it was characterized — they only see the region of interest on the master model projection. If the master model update reveals new discrepancies, the task is invalidated and must be redone, but now for the new defects. All results of this stage are stored in a single file regardless of the number of iterations.
 
-При сохранении врачу доступна только классификация очагов из проекции мастер-модели, выделение новых очагов не доступно.
+On save, the inspector only has access to classification of defects from the master model projection — marking new defects is not available.
 
-### 8. Обновление мастер-модели
+### 8. Master model update
 
-При обнаружении на этапе сравнения проекции и сегментации дополнительно выявленных очагов эксперту дается задача обновления мастер-модели.
+When the projection-vs-segmentation comparison stage finds additionally detected defects, the expert is given a master model update task.
 
-В Slicer 3D выдается мастер модель с эталонной серией КТ, проекция модели на модальность, также на проекцию нанесены дополнительно выявленные очаги (выделены дополнительным цветом). Эксперт должен перенести эти дополнительные очаги с проекции на мастер-модель.
+In 3D Slicer, the expert is presented with the master model with the CT reference series, the projection of the model onto the modality, and the additionally detected defects overlaid on the projection (highlighted in a separate color). The expert must transfer these additional defects from the projection onto the master model.
 
-Нумерация нанесенных на мастер-модель очагов осуществляется автоматически. Для избежания состояния гонки и дублирования работы по переносу вновь выявленного очага в каждый момент времени активной может быть только одна задача обновления, даже если дополнительные очаги были выявлены на разных модальностях.
+Numbering of defects added to the master model is assigned automatically. To avoid race conditions and duplicated work transferring a newly found defect, only one update task can be active at any given time, even if additional defects were found on different modalities.
 
-После обновления мастер-модели этапы нанесения проекции, сравнение проекций и сегментаций иналидируются и проводятся заново.
-Создаются новые задачи для экспертов на редактирование проекций.для врачей
+After the master model update, the projection and comparison stages are invalidated and redone.
+New tasks are created for experts to edit projections, and for inspectors.
 
-Координатная сетка мастер-модели не меняется
+The master model's coordinate grid does not change.
 
-Обновление не удаляет существующие очаги, только добавляет новые. Номера очагов на мастер модели являются иммутабельными, при сохранении проверяется, что ранее присутствующие на мастер-модели очаги не изменили номер.
+Updates never remove existing defects, only add new ones. Defect numbers on the master model are immutable — on save, it's validated that defects previously present on the master model have not changed number.
 
+**Problem:** the master model can be updated while a projection is being created. As a result, the projection would be saved after the master model save.
 
-**Проблема:** мастер-модель может быть обновлена в процессе создания проекции. Соответственно проекция будет сохранена после сохранения мастер модели.
+**Solution:**
+- When a projection is created, a checksum (hash) of the master model used is stored
+- On projection completion, the hash is compared against the current master model file
+- On mismatch, the projection is invalidated and a new task is created
+- No work is lost — the check only happens at task completion
 
-**Решение:**
-- При создании проекции сохраняется контрольная сумма (хэш) используемой мастер-модели
-- При завершении проекции хэш сравнивается с текущим файлом мастер-модели
-- При несовпадении проекция инвалидируется и создаётся новая задача
-- Потери работы не происходит — проверка только при завершении задачи
+## Example sequence
 
-## Пример последовательности действий
+1. **CT:** initial quality assessment → reference series determination → inspector segmentation → master model creation → projection onto the same series (a copy)
+2. **UT:** initial quality assessment → reference series determination → inspector segmentation → expert creates the master model projection → automatic comparison
+3. **Discrepancy:** 1 defect found on the UT segmentation, absent from the projection (false positive) → a master model update task is created
+4. **Update:** the expert adds the new defect to the master model → all existing projections are invalidated
+5. **Repeat projections:** experts re-mark projections for all modalities
+6. **Second review:** review tasks are created for inspectors whose segmentations diverged from the updated projection
+7. **CT-HD:** initial assessment → segmentation → projection → comparison → no discrepancies found
+8. **MCT:** same cycle → no discrepancies found
 
-1. **КТ:** первичная оценка качества → определение эталонной серии → сегментация врачом → создание мастер-модели → проекция на ту же серию (копия)
-2. **МРТ:** первичная оценка качества → определение эталонной серии → сегментация врачом → создание проекции мастер-модели экспертом → автоматическое сравнение
-3. **Расхождение:** обнаружен 1 очаг на сегментации МРТ, отсутствующий в проекции (false positive) → создаётся задача обновления мастер-модели
-4. **Обновление:** эксперт добавляет новый очаг на мастер-модель → все существующие проекции инвалидируются
-5. **Повторные проекции:** эксперты заново размечают проекции для всех модальностей
-6. **Пересмотр:** для врачей, чьи сегментации расходились с обновлённой проекцией, создаются задачи пересмотра
-7. **КТ-АГ:** первичная оценка → сегментация → проекция → сравнение → расхождений не выявлено
-8. **ПДКТ-АГ:** аналогичный цикл → расхождений не выявлено
-
-## Workflow диаграмма
+## Workflow diagram
 
 ```{mermaid}
 %%| label: fig-workflow
-%%| fig-cap: "Полная workflow диаграмма исследования метастазов печени"
+%%| fig-cap: "Full workflow diagram of the NDT comparative defect-detection study"
 %%| fig-width: 10
 %%| fig-height: 14
 
 flowchart TD
-    %% Начало процесса
-    Start([Пациент: 5 модальностей + КТ-архив]) --> QA1[Оценка качества]
+    %% Start of process
+    Start([Part: 5 modalities + baseline archive]) --> QA1[Quality assessment]
 
-    %% Оценка качества
-    QA1 -->|2 независимые оценки| QA2{Пригодность?}
-    QA2 -->|Нет| Reject[Исследование отклонено]
-    QA2 -->|Да| QA3[Определение эталонной серии]
+    %% Quality assessment
+    QA1 -->|2 independent assessments| QA2{Suitable?}
+    QA2 -->|No| Reject[Study rejected]
+    QA2 -->|Yes| QA3[Reference series determination]
 
-    %% Анонимизация
-    QA3 --> Anon[Анонимизация автоматически]
+    %% Anonymization
+    QA3 --> Anon[Anonymization — automatic]
 
-    %% Разделение по модальностям
-    Anon --> Split{Распределение по модальностям}
+    %% Split by modality
+    Anon --> Split{Modality routing}
 
-    %% КТ (первичное)
-    Split -->|КТ изолированное| CT1[Сегментация КТ]
-    CT1 -->|2 врача независимо| CT1_Done
+    %% CT (isolated)
+    Split -->|CT isolated| CT1[CT segmentation]
+    CT1 -->|2 inspectors independently| CT1_Done
 
-    %% КТ с архивом - строит мастер-модель
-    Split -->|КТ + архив| CT2[Сегментация КТ + архив]
-    CT2 -->|2 врача независимо| CT2_Done[КТ+архив завершено]
-    CT2_Done -->|Первая завершённая| MM_Create[Эксперт: создание мастер-модели]
+    %% CT with archive — builds the master model
+    Split -->|CT + archive| CT2[CT + archive segmentation]
+    CT2 -->|2 inspectors independently| CT2_Done[CT+archive complete]
+    CT2_Done -->|First completed| MM_Create[Expert: master model creation]
 
-    %% Другие модальности
-    Split -->|МРТ| MRI[Сегментация МРТ]
-    Split -->|КТ-АГ| CTAG[Сегментация КТ-АГ]
-    Split -->|МРТ-АГ| MRIAG[Сегментация МРТ-АГ]
-    Split -->|ПДКТ-АГ| PETCT[Сегментация ПДКТ-АГ]
+    %% Other modalities
+    Split -->|UT| UT[UT segmentation]
+    Split -->|CT-HD| CTHD[CT-HD segmentation]
+    Split -->|UT-HD| UTHD[UT-HD segmentation]
+    Split -->|MCT| MCT[MCT segmentation]
 
-    MRI -->|2 врача независимо| MRI_Done
-    CTAG -->|2 врача независимо| CTAG_Done
-    MRIAG -->|2 врача независимо| MRIAG_Done
-    PETCT -->|2 врача независимо| PETCT_Done
+    UT -->|2 inspectors independently| UT_Done
+    CTHD -->|2 inspectors independently| CTHD_Done
+    UTHD -->|2 inspectors independently| UTHD_Done
+    MCT -->|2 inspectors independently| MCT_Done
 
-    %% Создание проекций для всех модальностей
-    MM_Create --> MM_Ready[Мастер-модель готова]
+    %% Create projections for all modalities
+    MM_Create --> MM_Ready[Master model ready]
 
-    MM_Ready --> Proj_CT1[Проекция для КТ изолированного]
-    MM_Ready --> Proj_MRI[Проекция для МРТ]
-    MM_Ready --> Proj_CTAG[Проекция для КТ-АГ]
-    MM_Ready --> Proj_MRIAG[Проекция для МРТ-АГ]
-    MM_Ready --> Proj_PETCT[Проекция для ПДКТ-АГ]
+    MM_Ready --> Proj_CT1[Projection for isolated CT]
+    MM_Ready --> Proj_UT[Projection for UT]
+    MM_Ready --> Proj_CTHD[Projection for CT-HD]
+    MM_Ready --> Proj_UTHD[Projection for UT-HD]
+    MM_Ready --> Proj_MCT[Projection for MCT]
 
-    %% Сравнение проекций с сегментациями
-    CT1_Done --> Comp_CT1[Автоматическое сравнение]
+    %% Compare projections with segmentations
+    CT1_Done --> Comp_CT1[Automatic comparison]
     Proj_CT1 --> Comp_CT1
 
-    MRI_Done --> Comp_MRI[Автоматическое сравнение]
-    Proj_MRI --> Comp_MRI
+    UT_Done --> Comp_UT[Automatic comparison]
+    Proj_UT --> Comp_UT
 
-    CTAG_Done --> Comp_CTAG[Автоматическое сравнение]
-    Proj_CTAG --> Comp_CTAG
+    CTHD_Done --> Comp_CTHD[Automatic comparison]
+    Proj_CTHD --> Comp_CTHD
 
-    MRIAG_Done --> Comp_MRIAG[Автоматическое сравнение]
-    Proj_MRIAG --> Comp_MRIAG
+    UTHD_Done --> Comp_UTHD[Automatic comparison]
+    Proj_UTHD --> Comp_UTHD
 
-    PETCT_Done --> Comp_PETCT[Автоматическое сравнение]
-    Proj_PETCT --> Comp_PETCT
+    MCT_Done --> Comp_MCT[Automatic comparison]
+    Proj_MCT --> Comp_MCT
 
-    %% Анализ результатов сравнения
-    Comp_CT1 --> Analysis_CT1{Результат КТ}
-    Comp_MRI --> Analysis_MRI{Результат МРТ}
-    Comp_CTAG --> Analysis_CTAG{Результат КТ-АГ}
-    Comp_MRIAG --> Analysis_MRIAG{Результат МРТ-АГ}
-    Comp_PETCT --> Analysis_PETCT{Результат ПДКТ-АГ}
+    %% Analyze comparison results
+    Comp_CT1 --> Analysis_CT1{CT result}
+    Comp_UT --> Analysis_UT{UT result}
+    Comp_CTHD --> Analysis_CTHD{CT-HD result}
+    Comp_UTHD --> Analysis_UTHD{UT-HD result}
+    Comp_MCT --> Analysis_MCT{MCT result}
 
-    %% Обработка дополнительных очагов
-    Analysis_CT1 -->|Дополнительные очаги| Update_MM
-    Analysis_MRI -->|Дополнительные очаги| Update_MM
-    Analysis_CTAG -->|Дополнительные очаги| Update_MM
-    Analysis_MRIAG -->|Дополнительные очаги| Update_MM
-    Analysis_PETCT -->|Дополнительные очаги| Update_MM
+    %% Handle additional defects
+    Analysis_CT1 -->|Additional defects| Update_MM
+    Analysis_UT -->|Additional defects| Update_MM
+    Analysis_CTHD -->|Additional defects| Update_MM
+    Analysis_UTHD -->|Additional defects| Update_MM
+    Analysis_MCT -->|Additional defects| Update_MM
 
-    Update_MM[Эксперт: обновление мастер-модели]
-    Update_MM -->|Инвалидация всех проекций| MM_Ready
+    Update_MM[Expert: master model update]
+    Update_MM -->|Invalidate all projections| MM_Ready
 
-    %% Обработка пропущенных очагов
-    Analysis_CT1 -->|Пропущенные очаги| Review_CT1[Пересмотр КТ]
-    Analysis_MRI -->|Пропущенные очаги| Review_MRI[Пересмотр МРТ]
-    Analysis_CTAG -->|Пропущенные очаги| Review_CTAG[Пересмотр КТ-АГ]
-    Analysis_MRIAG -->|Пропущенные очаги| Review_MRIAG[Пересмотр МРТ-АГ]
-    Analysis_PETCT -->|Пропущенные очаги| Review_PETCT[Пересмотр ПДКТ-АГ]
+    %% Handle missed defects
+    Analysis_CT1 -->|Missed defects| Review_CT1[CT review]
+    Analysis_UT -->|Missed defects| Review_UT[UT review]
+    Analysis_CTHD -->|Missed defects| Review_CTHD[CT-HD review]
+    Analysis_UTHD -->|Missed defects| Review_UTHD[UT-HD review]
+    Analysis_MCT -->|Missed defects| Review_MCT[MCT review]
 
-    Review_CT1 --> Review_CT1_Done[Классификация очагов]
-    Review_MRI --> Review_MRI_Done[Классификация очагов]
-    Review_CTAG --> Review_CTAG_Done[Классификация очагов]
-    Review_MRIAG --> Review_MRIAG_Done[Классификация очагов]
-    Review_PETCT --> Review_PETCT_Done[Классификация очагов]
+    Review_CT1 --> Review_CT1_Done[Defect classification]
+    Review_UT --> Review_UT_Done[Defect classification]
+    Review_CTHD --> Review_CTHD_Done[Defect classification]
+    Review_UTHD --> Review_UTHD_Done[Defect classification]
+    Review_MCT --> Review_MCT_Done[Defect classification]
 
-    %% Завершение
-    Analysis_CT1 -->|Расхождений нет| Done_CT1[КТ завершено]
-    Analysis_MRI -->|Расхождений нет| Done_MRI[МРТ завершено]
-    Analysis_CTAG -->|Расхождений нет| Done_CTAG[КТ-АГ завершено]
-    Analysis_MRIAG -->|Расхождений нет| Done_MRIAG[МРТ-АГ завершено]
-    Analysis_PETCT -->|Расхождений нет| Done_PETCT[ПДКТ-АГ завершено]
+    %% Completion
+    Analysis_CT1 -->|No discrepancies| Done_CT1[CT complete]
+    Analysis_UT -->|No discrepancies| Done_UT[UT complete]
+    Analysis_CTHD -->|No discrepancies| Done_CTHD[CT-HD complete]
+    Analysis_UTHD -->|No discrepancies| Done_UTHD[UT-HD complete]
+    Analysis_MCT -->|No discrepancies| Done_MCT[MCT complete]
 
     Review_CT1_Done --> Done_CT1
-    Review_MRI_Done --> Done_MRI
-    Review_CTAG_Done --> Done_CTAG
-    Review_MRIAG_Done --> Done_MRIAG
-    Review_PETCT_Done --> Done_PETCT
+    Review_UT_Done --> Done_UT
+    Review_CTHD_Done --> Done_CTHD
+    Review_UTHD_Done --> Done_UTHD
+    Review_MCT_Done --> Done_MCT
 
-    Done_CT1 --> Final{Все модальности завершены?}
-    Done_MRI --> Final
-    Done_CTAG --> Final
-    Done_MRIAG --> Final
-    Done_PETCT --> Final
+    Done_CT1 --> Final{All modalities complete?}
+    Done_UT --> Final
+    Done_CTHD --> Final
+    Done_UTHD --> Final
+    Done_MCT --> Final
 
-    Final -->|Да| Complete([Исследование завершено])
-    Final -->|Нет| Wait[Ожидание других модальностей]
+    Final -->|Yes| Complete([Study complete])
+    Final -->|No| Wait[Waiting for other modalities]
 
-    %% Стили
+    %% Styles
     classDef automatic fill:#e1f5ff,stroke:#0066cc,stroke-width:2px
     classDef manual fill:#fff4e1,stroke:#ff9900,stroke-width:2px
     classDef expert fill:#ffe1f5,stroke:#cc0066,stroke-width:2px
     classDef decision fill:#f0f0f0,stroke:#666,stroke-width:2px
 
-    class Anon,Comp_CT1,Comp_MRI,Comp_CTAG,Comp_MRIAG,Comp_PETCT automatic
-    class QA1,QA3,CT1,CT2,MRI,CTAG,MRIAG,PETCT,Review_CT1,Review_MRI,Review_CTAG,Review_MRIAG,Review_PETCT manual
-    class MM_Create,Proj_CT1,Proj_MRI,Proj_CTAG,Proj_MRIAG,Proj_PETCT,Update_MM expert
-    class QA2,Split,Analysis_CT1,Analysis_MRI,Analysis_CTAG,Analysis_MRIAG,Analysis_PETCT,Final decision
+    class Anon,Comp_CT1,Comp_UT,Comp_CTHD,Comp_UTHD,Comp_MCT automatic
+    class QA1,QA3,CT1,CT2,UT,CTHD,UTHD,MCT,Review_CT1,Review_UT,Review_CTHD,Review_UTHD,Review_MCT manual
+    class MM_Create,Proj_CT1,Proj_UT,Proj_CTHD,Proj_UTHD,Proj_MCT,Update_MM expert
+    class QA2,Split,Analysis_CT1,Analysis_UT,Analysis_CTHD,Analysis_UTHD,Analysis_MCT,Final decision
 ```
 
-### Легенда
+### Legend
 
-- **Синий** (голубой фон) — автоматические процессы
-- **Оранжевый** (желтый фон) — ручные процессы (врачи)
-- **Розовый** — задачи эксперта
-- **Серый** — точки принятия решений
+- **Blue** (light blue fill) — automatic processes
+- **Orange** (yellow fill) — manual processes (inspectors)
+- **Pink** — expert tasks
+- **Gray** — decision points
 
-### Ключевые особенности workflow
+### Key workflow features
 
-1. **Параллельная обработка модальностей**: все 5 модальностей (КТ, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ) обрабатываются независимо
+1. **Parallel modality processing**: all 5 modalities (CT, UT, CT-HD, UT-HD, MCT) are processed independently
 
-2. **Циклы обновления**: при обнаружении дополнительных очагов мастер-модель обновляется, и все проекции инвалидируются
+2. **Update loops**: when additional defects are found, the master model is updated and all projections are invalidated
 
-3. **Двойная независимая оценка**: каждая сегментация выполняется двумя врачами независимо
+3. **Double independent assessment**: each segmentation is performed by two inspectors independently
 
-4. **Пересмотр**: врачи пересматривают пропущенные очаги после сравнения с проекцией
+4. **Second review**: inspectors review missed defects after comparison against the projection

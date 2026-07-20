@@ -1,246 +1,247 @@
-Исследование диагностической эффективности методов лучевой диагностики в выявлении метастазов печени.
+Comparative diagnostic-effectiveness study of NDT imaging modalities for internal-defect detection in cast parts.
 
-## План исследования
+## Study plan
 
-Пациент при соответствии критериям включения поступает на операцию. За 3 дня до операции ему выполняются:
-- КТ с внутривенным контрастированием (КТ)
-- МРТ с внутривенным контрастированием (МРТ)
-- КТ ангиография (КТ-АГ)
-- МРТ ангиография (МРТ-АГ)
-- ПДКТ ангиография (ПДКТ-АГ)
+When a part meets the inclusion criteria, it is scheduled for a repair operation. Shortly before the repair operation, the following scans are performed on it:
+- CT with standard settings (CT)
+- Ultrasonic volumetric scan (UT)
+- High-resolution/enhanced CT (CT-HD)
+- High-resolution UT (UT-HD)
+- Micro-CT (MCT)
 
-Также у пациента могут быть предыдущие КТ, выполненные до химиотерапии (КТ-архив). Таких исследований может быть несколько. Сегментация непосредственно на КТ-архив не выполняется, но эти данные доступны врачу при сегментации с расширенным контекстом (segment-ct-with-archive).
+The part may also have a baseline archive — prior CT scans of the same part, taken before an earlier repair/rework cycle. There may be several such archive studies. Segmentation is not performed directly on the baseline archive, but this data is available to the inspector during segmentation with extended context (`segment-ct-with-archive`).
 
-Каждая модальность представлена **одним** исследованием (кроме КТ-архива). Сегментация КТ и КТ-АГ осуществляется в двух вариантах: изолированной серии и совместно с КТ-архивом.
+Each modality is represented by **one** study (except the baseline archive). CT segmentation is done in two variants: as an isolated series, and together with the baseline archive.
 
-## Этапы исследования
+## Study stages
 
-### 1. Оценка качества (first-check, level: STUDY)
+### 1. Quality assessment (first-check, level: STUDY)
 
-Выполняется врачами-рентгенологами в виде двух независимых оценок (min_records=2, max_records=2). Определяет:
-- `is_good` — пригодно ли исследование
-- `study_type` — тип модальности (КТ, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ, КТ-архив)
-- `best_series` — UID эталонной серии с наименьшим числом артефактов и наибольшим числом анатомических ориентиров
+Performed by inspectors as two independent assessments (min_records=2, max_records=2). Determines:
+- `is_good` — whether the study is usable
+- `study_type` — modality type (CT, UT, CT-HD, UT-HD, MCT, CT-archive)
+- `best_series` — UID of the reference series with the fewest artifacts and the most reference landmarks
 
-Поиск очагов осуществляется на всех доступных сериях, но разметка выполняется только на эталонной серии.
+Defects are searched across all available series, but marking is only done on the reference series.
 
-### 2. Анонимизация (anonymize-study, level: STUDY, role: auto)
+### 2. Anonymization (anonymize-study, level: STUDY, role: auto)
 
-Выполняется автоматически при прохождении проверки качества. Все персональные данные пациента заменяются на анонимные идентификаторы. Результат: `anon_study_uid`, статистика по инстансам и сериям.
+Runs automatically once the study passes quality assessment. All part-identifying data is replaced with anonymous identifiers. Result: `anon_study_uid`, plus instance/series statistics.
 
-### 3. Сегментация очагов (level: STUDY)
+### 3. Defect segmentation (level: STUDY)
 
-Для каждой модальности — отдельный RecordType с ролевым допуском:
+A separate RecordType per modality, gated by role:
 
-| RecordType | role | Описание |
+| RecordType | role | Description |
 |---|---|---|
-| segment-ct-single | doctor_CT | КТ, только текущее исследование |
-| segment-ct-with-archive | doctor_CT | КТ + архивные КТ через `lifecycle.open` |
-| segment-mri-single | doctor_MRI | МРТ, только текущее исследование |
-| segment-ctag-single | doctor_CT-AG | КТ-АГ, только текущее исследование |
-| segment-mriag-single | doctor_MRI | МРТ-АГ, только текущее исследование |
-| segment-pdctag-single | doctor_PDCT | ПДКТ-АГ, только текущее исследование |
+| segment-ct-single | inspector_CT | CT, only the current study |
+| segment-ct-with-archive | inspector_CT | CT + baseline archive studies via `lifecycle.open` |
+| segment-ut-single | inspector_UT | UT, only the current study |
+| segment-ut-hd-single | inspector_UT | High-resolution UT (same role as UT — there is no separate `inspector_UT-HD` role) |
+| segment-ct-hd-single | inspector_CT-HD | High-resolution/enhanced CT |
+| segment-mct-single | inspector_MCT | Micro-CT |
 
-Все типы: min_records=2, max_records=4. При создании через flow создаётся `min_records` записей. Каждый врач создаёт свой файл `segmentation_{origin_type}_{user_id}.seg.nrrd`.
+All types: min_records=2, max_records=4. The flow creates `min_records` records on trigger. Each inspector creates their own file `segmentation_{origin_type}_{user_id}.seg.nrrd`.
 
-Врач просматривает анонимизированное исследование в OHIF viewer, загружает эталонную серию в 3D Slicer и размечает очаги в трёх категориях: метастазы, неопределённые образования, доброкачественные образования.
+The inspector views the anonymized study in the OHIF viewer, loads the reference series in 3D Slicer, and marks defects in three categories: defect, indeterminate, cosmetic.
 
-Оценка КТ с данными архива проводится всегда после оценки одиночного исследования. Если врач допускается к оценке нескольких модальностей, то модальности демонстрируются в последовательности от менее чувствительного метода до более чувствительного: КТ, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ, КТ с архивом. Между оценками одним врачом разных модальностей должно пройти не менее 2 дней, либо врачом должно быть оценено не менее 10 других исследований.
+Assessment of CT with archive data always happens after the assessment of the isolated study. If an inspector is assigned to assess several modalities, the modalities are presented in order from the least sensitive method to the most sensitive: CT, UT, CT-HD, UT-HD, MCT, CT with archive. At least 2 days must pass between one inspector's assessments of different modalities, or the inspector must have assessed at least 10 other studies in between.
 
-Вариант `_with_archive` (расширенный контекст просмотра) архитектурно поддерживается для любой модальности через механизм `lifecycle.open`, но пока реализован только для КТ.
+The `_with_archive` variant (extended viewing context) is architecturally supported for any modality via the `lifecycle.open` mechanism, but is currently only implemented for CT.
 
-### 4. Первичное построение мастер-модели (pipeline task)
+### 4. Initial master model construction (pipeline task)
 
-Производится автоматически после завершения первой КТ-сегментации с данными архива (`segment-ct-with-archive`). Таск `init_master_model` вызывается при каждом завершении и сам проверяет наличие файла: `if ctx.files.exists(master_model): return`.
+Runs automatically after the first completed CT segmentation with archive data (`segment-ct-with-archive`). The `init_master_model` task fires on every completion and checks for the file itself: `if ctx.files.exists(master_model): return`.
 
-Координатная сетка для модели определяется эталонной серией КТ. Каждый очаг из сегментации бинаризуется и разделяется на connected components с уникальными номерами.
+The coordinate grid for the model is defined by the reference CT series. Each defect in the segmentation is binarized and split into connected components with unique numbers.
 
-### 5. Построение проекции мастер-модели (create-master-projection, level: SERIES)
+### 5. Master model projection (create-master-projection, level: SERIES)
 
-Ручное создание проекции мастер-модели на координатное пространство конкретной серии. role=expert, min_records=1, max_records=1. Входной файл: master_model (role=input). Если файл мастер-модели отсутствует, запись получает статус `blocked`.
+Manual creation of the master model's projection onto a specific series' coordinate space. role=expert, min_records=1, max_records=1. Input file: master_model (role=input). If the master model file is missing, the record gets status `blocked`.
 
-Для КТ-исследований проекция создаётся автоматически (копия мастер-модели — та же координатная система). Для не-КТ модальностей эксперт вручную наносит ROI с мастер-модели на координатное пространство целевой серии.
+For CT studies the projection is created automatically (a copy of the master model — same coordinate system). For non-CT modalities the expert manually places ROIs from the master model into the target series' coordinate space.
 
-При сохранении разметка проекции валидируется на предмет наличия всех очагов и того, что никакой из очагов не представлен двумя отдельно лежащими ROI.
+On save, the projection is validated: its segment names must exactly match the master model's segment names (i.e. every defect from the master model is represented, and no extra ones are added).
 
-### 6. Сравнение проекции и сегментации (compare-with-projection, level: SERIES, role: auto)
+### 6. Comparing projection and segmentation (compare-with-projection, level: SERIES, role: auto)
 
-Автоматическое попиксельное сравнение сегментации и проекции. Совпадением считается пересечение ROI более чем на 5% их объёма. Создаётся и заполняется пайплайном без участия человека. Привязана к конкретной записи сегментации через `parent_record_id`.
+Automatic comparison of the inspector's segmentation with the master model projection. For each ROI, the pipeline checks for overlap: overlap present → same defect; no overlap → false negative or false positive. Created and filled by the pipeline without human involvement. Linked to a specific segmentation record via `parent_record_id`.
 
-Сравнение выполняется **для каждой** сегментации на данной серии (если 4 врача — 4 сравнения).
+The comparison runs **for each** segmentation on a given series (if 4 inspectors segmented it, 4 comparisons are created).
 
-Очаги классифицируются на:
-- **выявленные** — пересечение ROI проекции и сегментации
-- **пропущенные** (false negative) — очаг на проекции, но не на сегментации → second-review
-- **дополнительно выявленные** (false positive) — очаг на сегментации, но не на проекции → update-master-model
+Defects are classified as:
+- **detected** — overlap between the projection ROI and the segmentation ROI
+- **missed** (false negative) — defect on the projection but not on the segmentation → second-review
+- **additionally detected** (false positive) — defect on the segmentation but not on the projection → update-master-model
 
-### 7. Пересмотр (second-review, level: SERIES)
+### 7. Second review (second-review, level: SERIES)
 
-Один generic тип на все модальности. Создаётся для конкретного врача, чья сегментация расходится с проекцией мастер-модели. Привязана к записи сегментации через `parent_record_id`.
+One generic type covering all modalities. Created for the specific inspector whose segmentation diverges from the master model projection. Linked to the segmentation record via `parent_record_id`.
 
-Врач получает в 3D Slicer эталонную серию с нанесенными очагами из проекции, которые он пропустил (каждый под своим номером). Задача — отнести очаг к одной из четырёх категорий: метастазы, неясные, доброкачественные, невидимые. Врач не знает, по данным какой модальности очаг был выявлен.
+The inspector gets the reference series in 3D Slicer with the defects from the projection that they missed (each under its own number). Their task is to assign each defect to one of four categories: defect, indeterminate, cosmetic, invisible. The inspector doesn't know which modality the defect was originally found on.
 
-Этап пересмотра позволяет на per-lesion уровне разделить два качественно различных феномена: **ограничение метода** (очаг невидим при данной модальности из-за недостаточного контрастного разрешения, размера, локализации или артефактов) и **ошибку наблюдателя** (очаг визуализируется, но был пропущен). Категория «невидимый» указывает на ограничение метода, тогда как категории «метастаз», «неясное» или «доброкачественное» свидетельствуют о пропуске видимого очага.
+The second-review stage separates two qualitatively different phenomena at the per-defect level: **method limitation** (the defect isn't visible on this modality due to insufficient contrast resolution, size, location, or artifacts) and **observer error** (the defect is visible but was missed). The "invisible" category indicates a method limitation, while "defect", "indeterminate", or "cosmetic" indicate a missed-but-visible defect.
 
-Скрипт подготовки:
-1. Берёт master_projection и вычитает из него ROI, отмеченные врачом при первичной сегментации
-2. Если second-review ранее был выполнен и инвалидирован, дополнительно вычитает ROI из предыдущего second-review (при сохранении предыдущая и новая сегментация **объединяются**)
-3. Создаёт два слоя:
-   - **master_projection**: каждый оставшийся очаг под своим номером
-   - **output**: 4 пустые зоны интереса — metastasis, unclear, benign, invisible
-4. Врач с помощью инструмента "добавить островок" переназначает очаги из первого слоя во второй
+Preparation script:
+1. Takes master_projection and subtracts the ROIs the inspector already marked during their initial segmentation
+2. If a second-review was previously performed and invalidated, also subtracts the ROIs from the previous second-review (on save, the previous and new segmentation are merged)
+3. Creates two layers:
+   - **master_projection**: each remaining defect under its own number
+   - **output**: 4 empty regions of interest — defect, indeterminate, cosmetic, invisible
+4. The inspector uses the "add island" tool to reassign defects from the first layer to the second
 
-Инвалидируется, если при повторном compare выявлены **дополнительные** ложно-отрицательные результаты.
+Invalidated if a repeat comparison finds **additional** false negatives.
 
-### 8. Ретроспективная оценка семиотических признаков (retrospective-semiotics, level: SERIES)
+### 8. Retrospective characterization (retrospective-characterization, level: SERIES)
 
-После завершения всех этапов выявления очагов (сегментация, сравнение, пересмотр) проводится ретроспективная оценка рентгенологических признаков каждого очага на каждой модальности. Выполняется с соблюдением washout-периода (4–7 недель). role=generic, min_records=2, max_records=4.
+After all defect-detection stages are complete (segmentation, comparison, second review), a retrospective assessment of each defect's signal characteristics is performed on every modality. Carried out after a blind-reassessment interval (4–7 weeks). level: SERIES, role: auto, min_records=2, max_records=4. No Slicer script — assessed via the OHIF viewer with form-based data entry.
 
-Врач описывает семиотические характеристики каждого очага (паттерн контрастирования, сигнальные характеристики, морфологические признаки, чёткость контуров) на эталонной серии соответствующей модальности. Работает с анонимизированным исследованием и проекцией мастер-модели, на которой обозначены все очаги.
+The inspector records per-defect characterization (signal pattern, texture, morphology, edge definition, etc.) on the reference series of the corresponding modality. Works with the anonymized study and the master model projection, on which all defects are marked.
 
-Создаётся вручную координатором (не автоматический триггер).
+Created manually by the coordinator — not an automatic pipeline trigger.
 
-### 9. Обновление мастер-модели (update-master-model, level: PATIENT)
+### 9. Master model update (update-master-model, level: PATIENT)
 
-Ручное обновление мастер-модели экспертом. role=expert, max_records=1. Создаётся автоматически пайплайном при обнаружении false positive в compare-with-projection.
+Manual update of the master model by the expert. role=expert, max_records=1. Created automatically by the pipeline when a false positive is found in compare-with-projection (and also when additional defects are found during the repair operation, stage 12).
 
-В 3D Slicer эксперту предоставляется мастер-модель с эталонной серией КТ, проекция модели на модальность с дополнительно выявленными очагами (выделены отдельным цветом). Эксперт переносит дополнительные очаги с проекции на мастер-модель. Нумерация присваивается автоматически.
+In 3D Slicer, the expert is given the master model with the reference CT series, plus the projection of the model onto the modality with the additionally detected defects (highlighted in a separate color). The expert transfers the additional defects from the projection onto the master model. Numbering is assigned automatically.
 
-В каждый момент времени активной может быть только одна задача обновления. После обновления все проекции инвалидируются и проводятся заново. Координатная сетка мастер-модели не меняется. Обновление не удаляет существующие очаги, только добавляет новые. Номера очагов иммутабельны — при сохранении валидируется, что ранее присутствующие очаги не изменили номер.
+Only one update task can be active at a time. After the update, all projections are invalidated and redone. The master model's coordinate grid does not change. Updates never remove existing defects, only add new ones. Defect numbers are immutable — on save, it's validated that previously present defects have not changed number.
 
-### 10. Заключение МДК (mdk-conclusion, level: PATIENT)
+### 10. MRB conclusion (mrb-conclusion, level: PATIENT)
 
-Мультидисциплинарный консилиум (МДК) в составе врача-рентгенолога КТ, МРТ, рентгенхирурга и абдоминального хирурга классифицирует все очаги. role=mdk, min_records=1, max_records=1. Входной файл: master_model (input).
+The Material Review Board (MRB) — composed of the CT inspector, UT inspector, and repair technicians — classifies all defects. role=mrb, min_records=1, max_records=1. Input file: master_model (input).
 
-Классификация на шесть категорий: метастаз, исчезнувший метастаз, неясной природы, киста, гемангиома, доброкачественный очаг неясной природы. Определяется тактика лечения: удаление в составе кластера, изолированное удаление или не планируется к удалению.
+Classification into six categories: defect, resolved_defect, indeterminate, cavity, inclusion, cosmetic_indeterminate. A repair tactic is also assigned: cluster_repair, isolated_repair, or not_planned.
 
-### 11. Планирование резекции печени
+### 11. Repair planning
 
-#### 11a. 3D-модель для резекции (resection-model, level: PATIENT)
+#### 11a. 3D repair model (repair-model, level: PATIENT)
 
-Сегментация паренхимы печени, портальных и печёночных вен. role=expert, min_records=1, max_records=1. Входной файл: master_model (input), выходной: resection_model (output).
+role=expert, min_records=1, max_records=1. Input file: master_model (input), output: repair_model_file (output).
 
-Сегментация печени осуществляется с помощью TotalSegmentator с последующей коррекцией контуров. Сосуды сегментируются инструментом "threshold mask" с разделением на портальные и печёночные вены. Границы ROI всех очагов корректируются в соответствии с настоящими размерами. Очаги, не определяемые при КТ (в том числе «исчезнувшие» метастазы), отмечаются ROI в форме шара диаметром 5 мм.
+The part body is segmented via automated thresholding with manual boundary correction. Internal channels are segmented with the threshold-mask tool, split into primary and secondary channel networks. Defect ROI boundaries are corrected to their true extents. Defects not resolvable on CT (including resolved defects) are marked with a 5mm-diameter spherical ROI.
 
-#### 11b. План резекции (resection-plan, level: PATIENT)
+#### 11b. Repair plan (repair-plan, level: PATIENT)
 
-Определение кластеров удаления и расчёт объёма остаточной паренхимы. role=expert, min_records=1, max_records=1. Входные файлы: resection_model, master_model.
+role=expert, min_records=1, max_records=1. Input files: repair_model_file, master_model.
 
-На 3D-модели планируется резекция. Определяется, какие из очагов будут удалены в составе одного кластера, какие — отдельно. Зоны резекции выделяются инструментом "ножницы". Вычисляется объём остаточной паренхимы печени.
+The repair is planned on the 3D model. It's determined which defects will be repaired together as a cluster and which individually. Repair zones are outlined with the "scissors" tool. Residual material volume is calculated.
 
-#### 11c. Протокол резекции (resection-report, level: PATIENT)
+#### 11c. Repair report (repair-report, level: PATIENT)
 
-Интраоперационный протокол хирурга с привязкой очагов к кластерам удаления. role=surgeon, min_records=1, max_records=1. Входной файл: master_model (input). Данные предзаполняются из resection-plan (список очагов с запланированными кластерами).
+role=technician, min_records=1, max_records=1. Input file: master_model (input). Automatically prefilled from repair-plan (defects with their planned clusters).
 
-### 12. Операция (intraop-protocol, level: PATIENT)
+The technician confirms or adjusts the cluster assignment per defect, and can record additional defects (with a description and cluster) found beyond the master model.
 
-Через 1–7 дней после артериографии выполняется резекция печени. role=surgeon, min_records=1, max_records=1. Входной файл: master_model (input).
+### 12. Repair operation (repair-protocol, level: PATIENT)
 
-С помощью интраоперационного УЗИ осуществляется поиск всех очагов, отмеченных на модели, и разметка их проекции на поверхность печени коагулятором. Каждый очаг классифицируется как найденный, не найденный или дополнительно найденный. Удалённые фрагменты печени нумеруются с протоколированием, какие очаги расположены в каждом фрагменте.
+role=technician, min_records=1, max_records=1. Input file: master_model (input). Takes place a few days after the CT-HD scan.
 
-При обнаружении дополнительных очагов автоматически создаётся update-master-model.
+In-process UT is used to search for all defects marked on the model, marking their projection onto the part surface. Each defect is classified as found, not found, or additionally found. Removed fragments are numbered, with a record of which defects are located in each fragment.
 
-### 13. Послеоперационная КТ (postop-ct-review, level: STUDY)
+If additional defects are found, `update-master-model` is created automatically.
 
-Выполняется для скрининга послеоперационных осложнений. role=doctor_CT, min_records=1, max_records=2. Если во время операции были выявлены и удалены очаги, не обнаруженные в диагностическом этапе, послеоперационная КТ используется для обновления мастер-модели.
+### 13. Post-repair CT (post-repair-ct-review, level: STUDY)
 
-### 14. Гистология (histology, level: PATIENT)
+Performed to screen for post-repair anomalies. role=inspector_CT, min_records=1, max_records=2. If defects were found and removed during the repair operation that weren't identified during the detection phase, the post-repair CT is used to update the master model.
 
-Анализ макропрепарата проводится в составе патоморфолога, рентгенолога и хирурга. role=pathologist, min_records=1, max_records=1. Входной файл: master_model (input).
+### 14. Metallography (metallography, level: PATIENT)
 
-Патоморфологу сообщается число, размеры и примерное расположение очагов в удалённом фрагменте печени. Протоколируется соответствие очагов макропрепарата очагам на мастер-модели. Если при исследовании макропрепарата очаги не выявлены, берётся участок из ориентировочно того же места.
+role=analyst, min_records=1, max_records=1. Input file: master_model (input).
 
-По результатам микроскопии для каждого очага определяется: наличие опухолевых клеток (да/нет/нет данных), соотношение опухолевой и фиброзной ткани.
+Sectioning analysis is performed by a panel of the analyst, CT inspector, and repair technician. The analyst is told the count, size, and approximate location of defects in the removed fragment. Correspondence between sectioned defects and master-model defects is logged. If a defect isn't found on sectioning, a sample is taken from the approximately corresponding location. Microscopy determines, per defect: presence of defect material (yes/no/no_data), ratio of defect-to-sound material.
 
-## Мастер-модель
+## Master model
 
-Мастер-модель — сегментация, где каждый очаг расположен в отдельной ROI с уникальным номером.
+The master model is a segmentation where each defect occupies a separate ROI with a unique number.
 
-Основой является первая КТ пациента с завершённой записью типа segment-ct-with-archive (первая завершённая из нескольких врачей). Серия выбирается по полю `best_series` из записи first-check. После создания основа мастер-модели не меняется.
+Its basis is the part's first CT with a completed `segment-ct-with-archive` record (the first one completed, across however many inspectors performed it). The series is chosen from the `best_series` field of the first-check record. Once created, the basis of the master model does not change.
 
-Первая проекция (projection на ту же серию, что и основа) является копией мастер-модели.
+The first projection (onto the same series as the basis) is a copy of the master model.
 
-### Race condition: обновление мастер-модели во время создания проекции
+### Race condition: master model update during projection creation
 
-В записи проекции сохраняется хэш мастер-модели, по которой она создана. Проверка event-driven: при завершении (финише) проекции сравнивается сохранённый хэш с текущим файлом мастер-модели. При несовпадении — проекция инвалидируется. Потери работы не происходит — инвалидация только при финише.
+The projection record stores a hash of the master model it was created from. The check is event-driven: on projection completion (finish), the stored hash is compared against the current master model file. On mismatch, the projection is invalidated. No work is lost — the check only happens at finish time.
 
-## Множественные пользователи
+## Multiple users
 
-Параметры на RecordType:
-- **min_records** — минимальное количество записей, создаваемых при срабатывании flow. Определяет только начальное количество, не влияет на продвижение по flow
-- **max_records** — максимальное количество записей данного типа на сущность (UID зависит от level). Попытка создать больше — ошибка
+RecordType parameters:
+- **min_records** — the minimum number of records created when the flow fires. Determines only the initial count, doesn't affect progression through the flow
+- **max_records** — the maximum number of records of this type per entity (the UID depends on level). Trying to create more raises an error
 
-Продвижение по flow регулируется условиями самого flow, а не min/max_records.
+Progression through the flow is governed by the flow's own conditions, not by min/max_records.
 
-Каждая запись независима: имеет свой жизненный цикл, свой файл сегментации, свой статус finished. Сегментации разных врачей не блокируют друг друга.
+Each record is independent: it has its own lifecycle, its own segmentation file, its own `finished` status. Different inspectors' segmentations do not block each other.
 
-При завершении каждой отдельной сегментации запускается полный цикл: создание проекции, автоматическое сравнение, при расхождении — second-review для этого конкретного врача, при false positive — update-master-model.
+When each individual segmentation finishes, the full cycle runs: projection creation, automatic comparison, second-review for that specific inspector on any discrepancy, update-master-model on any false positive.
 
-## Роли
+## Roles
 
-- **doctor_CT, doctor_MRI, doctor_PDCT, doctor_CT-AG** — фильтр при назначении. Только врач с соответствующей ролью может получить задачу данного типа
-- **expert** — роль для обновления мастер-модели и создания проекций
-- **mdk** — роль для участников мультидисциплинарного консилиума
-- **surgeon** — роль для хирурга (интраоперационные этапы)
-- **pathologist** — роль для патоморфолога (гистология)
-- **auto** — запись создаётся и заполняется пайплайном. Без user_id
+- **inspector_CT, inspector_UT, inspector_MCT, inspector_CT-HD** — assignment filter. Only an inspector with the matching role can be assigned a task of that type
+- **inspector** — generic (modality-agnostic) inspector role, used for tasks that aren't tied to a specific modality (first-check, second-review, view-nifti)
+- **expert** — role for updating the master model and creating projections
+- **mrb** — role for Material Review Board participants
+- **technician** — role for the repair technician (repair-stage records)
+- **analyst** — role for the materials analyst (metallography)
+- **auto** — record is created and filled by the pipeline. No user_id
 
-Все роли (кроме auto) настраиваются через `extra_roles` в settings.toml.
+All roles (except auto) are configured via `extra_roles` in settings.toml.
 
-## Связи между записями
+## Record relationships
 
-Реализация: `parent_record_id` (FK на Record) — связь "один ко многим". Одна запись-родитель может иметь несколько дочерних записей (например, segmentation -> compare, second-review).
+Implementation: `parent_record_id` (FK on Record) — a one-to-many relationship. One parent record can have several child records (e.g. segmentation -> compare, second-review).
 
-Projection не хранит явную ссылку на segmentation — связь определяется через общий series_uid (projection level=SERIES, max_records=1 — одна проекция на серию).
+The projection does not store an explicit reference to the segmentation — the relationship is defined via the shared `series_uid` (projection level=SERIES, max_records=1 — one projection per series).
 
-Примеры связей:
-- compare-with-projection.parent_record_id -> segmentation (какую сегментацию сравниваем; проекцию находим по series_uid)
-- second-review.parent_record_id -> segmentation (для какого врача пересмотр)
-- update-master-model.parent_record_id -> compare-with-projection (на основании какого сравнения обновляем)
+Example relationships:
+- compare-with-projection.parent_record_id -> segmentation (which segmentation is being compared; the projection is found by series_uid)
+- second-review.parent_record_id -> segmentation (which inspector's review this is)
+- update-master-model.parent_record_id -> compare-with-projection (which comparison triggered this update)
 
-## Блокировка и порядок выполнения
+## Blocking and execution order
 
-Сегментации **не зависят** от мастер-модели и выполняются параллельно.
+Segmentations **do not depend** on the master model and run in parallel.
 
-Записи, зависящие от мастер-модели (create-master-projection), получают статус `blocked` при отсутствии входного файла master_model. Разблокировка происходит автоматически при появлении файла.
+Records that depend on the master model (create-master-projection) get status `blocked` when the input master_model file is missing. They unblock automatically once the file appears.
 
-Исследования могут поступить пакетом. Порядок завершения сегментаций не гарантирован. Мастер-модель создаётся по первой завершённой КТ-сегментации с данными архива (любого из врачей).
+Studies can arrive in batches. The order in which segmentations finish is not guaranteed. The master model is created from the first completed CT segmentation with archive data (from any of the inspectors).
 
-## Уровни файлов и FileAccessor
+## File levels and FileAccessor
 
-Уровень файла определяет:
-1. **Где хранится** — папка пациента (PATIENT), исследования (STUDY) или серии (SERIES)
-2. **Гарантии координат** — файлы одного уровня на одной сущности имеют одинаковые координатные сетки (число пикселей, размеры пикселей, точка отсчёта координат)
-3. **Защита от дубликатов** — например, master_model (level=PATIENT) один на всего пациента
+The file level determines:
+1. **Where it's stored** — the part's folder (PATIENT), study folder (STUDY), or series folder (SERIES)
+2. **Coordinate guarantees** — files at the same level on the same entity share the same coordinate grid (pixel count, pixel spacing, coordinate origin)
+3. **Duplicate protection** — e.g. master_model (level=PATIENT) is unique per part
 
-Файлы разных уровней таких гарантий координат не имеют.
+Files at different levels have no such coordinate guarantees.
 
-## Пример последовательности действий
+## Example sequence
 
-Процесс начинается с КТ: выполняется first-check (2 независимые оценки), определяется study_type=CT и best_series. После прохождения проверки качества автоматически запускается анонимизация. По завершении анонимизации создаются записи segment-ct-single и segment-ct-with-archive (min_records=2 на каждый тип).
+The process starts with CT: first-check runs (2 independent assessments), determining study_type=CT and best_series. After quality assessment passes, anonymization runs automatically. Once anonymization finishes, segment-ct-single and segment-ct-with-archive records are created (min_records=2 for each type).
 
-Врач завершает segment-ct-with-archive (первый из нескольких). Это первая КТ-сегментация с архивом → автоматически создаётся мастер-модель (init_master_model). Проекция мастер-модели на эту же серию — копия мастер-модели (auto_project_ct).
+An inspector completes segment-ct-with-archive (the first of several). This is the first CT segmentation with archive data → the master model is created automatically (init_master_model). The projection of the master model onto this same series is a copy of the master model (auto_project_ct).
 
-Выполнена МРТ → first-check → anonymize-study → segment-mri-single. Сегментация МРТ не зависит от мастер-модели и выполняется параллельно. Создаётся задача create-master-projection на серию МРТ. Если мастер-модель есть — эксперт размечает проекцию. Если нет — запись в статусе `blocked`.
+A UT scan is performed → first-check → anonymize-study → segment-ut-single. UT segmentation does not depend on the master model and runs in parallel. A create-master-projection task is created for the UT series. If the master model exists, the expert marks the projection. If not, the record stays `blocked`.
 
-Автоматическое сравнение projection vs segmentation для каждого врача. По результатам: один очаг на сегментации МРТ отсутствует на проекции → пайплайн создаёт update-master-model. Эксперт добавляет новый ROI. Хэш мастер-модели изменился → все проекции инвалидированы → повторная разметка. Для врачей с расхождениями создаётся second-review.
+Automatic comparison of projection vs. segmentation runs for each inspector. Result: one defect on the UT segmentation is absent from the projection → the pipeline creates update-master-model. The expert adds the new ROI. The master model hash changed → all projections are invalidated → re-marking is required. Second-review is created for inspectors whose segmentations had discrepancies.
 
-Последующие модальности (КТ-АГ, ПДКТ-АГ) проходят тот же цикл. После завершения всех этапов выявления очагов, через 4–7 недель, врачи ретроспективно описывают семиотические признаки каждого очага.
+Subsequent modalities (CT-HD, MCT) go through the same cycle. Once all defect-detection stages are complete, after 4–7 weeks, inspectors retrospectively record each defect's signal characterization.
 
-Далее: МДК классифицирует все очаги → resection-model → resection-plan → resection-report (предзаполнен из плана) → intraop-protocol → при дополнительных находках update-master-model → postop-ct-review → histology.
+Next: the MRB classifies all defects → repair-model → repair-plan → repair-report (prefilled from the plan) → repair-protocol (repair operation) → update-master-model on additional findings → post-repair-ct-review → metallography.
 
-## lifecycle.open — контракт
+## lifecycle.open — contract
 
-OHIF нативно поддерживает загрузку нескольких исследований через повторяющийся параметр:
+OHIF natively supports loading multiple studies via a repeated query parameter:
 ```
 /ohif/viewer?StudyInstanceUIDs=1.2.3&StudyInstanceUIDs=1.2.4&StudyInstanceUIDs=1.2.5
 ```
 
-Текущая реализация (`src/frontend/src/utils/viewer.gleam`) строит URL с одним study_uid. Страница выполнения записи (`records/execute.gleam`) уже учитывает level записи при формировании кнопки просмотра.
+The current implementation (`src/frontend/src/utils/viewer.gleam`) builds a URL with a single study_uid. The record-execution page (`records/execute.gleam`) already takes the record's level into account when building the viewer button.
 
-### Контракт
+### Contract
 
-`lifecycle_open` — поле RecordType, ссылающееся на Python-скрипт. Скрипт — чистая функция, получающая контекст записи (patient_id, study_uid, series_uid) и возвращающая список дополнительных study_uid для загрузки в viewer.
+`lifecycle_open` is a RecordType field referencing a Python script. The script is a pure function that receives the record's context (patient_id, study_uid, series_uid) and returns a list of additional study UIDs to load in the viewer.
 
 ```python
 # add_previous_ct_studies_to_viewer.py
@@ -248,15 +249,15 @@ async def lifecycle_open(ctx: RecordContext) -> list[str]:
     """Return additional study UIDs to load in OHIF viewer."""
     archive_studies = await ctx.client.find_studies(
         patient_id=ctx.patient_id,
-        study_type="CT-archive",
+        study_type="baseline archive",
     )
     return [s.study_uid for s in archive_studies]
 ```
 
-### Реализация в clarinet
+### Implementation in clarinet
 
-1. **API**: `RecordRead` получает computed-поле `viewer_study_uids: list[str]`. По умолчанию — `[record.study_uid]`. Если у RecordType задан `lifecycle_open`, вызывается скрипт и его результат добавляется к списку.
-2. **Frontend**: `viewer_url()` принимает `list[str]` вместо одного `study_uid`, формирует URL с несколькими `StudyInstanceUIDs`.
-3. **Кэширование**: результат `lifecycle_open` можно кэшировать на уровне записи (study_uid меняются только при добавлении новых исследований пациенту).
+1. **API**: `RecordRead` gets a computed field `viewer_study_uids: list[str]`. Default — `[record.study_uid]`. If the RecordType has `lifecycle_open` set, the script is invoked and its result is appended to the list.
+2. **Frontend**: `viewer_url()` takes a `list[str]` instead of a single `study_uid`, building a URL with multiple `StudyInstanceUIDs`.
+3. **Caching**: the result of `lifecycle_open` can be cached at the record level (study_uids only change when new studies are added to the part).
 
-Отдельный эндпоинт не нужен — достаточно включить `viewer_study_uids` в существующий ответ `GET /api/records/{id}`.
+A separate endpoint isn't needed — it's enough to include `viewer_study_uids` in the existing `GET /api/records/{id}` response.

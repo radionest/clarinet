@@ -1,31 +1,31 @@
-# Workflow диаграмма исследования метастазов печени
+# Workflow diagram — NDT comparative defect-detection study
 
-## Диагностический этап
+## Detection phase
 
 ```mermaid
 flowchart TD
-    %% Начало процесса
-    Start([Пациент: 5 модальностей + КТ-архив]) --> QA[Оценка качества и определение эталонной серии]
-    QA -->|2 независимые оценки| QA_Dec{Пригодность?}
-    QA_Dec -->|Нет| Reject[Исследование отклонено]
-    QA_Dec -->|Да| Anon[Анонимизация]
+    %% Start of process
+    Start([Part: 5 modalities + baseline archive]) --> QA[Quality assessment and reference-series selection]
+    QA -->|2 independent assessments| QA_Dec{Suitable?}
+    QA_Dec -->|No| Reject[Study rejected]
+    QA_Dec -->|Yes| Anon[Anonymization]
 
-    %% Сегментация
-    Anon --> Seg[Сегментация очагов — 2 врача независимо]
+    %% Segmentation
+    Anon --> Seg[Defect segmentation — 2 inspectors independently]
 
-    %% Мастер-модель
-    Seg -->|КТ + архив завершено первым| MM_Create[Эксперт: создание мастер-модели]
-    MM_Create --> MM_Ready[Мастер-модель готова]
+    %% Master model
+    Seg -->|CT + archive completed first| MM_Create[Expert: master model creation]
+    MM_Create --> MM_Ready[Master model ready]
 
-    %% Цикл для каждой модальности
-    subgraph Loop ["Для каждой модальности (КТ, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ)"]
+    %% Loop for each modality
+    subgraph Loop ["For each modality (CT, UT, CT-HD, UT-HD, MCT)"]
         direction TB
-        Proj[Эксперт: проекция мастер-модели] --> Comp[Автоматическое сравнение проекции и сегментации]
-        Comp --> Result{Результат сравнения}
+        Proj[Expert: master model projection] --> Comp[Automatic comparison of projection and segmentation]
+        Comp --> Result{Comparison result}
 
-        Result -->|Доп. очаги| Update_MM[Эксперт: обновление мастер-модели]
-        Result -->|Пропущенные очаги| Review[Пересмотр: классификация пропущенных очагов]
-        Result -->|Расхождений нет| Done[Модальность завершена]
+        Result -->|Additional defects| Update_MM[Expert: master model update]
+        Result -->|Missed defects| Review[Second review: classify missed defects]
+        Result -->|No discrepancies| Done[Modality complete]
 
         Review --> Done
     end
@@ -33,67 +33,67 @@ flowchart TD
     MM_Ready --> Proj
     Seg --> Comp
 
-    Update_MM -->|Инвалидация всех проекций| MM_Ready
+    Update_MM -->|Invalidate all projections| MM_Ready
 
-    Done --> Final{Все модальности завершены?}
-    Final -->|Да| Semiotics[Ретроспективная оценка семиотических признаков — washout 4–7 недель]
-    Semiotics --> DiagComplete([Диагностический этап завершён])
+    Done --> Final{All modalities complete?}
+    Final -->|Yes| Characterization[Retrospective characterization — blind-reassessment interval 4–7 weeks]
+    Characterization --> DiagComplete([Detection phase complete])
 
-    %% Стили
+    %% Styles
     classDef automatic fill:#e1f5ff,stroke:#0066cc,stroke-width:2px
     classDef manual fill:#fff4e1,stroke:#ff9900,stroke-width:2px
     classDef expert fill:#ffe1f5,stroke:#cc0066,stroke-width:2px
     classDef decision fill:#f0f0f0,stroke:#666,stroke-width:2px
 
     class Anon,Comp automatic
-    class QA,Seg,Review,Semiotics manual
+    class QA,Seg,Review,Characterization manual
     class MM_Create,Proj,Update_MM expert
     class QA_Dec,Result,Final decision
 ```
 
-## Хирургический этап
+## Repair phase
 
 ```mermaid
 flowchart TD
-    DiagComplete([Диагностический этап завершён]) --> MDK[МДК: классификация всех очагов]
-    MDK --> ResModel[Эксперт: 3D-модель резекции]
-    ResModel --> ResPlan[Эксперт: план резекции — кластеры удаления]
-    ResPlan --> ResReport[Хирург: протокол резекции]
-    ResReport --> Surgery[Операция — интраоперационное УЗИ]
+    DiagComplete([Detection phase complete]) --> MRB[MRB: classify all defects]
+    MRB --> RepairModel[Expert: 3D repair model]
+    RepairModel --> RepairPlan[Expert: repair plan — repair clusters]
+    RepairPlan --> RepairReport[Technician: repair report]
+    RepairReport --> Repair[Repair operation — in-process UT]
 
-    Surgery --> SurgResult{Доп. очаги на операции?}
-    SurgResult -->|Да| UpdateMM[Обновление мастер-модели]
-    SurgResult -->|Нет| PostOp
+    Repair --> RepairResult{Additional defects during repair?}
+    RepairResult -->|Yes| UpdateMM[Master model update]
+    RepairResult -->|No| PostRepair
 
-    UpdateMM --> PostOp[Послеоперационная КТ]
-    PostOp --> Histo[Гистология — макро + микроскопия]
-    Histo --> Complete([Исследование завершено])
+    UpdateMM --> PostRepair[Post-repair CT]
+    PostRepair --> Metallo[Metallography — macro + microscopy]
+    Metallo --> Complete([Study complete])
 
-    %% Стили
+    %% Styles
     classDef automatic fill:#e1f5ff,stroke:#0066cc,stroke-width:2px
     classDef manual fill:#fff4e1,stroke:#ff9900,stroke-width:2px
     classDef expert fill:#ffe1f5,stroke:#cc0066,stroke-width:2px
     classDef decision fill:#f0f0f0,stroke:#666,stroke-width:2px
 
-    class MDK,Surgery,PostOp,Histo manual
-    class ResModel,ResPlan,UpdateMM expert
-    class ResReport manual
-    class SurgResult decision
+    class MRB,Repair,PostRepair,Metallo manual
+    class RepairModel,RepairPlan,UpdateMM expert
+    class RepairReport manual
+    class RepairResult decision
 ```
 
-## Легенда
+## Legend
 
-- **Синий** (голубой фон) — автоматические процессы
-- **Оранжевый** (жёлтый фон) — ручные процессы (врачи)
-- **Розовый** — задачи эксперта
-- **Серый** — точки принятия решений
+- **Blue** (light blue fill) — automatic processes
+- **Orange** (yellow fill) — manual processes (inspectors)
+- **Pink** — expert tasks
+- **Gray** — decision points
 
-## Ключевые особенности workflow
+## Key workflow features
 
-1. **Параллельная обработка модальностей**: все 5 модальностей обрабатываются независимо
-2. **Циклы обновления**: при обнаружении дополнительных очагов мастер-модель обновляется и все проекции инвалидируются
-3. **Проверка hash**: при завершении проекции проверяется актуальность мастер-модели
-4. **Двойная независимая оценка**: каждая сегментация выполняется двумя врачами независимо
-5. **Пересмотр**: разделяет ограничение метода (невидимый очаг) и ошибку наблюдателя (пропущенный видимый очаг)
-6. **Washout-период**: ретроспективная семиотика отделена от сегментации интервалом 4–7 недель
-7. **Сквозная мастер-модель**: обновляется на всех этапах — от диагностики до интраоперационных находок
+1. **Parallel modality processing**: all 5 modalities are processed independently
+2. **Update loops**: when additional defects are found, the master model is updated and all projections are invalidated
+3. **Hash check**: on projection completion, the master model's currency is verified
+4. **Double independent assessment**: each segmentation is performed by two inspectors independently
+5. **Second review**: separates method limitation (invisible defect) from observer error (missed visible defect)
+6. **Blind-reassessment interval**: retrospective characterization is separated from segmentation by a 4–7 week interval
+7. **End-to-end master model**: updated at every stage — from detection through in-process repair findings
