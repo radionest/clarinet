@@ -200,7 +200,7 @@ pub fn init() -> Model {
     user: None,
     checking_session: True,
     project_name: "Clarinet",
-    project_description: "Medical Imaging Framework",
+    project_description: "Imaging Research Framework",
     loading: False,
     error: None,
     success_message: None,

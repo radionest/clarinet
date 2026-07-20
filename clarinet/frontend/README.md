@@ -1,11 +1,11 @@
 # Clarinet Frontend
 
-A modern single-page application (SPA) frontend for the Clarinet medical imaging framework, built with Gleam and Lustre.
+A modern single-page application (SPA) frontend for the Clarinet imaging framework, built with Gleam and Lustre.
 
 ## Overview
 
 The frontend provides a web-based user interface for:
-- Managing medical imaging studies
+- Managing imaging studies
 - Creating and executing analysis tasks
 - User management and authentication
 - Dynamic form generation for task results
@@ -264,4 +264,4 @@ When contributing to the frontend:
 
 ## License
 
-Part of the Clarinet medical imaging framework.
+Part of the Clarinet imaging framework.

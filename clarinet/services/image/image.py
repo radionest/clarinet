@@ -1,4 +1,4 @@
-"""Image class for reading/writing medical images (NIfTI, NRRD, DICOM)."""
+"""Image class for reading/writing images (NIfTI, NRRD, DICOM)."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def _reconcile_segment_metadata(header: dict[str, Any], present_labels: set[int]
 
 
 class FileType(enum.Enum):
-    """Supported medical image file formats."""
+    """Supported image file formats."""
 
     NIFTI = "nifti"
     NRRD = "nrrd"
@@ -118,7 +118,7 @@ class FileType(enum.Enum):
 
 
 class Image:
-    """3D medical image with format-aware I/O.
+    """3D image with format-aware I/O.
 
     Supports NIfTI (.nii, .nii.gz), NRRD (.nrrd), and DICOM series reading.
     Provides unified access to voxel data, spacing, and shape regardless of

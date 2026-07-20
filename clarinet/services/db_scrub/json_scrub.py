@@ -13,7 +13,7 @@ Policy — a string is **kept** only when the schema marks it as structured:
 Every other string is free text and is replaced with :data:`REDACTION`.
 Numbers, booleans and ``null`` are always preserved. Fields absent from the
 schema are treated as free text too (unknown ⇒ scrub), so a stale or partial
-schema fails safe rather than leaking. The known DICOM/medical schemas express
+schema fails safe rather than leaking. The known DICOM/imaging schemas express
 the fields a downstream stage needs (enums, integers, ``x-options`` UIDs)
 structurally, so this preserves exactly what replay requires.
 

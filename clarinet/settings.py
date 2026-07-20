@@ -473,7 +473,7 @@ class Settings(BaseSettings):
 
     # Project branding
     project_name: str = "Clarinet"
-    project_description: str = "Medical Imaging Framework"
+    project_description: str = "Imaging Research Framework"
     project_title: str | None = None  # Browser tab <title>; falls back to project_name
 
     # Project customization

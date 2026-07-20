@@ -7,8 +7,8 @@ exact date nor its year (both quasi-identifiers) leak past anonymization, and
 the free-text study description is dropped on the same path.
 
 RecordTypes may opt out of masking via ``mask_patient_data=False`` — used for
-record types filled by clinicians who need real patient IDs (surgery,
-pathology, MDK). Each deanonymized access is audit-logged at INFO level
+record types filled by specialists who need real patient IDs (repair,
+metallography, MRB). Each deanonymized access is audit-logged at INFO level
 without leaking PII (identifiers only).
 
 When ``settings.anon_per_study_patient_id`` is enabled, the masked patient ID
@@ -57,7 +57,7 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
     if record.patient.anon_name is None:
         return record
 
-    # Per-record-type opt-out: clinical roles (surgeons, pathologists, MDK)
+    # Per-record-type opt-out: specialist roles (technicians, analysts, MRB)
     # need real patient identifiers. Each access is audit-logged.
     if not record.record_type.mask_patient_data:
         logger.info(

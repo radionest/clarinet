@@ -16,7 +16,7 @@ server / CI box / WSL instead of skipping it.
 
 ## Prerequisites (one-time)
 
-1. **3D Slicer** (Linux build). Use the same version your clinicians run for
+1. **3D Slicer** (Linux build). Use the same version deployed in production for
    parity. Download from <https://download.slicer.org> and unpack, e.g.:
    ```bash
    curl -fsSL "https://download.slicer.org/find?os=linux&stability=release" | jq -r .download_url   # -> /bitstream/...

@@ -300,7 +300,7 @@ class TestMaskRecordPatientData:
         assert result.study.date == date(2025, 1, 17)
 
     def test_study_date_preserved_when_opted_out(self) -> None:
-        """``mask_patient_data=False`` keeps the real study date for clinical roles."""
+        """``mask_patient_data=False`` keeps the real study date for specialist roles."""
         user = _make_user(is_superuser=False)
         record = _make_record_read(
             anon_name="Anon Patient Name",
@@ -590,7 +590,7 @@ class TestMaskRecordPatientData:
     def test_record_type_opted_out_keeps_display_anon_id(self) -> None:
         """Opt-out types still carry the per-study display ID next to real data.
 
-        Clinical roles (``mask_patient_data=False``) see real identifiers, but
+        Specialist roles (``mask_patient_data=False``) see real identifiers, but
         the ANON ID column keeps showing the per-study hash so the row can
         still be correlated with the anonymized study in PACS.
         """

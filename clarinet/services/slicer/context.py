@@ -160,7 +160,7 @@ def build_slicer_context(
     file_registry = record.record_type.file_registry or []
 
     # -- Layer 1: Standard variables (by level) --
-    # Slicer is the UI layer for the radiologist — open a record even if
+    # Slicer is the UI layer for the inspector — open a record even if
     # anonymization has not propagated yet (PACS still answers under the
     # raw UID in that window). Backend tasks must NOT mirror this — they
     # use Files(...) in strict mode (default).

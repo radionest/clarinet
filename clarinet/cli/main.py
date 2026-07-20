@@ -58,7 +58,7 @@ def init_project(path: str, template: str | None = None) -> None:
 
 # ── Project ──────────────────────────────────────────
 project_name = "My Project"
-# project_description = "Medical Imaging Framework"
+# project_description = "Imaging Research Framework"
 # project_title = "My Project"  # browser tab <title>; defaults to project_name
 
 # ── Server ───────────────────────────────────────────
@@ -1415,7 +1415,7 @@ async def _handle_session(args: argparse.Namespace) -> None:
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        prog="clarinet", description="Clarinet Framework CLI - Medical Image Analysis Framework"
+        prog="clarinet", description="Clarinet Framework CLI - Imaging Research Framework"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
