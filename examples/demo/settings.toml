@@ -1,6 +1,6 @@
-project_name="НИР Печень"
-project_description="Большое исследование артериографии для выявления метастазов колректального рака в печень"
-extra_roles = ["doctor_CT", "doctor_MRI", "doctor_PDCT", "doctor_CT-AG", "mdk", "surgeon", "pathologist"]
+project_name = "NDT Comparative Study"
+project_description = "Comparative evaluation of non-destructive testing (NDT) imaging modalities for internal-defect detection in cast parts"
+extra_roles = ["inspector_CT", "inspector_UT", "inspector_MCT", "inspector_CT-HD", "mrb", "technician", "analyst"]
 debug = true
 log_level = "DEBUG"
 log_console_level = "INFO"
@@ -9,9 +9,9 @@ port = 8000
 host = "127.0.0.1"
 
 database_driver = "sqlite"
-database_name = "clarinet_liver_demo"
+database_name = "clarinet_demo"
 storage_path = "./data"
-anon_id_prefix = "DEMO_LIVER"
+anon_id_prefix = "DEMO_PART"
 secret_key = "demo-secret-key-not-for-production"
 admin_password = "admin123"
 recordflow_enabled = true
