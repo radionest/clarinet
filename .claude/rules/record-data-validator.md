@@ -30,7 +30,7 @@ from clarinet.services.record_data_validation import ValidatorContext, record_va
 from clarinet.types import RecordData
 
 
-@record_validator("map_lesion_numbers.unique_new_id", run_on_partial=False)
+@record_validator("map_defect_numbers.unique_new_id", run_on_partial=False)
 async def validate_unique_new_id(
     record: Record, data: RecordData, ctx: ValidatorContext
 ) -> None:
@@ -63,9 +63,9 @@ Binding to a RecordType:
 # plan/record_types.py
 from clarinet.flow import RecordDef
 
-map_lesion_numbers = RecordDef(
-    name="map-lesion-numbers",
-    data_validators=["map_lesion_numbers.unique_new_id"],
+map_defect_numbers = RecordDef(
+    name="map-defect-numbers",
+    data_validators=["map_defect_numbers.unique_new_id"],
     # ...
 )
 ```
@@ -205,7 +205,7 @@ from clarinet.exceptions.domain import RecordDataValidationError
 from clarinet_plan.validators import validate_unique_new_id
 
 async def test_duplicates_detected(record_factory, validator_ctx):
-    record = await record_factory(type_name="map-lesion-numbers")
+    record = await record_factory(type_name="map-defect-numbers")
     data = {"mappings": [{"old_id": 1, "new_id": 3}, {"old_id": 2, "new_id": 3}]}
     with pytest.raises(RecordDataValidationError) as exc_info:
         await validate_unique_new_id(record, data, validator_ctx)

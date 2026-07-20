@@ -36,7 +36,7 @@ segment_ct = RecordDef(
     name="segment-ct",
     label="CT Segmentation",
     level="STUDY",
-    role="doctor_CT",
+    role="inspector_CT",
     min_records=2, max_records=4,
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
@@ -51,7 +51,7 @@ Data schemas are JSON Schema. Clarinet auto-generates forms in the web UI:
 {
     "properties": {
         "is_good": {"type": "boolean"},
-        "study_type": {"type": "string", "enum": ["CT", "MRI", "CT-AG"]},
+        "study_type": {"type": "string", "enum": ["CT", "UT", "CT-HD"]},
         "best_series": {"type": "string", "x-options": {"source": "study_series"}}
     }
 }
@@ -76,7 +76,7 @@ study().on_creation().create_record("first-check")
     .if_record(F.is_good == True)
     .match(F.study_type)
     .case("CT").create_record("segment-ct", "segment-ct-archive")
-    .case("MRI").create_record("segment-mri")
+    .case("UT").create_record("segment-ut")
 )
 
 # Segmentation finished → run automatic comparison
@@ -124,19 +124,19 @@ clarinet worker --queues gpu    # worker for GPU tasks only
 - **Distributed processing**: pipeline tasks on remote machines with queue routing (GPU, DICOM, default), automatic retries, and dead letter queues
 - **RecordFlow**: event-driven workflow engine — automatic task creation, invalidation on data/file changes, pattern matching on fields, cascading reactions
 
-## Example: Liver Metastasis Study
+## Example: NDT Comparative Study
 
-A real-world example in `examples/demo_liver_v2/` — a multi-modality study with 15+ record types:
+A real-world example in `examples/demo/` — a multi-modality study with 20+ record types:
 
-1. Patient undergoes CT, MRI, CT angiography
+1. A part undergoes CT, UT, and CT-HD scanning
 2. Each study gets an initial assessment (`first-check`)
-3. Segmentation tasks are automatically created for multiple doctors based on modality
+3. Defect-segmentation tasks are automatically created for multiple inspectors based on modality
 4. The first completed CT segmentation becomes the master model
 5. The master model is projected onto other modalities, results are compared automatically
-6. Discrepancies trigger a second review for the specific doctor
-7. MDK council classifies lesions → 3D modeling → resection planning → histology
+6. Discrepancies trigger a second review for the specific inspector
+7. The MRB (Material Review Board) classifies defects → 3D repair modeling → repair planning → metallography
 
-This entire pipeline is described in ~100 lines of workflow and ~300 lines of record type definitions.
+This entire pipeline is described in the project's workflow and record type definitions (`examples/demo/tasks/workflows/pipeline_flow.py`, `examples/demo/tasks/definitions/record_types.py`).
 
 ## Requirements
 
