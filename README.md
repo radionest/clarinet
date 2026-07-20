@@ -5,11 +5,11 @@
 ![Python](https://raw.githubusercontent.com/radionest/clarinet/badges/python.svg)
 ![3D Slicer](https://raw.githubusercontent.com/radionest/clarinet/badges/slicer.svg)
 
-An imaging-centric framework for clinical research. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
+An imaging-centric framework for structured research workflows. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
 
 ## Why
 
-Running a medical imaging study means coordinating dozens of participants, modalities, processing steps, and files. Typically this looks like: images on PACS, annotations in shared folders, protocols in spreadsheets, and tracking "who did what" in the coordinator's head.
+Running a multi-participant imaging study means coordinating dozens of participants, modalities, processing steps, and files. Typically this looks like: images on PACS, annotations in shared folders, protocols in spreadsheets, and tracking "who did what" in the coordinator's head.
 
 Clarinet replaces all of this with a single system where:
 
