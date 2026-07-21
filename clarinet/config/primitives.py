@@ -4,12 +4,18 @@ These primitives are used in Python config files (``record_types.py``) to
 define RecordTypes in a declarative, type-safe way.
 """
 
+import warnings
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from clarinet.models.base import DicomQueryLevel, ViewerMode
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.models.uniqueness import (
+    DEFAULT_UNIQUE_BY,
+    canonical_unique_by,
+    legacy_unique_per_user,
+)
 from clarinet.utils.validators import validate_slug
 
 
@@ -70,11 +76,15 @@ class FileRef(BaseModel, frozen=True):
         file: Reference to a FileDef instance.
         role: File role in the processing pipeline.
         required: Whether this file is required.
+        allow_path_collision: Opt out of the default path-collision guard —
+            this binding may share its resolved path with another file of
+            the record.
     """
 
     file: FileDef
     role: FileRole = FileRole.OUTPUT
     required: bool = True
+    allow_path_collision: bool = False
 
     def __init__(
         self, file: FileDef, /, role: FileRole | str = FileRole.OUTPUT, **kwargs: Any
@@ -112,14 +122,19 @@ class RecordDef(BaseModel):
         data_validators: Names of cross-field RecordData validators to run.
         mask_patient_data: Mask patient/study/series identifiers for non-superusers
             once the patient is anonymized.
-        unique_per_user: Allow at most one record of this type per user.
+        unique_by: Uniqueness partition — at most one record of this type per
+            unique combination of these scopes (subset of {"user", "parent"}).
+            None disables the constraint. Default {"user", "parent"}. The
+            deprecated ``unique_per_user`` kwarg (True/False) still works —
+            it translates to {"user"}/None and emits a DeprecationWarning; an
+            explicit unique_by wins over it.
         parent_required: Require a parent record at creation.
         inherit_user_from_parent: Child inherits user_id from its parent record.
         editable: Whether non-superusers may change a submitted (finished) record.
         edit_window_days: Days a finished record stays editable; None = no limit.
         shared_editing: Any role-holder may edit any record of this type;
             each edit reassigns ownership to the editor. Requires
-            unique_per_user=False.
+            'user' not in unique_by.
         viewer_mode: How many series the viewer loads (single vs all series).
         allowed_viewers: Restrict the DICOM viewers shown for this type to these
             viewer names (matching ``ViewerInfo.name``); None/empty = all
@@ -150,7 +165,7 @@ class RecordDef(BaseModel):
     slicer_context_hydrators: list[str] | None = None
     data_validators: list[str] | None = None
     mask_patient_data: bool = True
-    unique_per_user: bool = True
+    unique_by: frozenset[str] | None = Field(default_factory=lambda: frozenset(DEFAULT_UNIQUE_BY))
     parent_required: bool = False
     inherit_user_from_parent: bool = False
     editable: bool = True
@@ -159,10 +174,26 @@ class RecordDef(BaseModel):
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
     allowed_viewers: list[str] | None = None
 
-    def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
-        """Accept ``role`` as a user-friendly alias for ``role_name``."""
+    def __init__(
+        self,
+        *,
+        role: str | None = None,
+        unique_per_user: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Accept ``role`` as a user-friendly alias for ``role_name`` and
+        translate the deprecated ``unique_per_user`` flag into ``unique_by``.
+        """
         if role is not None and "role_name" not in kwargs:
             kwargs["role_name"] = role
+        if unique_per_user is not None:
+            warnings.warn(
+                "unique_per_user is deprecated; use unique_by",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if "unique_by" not in kwargs:  # explicit unique_by wins
+                kwargs["unique_by"] = legacy_unique_per_user(unique_per_user)
         super().__init__(**kwargs)
 
     @field_validator("level", mode="before")
@@ -176,6 +207,12 @@ class RecordDef(BaseModel):
     def _coerce_viewer_mode(cls, v: Any) -> Any:
         """Accept string literals like ``"all_series"`` for viewer_mode."""
         return _coerce_viewer_mode(v)
+
+    @field_validator("unique_by", mode="before")
+    @classmethod
+    def _canonical_unique_by(cls, v: Any) -> Any:
+        """Canonicalize unique_by via the shared partition validator."""
+        return canonical_unique_by(v)
 
 
 def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
@@ -195,6 +232,7 @@ def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
         multiple=ref.file.multiple,
         role=ref.role,
         level=ref.file.level,
+        allow_path_collision=ref.allow_path_collision,
     )
 
 

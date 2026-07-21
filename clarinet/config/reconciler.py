@@ -40,7 +40,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "data_schema",
     "ui_schema",
     "mask_patient_data",
-    "unique_per_user",
+    "unique_by",
     "parent_required",
     "inherit_user_from_parent",
     "editable",

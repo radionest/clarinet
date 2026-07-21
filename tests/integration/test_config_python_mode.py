@@ -111,15 +111,15 @@ async def test_editable_flags_forwarded_when_explicit(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_unique_per_user_forwarded_when_explicit(tmp_path) -> None:
-    """``unique_per_user`` propagates from RecordDef only when set."""
+async def test_unique_by_forwarded_when_explicit(tmp_path) -> None:
+    """``unique_by`` propagates from RecordDef only when explicitly set."""
     _write_record_types(
         tmp_path,
         """\
         from clarinet.config.primitives import RecordDef
 
-        # Explicit False — must be forwarded
-        shared = RecordDef(name="shared-rt", level="STUDY", unique_per_user=False)
+        # Explicit — must be forwarded
+        scoped = RecordDef(name="scoped-rt", level="STUDY", unique_by={"parent"})
         # Default — must NOT be forwarded
         plain = RecordDef(name="plain-rt", level="STUDY")
         """,
@@ -128,10 +128,35 @@ async def test_unique_per_user_forwarded_when_explicit(tmp_path) -> None:
     config_items = await load_python_config(tmp_path)
     by_name = {item.name: item for item in config_items}
 
-    assert "unique_per_user" in by_name["shared-rt"].model_fields_set
-    assert by_name["shared-rt"].unique_per_user is False
+    assert "unique_by" in by_name["scoped-rt"].model_fields_set
+    assert by_name["scoped-rt"].unique_by == frozenset({"parent"})
 
-    assert "unique_per_user" not in by_name["plain-rt"].model_fields_set
+    assert "unique_by" not in by_name["plain-rt"].model_fields_set
+
+
+@pytest.mark.asyncio
+async def test_legacy_unique_per_user_forwarded_as_unique_by(tmp_path) -> None:
+    """Deprecated ``unique_per_user`` kwarg still reaches the reconciler, translated."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        # Explicit legacy False — must be forwarded as unique_by=None
+        shared = RecordDef(name="shared-rt", level="STUDY", unique_per_user=False)
+        # Default — must NOT be forwarded
+        plain = RecordDef(name="plain-rt", level="STUDY")
+        """,
+    )
+
+    with pytest.warns(DeprecationWarning):
+        config_items = await load_python_config(tmp_path)
+    by_name = {item.name: item for item in config_items}
+
+    assert "unique_by" in by_name["shared-rt"].model_fields_set
+    assert by_name["shared-rt"].unique_by is None
+
+    assert "unique_by" not in by_name["plain-rt"].model_fields_set
 
 
 @pytest.mark.asyncio
@@ -141,7 +166,7 @@ async def test_shared_editing_forwarded_when_explicit(tmp_path) -> None:
         tmp_path,
         "from clarinet.config.primitives import RecordDef\n\n"
         'shared = RecordDef(name="shared-rt", level="STUDY", '
-        "shared_editing=True, unique_per_user=False)\n"
+        "shared_editing=True, unique_by=None)\n"
         'plain = RecordDef(name="plain-rt", level="STUDY")\n',
     )
 
@@ -200,7 +225,7 @@ _FORWARD_SAMPLES: dict[str, object] = {
     "data_schema": {"type": "object"},
     "ui_schema": {"name": {"ui:widget": "text"}},
     "mask_patient_data": False,
-    "unique_per_user": False,
+    "unique_by": frozenset({"parent"}),
     "parent_required": True,
     "inherit_user_from_parent": True,
     "editable": False,

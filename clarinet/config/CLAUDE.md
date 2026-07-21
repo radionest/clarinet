@@ -40,8 +40,8 @@ lesion_seg = RecordDef(
 ```
 
 - `FileDef`: pattern, multiple, level (str or `DicomQueryLevel`, **required**), description, name (auto-derived)
-- `FileRef(file, role, required)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum
-- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum; `unique_per_user`: one record per user (default True); `editable`: non-superusers may update a finished record (default True); `shared_editing`: any role-holder may edit any record of this type — each edit reassigns ownership to the editor (requires `unique_per_user=False`, default False)
+- `FileRef(file, role, required, allow_path_collision)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum; `allow_path_collision` opts a binding out of the default path-collision guard (default False)
+- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum; `unique_by`: uniqueness partition set, subset of `{"user", "parent"}` (default `{"user", "parent"}`; `None` disables); deprecated `unique_per_user=True/False` kwarg still works (translates to `{"user"}`/`None`, emits `DeprecationWarning`, ignored if `unique_by` is also given); `editable`: non-superusers may update a finished record (default True); `shared_editing`: any role-holder may edit any record of this type — each edit reassigns ownership to the editor (requires `'user' not in unique_by`, default False)
 
 **String coercion:** `level` and `role` fields accept plain strings (`"SERIES"`, `"input"`) — validators coerce to enums automatically.
 
