@@ -81,6 +81,9 @@ def fields_from(record: RecordRead, parent: RecordRead | None = None) -> dict[st
     That dict-merge means a present-but-empty ``record.data[FIELD]`` wins its key
     and does NOT fall back to ``parent`` — unlike the scalar fields below, which
     fall back when the record's own value is ``None`` / ``""``.
+    ``parent_id`` is a direct passthrough of ``record.parent_record_id`` — no
+    parent-fallback and no attribute access on *parent* at all, so it renders
+    identically whether or not the parent record was loaded.
     Coercion (lists → ``"CT_SR"``) happens later in ``_template.render``.
     """
 
@@ -93,6 +96,7 @@ def fields_from(record: RecordRead, parent: RecordRead | None = None) -> dict[st
     data = {**(getattr(parent, "data", None) or {}), **(getattr(record, "data", None) or {})}
     return {
         "id": record.id,
+        "parent_id": record.parent_record_id,
         "user_id": scalar("user_id"),
         "patient_id": scalar("patient_id"),
         "study_uid": scalar("study_uid"),

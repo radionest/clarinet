@@ -5,7 +5,9 @@ This module tests the file pattern functions used for resolving
 placeholders and matching filenames.
 """
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -38,6 +40,41 @@ def mock_record() -> MagicMock:
     record.record_type.name = "ct-segmentation"
     record.record_type.level = "SERIES"
     return record
+
+
+@pytest.fixture
+def make_record_read() -> Callable[..., MagicMock]:
+    """Factory for a minimal mock record, overridable via kwargs.
+
+    Local to this module — no shared ``make_record_read`` fixture exists yet.
+    """
+
+    def _make(
+        *,
+        id: int = 1,
+        parent_record_id: int | None = None,
+        user_id: str | None = None,
+        patient_id: str = "P",
+        study_uid: str | None = None,
+        series_uid: str | None = None,
+        data: dict[str, Any] | None = None,
+        record_type_name: str = "test-type",
+        level: str = "SERIES",
+    ) -> MagicMock:
+        record = MagicMock()
+        record.id = id
+        record.parent_record_id = parent_record_id
+        record.user_id = user_id
+        record.patient_id = patient_id
+        record.study_uid = study_uid
+        record.series_uid = series_uid
+        record.data = data or {}
+        record.record_type = MagicMock()
+        record.record_type.name = record_type_name
+        record.record_type.level = level
+        return record
+
+    return _make
 
 
 class TestPlaceholderRegex:
@@ -244,6 +281,25 @@ class TestOriginType:
 
         result = _render_for("{record_type.name}_output.nrrd", mock_record, parent)
         assert result == "ct-segmentation_output.nrrd"
+
+
+class TestParentId:
+    """Tests for the {parent_id} virtual field — resolved from the FK column only."""
+
+    def test_parent_id_from_fk_is_load_independent(
+        self, make_record_read: Callable[..., MagicMock]
+    ) -> None:
+        """{parent_id} resolves from the FK column, identical whether parent is loaded or None."""
+        rec = make_record_read(parent_record_id=4711)
+        assert fields_from(rec, parent=None)["parent_id"] == 4711
+        assert fields_from(rec, parent=make_record_read(id=4711))["parent_id"] == 4711
+
+    def test_parent_id_none_stays_none(self, make_record_read: Callable[..., MagicMock]) -> None:
+        """{parent_id} is None when parent_record_id is None (no coercion in fields_from)."""
+        # Lenient template rendering turns None into "" (strict raises) — pinned in spec.
+        assert (
+            fields_from(make_record_read(parent_record_id=None), parent=None)["parent_id"] is None
+        )
 
 
 class TestGlobFilePaths:
