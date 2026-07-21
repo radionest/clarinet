@@ -41,3 +41,8 @@ def test_unknown_token_rejected():
 def test_legacy_mapping():
     assert legacy_unique_per_user(True) == frozenset({"user"})
     assert legacy_unique_per_user(False) is None
+
+
+def test_bare_string_rejected_with_teaching_message():
+    with pytest.raises(ValueError, match='not "user"'):
+        canonical_unique_by("user")

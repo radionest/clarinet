@@ -19,6 +19,12 @@ def canonical_unique_by(value: Iterable[str] | bool | None) -> frozenset[str] | 
             "unique_by=true is not a partition set — use {'user'} for the legacy "
             "unique_per_user behavior, or omit the field for the default"
         )
+    if isinstance(value, str):
+        # A bare string is an Iterable[str] of characters — without this guard
+        # "user" would be rejected as unknown partitions ['e', 'r', 's', 'u'].
+        raise ValueError(
+            f'unique_by must be a set/list of partition names — use ["{value}"], not "{value}"'
+        )
     parts = frozenset(value)
     if not parts:
         raise ValueError(

@@ -19,6 +19,7 @@ from clarinet.files._patterns import (
 )
 from clarinet.files._template import RenderMode, render_template
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.models.record import RecordRead
 
 
 def _render_for(pattern: str, record: MagicMock, parent: MagicMock | None = None) -> str:
@@ -61,7 +62,7 @@ def make_record_read() -> Callable[..., MagicMock]:
         record_type_name: str = "test-type",
         level: str = "SERIES",
     ) -> MagicMock:
-        record = MagicMock()
+        record = MagicMock(spec=RecordRead)
         record.id = id
         record.parent_record_id = parent_record_id
         record.user_id = user_id
