@@ -113,6 +113,8 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
                 file_entry["multiple"] = True
             if fd.get("level"):
                 file_entry["level"] = fd["level"]
+            if fd.get("allow_path_collision"):
+                file_entry["allow_path_collision"] = True
             files.append(file_entry)
         if files:
             data["file_registry"] = files

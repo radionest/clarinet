@@ -164,16 +164,24 @@ def _file_links_differ(
     if len(existing_links) != len(config_defs):
         return True
 
-    # Build comparable sets (name, role, required, level)
-    existing_set: set[tuple[str, str, bool, str | None]] = set()
+    # Build comparable sets (name, role, required, level, allow_path_collision)
+    existing_set: set[tuple[str, str, bool, str | None, bool]] = set()
     for link in existing_links:
         level = link.file_definition.level.value if link.file_definition.level else None
-        existing_set.add((link.file_definition.name, link.role.value, link.required, level))
+        existing_set.add(
+            (
+                link.file_definition.name,
+                link.role.value,
+                link.required,
+                level,
+                link.allow_path_collision,
+            )
+        )
 
-    config_set: set[tuple[str, str, bool, str | None]] = set()
+    config_set: set[tuple[str, str, bool, str | None, bool]] = set()
     for fd in config_defs:
         level = fd.level.value if fd.level else None
-        config_set.add((fd.name, fd.role.value, fd.required, level))
+        config_set.add((fd.name, fd.role.value, fd.required, level, fd.allow_path_collision))
 
     return existing_set != config_set
 

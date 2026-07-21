@@ -13,7 +13,7 @@ collision.
 from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import RecordConstraintViolationError
-from clarinet.files._patterns import PLACEHOLDER_REGEX
+from clarinet.files import PLACEHOLDER_REGEX
 from clarinet.models.file_schema import FileRole
 
 if TYPE_CHECKING:

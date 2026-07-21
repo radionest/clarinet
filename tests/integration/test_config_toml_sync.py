@@ -20,7 +20,7 @@ from clarinet.config.toml_exporter import (
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
-from clarinet.models.file_schema import RecordTypeFileLink
+from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.record_type import RecordTypeBase
 from clarinet.models.uniqueness import canonical_unique_by
@@ -260,6 +260,115 @@ async def test_file_registry_round_trip(
     exported = tomllib.loads((export_dir / "round-trip.toml").read_text())
     assert "file_registry" in exported
     assert exported["file_registry"][0]["name"] == "seg_mask"
+
+
+@pytest.mark.asyncio
+async def test_export_includes_allow_path_collision(tmp_path) -> None:
+    """TOML export writes allow_path_collision for an opted-out OUTPUT file,
+    and omits it (default False) for a plain file — mirrors ``multiple``.
+    """
+    import tomllib
+
+    rt = RecordType(name="collision-export", level="SERIES")
+    rt.file_links = [
+        RecordTypeFileLink(
+            record_type_name="collision-export",
+            file_definition=FileDefinition(name="report_file", pattern="report.pdf"),
+            role=FileRole.OUTPUT,
+            required=True,
+            allow_path_collision=True,
+        ),
+        RecordTypeFileLink(
+            record_type_name="collision-export",
+            file_definition=FileDefinition(name="seg_file", pattern="seg_{id}.nrrd"),
+            role=FileRole.OUTPUT,
+            required=True,
+            allow_path_collision=False,
+        ),
+    ]
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+
+    files_by_name = {f["name"]: f for f in content["file_registry"]}
+    assert files_by_name["report_file"]["allow_path_collision"] is True
+    assert "allow_path_collision" not in files_by_name["seg_file"]
+
+
+@pytest.mark.asyncio
+async def test_allow_path_collision_round_trip_survives_reexport(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """TOML(opt-out=true) -> DB (reconcile) -> re-export -> reload must keep
+    the opt-out and NOT fail config-load validation.
+
+    Regression for the boot-failure scenario: this OUTPUT file has no
+    discriminating placeholder and relies entirely on
+    ``allow_path_collision`` to pass ``validate_output_path_uniqueness``. If
+    the reconciler's DB write (``sync_file_links``) or the exporter drops
+    the flag anywhere along the way, the type fails to load on the next
+    startup with ``RecordConstraintViolationError``.
+    """
+    import tomllib
+
+    file_def = {
+        "name": "report_file",
+        "pattern": "report.pdf",  # no discriminating placeholder
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "allow_path_collision": True,
+    }
+    _write_toml(
+        tmp_path,
+        "collision-trip",
+        {
+            "name": "collision-trip",
+            "level": "SERIES",
+            "unique_by": False,
+            "max_records": 4,  # >1 coexisting, no unique_by -> {id} normally required
+            "file_registry": [file_def],
+        },
+    )
+    _write_schema(tmp_path, "collision-trip", {"type": "object"})
+
+    # Load + reconcile into DB
+    config_files = discover_config_files(str(tmp_path))
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    await reconcile_record_types(items, test_session)
+
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "collision-trip")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.file_registry[0].allow_path_collision is True  # DB write kept the flag
+
+    # Re-export to TOML (simulates the API-triggered background export)
+    export_dir = tmp_path / "export"
+    await export_record_type_to_toml(rt, export_dir)
+    _write_schema(export_dir, "collision-trip", {"type": "object"})
+
+    exported = tomllib.loads((export_dir / "collision-trip.toml").read_text())
+    assert exported["file_registry"][0]["allow_path_collision"] is True
+
+    # Reload the re-exported TOML exactly like a fresh startup would — must
+    # NOT raise RecordConstraintViolationError.
+    reload_files = discover_config_files(str(export_dir))
+    reload_props = await load_record_config(reload_files[0])
+    assert reload_props is not None
+    reloaded = RecordTypeCreate(**reload_props)
+    assert reloaded.file_registry[0].allow_path_collision is True
 
 
 @pytest.mark.asyncio

@@ -1114,8 +1114,9 @@ class RecordRepository(BaseRepository[Record]):
         """Bulk-delete records by primary key in a single SQL statement.
 
         ``RecordFileLink`` rows are cleaned up by the database-level
-        ``ondelete="CASCADE"`` FK. ``parent_record_id`` references are
-        cleared by ``ondelete="SET NULL"``.
+        ``ondelete="CASCADE"`` FK. ``parent_record_id`` children are removed
+        by the same ``ondelete="CASCADE"`` FK — no manual reverse-topological
+        deletion needed.
 
         This avoids ORM unit-of-work ordering pitfalls that apply when
         deleting self-referential rows via ``session.delete()`` without
@@ -1136,10 +1137,12 @@ class RecordRepository(BaseRepository[Record]):
         if commit:
             await self.session.commit()
             # sse-capture: explicit emit, UoW-invisible (Core bulk DML).
-            # Children whose parent_record_id is SET NULL by the FK are
-            # intentionally not emitted as "updated" (minor: parent rarely
-            # affects the UI; thin events keep the client cache eventually
-            # consistent via TTL/refetch).
+            # The primary path (collect_descendants) pre-collects the full
+            # subtree before deleting, so record_ids already names every
+            # cascade-deleted row; a straggler outside that set that the FK
+            # alone would also cascade-delete is not reflected here (minor:
+            # thin events keep the client cache eventually consistent via
+            # TTL/refetch).
             emit_entity("record", "deleted", [str(i) for i in record_ids])
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 

@@ -7,10 +7,12 @@ import pytest
 import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import _COMPARED_FIELDS, ReconcileResult, reconcile_record_types
 from clarinet.exceptions.domain import ConfigurationError
+from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
 
@@ -545,6 +547,53 @@ async def test_file_level_change_triggers_update(
     ]
     result = await reconcile_record_types(config_v2, test_session)
     assert result.updated == ["level-test1"]
+
+
+@pytest.mark.asyncio
+async def test_allow_path_collision_flip_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Toggling allow_path_collision (all else identical) must be detected as
+    a diff by _file_links_differ; identical flags across reconciles is a no-op.
+    """
+    file_def_v1 = {
+        "name": "seg_file",
+        "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness no-ops
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "allow_path_collision": True,
+    }
+    config_v1 = [_make_config("collision-flip", file_registry=[file_def_v1])]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.created == ["collision-flip"]
+
+    test_session.expire_all()
+
+    # Re-reconcile with an identical config -> no-op
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.unchanged == ["collision-flip"]
+
+    test_session.expire_all()
+
+    # Flip allow_path_collision -> must be detected as a change
+    file_def_v2 = {**file_def_v1, "allow_path_collision": False}
+    config_v2 = [_make_config("collision-flip", file_registry=[file_def_v2])]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.updated == ["collision-flip"]
+
+    test_session.expire_all()
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "collision-flip")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    row = (await test_session.execute(stmt)).scalar_one()
+    assert row.file_registry[0].allow_path_collision is False
 
 
 @pytest.mark.asyncio
