@@ -764,6 +764,115 @@ __execResult = {'raised': raised, 'bypassed': bypassed}
     assert result["bypassed"] is True
 
 
+async def test_subtract_strategy_override_live(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """An explicit strategy built from bundle symbols drives the verdict."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+s = SlicerHelper(working_folder)
+vol = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', '_StratVol')
+slicer.util.updateVolumeFromArray(vol, np.zeros((20, 20, 20), dtype=np.int16))
+s._image_node = vol
+seg_logic = slicer.modules.segmentations.logic()
+
+
+def _seg_from(name, slices):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', name)
+    node.CreateDefaultDisplayNodes()
+    node.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+    lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', name + '_lm')
+    arr = np.zeros((20, 20, 20), dtype=np.uint8)
+    for value, sl in enumerate(slices, start=1):
+        arr[sl] = value
+    slicer.util.updateVolumeFromArray(lm, arr)
+    seg_logic.ImportLabelmapToSegmentationNode(lm, node)
+    slicer.mrmlScene.RemoveNode(lm)
+    return node
+
+
+# Base: one 4x4x4 blob. Other: identical blob -> IoU 1.0.
+base = _seg_from('StratBase', [np.s_[5:9, 5:9, 5:9]])
+other = _seg_from('StratOther', [np.s_[5:9, 5:9, 5:9]])
+
+# Permissive scalar thresholds would keep nothing anyway; prove the strategy
+# object wins by using one that only matches at IoU >= 0.9.
+out = s.subtract_segmentations(
+    base, other, output_name='_StratOut',
+    strategy=ThresholdMatch(IoU(), min_score=0.9),
+)
+removed_by_strategy = out.GetSegmentation().GetNumberOfSegments()
+
+# Same scene, disjoint other -> IoU 0 -> kept.
+disjoint = _seg_from('StratDisjoint', [np.s_[15:18, 15:18, 15:18]])
+out2 = s.subtract_segmentations(
+    base, disjoint, output_name='_StratOut2',
+    strategy=ThresholdMatch(IoU(), min_score=0.9),
+)
+kept_when_disjoint = out2.GetSegmentation().GetNumberOfSegments()
+
+__execResult = {"removed_by_strategy": removed_by_strategy, "kept_when_disjoint": kept_when_disjoint}
+"""
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
+    assert result["removed_by_strategy"] == 0
+    assert result["kept_when_disjoint"] == 1
+
+
+async def test_subtract_union_granularity_live(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """Fragmented sub-threshold overlap: default keeps, union removes (D8)."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+s = SlicerHelper(working_folder)
+vol = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', '_GranVol')
+slicer.util.updateVolumeFromArray(vol, np.zeros((20, 20, 20), dtype=np.int16))
+s._image_node = vol
+seg_logic = slicer.modules.segmentations.logic()
+
+
+def _seg_from(name, slices):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', name)
+    node.CreateDefaultDisplayNodes()
+    node.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+    lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', name + '_lm')
+    arr = np.zeros((20, 20, 20), dtype=np.uint8)
+    for value, sl in enumerate(slices, start=1):
+        arr[sl] = value
+    slicer.util.updateVolumeFromArray(lm, arr)
+    seg_logic.ImportLabelmapToSegmentationNode(lm, node)
+    slicer.mrmlScene.RemoveNode(lm)
+    return node
+
+
+# Base row of 10 voxels; two disjoint 3-voxel subtracted segments (0.3 each, 0.6 joint).
+base = _seg_from('GranBase', [np.s_[5, 3:13, 5]])
+frags = _seg_from('GranFrags', [np.s_[5, 3:6, 5], np.s_[5, 8:11, 5]])
+
+out_label = s.subtract_segmentations(
+    base, frags, output_name='_GranLabel', max_overlap_ratio=0.5,
+)
+out_union = s.subtract_segmentations(
+    base, frags, output_name='_GranUnion', max_overlap_ratio=0.5, granularity='union',
+)
+__execResult = {
+    "kept_default": out_label.GetSegmentation().GetNumberOfSegments(),
+    "kept_union": out_union.GetSegmentation().GetNumberOfSegments(),
+}
+"""
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
+    assert result["kept_default"] == 1
+    assert result["kept_union"] == 0
+
+
 async def test_binarize_and_split_islands_guards_grid_mismatch(
     slicer_service: SlicerService,
     slicer_url: str,
