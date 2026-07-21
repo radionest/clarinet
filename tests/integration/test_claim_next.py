@@ -2,7 +2,7 @@
 
 Covers the "take a task" dashboard action: a regular user claims a random
 unassigned ``pending`` record of a chosen type, respecting role scope and
-``unique_per_user`` filtering. The claimed record is assigned to the caller and
+``unique_by`` filtering. The claimed record is assigned to the caller and
 moved to ``inwork``; an empty / non-claimable pool yields 404.
 """
 
@@ -64,7 +64,7 @@ async def claim_type(test_session, claim_role):
     rt = RecordType(
         name="claimable-type",
         description="Claimable from the pool",
-        unique_per_user=False,
+        unique_by=None,
         level=DicomQueryLevel.SERIES,
         role_name=claim_role.name,
     )
@@ -148,7 +148,7 @@ class TestClaimNextEndpoint:
         await test_session.commit()
         other_type = RecordType(
             name="other-role-type",
-            unique_per_user=False,
+            unique_by=None,
             level=DicomQueryLevel.SERIES,
             role_name=other_role.name,
         )
@@ -202,11 +202,11 @@ class TestClaimNextEndpoint:
         claim_user,
         claim_role,
     ):
-        """A unique_per_user pool record the caller already satisfied is filtered
+        """A unique_by pool record the caller already satisfied is filtered
         out of the pool → 404 (the duplicate never reaches the claim step)."""
         unique_type = RecordType(
             name="claim-unique-type",
-            unique_per_user=True,
+            unique_by=frozenset({"user"}),
             level=DicomQueryLevel.SERIES,
             role_name=claim_role.name,
         )

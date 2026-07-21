@@ -295,13 +295,14 @@ class TestAdminService:
         # Two roles, each backing its own record type.
         session.add_all([UserRole(name="fa-role"), UserRole(name="other-role")])
         await session.commit()
-        # Non-unique types: this test covers role-scoping, not unique_per_user
-        # (make_record_type defaults unique_per_user=True). The unique-per-user
-        # exclusion is verified in test_available_excludes_unique_per_user_conflicts.
+        # Non-unique types: this test covers role-scoping, not unique_by
+        # (make_record_type defaults unique_by={"user","parent"}). The
+        # uniqueness exclusion is verified in
+        # test_available_excludes_unique_per_user_conflicts.
         session.add_all(
             [
-                make_record_type("fa-rt", role_name="fa-role", unique_per_user=False),
-                make_record_type("other-rt", role_name="other-role", unique_per_user=False),
+                make_record_type("fa-rt", role_name="fa-role", unique_by=None),
+                make_record_type("other-rt", role_name="other-role", unique_by=None),
             ]
         )
         await session.commit()
@@ -361,8 +362,8 @@ class TestAdminService:
 
         session.add(UserRole(name="uq-role"))
         await session.commit()
-        # SERIES-level (make_record_type default) unique_per_user type.
-        session.add(make_record_type("uq-rt", role_name="uq-role", unique_per_user=True))
+        # SERIES-level (make_record_type default) type, pinned to unique_by={"user"}.
+        session.add(make_record_type("uq-rt", role_name="uq-role", unique_by=frozenset({"user"})))
         await session.commit()
 
         u_role = make_user(email="uq_role@test.com", is_active=True)
@@ -384,7 +385,7 @@ class TestAdminService:
             )
 
         # Series .1: u_role already holds a uq-rt record → its 2 unassigned
-        # pending records are NOT claimable by u_role (unique_per_user conflict).
+        # pending records are NOT claimable by u_role (unique_by conflict).
         await add("1.2.3.901.1", u_role.id, RecordStatus.inwork)
         await add("1.2.3.901.1", None, RecordStatus.pending)
         await add("1.2.3.901.1", None, RecordStatus.pending)

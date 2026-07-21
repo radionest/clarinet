@@ -33,7 +33,7 @@ async def parent_required_type(test_session):
         name="parent-required-type",
         description="Requires a parent record",
         parent_required=True,
-        unique_per_user=False,
+        unique_by=None,
         level=DicomQueryLevel.SERIES,
     )
     test_session.add(rt)
@@ -49,7 +49,7 @@ async def parent_optional_type(test_session):
         name="parent-optional-type",
         description="Parent not required",
         parent_required=False,
-        unique_per_user=False,
+        unique_by=None,
         level=DicomQueryLevel.SERIES,
     )
     test_session.add(rt)

@@ -179,8 +179,15 @@ class TestApiRecordParent:
         await test_session.commit()
 
         rt_parent = make_record_type("ar-parent-ty")
-        # Opt-in: user_id inheritance from parent is gated by this flag
-        rt_child = make_record_type("ar-child-type", inherit_user_from_parent=True)
+        # Opt-in: user_id inheritance from parent is gated by this flag.
+        # unique_by is pinned to {"user"} (rather than the {"user","parent"}
+        # class default) so the uniqueness check below stays pure per-user —
+        # independent of parent_record_id — matching this fixture's intent.
+        rt_child = make_record_type(
+            "ar-child-type",
+            inherit_user_from_parent=True,
+            unique_by=frozenset({"user"}),
+        )
         rt_noinherit = make_record_type("ar-noinherit-t")
         test_session.add_all([rt_parent, rt_child, rt_noinherit])
         await test_session.commit()
@@ -308,7 +315,7 @@ class TestApiRecordParent:
 
     @pytest.mark.asyncio
     async def test_inherited_user_id_respects_unique_per_user(self, client, test_session, seed):
-        """Inheritance re-checks unique_per_user with the inherited user.
+        """Inheritance re-checks unique_by with the inherited user.
 
         The route-level constraint check runs with the payload user_id
         (None here) and cannot see the inherited one — the service must
@@ -320,7 +327,7 @@ class TestApiRecordParent:
         await test_session.refresh(user)
 
         # The user already owns a record of the child type in this series
-        # context (ar-child-type has unique_per_user=True by default).
+        # context (ar-child-type is pinned to unique_by={"user"} in `seed`).
         await seed_record(
             test_session,
             patient_id=seed["patient_id"],

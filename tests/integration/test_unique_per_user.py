@@ -1,7 +1,12 @@
-"""Integration tests for the unique_per_user feature.
+"""Integration tests for the unique_by feature (legacy unique_per_user shape).
+
+These fixtures use ``unique_by=frozenset({"user"})`` / ``unique_by=None`` —
+the direct translation of the deprecated ``unique_per_user`` True/False flag
+(see ``clarinet.models.uniqueness.legacy_unique_per_user``) — so none of them
+exercise the "parent" partition; that ground is covered separately by
+``tests/integration/test_unique_by.py``.
 
 Covers:
-- RecordRepository.count_user_records_for_context (all levels, all statuses)
 - RecordRepository.find_by_user with exclude_unique_violations
 - RecordRepository.find_pending_by_user with exclude_unique_violations
 - RecordRepository.get_available_type_counts with exclude_unique_violations
@@ -14,7 +19,6 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -25,13 +29,12 @@ from sqlmodel import select
 from clarinet.exceptions.domain import RecordConstraintViolationError
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
-from clarinet.models.study import Study
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.record_service import RecordService
 from clarinet.utils.auth import get_password_hash
 from tests.conftest import create_authenticated_client
-from tests.utils.factories import make_patient, make_series, make_user
+from tests.utils.factories import make_series
 from tests.utils.urls import RECORDS_BASE, RECORDS_FIND, RECORDS_FIND_RANDOM
 
 # ── Shared fixture helpers ────────────────────────────────────────────────────
@@ -39,11 +42,11 @@ from tests.utils.urls import RECORDS_BASE, RECORDS_FIND, RECORDS_FIND_RANDOM
 
 @pytest_asyncio.fixture
 async def unique_series_type(test_session):
-    """RecordType with unique_per_user=True at SERIES level."""
+    """RecordType with unique_by={"user"} at SERIES level."""
     rt = RecordType(
         name="unique-series-type",
         description="Unique per user at series level",
-        unique_per_user=True,
+        unique_by=frozenset({"user"}),
         level=DicomQueryLevel.SERIES,
     )
     test_session.add(rt)
@@ -54,11 +57,11 @@ async def unique_series_type(test_session):
 
 @pytest_asyncio.fixture
 async def unique_study_type(test_session):
-    """RecordType with unique_per_user=True at STUDY level."""
+    """RecordType with unique_by={"user"} at STUDY level."""
     rt = RecordType(
         name="unique-study-type",
         description="Unique per user at study level",
-        unique_per_user=True,
+        unique_by=frozenset({"user"}),
         level=DicomQueryLevel.STUDY,
     )
     test_session.add(rt)
@@ -69,11 +72,11 @@ async def unique_study_type(test_session):
 
 @pytest_asyncio.fixture
 async def unique_patient_type(test_session):
-    """RecordType with unique_per_user=True at PATIENT level."""
+    """RecordType with unique_by={"user"} at PATIENT level."""
     rt = RecordType(
         name="unique-patient-type",
         description="Unique per user at patient level",
-        unique_per_user=True,
+        unique_by=frozenset({"user"}),
         level=DicomQueryLevel.PATIENT,
     )
     test_session.add(rt)
@@ -84,11 +87,11 @@ async def unique_patient_type(test_session):
 
 @pytest_asyncio.fixture
 async def non_unique_type(test_session):
-    """RecordType with unique_per_user=False."""
+    """RecordType with unique_by=None."""
     rt = RecordType(
         name="non-unique-type",
         description="Not unique per user",
-        unique_per_user=False,
+        unique_by=None,
         level=DicomQueryLevel.SERIES,
     )
     test_session.add(rt)
@@ -105,297 +108,6 @@ async def second_series(test_session, test_study):
     await test_session.commit()
     await test_session.refresh(series)
     return series
-
-
-@pytest_asyncio.fixture
-async def second_study(test_session, test_patient):
-    """A second study under test_patient for context-isolation tests."""
-    study = Study(
-        patient_id=test_patient.id,
-        study_uid="1.2.3.4.5.6.7.8.9.SECOND",
-        date=datetime.now(UTC).date(),
-    )
-    test_session.add(study)
-    await test_session.commit()
-    await test_session.refresh(study)
-    return study
-
-
-@pytest_asyncio.fixture
-async def second_patient(test_session):
-    """A second patient for context-isolation tests."""
-    patient = make_patient("TEST_PAT002", "Second Patient")
-    test_session.add(patient)
-    await test_session.commit()
-    await test_session.refresh(patient)
-    return patient
-
-
-# ── Section 1: count_user_records_for_context ─────────────────────────────────
-
-
-class TestCountUserRecordsForContext:
-    """Tests for RecordRepository.count_user_records_for_context."""
-
-    @pytest.mark.asyncio
-    async def test_series_level_counts_matching_record(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
-    ):
-        """SERIES level: counts records matching (user, type, series_uid)."""
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            level="SERIES",
-        )
-        assert count == 1
-
-    @pytest.mark.asyncio
-    async def test_study_level_counts_matching_record(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_study_type
-    ):
-        """STUDY level: counts records matching (user, type, study_uid)."""
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            user_id=test_user.id,
-            record_type_name=unique_study_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_study_type.name,
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=None,
-            level="STUDY",
-        )
-        assert count == 1
-
-    @pytest.mark.asyncio
-    async def test_patient_level_counts_matching_record(
-        self, test_session, test_user, test_patient, test_study, unique_patient_type
-    ):
-        """PATIENT level: counts records matching (user, type, patient_id)."""
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            user_id=test_user.id,
-            record_type_name=unique_patient_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_patient_type.name,
-            patient_id=test_patient.id,
-            study_uid=None,
-            series_uid=None,
-            level="PATIENT",
-        )
-        assert count == 1
-
-    @pytest.mark.asyncio
-    async def test_returns_zero_when_no_matching_records(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
-    ):
-        """Returns 0 when no matching records exist for the user/type/context."""
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            level="SERIES",
-        )
-        assert count == 0
-
-    @pytest.mark.asyncio
-    async def test_counts_all_statuses(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
-    ):
-        """Returns count across all status values (pending, inwork, finished, failed)."""
-        statuses = [
-            RecordStatus.pending,
-            RecordStatus.inwork,
-            RecordStatus.finished,
-            RecordStatus.failed,
-        ]
-        for _i, status in enumerate(statuses):
-            # Use distinct series UIDs derived from the base to avoid level conflicts;
-            # here we're testing the count aggregation so we re-use the same series.
-            record = Record(
-                patient_id=test_patient.id,
-                study_uid=test_study.study_uid,
-                series_uid=test_series.series_uid,
-                user_id=test_user.id,
-                record_type_name=unique_series_type.name,
-                status=status,
-            )
-            test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            level="SERIES",
-        )
-        assert count == len(statuses)
-
-    @pytest.mark.asyncio
-    async def test_does_not_count_different_user(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
-    ):
-        """Does not count records belonging to a different user."""
-        other_user = make_user()
-        test_session.add(other_user)
-        await test_session.commit()
-
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            user_id=other_user.id,
-            record_type_name=unique_series_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            level="SERIES",
-        )
-        assert count == 0
-
-    @pytest.mark.asyncio
-    async def test_series_level_does_not_count_different_series(
-        self,
-        test_session,
-        test_user,
-        test_patient,
-        test_study,
-        test_series,
-        second_series,
-        unique_series_type,
-    ):
-        """SERIES level: does not count records for a different series_uid."""
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=second_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            series_uid=test_series.series_uid,
-            level="SERIES",
-        )
-        assert count == 0
-
-    @pytest.mark.asyncio
-    async def test_study_level_does_not_count_different_study(
-        self,
-        test_session,
-        test_user,
-        test_patient,
-        test_study,
-        second_study,
-        unique_study_type,
-    ):
-        """STUDY level: does not count records for a different study_uid."""
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            user_id=test_user.id,
-            record_type_name=unique_study_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_study_type.name,
-            patient_id=test_patient.id,
-            study_uid=second_study.study_uid,
-            series_uid=None,
-            level="STUDY",
-        )
-        assert count == 0
-
-    @pytest.mark.asyncio
-    async def test_patient_level_does_not_count_different_patient(
-        self,
-        test_session,
-        test_user,
-        test_patient,
-        test_study,
-        second_patient,
-        unique_patient_type,
-    ):
-        """PATIENT level: does not count records for a different patient_id."""
-        record = Record(
-            patient_id=test_patient.id,
-            study_uid=test_study.study_uid,
-            user_id=test_user.id,
-            record_type_name=unique_patient_type.name,
-            status=RecordStatus.pending,
-        )
-        test_session.add(record)
-        await test_session.commit()
-
-        repo = RecordRepository(test_session)
-        count = await repo.count_user_records_for_context(
-            user_id=test_user.id,
-            record_type_name=unique_patient_type.name,
-            patient_id=second_patient.id,
-            study_uid=None,
-            series_uid=None,
-            level="PATIENT",
-        )
-        assert count == 0
 
 
 # ── Section 2: RecordService.assign_user constraint ───────────────────────────
@@ -874,7 +586,7 @@ class TestGetAvailableTypeCountsUniqueViolationFilter:
         self, test_session, test_user, test_patient, test_study, test_series
     ):
         """get_available_type_counts with exclude_unique_violations=True returns
-        count 0 for a unique_per_user type where the user already has a record,
+        count 0 for a unique_by type where the user already has a record,
         while non-unique type counts are unaffected."""
         # Create role and assign to test_user
         role = UserRole(name="annotator")
@@ -886,14 +598,14 @@ class TestGetAvailableTypeCountsUniqueViolationFilter:
         unique_rt = RecordType(
             name="unique-role-type",
             description="Unique per user with role",
-            unique_per_user=True,
+            unique_by=frozenset({"user"}),
             level=DicomQueryLevel.SERIES,
             role_name="annotator",
         )
         non_unique_rt = RecordType(
             name="non-unique-role-type",
             description="Non-unique with role",
-            unique_per_user=False,
+            unique_by=None,
             level=DicomQueryLevel.SERIES,
             role_name="annotator",
         )
@@ -1189,7 +901,7 @@ class TestFindByUserUniqueViolationFilter:
         non_unique_type,
     ):
         """find_by_user with exclude_unique_violations=True still shows an
-        unassigned record when the record type has unique_per_user=False."""
+        unassigned record when the record type has unique_by=None."""
         assigned = Record(
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
@@ -1272,11 +984,11 @@ async def upu_role(test_session):
 
 @pytest_asyncio.fixture
 async def upu_role_type(test_session, upu_role):
-    """RecordType with unique_per_user=True at SERIES level + role_name=upu-role."""
+    """RecordType with unique_by={"user"} at SERIES level + role_name=upu-role."""
     rt = RecordType(
         name="upu-role-series-type",
-        description="unique_per_user + role_name for E2E tests",
-        unique_per_user=True,
+        description="unique_by + role_name for E2E tests",
+        unique_by=frozenset({"user"}),
         level=DicomQueryLevel.SERIES,
         role_name=upu_role.name,
     )
