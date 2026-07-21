@@ -64,6 +64,16 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `get_per_type_status_counts()` | Status counts per type |
 | `get_per_type_unique_users()` | Unique user count per type |
 
+## Constraint predicates: pre-insert vs post-insert reuse
+
+A count/EXISTS uniqueness or quota check written for creation (candidate row
+absent) silently matches the candidate itself when reused after the row is
+persisted (claim/assign/update) — `ensure_unique_by` did exactly this at
+assignment time, producing listed-but-unclaimable records. Whenever such a
+predicate is called with an already-persisted candidate row, it must take an
+exclude-self parameter (`exclude_record_id`-style) and have a test asserting
+the idempotent re-check case (re-validating an existing row passes).
+
 ## RecordTypeRepository Methods
 
 `RecordTypeRepository` overrides `BaseRepository` so that every read eagerly loads
