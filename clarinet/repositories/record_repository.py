@@ -1274,8 +1274,9 @@ class RecordRepository(BaseRepository[Record]):
         patient_id: str,
         study_uid: str | None,
         series_uid: str | None,
+        exclude_record_id: int | None = None,
     ) -> None:
-        """Raise if an existing record already matches on every selected partition.
+        """Raise if another record already matches on every selected partition.
 
         No-op when ``record_type.unique_by`` is ``None``. Bound-tuple rule:
         when "user" is a selected partition and ``user_id`` is ``None``, the
@@ -1286,8 +1287,15 @@ class RecordRepository(BaseRepository[Record]):
         ``user_id`` inheritance, which happens after the route-level
         constraint check, and by ``RecordService`` assign/claim/submit paths.
 
+        ``exclude_record_id`` excludes the record under evaluation itself
+        from the match count. Required whenever the candidate row already
+        exists in the DB (assignment-time re-checks) — otherwise it matches
+        its own row and every assignment to an already-persisted record
+        would 409 against itself. Creation-time callers pass nothing since
+        the row doesn't exist yet.
+
         Raises:
-            RecordUniquePerUserError: If a record already exists matching
+            RecordUniquePerUserError: If another record already exists matching
                 every selected partition in the given DICOM context.
         """
         parts = record_type.unique_by
@@ -1298,6 +1306,8 @@ class RecordRepository(BaseRepository[Record]):
         query = select(func.count(col(Record.id))).where(
             Record.record_type_name == record_type.name,
         )
+        if exclude_record_id is not None:
+            query = query.where(col(Record.id) != exclude_record_id)
         match record_type.level:
             case DicomQueryLevel.PATIENT:
                 query = query.where(Record.patient_id == patient_id)

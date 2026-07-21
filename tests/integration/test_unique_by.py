@@ -125,6 +125,26 @@ async def seed_parent_only_type(test_session):
     return rt
 
 
+@pytest_asyncio.fixture
+async def seed_parent_only_required_type(test_session):
+    """RecordType with unique_by={"parent"} + parent_required=True, at SERIES level.
+
+    Used for the assignment-time self-collision regression: a parent-only
+    type has no "user" partition, so the bound-tuple skip never applies and
+    the record under evaluation must be excluded from its own match count.
+    """
+    rt = RecordType(
+        name="ub-parentonly-req-ty",
+        unique_by=frozenset({"parent"}),
+        parent_required=True,
+        level=DicomQueryLevel.SERIES,
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    await test_session.refresh(rt)
+    return rt
+
+
 @pytest.mark.asyncio
 async def test_parent_partition_blocks_same_parent(
     client,
@@ -519,3 +539,157 @@ async def test_claimable_listing_matches_claim(
     fresh_ids = {r.id for r in pool_for_fresh}
     assert candidate_p.id in fresh_ids
     assert candidate_q.id in fresh_ids
+
+
+@pytest.mark.asyncio
+async def test_claim_parent_only_record_succeeds(
+    client,
+    test_session,
+    test_patient,
+    test_study,
+    test_series,
+    seed_parent_only_required_type,
+    seed_none_type,
+    test_user,
+):
+    """CRITICAL regression: unique_by={"parent"} has no "user" partition, so
+    the bound-tuple skip never applies at assignment time either. Before the
+    fix, ``ensure_unique_by`` counted the candidate row itself (no
+    exclusion) — the only child of its parent always matched itself and
+    409'd on every claim, even though nothing else shares its (type,
+    context, parent) tuple."""
+    anchor = await _make_anchor(test_session, seed_none_type, test_patient, test_study, test_series)
+    child = await seed_record(
+        test_session,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        rt_name=seed_parent_only_required_type.name,
+        parent_record_id=anchor.id,
+        status=RecordStatus.pending,
+    )
+
+    resp = await client.patch(
+        f"{RECORDS_BASE}/{child.id}/user", params={"user_id": str(test_user.id)}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] == str(test_user.id)
+
+
+@pytest.mark.asyncio
+async def test_parent_only_required_creation_still_blocks_duplicate(
+    client,
+    test_session,
+    test_patient,
+    test_study,
+    test_series,
+    seed_parent_only_required_type,
+    seed_none_type,
+):
+    """Guards that excluding the candidate row at assignment time does not
+    weaken create-time enforcement: a second unassigned child for the same
+    parent still 409s at creation (``ensure_unique_by`` is called with no
+    ``exclude_record_id`` on the create path)."""
+    anchor = await _make_anchor(test_session, seed_none_type, test_patient, test_study, test_series)
+
+    r1 = await create_record(
+        client,
+        seed_parent_only_required_type.name,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        parent_record_id=anchor.id,
+    )
+    assert r1.status_code == 201
+
+    r2 = await create_record(
+        client,
+        seed_parent_only_required_type.name,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        parent_record_id=anchor.id,
+    )
+    assert r2.status_code == 409
+    assert r2.json()["code"] == "UNIQUE_PER_USER"
+
+
+@pytest.mark.asyncio
+async def test_assign_excludes_only_self_not_other_conflicts(
+    client,
+    test_session,
+    test_patient,
+    test_study,
+    test_series,
+    seed_parented_type,
+    seed_none_type,
+    test_user,
+):
+    """unique_by={"user","parent"}: self-exclusion must not weaken genuine
+    conflicts. test_user already holds ANOTHER record (P, test_user);
+    assigning test_user to a distinct unassigned candidate that also has
+    parent P still 409s — excluding the candidate's own id from the count
+    does not remove the other, genuinely-matching row."""
+    p = await _make_anchor(test_session, seed_none_type, test_patient, test_study, test_series)
+    await seed_record(
+        test_session,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        rt_name=seed_parented_type.name,
+        user_id=test_user.id,
+        parent_record_id=p.id,
+        status=RecordStatus.inwork,
+    )
+    candidate = await seed_record(
+        test_session,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        rt_name=seed_parented_type.name,
+        parent_record_id=p.id,
+        status=RecordStatus.pending,
+    )
+
+    resp = await client.patch(
+        f"{RECORDS_BASE}/{candidate.id}/user", params={"user_id": str(test_user.id)}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "UNIQUE_PER_USER"
+
+
+@pytest.mark.asyncio
+async def test_reassign_same_user_is_idempotent_not_blocked(
+    client,
+    test_session,
+    test_patient,
+    test_study,
+    test_series,
+    seed_parented_type,
+    seed_none_type,
+    test_user,
+):
+    """Idempotent-reassign edge for unique_by={"user","parent"}: test_user
+    already holds this exact record (user, parent) — re-assigning test_user
+    to the SAME record must not 409, since the record is its own only
+    match. Before the fix, ``_check_unique_by`` counted the candidate row
+    itself and raised a false UNIQUE_PER_USER on every idempotent
+    ``PATCH .../user`` call (``RecordService.assign_user`` does not
+    short-circuit same-user reassignment before the check)."""
+    anchor = await _make_anchor(test_session, seed_none_type, test_patient, test_study, test_series)
+    record = await seed_record(
+        test_session,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        rt_name=seed_parented_type.name,
+        user_id=test_user.id,
+        parent_record_id=anchor.id,
+        status=RecordStatus.inwork,
+    )
+
+    resp = await client.patch(
+        f"{RECORDS_BASE}/{record.id}/user", params={"user_id": str(test_user.id)}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] == str(test_user.id)

@@ -1139,13 +1139,16 @@ class RecordService:
 
         Thin wrapper over ``RecordRepository.ensure_unique_by`` — that method
         self-gates on ``record_type.unique_by`` (no-op when ``None``).
+        ``exclude_record_id=record.id`` excludes the record itself from the
+        match: at assignment time the candidate row already exists, so
+        without exclusion it would always match itself.
 
         Args:
             user_id: User being assigned.
             record: Record with record_type eagerly loaded.
 
         Raises:
-            RecordUniquePerUserError: If an existing record already matches
+            RecordUniquePerUserError: If another record already exists matching
                 every selected unique_by partition for this DICOM context.
         """
         await self.repo.ensure_unique_by(
@@ -1155,6 +1158,7 @@ class RecordService:
             patient_id=record.patient_id,
             study_uid=record.study_uid,
             series_uid=record.series_uid,
+            exclude_record_id=record.id,
         )
 
     async def _resolve_preparing_exit(

@@ -147,16 +147,19 @@ class DatabaseManager:
         by a deletion that predates ``ON DELETE CASCADE`` enforcement). This
         is a diagnostic only — it never aborts startup.
         """
-        async with self.async_engine.connect() as conn:
-            result = await conn.execute(text("PRAGMA foreign_key_check"))
-            violations = result.mappings().all()
+        try:
+            async with self.async_engine.connect() as conn:
+                result = await conn.execute(text("PRAGMA foreign_key_check"))
+                violations = result.mappings().all()
 
-        for violation in violations:
-            logger.warning(
-                f"SQLite foreign key violation: table={violation['table']}, "
-                f"rowid={violation['rowid']}, parent={violation['parent']}, "
-                f"fkid={violation['fkid']}"
-            )
+            for violation in violations:
+                logger.warning(
+                    f"SQLite foreign key violation: table={violation['table']}, "
+                    f"rowid={violation['rowid']}, parent={violation['parent']}, "
+                    f"fkid={violation['fkid']}"
+                )
+        except Exception as exc:
+            logger.warning(f"SQLite foreign-key audit could not run: {exc}")
 
     async def drop_db_and_tables_async(self) -> None:
         """Drop all database tables asynchronously."""

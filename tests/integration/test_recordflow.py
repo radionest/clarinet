@@ -2001,12 +2001,12 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-summary",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         sentinel_type = RecordType(
             name="sentinel-output",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add_all([pat_type, sentinel_type])
         await test_session.commit()
@@ -2070,12 +2070,12 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-summary-any",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         sentinel_type = RecordType(
             name="sentinel-any-output",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add_all([pat_type, sentinel_type])
         await test_session.commit()
@@ -2133,7 +2133,7 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-trigger-bulk",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add(pat_type)
         await test_session.commit()
@@ -2184,7 +2184,7 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-trigger-single",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add(pat_type)
         await test_session.commit()
@@ -2237,12 +2237,12 @@ class TestTreeFilterContext:
         meta_type = RecordType(
             name="markup-meta",
             level=DicomQueryLevel.SERIES,
-            unique_per_user=False,
+            unique_by=None,
         )
         output_type = RecordType(
             name="series-output",
             level=DicomQueryLevel.SERIES,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add_all([meta_type, output_type])
         await test_session.commit()
