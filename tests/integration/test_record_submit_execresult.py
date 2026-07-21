@@ -376,3 +376,14 @@ async def test_submit_custom_python_validator_sees_merged_keys(
     assert body.get("detail") == "Validation failed"
     paths = [err.get("path") for err in body.get("errors", [])]
     assert "/x_min" in paths, body
+
+
+@pytest.mark.asyncio
+async def test_submit_validator_receives_bundle(
+    client, cropping_box_record: Record, mock_slicer_service: AsyncMock
+):
+    """D9: the submit-path validator always gets the correspondence engine."""
+    resp = await client.post(f"{RECORDS_BASE}/{cropping_box_record.id}/submit", json={})
+
+    assert resp.status_code == 200, resp.text
+    assert mock_slicer_service.execute.call_args.kwargs.get("include_correspondence") is True

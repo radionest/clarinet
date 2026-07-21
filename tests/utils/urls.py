@@ -105,6 +105,9 @@ WORKFLOW_DISPATCH = "/api/admin/workflow/dispatch"
 # --- Slicer ---
 SLICER_BASE = "/api/slicer"
 SLICER_PING = "/api/slicer/ping"
+SLICER_EXEC = "/api/slicer/exec"
+SLICER_RECORD_OPEN = "/api/slicer/records/{record_id}/open"
+SLICER_RECORD_VALIDATE = "/api/slicer/records/{record_id}/validate"
 
 # --- DICOM ---
 DICOM_BASE = "/api/dicom"
