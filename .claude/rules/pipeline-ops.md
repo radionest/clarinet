@@ -52,13 +52,13 @@ Optional group `pipeline` in `pyproject.toml`:
 Queue names are derived from `settings.pipeline_task_namespace` (which is normalized
 from `settings.project_name`):
 
-| Setting property | Default (`project_name="Clarinet"`) | Custom (`project_name="Liver"`) |
+| Setting property | Default (`project_name="Clarinet"`) | Custom (`project_name="Acme"`) |
 |---|---|---|
-| `settings.default_queue_name` | `clarinet.default` | `liver.default` |
-| `settings.gpu_queue_name` | `clarinet.gpu` | `liver.gpu` |
-| `settings.dicom_queue_name` | `clarinet.dicom` | `liver.dicom` |
-| `settings.quarto_queue_name` | `clarinet.quarto` | `liver.quarto` |
-| `settings.dlq_queue_name` | `clarinet.dead_letter` | `liver.dead_letter` |
+| `settings.default_queue_name` | `clarinet.default` | `acme.default` |
+| `settings.gpu_queue_name` | `clarinet.gpu` | `acme.gpu` |
+| `settings.dicom_queue_name` | `clarinet.dicom` | `acme.dicom` |
+| `settings.quarto_queue_name` | `clarinet.quarto` | `acme.quarto` |
+| `settings.dlq_queue_name` | `clarinet.dead_letter` | `acme.dead_letter` |
 
 Tasks should use these properties (`settings.dicom_queue_name`) instead of hard-coded
 strings (`"clarinet.dicom"`) — otherwise multi-project deployments collide on the same

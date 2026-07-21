@@ -1,4 +1,4 @@
-"""Image processing service — medical image I/O, segmentation, and format conversion."""
+"""Image processing service — image I/O, segmentation, and format conversion."""
 
 from clarinet.services.image.coco2nii import COCODataset, coco_to_segmentation
 from clarinet.services.image.image import FileType, Image

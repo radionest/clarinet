@@ -1,4 +1,4 @@
-"""Custom slicer context hydrators for the liver study v2.
+"""Custom slicer context hydrators for the NDT comparative study.
 
 Loaded automatically at startup by ``load_custom_slicer_hydrators()``.
 
@@ -168,18 +168,18 @@ async def hydrate_projection_for_update(
     context: dict[str, Any],
     ctx: SlicerHydrationContext,
 ) -> dict[str, Any]:
-    """Inject projection and doctor segmentation paths for master model update.
+    """Inject projection and inspector segmentation paths for master model update.
 
     Finds a ``compare_with_projection`` record with false positives for this
     patient, resolves the target study/series UIDs, and builds file paths for
-    the projection and doctor segmentation so the Slicer script can compute
+    the projection and inspector segmentation so the Slicer script can compute
     NEW_* false-positive ROIs at runtime.
 
     Returns:
         Dict with ``target_study_uid``, ``target_series_uid``,
-        ``projection_path``, ``doctor_segmentation_path``;
+        ``projection_path``, ``inspector_segmentation_path``;
         or empty dict if no comparison with false positives exists
-        (graceful fallback for intraop trigger).
+        (graceful fallback for the in-process trigger).
     """
     criteria = RecordSearchCriteria(
         patient_id=record.patient_id,
@@ -197,7 +197,7 @@ async def hydrate_projection_for_update(
     if comp is None:
         return {}
 
-    # Get doctor user_id from parent segmentation record
+    # Get inspector user_id from parent segmentation record
     if comp.parent_record_id is None:
         return {}
     parent_record = await ctx.record_repo.get(comp.parent_record_id)
@@ -242,7 +242,7 @@ async def hydrate_projection_for_update(
         "master_projection.seg.nrrd",
     )
     parent_type = parent_record.record_type_name  # FK field, always available
-    doctor_segmentation_path = os.path.join(
+    inspector_segmentation_path = os.path.join(
         patient_dir,
         study_anon_uid,
         f"segmentation_{parent_type}_{user_id}.seg.nrrd",
@@ -252,5 +252,5 @@ async def hydrate_projection_for_update(
         "target_study_uid": study_anon_uid,
         "target_series_uid": target_series_uid,
         "projection_path": projection_path,
-        "doctor_segmentation_path": doctor_segmentation_path,
+        "inspector_segmentation_path": inspector_segmentation_path,
     }

@@ -1,62 +1,56 @@
-Действительно для сегментаций очагов лучше применять NRRD. Обратная совместимость не важна, это демо проект.
-Имена каждому label могут быть просто в виде цифр без префикса ("1","2","3")
-Лимит 255 меня устраивает
+Using NRRD for defect segmentations is fine. Backward compatibility doesn't matter, this is a demo project.
+Each master-model label can just be a number, no prefix ("1", "2", "3").
+A 255-label limit is fine.
 
 Labels
 ## Segmentation
-"mts","unclear","benign"
+"defect", "indeterminate", "cosmetic"
 ## Master model
-"1","2","3",....
-Тут нужна не просто стабильность, а иммутабельность имен, которая гарантируется валидаторами. Т.е. если пользователь при сохранении вдруг переиминует зону, такой результат не дожен сохраниться, а должен выдать ошибку. autolabel может использоваться при init.
-Проблема slicer <-> pipeline, должна решаться конвертацией номеров label, через функцию конвертации (кастомизируема, в нашем случае lambda x: int(x) ) в значения numpy массива
+"1", "2", "3", ...
+This needs immutability, not just stability, guaranteed by validators: if a reviewer renames a zone on save, that save must fail with a validation error, not silently succeed. autolabel may run at init.
+The Slicer <-> pipeline label-numbering mismatch is resolved by a conversion function (customizable — here `lambda x: int(x)`) mapping label names to numpy array values.
 
 ## Projection
-"1","2","3",.... == Master model
+"1", "2", "3", ... == Master model
 ## Second review
-"mts","unclear","benign", "invisible"
+"defect", "indeterminate", "cosmetic", "invisible"
 
-enum["metastasis", "unclear", "benign", "invisible"] - должны быть названиями label, а не вариантами в json
+enum["defect", "indeterminate", "cosmetic", "invisible"] must be the label *names*, not just JSON enum variants.
 
-Общая схема измернений такая
-auto -- то что делает пайплайн таски
-man -- вручную, через рекорд и валидацию slicer
+General staging scheme:
+auto -- pipeline task
+man -- manual, through a record + Slicer validation
 
 segmentation_CT_single(man) --> init_master(auto) --> projection[CT](auto)
 
+segmentation_UT_single(man) --> projection[UT](man) --> compare[segmentation_UT, projection_UT](auto) if FP --> update_master[projection_UT](man) and invalidate all projections
 
-segmentation_MRI_single(man) --> projection[MRI](man) --> compare[segmentation_MRI,projection_MRI](auto) if FP --> update_master[projection_MRI](man) and invalidate all projections
+A study goes through the following stages:
 
-Исследование имеет следующие этапы
+# Quality assessment (manual)
+Issued automatically when a study lands in the database
+Result: quality, modality, reference series
 
-# Оценка качества (ручное)
-Автоматически выдается когда исследование попадает в базу
-Результат: качество, модальность, эталонная серия
+# Anonymization (automatic)
+On passing quality assessment
 
-# Анонимизация (автоматически)
-При прозождении проверки качества
+# Defect segmentation [CT, CT with archive, UT, CT-HD, UT-HD, micro-CT] (manual)
+Appears for studies that passed quality assessment and were anonymized
 
-# Сегментация [КТ, КТ с архивом, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ] (ручное)
-Появляется для прошедших оценку качества и анонимизированных исследований
+The inspector sees the anonymized study in OHIF (only the STUDY the task is bound to, except CT-with-archive which also exposes other CT scans)
 
-Врачу доступны анонимизированные исследования в OHIF (только то STUDY к которму привязана задача, исключение КТ с архивом в которм также доступны другие КТ)
+The reference series determined during quality assessment is loaded in Slicer. A segmentation is created with empty labels [defect, indeterminate, cosmetic]
 
-В Slicer загружается эталонная серия, которая определена при оценке качества. Создаётся сегментация с пустыми labels [mts, unclear, benign]
+Result: NRRD segmentation
 
-Результат: NRRD сегментация
+# Master model construction (automatic)
+Appears after the first CT segmentation
 
+# Master model projection [CT, CT with archive, UT, CT-HD, UT-HD, micro-CT]
+# Comparison of projection and segmentation
 
-# Построение мастер модели (автоматически)
-Появляется после первой сегментации КТ
-Пе
+# Approval of new defects
+Appears for studies where **comparison of projection and segmentation** found defects on the segmentation that aren't on the projection.
 
-
-# Построение проекции мастер модели [КТ, КТ с архивом, МРТ, КТ-АГ, МРТ-АГ, ПДКТ-АГ]
-# Сравнение проекции и сегментации
-
-# Апрув новых очагов
-Появляется для исследований в которых в результате **Сравнение проекции и сегментации** на сегментации были выявлены очаги, которых нет на проекции.
-
-
-
-# Обновление мастер модели
-# Пересмотр
+# Master model update
+# Second review

@@ -1,6 +1,6 @@
 """Clarinet frontend module.
 
-This module contains the Gleam/Lustre-based frontend for the Clarinet medical imaging framework.
+This module contains the Gleam/Lustre-based frontend for the Clarinet imaging framework.
 The frontend is built as a single-page application (SPA) that communicates with the FastAPI backend.
 """
 

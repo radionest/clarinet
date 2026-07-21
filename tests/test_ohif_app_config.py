@@ -15,15 +15,15 @@ def _cfg(backend, external_root):
         qido_include=None,
         fuzzy=None,
         wildcard=None,
-        base_path="/liver_nir",
+        base_path="/demo_ndt",
     )[0]["configuration"]
 
 
 def test_builtin_roots_and_conservative_flags():
     cfg = _cfg("builtin", None)
-    assert cfg["qidoRoot"] == "/liver_nir/dicom-web"
-    assert cfg["wadoRoot"] == "/liver_nir/dicom-web"
-    assert cfg["wadoUriRoot"] == "/liver_nir/dicom-web"
+    assert cfg["qidoRoot"] == "/demo_ndt/dicom-web"
+    assert cfg["wadoRoot"] == "/demo_ndt/dicom-web"
+    assert cfg["wadoUriRoot"] == "/demo_ndt/dicom-web"
     assert cfg["qidoSupportsIncludeField"] is False
     assert cfg["supportsFuzzyMatching"] is False
     assert cfg["supportsWildcard"] is False
@@ -31,9 +31,9 @@ def test_builtin_roots_and_conservative_flags():
 
 def test_external_roots_and_fast_flags():
     cfg = _cfg("external", "/pacs-web")
-    assert cfg["qidoRoot"] == "/liver_nir/pacs-web"
-    assert cfg["wadoRoot"] == "/liver_nir/pacs-web"
-    assert cfg["wadoUriRoot"] == "/liver_nir/pacs-web"
+    assert cfg["qidoRoot"] == "/demo_ndt/pacs-web"
+    assert cfg["wadoRoot"] == "/demo_ndt/pacs-web"
+    assert cfg["wadoUriRoot"] == "/demo_ndt/pacs-web"
     assert cfg["qidoSupportsIncludeField"] is True
     assert cfg["supportsFuzzyMatching"] is True
     assert cfg["supportsWildcard"] is True
@@ -72,9 +72,9 @@ def test_trailing_slash_base_path_normalized():
         qido_include=None,
         fuzzy=None,
         wildcard=None,
-        base_path="/liver_nir/",
+        base_path="/demo_ndt/",
     )[0]["configuration"]
-    assert cfg["qidoRoot"] == "/liver_nir/dicom-web"
+    assert cfg["qidoRoot"] == "/demo_ndt/dicom-web"
 
 
 def test_serve_app_config_renders_external(tmp_path, monkeypatch):

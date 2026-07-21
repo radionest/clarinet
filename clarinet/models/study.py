@@ -1,7 +1,7 @@
 """
 Study and series models for the Clarinet framework.
 
-This module provides models for medical imaging studies and series.
+This module provides models for imaging studies and series.
 """
 
 from datetime import date
@@ -38,7 +38,7 @@ class StudyBase(BaseModel):
 
 
 class Study(StudyBase, table=True):
-    """Model representing a medical imaging study in the system."""
+    """Model representing an imaging study in the system."""
 
     study_uid: DicomUID = Field(primary_key=True)
     patient_id: PatientID = Field(foreign_key="patient.id", ondelete="CASCADE")
@@ -76,7 +76,7 @@ class SeriesBase(BaseModel):
 
 
 class Series(SeriesBase, table=True):
-    """Model representing a series within a medical imaging study."""
+    """Model representing a series within an imaging study."""
 
     series_uid: DicomUID = Field(primary_key=True)
     anon_uid: str | None = None

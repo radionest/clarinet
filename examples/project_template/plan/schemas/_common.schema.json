@@ -4,7 +4,7 @@
         "StudyType": {
             "type": "string",
             "title": "Тип исследования",
-            "enum": ["CT", "MRI"]
+            "enum": ["CT", "UT"]
         }
     }
 }

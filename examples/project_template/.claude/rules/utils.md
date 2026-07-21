@@ -11,7 +11,7 @@ Project-specific helper modules used by pipeline tasks, validators, and scripts.
 
 - **Shared constants**: segment label maps, category names, classification thresholds.
   ```python
-  SEG_LABELS: dict[str, int] = {"mts": 1, "unclear": 2, "benign": 3}
+  SEG_LABELS: dict[str, int] = {"defect": 1, "indeterminate": 2, "cosmetic": 3}
   ```
 - **File I/O wrappers**: reading/writing `.seg.nrrd` with segment metadata, reading DICOM metadata, parsing reports.
 - **Image processing** not tied to one specific task: label converters, connected components, segmentation metrics (Dice, Hausdorff), morphological operations.
@@ -89,10 +89,10 @@ def master_label_converter(name: str) -> int:
     return int(name)
 ```
 
-For categories (`"mts"` → `1`):
+For categories (`"defect"` → `1`):
 
 ```python
-SEG_LABELS = {"mts": 1, "unclear": 2, "benign": 3}
+SEG_LABELS = {"defect": 1, "indeterminate": 2, "cosmetic": 3}
 def category_converter(name: str) -> int:
     return SEG_LABELS[name]
 ```

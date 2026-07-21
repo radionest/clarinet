@@ -32,7 +32,7 @@ The shared file (`plan/schemas/_common.schema.json`) keeps definitions in a `$de
 ```json
 {
   "$defs": {
-    "StudyType": { "type": "string", "title": "Study type", "enum": ["CT", "MRI"] }
+    "StudyType": { "type": "string", "title": "Study type", "enum": ["CT", "UT"] }
   }
 }
 ```
@@ -87,7 +87,7 @@ For dependent fields: show/require certain fields only when others have a specif
     "properties": {
       "study_type": {
         "type": "string",
-        "enum": ["CT", "MRI", "CT-AG"]
+        "enum": ["CT", "UT", "CT-HD"]
       },
       "best_series": { "type": "string" }
     },
@@ -126,21 +126,21 @@ The list of available sources is extended by the frontend — check the frontend
 
 ## Localization (the `title` field)
 
-The frontend uses `title` instead of the field name for form labels. Write it in whatever language your project uses (Russian is typical for this framework's clinical deployments):
+The frontend uses `title` instead of the field name for form labels. Write it in whatever language your project uses (Russian is typical for this framework's deployments):
 
 ```json
 {
-  "lesions": {
+  "defects": {
     "type": "array",
-    "title": "Lesions",
+    "title": "Defects",
     "items": {
       "type": "object",
       "properties": {
-        "lesion_num": { "type": "integer", "title": "Lesion #", "readOnly": true },
+        "defect_num": { "type": "integer", "title": "Defect #", "readOnly": true },
         "classification": {
           "type": "string",
           "title": "Classification",
-          "enum": ["metastasis", "cyst", "hemangioma"]
+          "enum": ["defect", "cavity", "inclusion"]
         }
       }
     }
@@ -150,23 +150,23 @@ The frontend uses `title` instead of the field name for form labels. Write it in
 
 ## Read-only fields
 
-The standard JSON Schema attribute `readOnly: true` — the field is shown but not editable. Used for system values (`lesion_num`, populated when the record is created).
+The standard JSON Schema attribute `readOnly: true` — the field is shown but not editable. Used for system values (`defect_num`, populated when the record is created).
 
 ## Nested arrays of objects
 
-For collections (lists of lesions, mappings, attendees):
+For collections (lists of defects, mappings, attendees):
 
 ```json
 {
-  "lesions": {
+  "defects": {
     "type": "array",
     "items": {
       "type": "object",
       "properties": {
-        "lesion_num": { "type": "integer", "readOnly": true },
+        "defect_num": { "type": "integer", "readOnly": true },
         "cluster": { "type": "integer", "minimum": 1 }
       },
-      "required": ["lesion_num"]
+      "required": ["defect_num"]
     }
   }
 }
@@ -177,32 +177,32 @@ For collections (lists of lesions, mappings, attendees):
 ```json
 {
   "type": "object",
-  "title": "MDT conclusion",
+  "title": "MRB conclusion",
   "properties": {
-    "lesions": {
+    "defects": {
       "type": "array",
-      "title": "Lesions",
+      "title": "Defects",
       "items": {
         "type": "object",
         "properties": {
-          "lesion_num": { "type": "integer", "title": "Lesion #", "readOnly": true },
+          "defect_num": { "type": "integer", "title": "Defect #", "readOnly": true },
           "classification": {
             "type": "string",
             "title": "Classification",
-            "enum": ["metastasis", "unclear", "cyst", "hemangioma", "benign"]
+            "enum": ["defect", "indeterminate", "cavity", "inclusion", "cosmetic"]
           },
           "treatment": {
             "type": "string",
             "title": "Treatment",
-            "enum": ["resection", "ablation", "observation"]
+            "enum": ["repair", "ablation", "observation"]
           }
         },
-        "required": ["lesion_num", "classification", "treatment"]
+        "required": ["defect_num", "classification", "treatment"]
       }
     },
     "attendees": {
       "type": "array",
-      "title": "MDT attendees",
+      "title": "MRB attendees",
       "items": { "type": "string" },
       "x-options": { "source": "users" }
     },
@@ -211,6 +211,6 @@ For collections (lists of lesions, mappings, attendees):
       "title": "Conclusion text"
     }
   },
-  "required": ["lesions", "attendees"]
+  "required": ["defects", "attendees"]
 }
 ```

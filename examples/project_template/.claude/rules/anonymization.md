@@ -29,7 +29,7 @@ anonymize_study = RecordDef(
     description="Automatic study anonymization — fetch from PACS, anonymize, distribute",
     label="Anonymize study",
     level="STUDY",
-    role="auto",                # machine-driven, no doctor UI
+    role="auto",                # machine-driven, no inspector UI
     min_records=1,
     max_records=1,
 )

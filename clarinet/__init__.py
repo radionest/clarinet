@@ -1,4 +1,4 @@
-"""Clarinet — an imaging-centric framework for clinical research."""
+"""Clarinet — an imaging-centric framework for structured research workflows."""
 
 from __future__ import annotations
 

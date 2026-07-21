@@ -90,16 +90,16 @@ def _entity_events(bus, entity=None, action=None):
 
 @pytest_asyncio.fixture
 async def hierarchy(test_session):
-    test_session.add(make_patient("AUD_PAT", "Audit Patient"))
+    test_session.add(make_patient("AUD_PART", "Audit Part"))
     await test_session.commit()
-    test_session.add(make_study("AUD_PAT", "1.2.3.800"))
+    test_session.add(make_study("AUD_PART", "1.2.3.800"))
     await test_session.commit()
     test_session.add(make_series("1.2.3.800", "1.2.3.800.1", 1))
     await test_session.commit()
     test_session.add(make_record_type("aud-rt", level=DicomQueryLevel.SERIES))
     await test_session.commit()
     return {
-        "patient_id": "AUD_PAT",
+        "patient_id": "AUD_PART",
         "study_uid": "1.2.3.800",
         "series_uid": "1.2.3.800.1",
         "rt": "aud-rt",

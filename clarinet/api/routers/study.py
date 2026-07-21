@@ -1,7 +1,7 @@
 """
 Async study router for the Clarinet framework.
 
-This module provides async API endpoints for managing medical imaging studies, series, and related data.
+This module provides async API endpoints for managing imaging studies, series, and related data.
 """
 
 from typing import Annotated

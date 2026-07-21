@@ -1,6 +1,6 @@
 """End-to-end workflow tests for clarinet.services.image.
 
-These tests exercise multi-step pipelines simulating real clinical image
+These tests exercise multi-step pipelines simulating real-world image
 processing scenarios: format conversions, segmentation chains, COCO ingestion,
 HU correction, and degraded DICOM input handling.
 

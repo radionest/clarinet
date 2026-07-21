@@ -12,8 +12,7 @@ paths:
 
 ```bash
 clarinet init my_project --template research    # Research scaffold with .claude/ docs for agents (Python config, plan/)
-clarinet init my_project --template bigliver    # Full liver template (Python config, workflows, pipeline)
-clarinet init my_project --template demo        # Simple demo (JSON/TOML config)
+clarinet init my_project --template demo        # NDT comparative-study demo (Python config, workflows, pipeline)
 clarinet init my_project                        # Bare skeleton
 clarinet init --list-templates                  # Show available templates
 ```
@@ -55,7 +54,7 @@ Every plan file imports as a `clarinet_plan.` submodule off this single root
 project_name = "My Study"
 root_url = "/my_study"                          # Sub-path prefix
 api_base_url = "http://127.0.0.1:8111/my_study/api"
-extra_roles = ["doctor", "surgeon"]             # Custom roles beyond admin/user
+extra_roles = ["inspector", "technician"]       # Custom roles beyond admin/user
 
 config_mode = "python"                          # "toml" (default) or "python"
 config_tasks_path = "./plan/"                   # Root for config files

@@ -402,7 +402,7 @@ slicer_script = "process.py"
     async def test_full_json_backward_compat(self, tmp_path: Path) -> None:
         """Test existing JSON still works."""
         config = {
-            "record": {"name": "Segmentation", "description": "Liver segmentation"},
+            "record": {"name": "Segmentation", "description": "Demo segmentation"},
             "slicer_script": "inline script content",
             "data_schema": {"type": "object", "properties": {"mask": {"type": "string"}}},
         }

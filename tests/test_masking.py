@@ -300,7 +300,7 @@ class TestMaskRecordPatientData:
         assert result.study.date == date(2025, 1, 17)
 
     def test_study_date_preserved_when_opted_out(self) -> None:
-        """``mask_patient_data=False`` keeps the real study date for clinical roles."""
+        """``mask_patient_data=False`` keeps the real study date for specialist roles."""
         user = _make_user(is_superuser=False)
         record = _make_record_read(
             anon_name="Anon Patient Name",
@@ -353,7 +353,7 @@ class TestMaskRecordPatientData:
             anon_name="Anon Patient Name",
             auto_id=1,
             study_anon_uid="9.8.7.6.5.4.3.2",
-            study_description="CT ANGIO LIVER - IVANOV I.I.",
+            study_description="CT SCAN PART - BATCH 001",
             series_uid=None,
             series_anon_uid=None,
         )
@@ -369,13 +369,13 @@ class TestMaskRecordPatientData:
         record = _make_record_read(
             anon_name="Anon Patient Name",
             auto_id=1,
-            study_description="CT ANGIO LIVER - IVANOV I.I.",
+            study_description="CT SCAN PART - BATCH 001",
         )
 
         result = mask_record_patient_data(record, superuser)
 
         assert result.study is not None
-        assert result.study.study_description == "CT ANGIO LIVER - IVANOV I.I."
+        assert result.study.study_description == "CT SCAN PART - BATCH 001"
 
     def test_series_uid_masked_when_anon_uid_exists(self) -> None:
         """Series UID is masked when anon_uid is set."""
@@ -590,7 +590,7 @@ class TestMaskRecordPatientData:
     def test_record_type_opted_out_keeps_display_anon_id(self) -> None:
         """Opt-out types still carry the per-study display ID next to real data.
 
-        Clinical roles (``mask_patient_data=False``) see real identifiers, but
+        Specialist roles (``mask_patient_data=False``) see real identifiers, but
         the ANON ID column keeps showing the per-study hash so the row can
         still be correlated with the anonymized study in PACS.
         """
@@ -599,7 +599,7 @@ class TestMaskRecordPatientData:
             fs_settings.anon_per_study_patient_id = True
             fs_settings.anon_per_study_patient_id_hex_length = 8
             fs_settings.anon_uid_salt = "test-salt"
-            fs_settings.anon_id_prefix = "NIR_LIVER"
+            fs_settings.anon_id_prefix = "DEMO_PART"
             record = _make_record_read(auto_id=42, mask_patient_data=False)
 
             result = mask_record_patient_data(record, user)
@@ -607,7 +607,7 @@ class TestMaskRecordPatientData:
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
         assert result.patient_id == "REAL_PAT_001"
         assert result.patient.name == "Real Patient Name"
-        assert result.display_anon_id == f"NIR_LIVER_{expected_hash}"
+        assert result.display_anon_id == f"DEMO_PART_{expected_hash}"
 
     def test_record_type_masked_explicit_default(self) -> None:
         """Explicit ``mask_patient_data=True`` behaves identically to the default."""
@@ -742,7 +742,7 @@ class TestMaskRecords:
             auto_id=1,
             study_anon_uid="9.8.7.6.5.4.3.2",
             study_date=date(2025, 1, 17),
-            study_description="CT ANGIO LIVER - IVANOV",
+            study_description="CT SCAN PART - BATCH 002",
             series_uid=None,
             series_anon_uid=None,
         )
@@ -838,7 +838,7 @@ class TestMaskRecords:
             fs_settings.anon_per_study_patient_id = True
             fs_settings.anon_per_study_patient_id_hex_length = 8
             fs_settings.anon_uid_salt = "test-salt"
-            fs_settings.anon_id_prefix = "NIR_LIVER"
+            fs_settings.anon_id_prefix = "DEMO_PART"
             record = _make_record_read(
                 patient_id="REAL_PAT_001",
                 patient_name="Real Patient Name",
@@ -852,7 +852,7 @@ class TestMaskRecords:
             result = mask_record_patient_data(record, user)
 
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
-        expected_id = f"NIR_LIVER_{expected_hash}"
+        expected_id = f"DEMO_PART_{expected_hash}"
         assert result.patient_id == expected_id
         assert result.patient.id == expected_id
         assert result.patient.name == expected_id
@@ -938,7 +938,7 @@ class TestMaskRecords:
             fs_settings.anon_per_study_patient_id = True
             fs_settings.anon_per_study_patient_id_hex_length = 8
             fs_settings.anon_uid_salt = "test-salt"
-            fs_settings.anon_id_prefix = "NIR_LIVER"
+            fs_settings.anon_id_prefix = "DEMO_PART"
             record = _make_record_read(
                 auto_id=42,
                 study_uid="1.2.3.4.5.6.7.8",
@@ -946,7 +946,7 @@ class TestMaskRecords:
             )
 
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
-        assert record.display_anon_id == f"NIR_LIVER_{expected_hash}"
+        assert record.display_anon_id == f"DEMO_PART_{expected_hash}"
 
     def test_display_anon_id_none_until_study_anonymized(self) -> None:
         """Per-study mode + study.anon_uid=None: display_anon_id stays None."""
@@ -954,7 +954,7 @@ class TestMaskRecords:
             fs_settings.anon_per_study_patient_id = True
             fs_settings.anon_per_study_patient_id_hex_length = 8
             fs_settings.anon_uid_salt = "test-salt"
-            fs_settings.anon_id_prefix = "NIR_LIVER"
+            fs_settings.anon_id_prefix = "DEMO_PART"
             record = _make_record_read(auto_id=42, study_anon_uid=None)
 
         assert record.display_anon_id is None
@@ -971,7 +971,7 @@ class TestMaskRecords:
             fs_settings.anon_per_study_patient_id = True
             fs_settings.anon_per_study_patient_id_hex_length = 8
             fs_settings.anon_uid_salt = "test-salt"
-            fs_settings.anon_id_prefix = "NIR_LIVER"
+            fs_settings.anon_id_prefix = "DEMO_PART"
             record = _make_record_read(
                 auto_id=42,
                 study_uid="1.2.3.4.5.6.7.8",
@@ -982,7 +982,7 @@ class TestMaskRecords:
             revalidated = RecordRead.model_validate(result.model_dump())
 
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
-        expected_id = f"NIR_LIVER_{expected_hash}"
+        expected_id = f"DEMO_PART_{expected_hash}"
         # display matches the masked PatientID, not a hash of the anon study UID
         assert result.display_anon_id == expected_id
         assert result.patient_id == expected_id

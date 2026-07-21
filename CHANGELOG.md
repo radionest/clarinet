@@ -155,6 +155,10 @@
 - `GET /api/pipelines/runs` now advertises a `[1, 2147483647]` (int32) bound on
   the `record_id` query filter — an out-of-range value returns 422 at the API
   boundary instead of reaching PostgreSQL as a `NumericValueOutOfRange`.
+- Default `project_description` changed from `"Medical Imaging Framework"` to
+  `"Imaging Research Framework"`, matching the framework's domain-agnostic
+  framing (docs, agent rules, and the bundled demo no longer assume a medical
+  use case). Projects that set `project_description` explicitly are unaffected.
 
 ### Fixed
 

@@ -1,4 +1,4 @@
-"""Slicer script — lesion segmentation on a single study.
+"""Slicer script — defect segmentation on a single study.
 
 Context variables (injected by build_slicer_context):
     working_folder: Absolute path to the working directory (auto).
@@ -23,12 +23,12 @@ if os.path.isfile(output_file):  # type: ignore[name-defined]  # noqa: F821
 else:
     seg = (
         s.create_segmentation("Segmentation")
-        .add_segment("mts", (1.0, 0.0, 0.0))
-        .add_segment("unclear", (1.0, 1.0, 0.0))
-        .add_segment("benign", (0.0, 1.0, 0.0))
+        .add_segment("defect", (1.0, 0.0, 0.0))
+        .add_segment("indeterminate", (1.0, 1.0, 0.0))
+        .add_segment("cosmetic", (0.0, 1.0, 0.0))
     )
 
 s.setup_editor(seg, effect="Paint", brush_size=5.0)
 s.set_layout("axial")
 s.add_view_shortcuts()
-s.annotate("Segment all lesions")
+s.annotate("Segment all defects")

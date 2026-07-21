@@ -5,7 +5,7 @@
         "is_good": {
             "type": "boolean",
             "title": "Подходит для исследования",
-            "description": "Whether the study is suitable for the trial"
+            "description": "Whether the study is suitable for further processing"
         }
     },
     "required": ["is_good"],

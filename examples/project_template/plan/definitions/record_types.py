@@ -27,7 +27,7 @@ example_segmentation = FileDef(
 
 first_check = RecordDef(
     name="first-check",
-    description="Initial assessment of every study in the trial",
+    description="Initial assessment of every study",
     label="First check",
     level="STUDY",
     role="doctor",

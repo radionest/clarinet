@@ -164,7 +164,7 @@ result = seg_a.difference(seg_b, strategy=GreedyArgmax(IoU(), direction="a_to_b"
 
 Available measures: `IoU`, `Dice`, `Coverage`, `OverlapCoefficient`, `AbsoluteOverlap`, `CentroidProximity`.
 
-**Grid alignment (fail-fast)**: every set operation compares the two segmentations **by voxel index**, so both must occupy the same physical grid. By default a grid mismatch (different shape, origin, spacing, or direction — e.g. a Z-flipped projection vs. its doctor segmentation) raises `GeometryMismatchError` instead of silently producing wrong results. Pass `resample=True` to opt into automatic nearest-neighbour resampling of `other` onto the caller's grid. This mirrors ITK's "same physical space" guard plus an explicit `ResampleImageFilter`.
+**Grid alignment (fail-fast)**: every set operation compares the two segmentations **by voxel index**, so both must occupy the same physical grid. By default a grid mismatch (different shape, origin, spacing, or direction — e.g. a Z-flipped projection vs. its inspector segmentation) raises `GeometryMismatchError` instead of silently producing wrong results. Pass `resample=True` to opt into automatic nearest-neighbour resampling of `other` onto the caller's grid. This mirrors ITK's "same physical space" guard plus an explicit `ResampleImageFilter`.
 
 | Helper | Returns | Purpose |
 |---|---|---|
@@ -352,7 +352,7 @@ re-run) lands on the *identical* voxel grid. Without it, the slice-ordering conv
 between readers — the pre-#221 hand-written reader sorted by ascending `ImagePositionPatient[2]`,
 while GDCM sorts along the IOP slice normal, which can point either way — so a segmentation frozen
 on one grid and another frozen on the other end up on physically equivalent but **index-reversed**
-grids (the projection/doctor-seg Z-flip). The flip is **geometry-preserving**: the array, origin,
+grids (the projection/inspector-seg Z-flip). The flip is **geometry-preserving**: the array, origin,
 and slice direction are reversed *together*, so every voxel keeps its physical position (a
 direction-only flip would mirror the data). No-op when the slice axis already points the canonical way.
 

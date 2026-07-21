@@ -32,7 +32,7 @@ def build_template_vars(record: RecordRead) -> dict[str, Any]:
     (``{study_anon_uid}``, ``{patient_id}`` etc.).
 
     UX layer — falls back to raw UIDs when anonymization has not yet
-    propagated, so the Slicer UI keeps rendering text for the doctor
+    propagated, so the Slicer UI keeps rendering text for the inspector
     even on records that predate the anonymization run. Backend tasks
     that need a strict anonymized path use ``Files(record)`` directly.
 
@@ -160,7 +160,7 @@ def build_slicer_context(
     file_registry = record.record_type.file_registry or []
 
     # -- Layer 1: Standard variables (by level) --
-    # Slicer is the UI layer for the radiologist — open a record even if
+    # Slicer is the UI layer for the inspector — open a record even if
     # anonymization has not propagated yet (PACS still answers under the
     # raw UID in that window). Backend tasks must NOT mirror this — they
     # use Files(...) in strict mode (default).
@@ -181,7 +181,7 @@ def build_slicer_context(
     # (`PacsHelper.retrieve_study(study_uid)` / `.retrieve_series(...)`).
     # On anonymized studies the PACS holds them under ``anon_uid``; on a
     # not-yet-anonymized study it still holds them under the raw UID.
-    # Fall back so the doctor can open in-flight records too.
+    # Fall back so the inspector can open in-flight records too.
     if record_level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         context["study_uid"] = (
             record.study.anon_uid if record.study else record.study_anon_uid

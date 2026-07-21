@@ -142,21 +142,21 @@ _BOOK_YML = """project:
   type: book
   output-dir: _site
 book:
-  title: Liver Book
-  description: Multi-chapter liver report
+  title: Demo Book
+  description: Multi-chapter part report
 clarinet:
   data:
-    - liver_stats
+    - part_stats
 """
 
 
 def test_parse_book_metadata_full() -> None:
     from clarinet.utils.quarto_discovery import parse_book_metadata
 
-    title, desc, data, output_dir = parse_book_metadata(_BOOK_YML, fallback_name="liver")
-    assert title == "Liver Book"
-    assert desc == "Multi-chapter liver report"
-    assert data == ["liver_stats"]
+    title, desc, data, output_dir = parse_book_metadata(_BOOK_YML, fallback_name="demo")
+    assert title == "Demo Book"
+    assert desc == "Multi-chapter part report"
+    assert data == ["part_stats"]
     assert output_dir == "_site"
 
 
@@ -193,8 +193,8 @@ def test_discover_recognizes_book_subdir(tmp_path: Path) -> None:
 
     book_t, book_path = by_name["report_book"]
     assert book_t.kind is QuartoReportKind.BOOK
-    assert book_t.title == "Liver Book"
-    assert book_t.data_reports == ["liver_stats"]
+    assert book_t.title == "Demo Book"
+    assert book_t.data_reports == ["part_stats"]
     assert book_path == book.resolve()  # path is the project dir, not a .qmd
 
     assert by_name["single"][0].kind is QuartoReportKind.FILE

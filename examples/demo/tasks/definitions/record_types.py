@@ -1,4 +1,4 @@
-"""Liver study v2 — RecordType definitions (Python config mode).
+"""NDT comparative study — RecordType definitions (Python config mode).
 
 All file definitions and record types in a single self-contained file.
 """
@@ -12,7 +12,7 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 master_model = FileDef(
     pattern="master_model.seg.nrrd",
     level="PATIENT",
-    description="Master model segmentation — one ROI per lesion with unique number",
+    description="Master model segmentation — one ROI per defect with unique number",
 )
 
 segmentation = FileDef(
@@ -30,7 +30,7 @@ master_projection = FileDef(
 second_review_output = FileDef(
     pattern="second_review_{user_id}.seg.nrrd",
     level="SERIES",
-    description="Second review classification: metastasis/unclear/benign/invisible",
+    description="Second review classification: defect/indeterminate/cosmetic/invisible",
 )
 
 volume_nifti = FileDef(
@@ -39,10 +39,10 @@ volume_nifti = FileDef(
     description="NIfTI volume converted from DICOM series",
 )
 
-resection_model_file = FileDef(
-    pattern="resection_model.seg.nrrd",
+repair_model_file = FileDef(
+    pattern="repair_model.seg.nrrd",
     level="PATIENT",
-    description="3D resection model — liver parenchyma, vessels, corrected lesion boundaries",
+    description="3D repair model — part body, internal channels, corrected defect boundaries",
 )
 
 # ---------------------------------------------------------------------------
@@ -51,10 +51,10 @@ resection_model_file = FileDef(
 
 first_check = RecordDef(
     name="first-check",
-    description="Initial assessment of every study added to the trial",
+    description="Initial assessment of every study added to the demo",
     label="First check",
     level="STUDY",
-    role="doctor",
+    role="inspector",
     min_records=2,
     max_records=2,
     data_schema="schemas/first-check.schema.json",
@@ -72,12 +72,12 @@ anonymize_study = RecordDef(
 
 segment_CT_single = RecordDef(
     name="segment-ct-single",
-    description="CT lesion segmentation — only the current study is available for review",
+    description="CT defect segmentation — only the current study is available for review",
     label="CT segment (single)",
     level="STUDY",
     min_records=2,
     max_records=4,
-    role="doctor_CT",
+    role="inspector_CT",
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
@@ -87,12 +87,12 @@ segment_CT_single = RecordDef(
 
 segment_CT_with_archive = RecordDef(
     name="segment-ct-with-archive",
-    description="CT lesion segmentation — current study plus all archive CT studies are available for review",
+    description="CT defect segmentation — current study plus all archive CT studies are available for review",
     label="CT segment (with archive)",
     level="STUDY",
     min_records=2,
     max_records=4,
-    role="doctor_CT",
+    role="inspector_CT",
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
@@ -100,14 +100,14 @@ segment_CT_with_archive = RecordDef(
     # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
-segment_MRI_single = RecordDef(
-    name="segment-mri-single",
-    description="MRI lesion segmentation — only the current study is available for review",
-    label="MRI segment",
+segment_UT_single = RecordDef(
+    name="segment-ut-single",
+    description="UT (ultrasonic) defect segmentation — only the current study is available for review",
+    label="UT segment",
     level="STUDY",
     min_records=2,
     max_records=4,
-    role="doctor_MRI",
+    role="inspector_UT",
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
@@ -115,14 +115,14 @@ segment_MRI_single = RecordDef(
     # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
-segment_MRIAG_single = RecordDef(
-    name="segment-mriag-single",
-    description="MRI angiography lesion segmentation",
-    label="MRI-AG segment",
+segment_UTHD_single = RecordDef(
+    name="segment-ut-hd-single",
+    description="High-resolution UT defect segmentation",
+    label="UT-HD segment",
     level="STUDY",
     min_records=2,
     max_records=4,
-    role="doctor_MRI",
+    role="inspector_UT",
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
@@ -130,14 +130,14 @@ segment_MRIAG_single = RecordDef(
     # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
-segment_CTAG_single = RecordDef(
-    name="segment-ctag-single",
-    description="CT angiography lesion segmentation",
-    label="CT-AG segment",
+segment_CTHD_single = RecordDef(
+    name="segment-ct-hd-single",
+    description="High-resolution/contrast-enhanced CT defect segmentation",
+    label="CT-HD segment",
     level="STUDY",
     min_records=2,
     max_records=4,
-    role="doctor_CT-AG",
+    role="inspector_CT-HD",
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
@@ -145,14 +145,14 @@ segment_CTAG_single = RecordDef(
     # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
-segment_PDCTAG_single = RecordDef(
-    name="segment-pdctag-single",
-    description="PDCT angiography lesion segmentation",
-    label="PDCT-AG segment",
+segment_MCT_single = RecordDef(
+    name="segment-mct-single",
+    description="Micro-CT defect segmentation",
+    label="micro-CT segment",
     level="STUDY",
     min_records=2,
     max_records=4,
-    role="doctor_PDCT",
+    role="inspector_MCT",
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
@@ -183,7 +183,7 @@ create_master_projection = RecordDef(
 
 compare_with_projection = RecordDef(
     name="compare-with-projection",
-    description="Automatic comparison of doctor segmentation with master model projection",
+    description="Automatic comparison of inspector segmentation with master model projection",
     label="Compare with projection",
     level="SERIES",
     min_records=2,
@@ -198,10 +198,10 @@ compare_with_projection = RecordDef(
 
 second_review = RecordDef(
     name="second-review",
-    description="Second review — doctor classifies lesions that were missed in the initial segmentation",
+    description="Second review — inspector classifies defects that were missed in the initial segmentation",
     label="Second review",
     level="SERIES",
-    role="doctor",
+    role="inspector",
     min_records=1,
     max_records=1,
     slicer_script="scripts/second_review.py",
@@ -227,170 +227,166 @@ update_master_model = RecordDef(
     slicer_result_validator="validators/master_model_validator.py",
     files=[FileRef(master_model, "output")],
     slicer_context_hydrators=[
-        "patient_first_study",  # best_study_uid (fallback for intraop trigger)
+        "patient_first_study",  # best_study_uid (fallback for in-process trigger)
         "model_series_for_projection",  # model_study_uid, model_series_uid (CT ref)
-        "projection_for_update",  # target_study_uid, target_series_uid, projection_path, doctor_segmentation_path
+        "projection_for_update",  # target_study_uid, target_series_uid, projection_path, inspector_segmentation_path
     ],
     # master_model, output_file, working_folder, best_study_uid — auto-injected
 )
 
 # ---------------------------------------------------------------------------
-# Stage 8: Retrospective semiotics
+# Stage 8: Retrospective characterization
 # ---------------------------------------------------------------------------
 
-retrospective_semiotics = RecordDef(
-    name="retrospective-semiotics",
+retrospective_characterization = RecordDef(
+    name="retrospective-characterization",
     description=(
-        "Retrospective semiotics assessment — radiological characteristics "
-        "of each lesion on a given modality (after 4-7 week washout period)"
+        "Retrospective characterization assessment — signal characteristics "
+        "of each defect on a given modality (after a blind-reassessment interval)"
     ),
-    label="Semiotics",
+    label="Characterization",
     level="SERIES",
     role="auto",
     min_records=2,
     max_records=4,
     files=[FileRef(master_projection, "input")],
-    # Data: per-lesion semiotics (contrast pattern, signal, morphology, borders, etc.)
+    # Data: per-defect characterization (signal pattern, texture, morphology, edge definition, etc.)
     # No Slicer script — OHIF viewer + form-based data entry
 )
 
 # ---------------------------------------------------------------------------
-# Stage 10: MDK conclusion
+# Stage 10: MRB conclusion
 # ---------------------------------------------------------------------------
 
-mdk_conclusion = RecordDef(
-    name="mdk-conclusion",
+mrb_conclusion = RecordDef(
+    name="mrb-conclusion",
     description=(
-        "MDK conclusion — multidisciplinary council classifies all lesions "
-        "and defines treatment plan"
+        "MRB conclusion — Material Review Board classifies all defects and defines the repair plan"
     ),
-    label="MDK",
+    label="MRB",
     level="PATIENT",
-    role="mdk",
+    role="mrb",
     min_records=1,
     max_records=1,
     mask_patient_data=False,
     files=[FileRef(master_model, "input")],
-    # Data per lesion: classification (metastasis, disappeared_metastasis, unclear,
-    #   cyst, hemangioma, benign_unclear) + treatment (cluster_removal, isolated_removal, not_planned)
+    # Data per defect: classification (defect, resolved_defect, indeterminate,
+    #   cavity, inclusion, cosmetic_indeterminate) + treatment (cluster_repair, isolated_repair, not_planned)
 )
 
 # ---------------------------------------------------------------------------
-# Stage 11: Resection planning
+# Stage 11: Repair planning
 # ---------------------------------------------------------------------------
 
-resection_model = RecordDef(
-    name="resection-model",
+repair_model = RecordDef(
+    name="repair-model",
     description=(
-        "3D model for resection planning — liver parenchyma, portal/hepatic veins, "
-        "corrected lesion ROIs"
+        "3D model for repair planning — part body, primary/secondary internal channels, "
+        "corrected defect ROIs"
     ),
-    label="Resection model",
+    label="Repair model",
     level="PATIENT",
     role="expert",
     min_records=1,
     max_records=1,
     mask_patient_data=False,
-    slicer_script="scripts/resection_model.py",
-    slicer_result_validator="validators/resection_model_validator.py",
+    slicer_script="scripts/repair_model.py",
+    slicer_result_validator="validators/repair_model_validator.py",
     slicer_context_hydrators=["patient_first_study"],
     files=[
         FileRef(master_model, "input"),
-        FileRef(resection_model_file, "output"),
+        FileRef(repair_model_file, "output"),
     ],
 )
 
-resection_plan = RecordDef(
-    name="resection-plan",
-    description=(
-        "Resection planning — cluster definition, resection zones, residual parenchyma volume"
-    ),
-    label="Resection plan",
+repair_plan = RecordDef(
+    name="repair-plan",
+    description=("Repair planning — cluster definition, repair zones, residual material volume"),
+    label="Repair plan",
     level="PATIENT",
     role="expert",
     min_records=1,
     max_records=1,
     mask_patient_data=False,
-    slicer_script="scripts/resection_plan.py",
+    slicer_script="scripts/repair_plan.py",
     files=[
-        FileRef(resection_model_file, "input"),
+        FileRef(repair_model_file, "input"),
         FileRef(master_model, "input"),
     ],
-    # Data: per-lesion cluster assignment, resection zones, residual volume
+    # Data: per-defect cluster assignment, repair zones, residual volume
 )
 
-resection_report = RecordDef(
-    name="resection-report",
-    description=("Intraoperative resection report — per-lesion cluster assignment by surgeon"),
-    label="Resection report",
+repair_report = RecordDef(
+    name="repair-report",
+    description=("Post-repair report — per-defect cluster assignment by technician"),
+    label="Repair report",
     level="PATIENT",
-    role="surgeon",
+    role="technician",
     min_records=1,
     max_records=1,
     mask_patient_data=False,
-    data_schema="schemas/resection-report.schema.json",
+    data_schema="schemas/repair-report.schema.json",
     files=[FileRef(master_model, "input")],
-    # Data: lesions[].lesion_num (readonly, prefilled), lesions[].cluster (editable)
-    # additional_lesions[].description, additional_lesions[].cluster
+    # Data: defects[].defect_num (readonly, prefilled), defects[].cluster (editable)
+    # additional_defects[].description, additional_defects[].cluster
 )
 
 # ---------------------------------------------------------------------------
-# Stage 12: Intraoperative protocol
+# Stage 12: Repair protocol
 # ---------------------------------------------------------------------------
 
-intraop_protocol = RecordDef(
-    name="intraop-protocol",
+repair_protocol = RecordDef(
+    name="repair-protocol",
     description=(
-        "Intraoperative protocol — US lesion marking, found/not-found/additional "
+        "In-process repair protocol — UT defect marking, found/not-found/additional "
         "classification, fragment numbering"
     ),
-    label="Surgery protocol",
+    label="Repair protocol",
     level="PATIENT",
-    role="surgeon",
+    role="technician",
     min_records=1,
     max_records=1,
     mask_patient_data=False,
     files=[FileRef(master_model, "input")],
-    # Data per lesion: us_found (bool), removed (bool), fragment_number (int)
-    # Data additional: additionally_found_lesions list
+    # Data per defect: ut_found (bool), removed (bool), fragment_number (int)
+    # Data additional: additionally_found_defects list
 )
 
 # ---------------------------------------------------------------------------
-# Stage 13: Post-operative CT review
+# Stage 13: Post-repair CT review
 # ---------------------------------------------------------------------------
 
-postop_ct_review = RecordDef(
-    name="postop-ct-review",
+post_repair_ct_review = RecordDef(
+    name="post-repair-ct-review",
     description=(
-        "Post-operative CT review — complication screening, "
-        "master model update for intraop findings"
+        "Post-repair CT review — anomaly screening, master model update for in-process findings"
     ),
-    label="Post-op CT",
+    label="Post-repair CT",
     level="STUDY",
-    role="doctor_CT",
+    role="inspector_CT",
     min_records=1,
     max_records=2,
 )
 
 # ---------------------------------------------------------------------------
-# Stage 14: Histology
+# Stage 14: Metallography
 # ---------------------------------------------------------------------------
 
-histology = RecordDef(
-    name="histology",
+metallography = RecordDef(
+    name="metallography",
     description=(
-        "Histological examination — macroscopic and microscopic analysis "
-        "per fragment and per lesion"
+        "Metallographic examination — macroscopic and microscopic sectioning analysis "
+        "per fragment and per defect"
     ),
-    label="Histology",
+    label="Metallography",
     level="PATIENT",
-    role="pathologist",
+    role="analyst",
     min_records=1,
     max_records=1,
     mask_patient_data=False,
     files=[FileRef(master_model, "input")],
-    # Data per lesion: macro_visible (bool), micro_visible (bool),
-    #   tumor_cells (yes/no/no_data), tumor_fibrotic_ratio (float, nullable)
+    # Data per defect: macro_visible (bool), micro_visible (bool),
+    #   defect_confirmed (yes/no/no_data), defect_area_fraction (float, nullable)
 )
 
 # ---------------------------------------------------------------------------
@@ -402,7 +398,7 @@ view_nifti = RecordDef(
     description="View pre-converted NIfTI volume in 3D Slicer",
     label="View NIfTI",
     level="SERIES",
-    role="doctor",
+    role="inspector",
     min_records=1,
     max_records=1,
     slicer_script="scripts/view_nifti.py",

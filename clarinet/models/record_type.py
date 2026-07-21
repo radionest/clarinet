@@ -154,7 +154,7 @@ class RecordTypeBase(SQLModel):
         description=(
             "Whether to mask patient/study/series identifiers for non-superusers "
             "when the patient has been anonymized. Set to False for record types "
-            "filled by clinicians who need real patient IDs (surgery, pathology, MDK)."
+            "filled by specialists who need real patient IDs (repair, metallography, MRB)."
         ),
     )
 

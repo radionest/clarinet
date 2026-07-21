@@ -145,7 +145,7 @@ HTTP-callbacks from validators are unsupported" below).
 
 ### Flow
 
-1. Doctor edits in Slicer → `POST /api/records/{id}/submit` (or `POST /api/records/{id}/data`).
+1. Inspector edits in Slicer → `POST /api/records/{id}/submit` (or `POST /api/records/{id}/data`).
 2. `_process_submission` validates `data` against the record-type schema (pass 1).
 3. `slicer_result_validator` runs in Slicer. The script may:
    - Raise → propagates as `SlicerError` → 422.
@@ -204,7 +204,7 @@ No HTTP callbacks, no `clarinet_api_url` / `clarinet_auth_cookie` injection.
 
 On overlapping keys between `__execResult` and user-submitted `data` —
 **validator wins**. This is intentional: hidden fields are authoritative and
-not editable by the doctor. If a non-hidden key happens to collide, the
+not editable by the inspector. If a non-hidden key happens to collide, the
 validator override is still applied; if that's not desired, the validator
 should not return that key. The override is still subject to the second
 validation pass — see "Error semantics" below.

@@ -7,10 +7,7 @@ from clarinet.utils.logger import logger
 
 # friendly name → (directory name under examples/, one-line description)
 TEMPLATES: dict[str, tuple[str, str]] = {
-    "minimal": ("demo_init", "Empty project skeleton"),
-    "demo": ("demo", "JSON-mode demo with tasks and record flow"),
-    "liver": ("demo_liver", "Liver study (TOML config)"),
-    "bigliver": ("demo_liver_v2", "Full liver study (Python config, workflows, pipeline)"),
+    "demo": ("demo", "NDT comparative-study demo (Python config, tasks, pipeline, RecordFlow)"),
     "research": (
         "project_template",
         "Research project scaffold (Python config, plan/, .claude/ docs for agents)",
