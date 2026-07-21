@@ -63,7 +63,13 @@
   and the new column's own `server_default` is `["parent", "user"]` —
   backfilling with the server_default instead of the `CASE` would give those
   rows a `unique_by` containing `"user"`, immediately violating
-  "`shared_editing` requires `'user' not in unique_by`". Before relying on
+  "`shared_editing` requires `'user' not in unique_by`". The backfilled
+  value is durable only for types whose config pins `unique_by` (or still
+  passes the legacy `unique_per_user` kwarg/key): on first startup the
+  reconciler self-heals any type whose config leaves `unique_by` unset
+  toward the new default `["parent", "user"]`, overwriting the backfilled
+  `["user"]` — pin `unique_by` explicitly for every type that must keep
+  the legacy per-user semantics. Before relying on
   the new SQLite FK enforcement, audit for pre-existing dangling
   `parent_record_id` rows (the startup audit only warns, it doesn't fix),
   and expect legacy duplicate rows that violate the new default partition to

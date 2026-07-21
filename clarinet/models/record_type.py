@@ -447,6 +447,14 @@ class RecordTypeOptional(SQLModel):
                 data["unique_by"] = legacy_unique_per_user(legacy)
         return data
 
+    @field_validator("unique_by", mode="before")
+    @classmethod
+    def _canonical_unique_by(cls, v: object) -> frozenset[str] | None:
+        # Same gatekeeper as RecordTypeBase: without it the PATCH DTO would
+        # accept garbage ([], unknown tokens, wrong case) that only the
+        # service's merged-RecordTypeCreate re-validation happens to catch.
+        return canonical_unique_by(v)  # type: ignore[arg-type]
+
     @field_validator(
         "data_schema",
         "ui_schema",

@@ -65,6 +65,10 @@ def validate_output_path_uniqueness(rt: "RecordTypeCreate | Any") -> None:
     """
     parts = rt.unique_by  # frozenset | None
     for fd in getattr(rt, "file_registry", None) or []:
+        # OUTPUT only by design: INPUT files are produced by other records
+        # (their identity is validated where they are OUTPUT), and
+        # INTERMEDIATE files are ephemeral scratch — a collision there
+        # cannot destroy a record's durable identity.
         if fd.role != FileRole.OUTPUT or getattr(fd, "multiple", False):
             continue
         if getattr(fd, "allow_path_collision", False):

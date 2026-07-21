@@ -34,3 +34,17 @@ def test_legacy_key_translated_on_patch():
     with pytest.warns(DeprecationWarning):
         p = RecordTypeOptional(unique_per_user=True)
     assert p.unique_by == frozenset({"user"}) and "unique_by" in p.model_fields_set
+
+
+def test_optional_unique_by_canonicalized_at_dto_layer():
+    from clarinet.models.record_type import RecordTypeOptional
+
+    with pytest.raises(ValidationError, match="max_records=1"):
+        RecordTypeOptional(unique_by=set())
+    with pytest.raises(ValidationError, match="series"):
+        RecordTypeOptional(unique_by={"series"})
+    with pytest.raises(ValidationError, match="USER"):
+        RecordTypeOptional(unique_by=["USER"])
+    assert RecordTypeOptional(unique_by=["user", "user"]).unique_by == frozenset({"user"})
+    assert RecordTypeOptional(unique_by=False).unique_by is None
+    assert RecordTypeOptional(unique_by=None).unique_by is None
