@@ -245,7 +245,7 @@ async def test_file_registry_diff(
     """Changed file definitions detected."""
     file_def = {
         "name": "output_seg",
-        "pattern": "seg.nrrd",
+        "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness check no-ops
         "role": "output",
         "required": True,
         "multiple": False,
@@ -416,6 +416,8 @@ async def test_file_level_change_triggers_update(
     test_session: AsyncSession,
 ) -> None:
     """Changing file level triggers update via _file_links_differ."""
+    # {id} discriminates regardless of unique_by/level -> path-uniqueness check
+    # no-ops here; the diff being tested is (name, role, required, level) only.
     # Create initial with no level
     config_v1 = [
         _make_config(
@@ -423,7 +425,7 @@ async def test_file_level_change_triggers_update(
             file_registry=[
                 {
                     "name": "seg_file",
-                    "pattern": "seg.nrrd",
+                    "pattern": "seg_{id}.nrrd",
                     "role": "output",
                     "required": True,
                     "multiple": False,
@@ -444,7 +446,7 @@ async def test_file_level_change_triggers_update(
             file_registry=[
                 {
                     "name": "seg_file",
-                    "pattern": "seg.nrrd",
+                    "pattern": "seg_{id}.nrrd",
                     "role": "output",
                     "required": True,
                     "multiple": False,

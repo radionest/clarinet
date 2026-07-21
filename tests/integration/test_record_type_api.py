@@ -26,6 +26,31 @@ async def sample_record_type(test_session) -> RecordType:
     return rt
 
 
+@pytest_asyncio.fixture
+async def record_type_with_parent_output(client: AsyncClient, auth_headers) -> str:
+    """RecordType with unique_by={'parent'}, parent_required=True, and an OUTPUT
+    pattern keyed by {parent_id} — valid under that combo, but not under the
+    default {"user", "parent"} (missing {user_id})."""
+    payload = {
+        "name": "parent-scoped-type",
+        "level": "SERIES",
+        "parent_required": True,
+        "unique_by": ["parent"],
+        "file_registry": [
+            {
+                "name": "review_out",
+                "pattern": "review_{parent_id}.seg.nrrd",
+                "role": "output",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+    }
+    response = await client.post(f"{BASE}/types", json=payload, headers=auth_headers)
+    assert response.status_code == 201
+    return payload["name"]
+
+
 class TestGetRecordType:
     """Tests for GET /types/{record_type_id}."""
 
@@ -102,6 +127,59 @@ class TestUpdateRecordType:
         )
         assert response.status_code == 200
         assert response.json()["edit_window_days"] is None
+
+    @pytest.mark.asyncio
+    async def test_update_explicit_null_unique_by_clears_it(
+        self, client: AsyncClient, auth_headers, sample_record_type
+    ):
+        """Explicit null on unique_by disables the constraint (the exclude_none
+        exception, mirroring edit_window_days). Regression: exclude_none used to
+        silently drop this, so PATCH {"unique_by": null} was a no-op."""
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"unique_by": None},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["unique_by"] is None
+
+    @pytest.mark.asyncio
+    async def test_update_invalid_unique_by_token_rejected(
+        self, client: AsyncClient, auth_headers, sample_record_type
+    ):
+        """An unknown unique_by partition token is rejected, not silently
+        smuggled in — RecordTypeOptional has no canonicalizing validator, so
+        this is caught by the merged-result RecordTypeCreate construction."""
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"unique_by": ["series"]},
+            headers=auth_headers,
+        )
+        assert response.status_code in (400, 422)
+
+        get_response = await client.get(
+            f"{BASE}/types/{sample_record_type.name}", headers=auth_headers
+        )
+        assert get_response.json()["unique_by"] == ["parent", "user"]
+
+    @pytest.mark.asyncio
+    async def test_update_unique_by_combo_output_cannot_discriminate_rejected(
+        self, client: AsyncClient, auth_headers, record_type_with_parent_output
+    ):
+        """Flipping unique_by to a combination the existing OUTPUT pattern can't
+        discriminate is rejected at PATCH time — DB unchanged. In TOML mode this
+        would otherwise export to disk and fail the next startup."""
+        response = await client.patch(
+            f"{BASE}/types/{record_type_with_parent_output}",
+            json={"unique_by": ["user", "parent"]},
+            headers=auth_headers,
+        )
+        assert response.status_code in (409, 422)
+
+        get_response = await client.get(
+            f"{BASE}/types/{record_type_with_parent_output}", headers=auth_headers
+        )
+        assert get_response.json()["unique_by"] == ["parent"]
 
     @pytest.mark.asyncio
     async def test_update_with_json_string_slicer_args(

@@ -362,6 +362,25 @@ class RecordTypeCreate(RecordTypeBase):
                 data["unique_by"] = legacy_unique_per_user(legacy)
         return data
 
+    @model_validator(mode="after")
+    def _validate_output_paths(self) -> "RecordTypeCreate":
+        """Reject OUTPUT file patterns that cannot discriminate coexisting records.
+
+        Runs after ``unique_by`` canonicalization (mode="before" field
+        validator already ran) on every construction — API POST/PATCH-merge,
+        TOML load, Python config load — so a broken pattern is caught at the
+        point of the mutation. ``file_registry`` defaults to ``None`` on this
+        model (many call sites attach file links separately), and the
+        predicate treats that as "nothing to check" — safe no-op.
+
+        Imported lazily to avoid a config <-> models import cycle
+        (``clarinet.config`` imports ``clarinet.models`` at its own top level).
+        """
+        from clarinet.config.path_uniqueness import validate_output_path_uniqueness
+
+        validate_output_path_uniqueness(self)
+        return self
+
 
 class RecordTypeOptional(SQLModel):
     """Pydantic model for updating a record type with optional fields."""

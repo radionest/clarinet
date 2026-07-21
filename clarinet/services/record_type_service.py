@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from jsonschema import Draft202012Validator, SchemaError
 
 from clarinet.exceptions.domain import ValidationError
-from clarinet.models.record import RecordType
+from clarinet.models.record import RecordType, RecordTypeCreate, RecordTypeRead
 from clarinet.services.record_data_validation import run_record_validators
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.utils.file_link_sync import sync_file_links
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from clarinet.models import Record
-    from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
+    from clarinet.models.record import RecordTypeOptional
     from clarinet.repositories.file_definition_repository import FileDefinitionRepository
     from clarinet.repositories.record_type_repository import RecordTypeRepository
     from clarinet.types import RecordData
@@ -112,8 +112,9 @@ class RecordTypeService:
             ``update_data`` uses ``exclude_none=True``, so explicitly sending
             ``{"ui_schema": null}`` (or ``data_schema: null``) is silently
             ignored — the column is not cleared. Pass an empty dict to reset.
-            ``edit_window_days`` is the exception: an explicit null clears the
-            time limit (null is its meaningful "no limit" value).
+            ``edit_window_days`` and ``unique_by`` are the exceptions: an
+            explicit null reaches the column (removes the time limit /
+            disables the uniqueness constraint — both real "off" values).
         """
         record_type = await self.repo.get(record_type_id)
 
@@ -127,15 +128,31 @@ class RecordTypeService:
             exclude_none=True,
             exclude={"file_registry"},
         )
-        # exclude_none drops an explicit null, but for edit_window_days null
-        # is meaningful (= remove the time limit) — restore it when sent.
+        # exclude_none drops an explicit null, but for these two fields null is
+        # meaningful (remove the time limit / disable uniqueness) — restore it.
         if "edit_window_days" in update.model_fields_set and update.edit_window_days is None:
             update_data["edit_window_days"] = None
+        if "unique_by" in update.model_fields_set and update.unique_by is None:
+            update_data["unique_by"] = None
+
+        # Validate the *merged* effective state before writing anything: a
+        # patch that flips unique_by/max_records/parent_required/file_registry
+        # into a combination the existing OUTPUT patterns can't discriminate
+        # must be rejected at PATCH time (path predicate + _validate_shared_editing,
+        # both run via RecordTypeCreate model validation) — otherwise, in TOML
+        # mode, it would export to disk and fail the next startup.
+        current_dto = RecordTypeRead.model_validate(record_type)
+        merged = current_dto.model_dump(exclude={"file_registry"})
+        merged.update(update_data)
+        effective_file_registry = (
+            file_defs if (file_defs_set and file_defs is not None) else current_dto.file_registry
+        )
+        RecordTypeCreate(**merged, file_registry=effective_file_registry)
 
         if update_data:
             # exclude_unset=False: update_data is already exclude_none-filtered,
-            # so a remaining None (edit_window_days) must reach the column —
-            # the repo's default would silently skip it.
+            # so a remaining None (edit_window_days/unique_by) must reach the
+            # column — the repo's default would silently skip it.
             await self.repo.update(record_type, update_data, exclude_unset=False)
 
         if file_defs is not None:

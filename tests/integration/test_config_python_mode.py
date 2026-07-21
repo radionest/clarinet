@@ -14,6 +14,7 @@ from sqlmodel import select
 from clarinet.config.primitives import RecordDef
 from clarinet.config.python_loader import load_python_config
 from clarinet.config.reconciler import _COMPARED_FIELDS, reconcile_record_types
+from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType
 
@@ -307,6 +308,33 @@ async def test_bootstrap_loads_python_config(
 
 
 @pytest.mark.asyncio
+async def test_bad_output_pattern_aborts_startup(tmp_path) -> None:
+    """A RecordDef whose OUTPUT pattern can't discriminate coexisting records
+    raises ConfigLoadError naming the RecordType + FileDef, instead of
+    silently loading a broken config (which would collide on disk at runtime).
+    """
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef, FileRef, FileDef
+
+        bad_output = FileDef(pattern="result.nrrd", level="SERIES", description="Ambiguous output")
+
+        ambiguous = RecordDef(
+            name="ambiguous-type",
+            level="SERIES",
+            files=[FileRef(bad_output, "output")],
+        )
+        """,
+    )
+
+    with pytest.raises(ConfigLoadError, match="ambiguous-type") as exc_info:
+        await load_python_config(tmp_path)
+
+    assert "bad_output" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_file_refs_resolved(
     test_session: AsyncSession,
     tmp_path,
@@ -331,6 +359,10 @@ async def test_file_refs_resolved(
             name="ai-analysis",
             description="AI analysis task",
             level="SERIES",
+            # plain "master.nrrd" pattern has no {user_id}/{parent_id}/{id} —
+            # opt out of the uniqueness check (unrelated to this test's intent).
+            unique_by=None,
+            max_records=1,
             files=[FileRef(master_model, role=FileRole.OUTPUT, required=False)],
         )
         """,
@@ -601,7 +633,8 @@ async def test_single_file_mode(
         """\
         from clarinet.config.primitives import FileDef, FileRef, RecordDef
 
-        my_file = FileDef(pattern="output.nrrd", level="SERIES", description="Output file")
+        # {id} discriminates -> path-uniqueness check no-ops (unrelated to this test)
+        my_file = FileDef(pattern="output_{id}.nrrd", level="SERIES", description="Output file")
 
         single_file_type = RecordDef(
             name="single-file-type",
