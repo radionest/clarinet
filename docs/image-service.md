@@ -138,7 +138,7 @@ All set operations are **label-based** (operate on connected-component labels), 
 |---|---|---|
 | `a.intersection(b, *, min_overlap=1, min_overlap_ratio=None, strategy=None)` | Keep ROIs from `a` with sufficient overlap with `b` | `min_overlap`: min voxels (default 1). `min_overlap_ratio`: min fraction of label size. `strategy`: optional `MatchingStrategy` — see below. |
 | `a.union(b)` | Binary union — all nonzero from both, result is single-valued | — |
-| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None, strategy=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction (now applied per component — see below). `strategy`: optional `MatchingStrategy`. |
+| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None, granularity="label", strategy=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction (now applied per component — see below). `granularity`: `"label"` (default) scores each `b` label separately; `"union"` flattens `b` to one mask (sum-over-union). `strategy`: optional `MatchingStrategy`. |
 | `a.symmetric_difference(b, *, min_overlap=1, min_overlap_ratio=None, max_overlap=0, max_overlap_ratio=None, strategy=None)` | Component-level symmetric difference (unmatched A + unmatched B) | Same threshold params as `intersection`/`difference`. `strategy`: optional `MatchingStrategy`. |
 
 **Union flattening**: the result is always binary (values 0 or 1). With `autolabel=True`, connected regions become a single label. Separate regions get different labels.
@@ -149,7 +149,7 @@ All set operations are **label-based** (operate on connected-component labels), 
 
 **`symmetric_difference` is component-level**: produces the union of unmatched A and unmatched B components. This is cleaner than the prior implementation which called `union().difference(intersection())` and could introduce re-labeling artifacts.
 
-**Per-edge overlap threshold (behavior note)**: for `intersection` and `difference`, the default no-`strategy` path evaluates the threshold against the **largest single B-component overlap**, not the summed overlap across all B components. This matches historical behavior for default thresholds (`min_overlap=1` / `max_overlap=0`) and for single-component overlaps. Consumers relying on raised thresholds with fragmented (multi-component) other masks should be aware: for example, two B components each overlapping A by 3 voxels (sum 6) do not trigger a `min_overlap=5` threshold — only the per-component max of 3 is tested.
+**Per-edge overlap threshold (behavior note)**: for `intersection` and `difference`, the default no-`strategy` path evaluates the threshold against the **largest single B-component overlap**, not the summed overlap across all B components. This matches historical behavior for default thresholds (`min_overlap=1` / `max_overlap=0`) and for single-component overlaps. Consumers relying on raised thresholds with fragmented (multi-component) other masks should be aware: for example, two B components each overlapping A by 3 voxels (sum 6) do not trigger a `min_overlap=5` threshold — only the per-component max of 3 is tested. For `difference`, passing `granularity="union"` flattens the other mask to a single label first, so each A component is scored against the combined extent — the summed behavior.
 
 #### Optional `strategy=` parameter
 

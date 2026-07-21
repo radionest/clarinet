@@ -1636,12 +1636,13 @@ class _SegmentAnalysisMixin(_SlicerHelperBase):
         return self._apply_parent_transform(self._unwrap_node(segmentation), local)
 
 
-# TYPE_CHECKING-only: build_overlap_graph is never a real import at runtime — it
-# is concatenated as source text (see correspondence_bundle.py) and exec'd into
-# this module's globals only when the caller passes
-# execute(..., include_correspondence=True). detect_overlaps() below reads it
-# via globals() (see its guard there); this import exists solely so mypy can
-# resolve the name and type-check the call.
+# TYPE_CHECKING-only: none of these are real imports at runtime — the
+# correspondence engine is concatenated as source text (see
+# correspondence_bundle.py) and exec'd into this module's globals only when the
+# caller passes execute(..., include_correspondence=True). detect_overlaps()
+# and subtract_segmentations() below read the symbols via globals() (see their
+# guards); these imports exist solely so mypy can resolve the names and
+# type-check the calls.
 if TYPE_CHECKING:
     from clarinet.services.image.correspondence.graph import build_overlap_graph, correspond
     from clarinet.services.image.correspondence.matching import strategy_from_thresholds
