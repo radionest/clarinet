@@ -100,3 +100,16 @@ def test_explicit_strategy_ignores_scalars() -> None:
         strategy=ThresholdMatch(IoU(), min_score=0.99),
     )
     assert keep == server == {1, 2}
+
+
+def test_engine_parameter_parity() -> None:
+    """D10: one engine implies one parameter set — names must not drift apart.
+
+    Runtime-only names are the documented exclusions: node handling on the
+    Slicer side (operands + output_name), the operand on the image side.
+    """
+    import inspect
+
+    sub = set(inspect.signature(SlicerHelper.subtract_segmentations).parameters)
+    diff = set(inspect.signature(Segmentation.difference).parameters)
+    assert sub - {"self", "seg_a", "seg_b", "output_name"} == diff - {"self", "other"}
