@@ -25,7 +25,14 @@ def canonical_unique_by(value: Iterable[str] | bool | None) -> frozenset[str] | 
         raise ValueError(
             f'unique_by must be a set/list of partition names — use ["{value}"], not "{value}"'
         )
-    parts = frozenset(value)
+    try:
+        parts = frozenset(value)
+    except TypeError:
+        # Only ValueError becomes a 422 inside a pydantic validator; a leaked
+        # TypeError (e.g. unique_by=7 from a fuzzed API body) would be a 500.
+        raise ValueError(
+            f"unique_by must be a set/list of partition names, got {type(value).__name__}"
+        ) from None
     if not parts:
         raise ValueError(
             "unique_by cannot be empty — use None for no uniqueness, "

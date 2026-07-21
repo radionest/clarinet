@@ -46,3 +46,11 @@ def test_legacy_mapping():
 def test_bare_string_rejected_with_teaching_message():
     with pytest.raises(ValueError, match='not "user"'):
         canonical_unique_by("user")
+
+
+def test_non_iterable_rejected_as_value_error():
+    # ValueError (not TypeError) so a fuzzed API body yields 422, not 500.
+    with pytest.raises(ValueError, match="got int"):
+        canonical_unique_by(7)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="got float"):
+        canonical_unique_by(1.5)  # type: ignore[arg-type]

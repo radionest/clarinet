@@ -48,3 +48,14 @@ def test_optional_unique_by_canonicalized_at_dto_layer():
     assert RecordTypeOptional(unique_by=["user", "user"]).unique_by == frozenset({"user"})
     assert RecordTypeOptional(unique_by=False).unique_by is None
     assert RecordTypeOptional(unique_by=None).unique_by is None
+
+
+def test_non_iterable_unique_by_is_validation_error_not_500():
+    from clarinet.models.record_type import RecordTypeOptional
+
+    # A TypeError escaping the before-validator would surface as HTTP 500;
+    # both DTOs must turn garbage scalars into a plain ValidationError (422).
+    with pytest.raises(ValidationError, match="got int"):
+        RecordTypeCreate(name="x", unique_by=7)
+    with pytest.raises(ValidationError, match="got int"):
+        RecordTypeOptional(unique_by=7)
