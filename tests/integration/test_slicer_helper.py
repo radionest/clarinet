@@ -644,7 +644,9 @@ __execResult = {
     "ok": True,
 }
 """
-    result = await slicer_service.execute(slicer_url, script, context=context)
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
     assert result.get("ok") is True
     assert result.get("missed_segments") == 0
     assert result.get("islands") == 0
@@ -754,7 +756,9 @@ except Exception:
 
 __execResult = {'raised': raised, 'bypassed': bypassed}
 """
-    result = await slicer_service.execute(slicer_url, script, context=context)
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
     assert isinstance(result, dict)
     assert result["raised"] is True
     assert result["bypassed"] is True

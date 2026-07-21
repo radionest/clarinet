@@ -1643,7 +1643,9 @@ class _SegmentAnalysisMixin(_SlicerHelperBase):
 # via globals() (see its guard there); this import exists solely so mypy can
 # resolve the name and type-check the call.
 if TYPE_CHECKING:
-    from clarinet.services.image.correspondence.graph import build_overlap_graph
+    from clarinet.services.image.correspondence.graph import build_overlap_graph, correspond
+    from clarinet.services.image.correspondence.matching import strategy_from_thresholds
+    from clarinet.services.image.correspondence.operations import Difference
 
 
 class _SegmentEditMixin(_SlicerHelperBase):
@@ -2014,28 +2016,63 @@ class _SegmentEditMixin(_SlicerHelperBase):
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
         resample: bool = False,
+        *,
+        strategy: Any = None,
+        granularity: Literal["label", "union"] = "label",
     ) -> Any:
-        """ROI-level subtraction: remove segments from seg_a that overlap with seg_b.
+        """ROI-level subtraction backed by the shared correspondence engine.
 
-        For each segment in seg_a, counts voxel overlap with the merged seg_b
-        labelmap. Segments exceeding overlap thresholds are removed.
+        Removal decisions run the same path as the image service's
+        ``Segmentation.difference``: ``correspond()`` -> ``Difference()`` ->
+        ``KeepPlan``. Scalar thresholds derive the strategy via the bundled
+        ``strategy_from_thresholds``: with ``max_overlap_ratio`` set the ratio
+        wins (a segment is removed iff ``overlap / size >= max_overlap_ratio``
+        against its best-scoring counterpart; ``max_overlap`` is ignored),
+        otherwise a segment is removed when its largest single-pair overlap
+        exceeds ``max_overlap`` voxels.
 
         Args:
             seg_a: Segmentation to subtract from (SegmentationBuilder or node).
             seg_b: Segmentation to subtract (SegmentationBuilder or node).
             output_name: If set, create a new node with surviving segments instead
-                         of modifying seg_a in-place.
-            max_overlap: Maximum allowed overlap voxel count (segments with more are removed).
-            max_overlap_ratio: Maximum allowed overlap ratio (overlap/total). Both
-                               thresholds must be exceeded for removal when set.
+                         of modifying seg_a in-place. Slicer-only node handling —
+                         not part of the shared engine parameter set.
+            max_overlap: Maximum allowed per-pair overlap voxel count.
+                Ignored when ``strategy`` or ``max_overlap_ratio`` is set.
+            max_overlap_ratio: Maximum allowed overlap ratio (overlap/segment size).
+                Takes precedence over ``max_overlap``; boundary is ``>=``.
             resample: If True, skip the source-vs-volume geometry check and re-grid a
                 mismatched input onto the reference extent (legacy behavior). Default
-                False raises SlicerHelperError on a grid mismatch.
+                False raises SlicerHelperError on a grid mismatch. Re-gridding is
+                runtime-native (labelmap re-export here, ``reindex_to`` server-side) —
+                near-threshold verdicts may differ between runtimes on this path.
+            strategy: Matching-strategy override built from bundle symbols, e.g.
+                ``ThresholdMatch(IoU(), min_score=0.5)``. When set, the scalar
+                thresholds are ignored.
+            granularity: How seg_b enters the overlap graph. ``"label"`` (default):
+                each subtracted segment scored separately, matching
+                ``Segmentation.difference``. ``"union"``: all subtracted segments
+                flattened to one mask — each base segment is scored against their
+                combined extent (the legacy sum-over-union rule).
 
         Returns:
             The output segmentation node (new node if output_name, else seg_a node).
+
+        Raises:
+            SlicerHelperError: The script was sent without the correspondence
+                bundle — call ``execute(..., include_correspondence=True)`` (raises
+                regardless of operand content); unknown ``granularity``; or a grid
+                mismatch was detected (see ``_export_segments_labelmap``).
         """
         import numpy as np
+
+        if "correspond" not in globals():
+            raise SlicerHelperError(
+                "subtract_segmentations requires the correspondence bundle; "
+                "call execute(..., include_correspondence=True)."
+            )
+        if granularity not in ("label", "union"):
+            raise SlicerHelperError(f"granularity must be 'label' or 'union', got {granularity!r}")
 
         node_a = self._unwrap_node(seg_a)
         node_b = self._unwrap_node(seg_b)
@@ -2058,24 +2095,23 @@ class _SegmentEditMixin(_SlicerHelperBase):
         try:
             # A None array means a source was genuinely empty (already warned, tolerated):
             # an empty base subtracts to itself, an empty subtrahend removes nothing —
-            # either way no segment is dropped, so skip the overlap scan entirely.
+            # either way no segment is dropped, so skip the engine entirely.
             if arr_a is not None and arr_b is not None:
+                if granularity == "union":
+                    arr_b = (arr_b > 0).astype(np.uint8)
+                if strategy is None:
+                    strategy = strategy_from_thresholds(max_overlap, max_overlap_ratio)
+                # Labelmap array axes are (z,y,x); GetSpacing() is (x,y,z) — reverse to match.
+                sx, sy, sz = labelmap_a.GetSpacing()
+                corr = correspond(arr_a, arr_b, spacing=(sz, sy, sx), strategy=strategy)
+                keep = {lbl for lbl, _out in Difference()(corr).from_a}
+                # Segments absent from the export (0 voxels) never enter the graph:
+                # keep them, as the legacy loop did.
+                present = {int(v) for v in np.unique(arr_a) if v}
                 for i in range(vtk_seg_a.GetNumberOfSegments()):
-                    seg_id = vtk_seg_a.GetNthSegmentID(i)
-                    label_value = i + 1  # merged labelmap: segment 0 → label 1
-
-                    mask_a = arr_a == label_value
-                    total = int(np.sum(mask_a))
-                    if total == 0:
-                        continue
-
-                    overlap = int(np.sum(mask_a & (arr_b > 0)))
-
-                    remove = overlap > max_overlap
-                    if max_overlap_ratio is not None:
-                        remove = remove and (overlap / total > max_overlap_ratio)
-                    if remove:
-                        segments_to_remove.append(seg_id)
+                    label = i + 1  # merged labelmap: segment 0 → label 1
+                    if label in present and label not in keep:
+                        segments_to_remove.append(vtk_seg_a.GetNthSegmentID(i))
         finally:
             slicer.mrmlScene.RemoveNode(labelmap_a)
             slicer.mrmlScene.RemoveNode(labelmap_b)
