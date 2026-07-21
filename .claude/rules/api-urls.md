@@ -52,7 +52,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
-| `/api/records/claim-next?record_type_name=` | POST | 200 | Claim a random unassigned `pending` record of the given type from the pool (role-scoped, `unique_per_user`-aware): assigns it to the caller + sets `inwork`. **404** when no claimable record of that type. **409**: `unique_per_user` violated. Powers the dashboard "take a task" button |
+| `/api/records/claim-next?record_type_name=` | POST | 200 | Claim a random unassigned `pending` record of the given type from the pool (role-scoped, `unique_by`-aware): assigns it to the caller + sets `inwork`. **404** when no claimable record of that type. **409**: `unique_by` violated. Powers the dashboard "take a task" button |
 | `/api/records/filter-options` | POST | 200 | Distinct patient/record_type/user values for filter dropdowns (RBAC-scoped; body filters ignored) |
 | `/api/records/bulk/status` | PATCH | 204 | Bulk status update. **409** for non-superusers when any target record is finished and its type locks submitted records (`editable=False` or expired `edit_window_days`); **409** when any target is `preparing` and the new status is `inwork`/`finished`. Preparing → pending re-validates files per record (may land in `blocked`) |
 | `/api/records/{id}` | GET | 200 | Get record |
