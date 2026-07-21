@@ -1,7 +1,11 @@
 """Pluggable component-correspondence engine (measure x matching x operation)."""
 
 from clarinet.services.image.correspondence.graph import build_overlap_graph, correspond
-from clarinet.services.image.correspondence.matching import GreedyArgmax, ThresholdMatch
+from clarinet.services.image.correspondence.matching import (
+    GreedyArgmax,
+    ThresholdMatch,
+    strategy_from_thresholds,
+)
 from clarinet.services.image.correspondence.measures import (
     AbsoluteOverlap,
     CentroidContainment,
@@ -60,4 +64,5 @@ __all__ = [
     "build_overlap_graph",
     "correspond",
     "render",
+    "strategy_from_thresholds",
 ]

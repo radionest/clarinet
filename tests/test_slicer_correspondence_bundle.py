@@ -83,3 +83,30 @@ def test_bundle_execs_and_builds_overlap_graph() -> None:
     assert edge.a == 1
     assert edge.b == 1
     assert edge.inter == 1
+
+
+def test_bundle_exposes_strategy_derivation() -> None:
+    """The scalars->strategy derivation must ship inside the bundle (D7)."""
+    ns: dict = {"__name__": "_bundle"}
+    exec(build_correspondence_bundle(), ns)
+    assert callable(ns["strategy_from_thresholds"])
+
+
+def test_bundle_derivation_matches_native() -> None:
+    """Identical scalars -> identical strategies, bundled and native alike."""
+    from clarinet.services.image.correspondence.matching import strategy_from_thresholds
+
+    ns: dict = {"__name__": "_bundle"}
+    exec(build_correspondence_bundle(), ns)
+    cases = [
+        {},
+        {"max_overlap": 3},
+        {"max_overlap_ratio": 0.25},
+        {"max_overlap": 3, "max_overlap_ratio": 0.25},  # ratio takes precedence
+    ]
+    for kwargs in cases:
+        bundled = ns["strategy_from_thresholds"](**kwargs)
+        native = strategy_from_thresholds(**kwargs)
+        assert type(bundled.measure).__name__ == type(native.measure).__name__
+        assert bundled.min_score == native.min_score
+        assert getattr(bundled.measure, "side", None) == getattr(native.measure, "side", None)

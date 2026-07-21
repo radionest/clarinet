@@ -26,6 +26,7 @@ from clarinet.services.image.correspondence import (
     ThresholdMatch,
     correspond,
     render,
+    strategy_from_thresholds,
 )
 from clarinet.services.image.correspondence import (
     AppendMerge as _AppendMergeOp,
@@ -504,10 +505,7 @@ class Segmentation(Image):
             return Segmentation(template=self, copy_data=True)
         other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         if strategy is None:
-            if max_overlap_ratio is not None:
-                strategy = ThresholdMatch(Coverage("a"), min_score=max_overlap_ratio)
-            else:
-                strategy = ThresholdMatch(AbsoluteOverlap(), min_score=float(max_overlap + 1))
+            strategy = strategy_from_thresholds(max_overlap, max_overlap_ratio)
         corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
         # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
         out = Segmentation(autolabel=False, template=self)
