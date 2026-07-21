@@ -45,6 +45,12 @@ repair_model_file = FileDef(
     description="3D repair model — part body, internal channels, corrected defect boundaries",
 )
 
+adjudication_note = FileDef(
+    pattern="adjudication_note_{parent_id}.md",
+    level="SERIES",
+    description="Adjudication note for one comparison result, keyed by its parent record",
+)
+
 # ---------------------------------------------------------------------------
 # Record types
 # ---------------------------------------------------------------------------
@@ -167,6 +173,11 @@ create_master_projection = RecordDef(
     level="SERIES",
     min_records=1,
     max_records=1,
+    # One canonical projection per series regardless of which expert (re)creates
+    # it — not one copy per user. unique_by=None + max_records=1 is the
+    # canonical spelling for a one-per-level singleton (the default
+    # {"user", "parent"} would demand {user_id} in master_projection's pattern).
+    unique_by=None,
     role="expert",
     slicer_script="scripts/create_projection.py",
     slicer_context_hydrators=["best_series_from_first_check", "model_series_for_projection"],
@@ -196,6 +207,26 @@ compare_with_projection = RecordDef(
     ],
 )
 
+comparison_adjudication = RecordDef(
+    name="comparison-adjudication",
+    description=(
+        "Inspector adjudication of one automatic comparison result — confirms or "
+        "overturns the automatic match/mismatch verdict. Demonstrates a "
+        "parent-scoped uniqueness partition: up to 4 compare-with-projection "
+        "records can coexist per series (one per segmentation source), and each "
+        "gets its own adjudication record keyed by {parent_id}, regardless of "
+        "which inspector claims it."
+    ),
+    label="Comparison adjudication",
+    level="SERIES",
+    role="inspector",
+    min_records=0,
+    max_records=4,  # mirrors compare-with-projection's own cap: one adjudication per parent
+    parent_required=True,
+    unique_by={"parent"},
+    files=[FileRef(adjudication_note, "output")],
+)
+
 second_review = RecordDef(
     name="second-review",
     description="Second review — inspector classifies defects that were missed in the initial segmentation",
@@ -222,6 +253,9 @@ update_master_model = RecordDef(
     level="PATIENT",
     min_records=1,
     max_records=1,
+    # One canonical master model per patient, edited in place by whichever
+    # expert updates it — see create-master-projection above for the rationale.
+    unique_by=None,
     role="expert",
     slicer_script="scripts/update_master_model.py",
     slicer_result_validator="validators/master_model_validator.py",
@@ -289,6 +323,9 @@ repair_model = RecordDef(
     role="expert",
     min_records=1,
     max_records=1,
+    # One canonical repair model per patient — see create-master-projection
+    # above for the rationale.
+    unique_by=None,
     mask_patient_data=False,
     slicer_script="scripts/repair_model.py",
     slicer_result_validator="validators/repair_model_validator.py",

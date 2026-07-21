@@ -18,7 +18,7 @@ File definitions are stored in a normalized schema with M2M relationship.
 | Field | Type | Notes |
 |-------|------|-------|
 | `name` | `str` | Unique, valid Python identifier |
-| `pattern` | `str` | Placeholders: `{id}`, `{patient_id}`, `{data.FIELD}`, etc. |
+| `pattern` | `str` | Placeholders: `{id}`, `{patient_id}`, `{parent_id}`, `{data.FIELD}`, etc. |
 | `description` | `str \| None` | Purpose description |
 | `multiple` | `bool` | `True` = glob collection, `False` = singular |
 | `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |
@@ -29,6 +29,7 @@ File definitions are stored in a normalized schema with M2M relationship.
 |-------|------|-------|
 | `role` | `FileRole` | `INPUT` / `OUTPUT` / `INTERMEDIATE` |
 | `required` | `bool` | Whether file must exist |
+| `allow_path_collision` | `bool` | Opt out of the output-path uniqueness guard (see below) — this binding may share its resolved path with another file of the record. Default `False` |
 
 **`FileDefinitionRead`** (DTO) — flat merge of identity + binding for API.
 
@@ -38,6 +39,20 @@ File definitions are stored in a normalized schema with M2M relationship.
 - `FileDefinition` and `FileDefinitionRead` both define identical `validate_name_is_identifier` — update both when changing.
 - `RecordRead.file_links`: `list[RecordFileLinkRead]` — structured M2M data, preferred over dict fields.
 - `RecordRead.files` / `RecordRead.file_checksums`: **deprecated** dict fields (use `file_links` instead).
+
+## Output-Path Uniqueness (`config/path_uniqueness.py`)
+
+Fail-fast, config-load-time check (Python/TOML load and RecordType `POST`/PATCH):
+every non-collection OUTPUT file must resolve to a distinct path per coexisting
+record, or two records silently overwrite each other's file. A pattern passes
+if it embeds `{id}` (always unique) or the placeholder its `RecordType`
+actually needs — `{user_id}` when `"user"` is in `unique_by`, `{parent_id}`
+when `"parent"` is in `unique_by` **and** `parent_required=True` (`{origin_type}`
+only distinguishes parent *types*, never two same-type parents, so it never
+satisfies this), or the RecordType's own level-UID placeholder when the file's
+`level` is coarser than the RecordType's. Per-`FileRef` `allow_path_collision=True`
+opts a single binding out (the author guarantees uniqueness some other way);
+every other OUTPUT file on the RecordType is still checked.
 
 ## ORM vs DTO: file_links vs file_registry
 

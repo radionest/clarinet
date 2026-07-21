@@ -41,7 +41,33 @@ lesion_seg = RecordDef(
 
 - `FileDef`: pattern, multiple, level (str or `DicomQueryLevel`, **required**), description, name (auto-derived)
 - `FileRef(file, role, required, allow_path_collision)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum; `allow_path_collision` opts a binding out of the default path-collision guard (default False)
-- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum; `unique_by`: uniqueness partition set, subset of `{"user", "parent"}` (default `{"user", "parent"}`; `None` disables); deprecated `unique_per_user=True/False` kwarg still works (translates to `{"user"}`/`None`, emits `DeprecationWarning`, ignored if `unique_by` is also given); `editable`: non-superusers may update a finished record (default True); `shared_editing`: any role-holder may edit any record of this type — each edit reassigns ownership to the editor (requires `'user' not in unique_by`, default False)
+- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum; `unique_by`: uniqueness partition set, subset of `{"user", "parent"}`, scoped within the type's own DICOM level (default `{"user", "parent"}`; `None`/TOML `false` disables; an empty set is rejected — use `None` for off, or `max_records=1` for one-per-level); deprecated `unique_per_user=True/False` kwarg still works (translates to `{"user"}`/`None`, emits `DeprecationWarning`, ignored if `unique_by` is also given); `editable`: non-superusers may update a finished record (default True); `shared_editing`: any role-holder may edit any record of this type — each edit reassigns ownership to the editor (requires `'user' not in unique_by`, default False)
+
+## Path Uniqueness Validator (`path_uniqueness.py`)
+
+```python
+def validate_output_path_uniqueness(rt: RecordTypeCreate | Any) -> None
+```
+
+Fail-fast check run on every `RecordTypeCreate` construction — Python config
+load, TOML load, and the API PATCH guard (which re-validates the *merged*
+effective state before writing, so a patch that stops satisfying its own
+OUTPUT patterns is rejected at PATCH time, not at the next startup). Every
+non-collection OUTPUT `FileRef` that hasn't opted out via
+`allow_path_collision=True` must embed the placeholder that discriminates
+coexisting records of that RecordType, or `RecordConstraintViolationError` is
+raised:
+
+- `{id}` anywhere in the pattern always passes (a record's own id is globally unique).
+- `"user"` in `unique_by` requires `{user_id}`.
+- `"parent"` in `unique_by` + `parent_required=True` requires `{parent_id}`
+  (the FK column, resolvable independent of whether the parent was loaded) —
+  `{origin_type}` only names the parent's *type*, never a same-type instance,
+  so it never satisfies this.
+- An OUTPUT file whose own `level` is coarser than the RecordType's requires
+  the RecordType's own level-UID placeholder.
+- `unique_by=None` with `max_records` allowing 2+ coexisting records requires
+  `{id}` — nothing else distinguishes the rows.
 
 **String coercion:** `level` and `role` fields accept plain strings (`"SERIES"`, `"input"`) — validators coerce to enums automatically.
 
