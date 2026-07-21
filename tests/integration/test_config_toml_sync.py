@@ -374,6 +374,44 @@ async def test_export_includes_unique_by(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_export_unique_by_from_raw_db_row(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """Exporter must handle a DB-loaded row whose unique_by is a raw JSON
+    list, not just a constructed model's frozenset.
+
+    ``RecordType`` (table=True) skips Pydantic validation when SQLAlchemy
+    hydrates attributes from a query row, so a fetched row's ``unique_by``
+    is the raw JSON-decoded list (or None) as stored — unlike a directly
+    constructed ``RecordType(...)``, whose ``__init__`` runs the
+    canonicalizing field validator and always yields a frozenset.
+    """
+    import tomllib
+
+    rt = RecordType(name="db-row-unique", level="SERIES", unique_by={"parent"})
+    test_session.add(rt)
+    await test_session.commit()
+    test_session.expire_all()
+
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "db-row-unique")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    fetched = (await test_session.execute(stmt)).scalar_one()
+    assert isinstance(fetched.unique_by, list)  # raw JSON shape, not a frozenset
+
+    path = await export_record_type_to_toml(fetched, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_by"] == ["parent"]
+
+
+@pytest.mark.asyncio
 async def test_export_includes_parent_required(tmp_path) -> None:
     """TOML export includes parent_required field."""
     import tomllib
