@@ -404,7 +404,7 @@ async def reconcile_config(
                 ) from e
             except ValidationError as e:
                 # A record-type config that violates a model invariant (e.g.
-                # shared_editing + unique_per_user) must abort startup, not be
+                # shared_editing + unique_by) must abort startup, not be
                 # swallowed by the lenient handler below — otherwise the type is
                 # silently dropped and later references 404 at runtime.
                 raise ConfigurationError(

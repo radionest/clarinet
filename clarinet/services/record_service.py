@@ -328,7 +328,7 @@ class RecordService:
             RecordConstraintViolationError: If unique_by is violated.
         """
         record = await self.repo.get_with_record_type(record_id)
-        await self._check_unique_per_user(user_id, record)
+        await self._check_unique_by(user_id, record)
         self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.assign_user(record_id, user_id)
         await self._record_event(
@@ -365,7 +365,7 @@ class RecordService:
         """
         record = await self.repo.get_with_record_type(record_id)
         old_status = record.status
-        await self._check_unique_per_user(user_id, record)
+        await self._check_unique_by(user_id, record)
         self._mark_audit(record_id, actor_id)
         await self.repo.claim_record(record_id, user_id)
         updated = await self.repo.get_with_relations(record_id)
@@ -461,7 +461,7 @@ class RecordService:
         if user_id is not None:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
-                await self._check_unique_per_user(user_id, record_check)
+                await self._check_unique_by(user_id, record_check)
                 self._mark_audit(record_id, actor_id)
                 await self.repo.ensure_user_assigned(record_id, user_id)
                 await self._record_event(
@@ -1134,7 +1134,7 @@ class RecordService:
 
     # ── Private helpers ──────────────────────────────────────────────────
 
-    async def _check_unique_per_user(self, user_id: UUID, record: Record) -> None:
+    async def _check_unique_by(self, user_id: UUID, record: Record) -> None:
         """Check that assigning user_id to record does not violate unique_by.
 
         Thin wrapper over ``RecordRepository.ensure_unique_by`` — that method
