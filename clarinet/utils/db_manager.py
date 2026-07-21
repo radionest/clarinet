@@ -30,6 +30,8 @@ def _pydantic_json_serializer(obj: Any) -> str:
     """JSON serializer that handles Pydantic/SQLModel objects in JSON columns."""
 
     def default(o: Any) -> Any:
+        if isinstance(o, set | frozenset):
+            return sorted(o)
         if hasattr(o, "model_dump"):
             return o.model_dump()
         raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
