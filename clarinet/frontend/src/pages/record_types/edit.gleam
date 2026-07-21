@@ -3,10 +3,10 @@ import api/models.{type FileDefinition, type RecordType}
 import api/records
 import api/types
 import config
-import gleam/javascript/promise
 import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
+import gleam/javascript/promise
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -32,11 +32,16 @@ pub type Msg {
   FormSubmitSuccess(name: String)
   FormSubmitError(error: String)
   RetryLoad
+  UniqueByChanged(String)
+  UniqueBySaved(Result(RecordType, types.ApiError))
 }
 
 // --- Init ---
 
-pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+pub fn init(
+  name: String,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
   #(
     Model(name: name, load_status: load_status.Loading),
     load_record_type_effect(name),
@@ -59,35 +64,59 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    RecordTypeLoaded(Ok(rt)) ->
-      #(
-        Model(..model, load_status: load_status.Loaded),
-        effect.none(),
-        [shared.CacheRecordType(rt)],
-      )
-    RecordTypeLoaded(Error(_)) ->
-      #(
-        Model(
-          ..model,
-          load_status: load_status.Failed("Failed to load record type"),
-        ),
-        effect.none(),
-        [shared.ShowError("Failed to load record type")],
-      )
-    RetryLoad ->
-      #(
-        Model(..model, load_status: load_status.Loading),
-        load_record_type_effect(model.name),
-        [],
-      )
-    FormSubmitSuccess(name) ->
-      #(model, effect.none(), [
-        shared.ShowSuccess("Record type updated successfully"),
-        shared.Navigate(router.AdminRecordTypeDetail(name)),
-        shared.ReloadRecordTypeStats,
-      ])
-    FormSubmitError(error) ->
-      #(model, effect.none(), [shared.ShowError(error)])
+    RecordTypeLoaded(Ok(rt)) -> #(
+      Model(..model, load_status: load_status.Loaded),
+      effect.none(),
+      [shared.CacheRecordType(rt)],
+    )
+    RecordTypeLoaded(Error(_)) -> #(
+      Model(
+        ..model,
+        load_status: load_status.Failed("Failed to load record type"),
+      ),
+      effect.none(),
+      [shared.ShowError("Failed to load record type")],
+    )
+    RetryLoad -> #(
+      Model(..model, load_status: load_status.Loading),
+      load_record_type_effect(model.name),
+      [],
+    )
+    FormSubmitSuccess(name) -> #(model, effect.none(), [
+      shared.ShowSuccess("Record type updated successfully"),
+      shared.Navigate(router.AdminRecordTypeDetail(name)),
+      shared.ReloadRecordTypeStats,
+    ])
+    FormSubmitError(error) -> #(model, effect.none(), [shared.ShowError(error)])
+    UniqueByChanged(raw) -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.update_record_type_unique_by(
+          model.name,
+          unique_by_from_select(raw),
+        )
+        |> promise.tap(fn(result) { dispatch(UniqueBySaved(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+    UniqueBySaved(Ok(rt)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.CacheRecordType(rt),
+      shared.ShowSuccess("Uniqueness constraint updated"),
+    ])
+    UniqueBySaved(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to update uniqueness constraint"),
+    )
+  }
+}
+
+fn handle_error(err: types.ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    types.AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
   }
 }
 
@@ -139,11 +168,6 @@ const record_type_edit_schema = "{
       \"type\": \"integer\",
       \"title\": \"Max Records\",
       \"minimum\": 1
-    },
-    \"unique_per_user\": {
-      \"type\": \"boolean\",
-      \"title\": \"Unique Per User\",
-      \"default\": false
     },
     \"viewer_mode\": {
       \"type\": \"string\",
@@ -210,6 +234,15 @@ fn render_edit(rt: RecordType, name: String) -> Element(Msg) {
       ),
     ]),
     html.div([attribute.class("card")], [
+      html.h3([], [html.text("Unique By")]),
+      html.p([attribute.class("text-muted")], [
+        html.text(
+          "Saved immediately on change — independent of the form below.",
+        ),
+      ]),
+      render_unique_by_select(rt),
+    ]),
+    html.div([attribute.class("card")], [
       formosh_component.element([
         formosh_component.schema_string(record_type_edit_schema),
         formosh_component.submit_url(
@@ -221,6 +254,56 @@ fn render_edit(rt: RecordType, name: String) -> Element(Msg) {
       ]),
     ]),
   ])
+}
+
+fn render_unique_by_select(rt: RecordType) -> Element(Msg) {
+  let current = unique_by_to_select(rt.unique_by)
+  html.select(
+    [attribute.class("form-select"), event.on_input(UniqueByChanged)],
+    [
+      html.option(
+        [
+          attribute.value("parent_user"),
+          attribute.selected(current == "parent_user"),
+        ],
+        "Parent + User (default)",
+      ),
+      html.option(
+        [attribute.value("user"), attribute.selected(current == "user")],
+        "User only",
+      ),
+      html.option(
+        [attribute.value("parent"), attribute.selected(current == "parent")],
+        "Parent only",
+      ),
+      html.option(
+        [attribute.value("off"), attribute.selected(current == "off")],
+        "Off (no uniqueness constraint)",
+      ),
+    ],
+  )
+}
+
+fn unique_by_from_select(raw: String) -> option.Option(List(String)) {
+  case raw {
+    "off" -> None
+    "user" -> Some(["user"])
+    "parent" -> Some(["parent"])
+    _ -> Some(["parent", "user"])
+  }
+}
+
+fn unique_by_to_select(value: option.Option(List(String))) -> String {
+  case value {
+    None -> "off"
+    Some(parts) ->
+      case parts {
+        ["parent", "user"] | ["user", "parent"] -> "parent_user"
+        ["user"] -> "user"
+        ["parent"] -> "parent"
+        _ -> "off"
+      }
+  }
 }
 
 fn decode_edit_submit(name: String) -> decode.Decoder(Msg) {
@@ -239,7 +322,6 @@ fn build_initial_values(rt: RecordType) -> String {
     #("role_name", json.nullable(rt.role_name, json.string)),
     #("min_records", json.nullable(rt.min_records, json.int)),
     #("max_records", json.nullable(rt.max_records, json.int)),
-    #("unique_per_user", json.bool(rt.unique_per_user)),
     #("viewer_mode", json.string(rt.viewer_mode)),
     #("slicer_script", json.nullable(rt.slicer_script, json.string)),
     #(
@@ -265,9 +347,7 @@ fn level_to_json(level: types.DicomQueryLevel) -> json.Json {
   }
 }
 
-fn dict_to_json_string(
-  d: option.Option(dict.Dict(String, String)),
-) -> json.Json {
+fn dict_to_json_string(d: option.Option(dict.Dict(String, String))) -> json.Json {
   case d {
     Some(dict_val) -> {
       let entries =

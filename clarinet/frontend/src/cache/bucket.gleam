@@ -35,7 +35,7 @@ pub type RecordsQuery {
     user_id: Option(String),
     // Tri-state assigned-user constraint, mirrors backend `wo_user`:
     // Some(True) — unassigned records only; user_id may still be attached
-    // so the backend can apply caller-specific exclusions (unique_per_user
+    // so the backend can apply caller-specific exclusions (unique_by
     // violations require user_id);
     // Some(False) — assigned only, pins an explicit user filter so the
     // backend's include_unassigned widening for regular users does not
