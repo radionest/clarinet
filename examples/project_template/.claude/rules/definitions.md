@@ -38,6 +38,7 @@ master_model = FileDef(
 | `{patient_id}`, `{study_uid}`, `{series_uid}` | Identifiers from the DICOM hierarchy (anonymized) |
 | `{user_id}` | ID of the user who created the record (for "per-inspector" files) |
 | `{origin_type}` | `record.record_type_name` — lets you name files after the originating record type |
+| `{parent_id}` | `record.parent_record_id` (FK value) — the exact per-parent discriminator, resolved without loading the parent |
 | `{data.FIELD}` | A field from `record.data` |
 
 Pattern-resolution details are in `<clarinet>/clarinet/.claude/rules/file-registry.md`.
@@ -62,6 +63,7 @@ FileRef(segmentation, role="input") # named
 | `file` | `FileDef` | Reference to a `FileDef` object declared earlier in the same file |
 | `role` | `"input"` / `"output"` / `"intermediate"` | Semantics: input (required before execution) / output (created) / intermediate |
 | `required` | `bool` (default `True`) | Whether the file must exist by the time the record is finalized |
+| `allow_path_collision` | `bool` (default `False`) | Opts this one binding out of output-path uniqueness validation (the author guarantees uniqueness, e.g. via `{data.FIELD}`) |
 
 `output_file` in a Slicer script is the path to the **first** `FileRef` with `role="output"` from `RecordDef.files`.
 
@@ -98,7 +100,8 @@ segment_ct = RecordDef(
 | `description` | Detailed description for the agent and the UI |
 | `label` | Short display name for the UI |
 | `role` (alias `role_name`) | Who performs it: `"doctor"`, `"auto"`, `"expert"`, or a custom role from `extra_roles` |
-| `min_records`, `max_records` | How many records of this type must/may exist per parent |
+| `min_records`, `max_records` | How many records of this type must/may exist per level context (patient/study/series) |
+| `unique_by` | Uniqueness partitions within the level context: set from `{"user", "parent"}` (default both), or `None` — no uniqueness. Legacy `unique_per_user=` is accepted, translated and deprecation-warned |
 | `files` | `list[FileRef(...)]` — link to `FileDef` |
 | `data_schema` | A `"schemas/X.schema.json"` path or an inline `dict`. The path is relative to `config_tasks_path` (i.e. `plan/`). Shared sub-schemas can be extracted into a separate file and pulled into any schema via `$ref` — see the `schemas` section |
 | `slicer_script` | Path to the Slicer script: `"scripts/segment.py"` |

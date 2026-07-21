@@ -54,6 +54,12 @@ satisfies this), or the RecordType's own level-UID placeholder when the file's
 opts a single binding out (the author guarantees uniqueness some other way);
 every other OUTPUT file on the RecordType is still checked.
 
+The guarantee is only as strong as the config proves: a `parent_required=False`
+type whose records nevertheless receive a `parent_record_id` (e.g. a flow's
+`create_record(parent_record_id=…)`) is not forced to carry `{parent_id}`, so
+two such records under different parents can still collide on disk. The
+validator demands a parent discriminator only when `parent_required=True`.
+
 ## ORM vs DTO: file_links vs file_registry
 
 - **`file_links`** (ORM): SQLAlchemy relationships. Used for DB writes needing `FileDefinition.id` as FK.
