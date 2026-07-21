@@ -18,6 +18,7 @@ from sqlmodel import select
 
 from clarinet.models.file_schema import FileDefinitionRead, RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
+from clarinet.models.uniqueness import canonical_unique_by
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.utils.file_link_sync import sync_file_links
 from clarinet.utils.logger import logger
@@ -113,6 +114,22 @@ def _fields_differ(db_record_type: RecordType, config: RecordTypeCreate) -> list
     whose default is ``None``/undefined keep the "unset = leave DB untouched"
     contract — ``None`` there means "not configured".
 
+    ``unique_by`` gets two special cases. First, ``RecordType`` rows skip
+    Pydantic validation (``table=True``), so ``db_record_type.unique_by`` is the
+    raw JSON list (or ``None``) as stored, while ``config.unique_by`` is already
+    a canonical ``frozenset | None`` (validated by ``RecordTypeCreate``). Both
+    sides are re-canonicalized via ``canonical_unique_by`` before comparing, so
+    a reordered-but-equal partition set is a no-op instead of a phantom diff —
+    a list and a frozenset never compare equal in Python regardless of
+    contents, which would otherwise report ``unique_by`` as changed on every
+    reconcile. Second, an explicit ``unique_by=None`` in the config is a real
+    target value ("no uniqueness"), not the generic "nullable field left
+    unset" ambiguity: it must overwrite a DB row holding the default partition
+    set rather than being skipped by the ``config_val is None and db_val ==
+    default`` rule below (that rule exists for fields like ``min_records``,
+    where an explicit ``None`` is meant to match the ORM default, not diverge
+    from it).
+
     Args:
         db_record_type: Existing RecordType from DB.
         config: Typed config object.
@@ -129,8 +146,11 @@ def _fields_differ(db_record_type: RecordType, config: RecordTypeCreate) -> list
             continue
         db_val = _normalize(getattr(db_record_type, field_name, None))
         config_val = _normalize(getattr(config, field_name, None))
+        if field_name == "unique_by":
+            db_val = canonical_unique_by(db_val)
+            config_val = canonical_unique_by(config_val)
         if db_val != config_val:
-            if config_val is None and db_val == default:
+            if config_val is None and db_val == default and field_name != "unique_by":
                 continue
             changed.append(field_name)
     return changed

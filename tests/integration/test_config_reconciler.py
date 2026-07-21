@@ -326,23 +326,80 @@ async def test_none_config_matches_orm_default(
 
 
 @pytest.mark.asyncio
-async def test_unset_flag_heals_drifted_db_value(
+async def test_unique_by_reorder_is_unchanged(
     test_session: AsyncSession,
     seed_record_type: RecordType,
 ) -> None:
-    """A DB row drifted from a non-None model default heals to that default even
-    when the config leaves the flag unset. Regression for issue #389: a
-    migration-backfilled ``unique_per_user=False`` must reconcile to the
-    documented default ``True`` on restart, not survive forever.
+    """A reordered but set-equal ``unique_by`` must not trigger an update.
+
+    The DB row holds the raw JSON list ``["parent", "user"]`` (the default, as
+    written by the round-trip through ``PortableJSON``); config sets the same
+    partition as a set literal in the opposite insertion order. A naive
+    list-vs-frozenset ``==`` would report this as changed on every reconcile —
+    a list and a frozenset never compare equal in Python regardless of
+    contents. Canonical comparison must treat them as equal.
     """
-    # Drift the DB row away from the model default (True), as a backfill would.
-    seed_record_type.unique_per_user = False
+    assert seed_record_type.unique_by == ["parent", "user"]  # raw list, DB round-trip
+
+    cfg = _make_config(
+        "existing-type",
+        description="Original description",
+        label="Original",
+        unique_by={"user", "parent"},
+    )
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.unchanged == ["existing-type"]
+    assert result.updated == []
+
+
+@pytest.mark.asyncio
+async def test_unique_by_none_vs_set_is_a_change(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """DB ``None`` vs. a configured partition set is a real diff, not a no-op."""
+    seed_record_type.unique_by = None
     test_session.add(seed_record_type)
     await test_session.commit()
     test_session.expire_all()
 
-    cfg = _make_config("existing-type", description="Original description", label="Original")
-    assert "unique_per_user" not in cfg.model_fields_set  # precondition: flag unset
+    cfg = _make_config(
+        "existing-type",
+        description="Original description",
+        label="Original",
+        unique_by={"user"},
+    )
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.updated == ["existing-type"]
+    test_session.expire_all()
+    row = (
+        await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
+    ).scalar_one()
+    assert row.unique_by == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_unique_by_explicit_none_overwrites_default(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """Explicit ``unique_by=None`` is a real target value ("off") — it must
+    overwrite a DB row holding the default partition set instead of being
+    skipped as "config left this unset" (contrast with
+    ``test_none_config_matches_orm_default``, where an explicit
+    ``min_records=None`` IS treated as a no-op against that field's default).
+    """
+    assert seed_record_type.unique_by == ["parent", "user"]  # DB holds the default
+
+    cfg = _make_config(
+        "existing-type",
+        description="Original description",
+        label="Original",
+        unique_by=None,
+    )
+    assert "unique_by" in cfg.model_fields_set  # precondition: explicitly set
 
     result = await reconcile_record_types([cfg], test_session)
 
@@ -351,7 +408,38 @@ async def test_unset_flag_heals_drifted_db_value(
     row = (
         await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
     ).scalar_one()
-    assert row.unique_per_user is True
+    assert row.unique_by is None
+
+
+@pytest.mark.asyncio
+async def test_unset_flag_heals_drifted_db_value(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """A DB row drifted from a non-None model default heals to that default even
+    when the config leaves the field unset. Regression for issue #389: a
+    migration-backfilled ``unique_by=None`` must reconcile to the documented
+    default ``{"user", "parent"}`` on restart, not survive forever.
+    """
+    # Drift the DB row away from the model default ({"user", "parent"}), as a
+    # migration backfill would (direct assignment skips validation, mirroring
+    # a raw DB row).
+    seed_record_type.unique_by = None
+    test_session.add(seed_record_type)
+    await test_session.commit()
+    test_session.expire_all()
+
+    cfg = _make_config("existing-type", description="Original description", label="Original")
+    assert "unique_by" not in cfg.model_fields_set  # precondition: field unset
+
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.updated == ["existing-type"]
+    test_session.expire_all()
+    row = (
+        await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
+    ).scalar_one()
+    assert row.unique_by == ["parent", "user"]
 
 
 @pytest.mark.asyncio
@@ -975,15 +1063,15 @@ def test_reconciler_compares_all_record_type_fields() -> None:
     assert model_fields - set(_COMPARED_FIELDS) - intentionally_excluded == set()
 
 
-def test_recordtypecreate_rejects_shared_editing_with_unique_per_user() -> None:
-    """The ``shared_editing`` / ``unique_per_user`` invariant is enforced on the
+def test_recordtypecreate_rejects_shared_editing_with_unique_by() -> None:
+    """The ``shared_editing`` / ``unique_by`` invariant is enforced on the
     model (``RecordTypeBase``), so every write path that builds a
     ``RecordTypeCreate`` rejects the combo: config load AND the API
     (``POST /types`` deserializes the body into ``RecordTypeCreate`` → 422),
     not only the bootstrap config-load path.
     """
-    with pytest.raises(ValidationError, match="unique_per_user"):
-        _make_config("shared-bad", shared_editing=True, unique_per_user=True)
+    with pytest.raises(ValidationError, match="unique_by"):
+        _make_config("shared-bad", shared_editing=True, unique_by={"user"})
 
 
 @pytest.mark.asyncio
