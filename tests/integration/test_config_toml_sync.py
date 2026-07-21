@@ -23,6 +23,7 @@ from clarinet.config.toml_exporter import (
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.record_type import RecordTypeBase
+from clarinet.models.uniqueness import canonical_unique_by
 from clarinet.utils.config_loader import discover_config_files, load_record_config
 
 
@@ -352,19 +353,24 @@ async def test_export_includes_editable_flags(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_export_includes_unique_per_user(tmp_path) -> None:
-    """TOML export includes unique_per_user field."""
+async def test_export_includes_unique_by(tmp_path) -> None:
+    """TOML export serializes unique_by: None -> false, a set -> sorted list.
+
+    ``false`` is the required spelling for "off" (TOML has no null) — an
+    absent key would heal to the parent-inclusive default on reload and
+    silently re-enable uniqueness.
+    """
     import tomllib
 
-    rt = RecordType(
-        name="unique-test",
-        level="SERIES",
-        unique_per_user=False,
-    )
-
-    path = await export_record_type_to_toml(rt, tmp_path)
+    rt_off = RecordType(name="unique-off", level="SERIES", unique_by=None)
+    path = await export_record_type_to_toml(rt_off, tmp_path)
     content = tomllib.loads(path.read_text())
-    assert content["unique_per_user"] is False
+    assert content["unique_by"] is False
+
+    rt_user = RecordType(name="unique-user", level="SERIES", unique_by={"user"})
+    path = await export_record_type_to_toml(rt_user, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_by"] == ["user"]
 
 
 @pytest.mark.asyncio
@@ -385,14 +391,14 @@ async def test_export_includes_parent_required(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_export_includes_constraint_flags_default(tmp_path) -> None:
-    """TOML export includes unique_per_user/parent_required with defaults."""
+    """TOML export includes unique_by/parent_required with defaults."""
     import tomllib
 
     rt = RecordType(name="flags-default", level="SERIES")
 
     path = await export_record_type_to_toml(rt, tmp_path)
     content = tomllib.loads(path.read_text())
-    assert content["unique_per_user"] is True
+    assert content["unique_by"] == ["parent", "user"]
     assert content["parent_required"] is False
 
 
@@ -432,7 +438,7 @@ async def test_constraint_flags_round_trip(
         {
             "name": "flags-trip",
             "level": "SERIES",
-            "unique_per_user": False,
+            "unique_by": False,
             "parent_required": True,
         },
     )
@@ -448,7 +454,7 @@ async def test_constraint_flags_round_trip(
 
     stmt = select(RecordType).where(RecordType.name == "flags-trip")
     rt = (await test_session.execute(stmt)).scalar_one()
-    assert rt.unique_per_user is False
+    assert canonical_unique_by(rt.unique_by) is None
     assert rt.parent_required is True
 
     # Flip both flags in TOML → reconcile must apply them on UPDATE
@@ -458,7 +464,7 @@ async def test_constraint_flags_round_trip(
         {
             "name": "flags-trip",
             "level": "SERIES",
-            "unique_per_user": True,
+            "unique_by": ["user"],
             "parent_required": False,
         },
     )
@@ -474,9 +480,60 @@ async def test_constraint_flags_round_trip(
     result = await reconcile_record_types(items, test_session)
     assert "flags-trip" in result.updated
 
+    test_session.expire_all()
     rt = (await test_session.execute(stmt)).scalar_one()
-    assert rt.unique_per_user is True
+    assert canonical_unique_by(rt.unique_by) == frozenset({"user"})
     assert rt.parent_required is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_unique_per_user_toml_loads_translated(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """A .toml carrying the old ``unique_per_user`` key (as the previous
+    exporter wrote) still loads — translated to ``unique_by``, not silently
+    healed to the parent-inclusive default — and warns.
+    """
+    _write_toml(
+        tmp_path,
+        "legacy-flag",
+        {
+            "name": "legacy-flag",
+            "level": "SERIES",
+            "unique_per_user": False,
+        },
+    )
+    _write_schema(tmp_path, "legacy-flag", {"type": "object"})
+
+    config_files = discover_config_files(str(tmp_path))
+    props = await load_record_config(config_files[0])
+    assert props is not None
+
+    with pytest.warns(DeprecationWarning, match="unique_per_user"):
+        config_item = RecordTypeCreate(**props)
+    assert config_item.unique_by is None
+
+    await reconcile_record_types([config_item], test_session)
+
+    stmt = select(RecordType).where(RecordType.name == "legacy-flag")
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert canonical_unique_by(rt.unique_by) is None
+
+
+@pytest.mark.asyncio
+async def test_unique_by_off_export_reload_round_trip(tmp_path) -> None:
+    """Export a type with unique_by=None -> TOML `unique_by = false` -> reload -> still off."""
+    rt = RecordType(name="unique-off-trip", level="SERIES", unique_by=None)
+    await export_record_type_to_toml(rt, tmp_path)
+    _write_schema(tmp_path, "unique-off-trip", {"type": "object"})
+
+    config_files = discover_config_files(str(tmp_path))
+    props = await load_record_config(config_files[0])
+    assert props is not None
+
+    reloaded = RecordTypeCreate(**props)
+    assert reloaded.unique_by is None
 
 
 def test_exporter_covers_all_record_type_fields() -> None:

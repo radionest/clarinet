@@ -1127,6 +1127,76 @@ async def test_toml_config_load_fails_fast_on_shared_editing_invariant(
 
 
 @pytest.mark.asyncio
+async def test_toml_config_load_fails_fast_on_output_path_uniqueness(
+    test_session: AsyncSession,
+) -> None:
+    """TOML mode must abort startup on an OUTPUT pattern that cannot
+    discriminate coexisting records.
+
+    Mirrors the shared_editing guard above: ``RecordTypeCreate(**props)``
+    inside the per-file loop runs ``validate_output_path_uniqueness`` (via the
+    model's ``_validate_output_paths`` model_validator), which raises
+    ``RecordConstraintViolationError`` for a default ``unique_by`` (the
+    "user" partition) paired with an OUTPUT pattern missing ``{user_id}``.
+    The loop must convert that into a fatal ``ConfigLoadError`` naming the
+    record type and the config file — not the lenient ``except Exception``
+    log-and-skip, which would silently reconcile a type whose OUTPUT file
+    collides across users. Carried over from task 6's review: this branch
+    had no test.
+    """
+    from pathlib import Path
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.exceptions.domain import ConfigLoadError
+    from clarinet.utils.bootstrap import reconcile_config
+
+    bad_props = {
+        "name": "bad-output-path",
+        "level": "SERIES",
+        "file_registry": [
+            {
+                "name": "result_file",
+                "pattern": "result.txt",
+                "role": "output",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "clarinet.utils.bootstrap.discover_config_files",
+            return_value=[Path("bad-output-path.toml")],
+        ),
+        patch(
+            "clarinet.utils.bootstrap.load_project_file_registry",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "clarinet.utils.bootstrap.load_record_config",
+            new_callable=AsyncMock,
+            return_value=bad_props,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.resolve_task_files",
+            side_effect=lambda props, _reg: props,
+        ),
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "toml"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        with pytest.raises(ConfigLoadError, match="bad-output-path") as exc_info:
+            await reconcile_config(folder="/fake/path")
+
+    assert exc_info.value.path == "bad-output-path.toml"
+    assert exc_info.value.kind == "record type config"
+
+
+@pytest.mark.asyncio
 async def test_reconcile_config_allows_shared_editing_without_unique_per_user(
     test_session: AsyncSession,
 ) -> None:

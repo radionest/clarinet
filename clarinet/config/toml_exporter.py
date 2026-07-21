@@ -13,6 +13,7 @@ import aiofiles
 import tomli_w
 
 from clarinet.models.record import RecordType
+from clarinet.models.uniqueness import canonical_unique_by
 from clarinet.utils.logger import logger
 
 # Scalar fields exported to TOML top-level keys.
@@ -24,7 +25,7 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "role_name",
     "min_records",
     "max_records",
-    "unique_per_user",
+    "unique_by",
     "parent_required",
     "mask_patient_data",
     "inherit_user_from_parent",
@@ -64,6 +65,16 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
     # Scalar fields
     for field_name in _SCALAR_FIELDS:
         value = getattr(rt, field_name, None)
+        if field_name == "unique_by":
+            # TOML has no null: unlike every other scalar field, None must
+            # serialize to `false` rather than being omitted — an absent key
+            # would heal to the parent-inclusive default on reload and
+            # silently re-enable uniqueness. A frozenset (constructed model),
+            # a raw JSON list (unvalidated DB row), or None all canonicalize
+            # through the same helper the model uses on load.
+            canonical = canonical_unique_by(value)
+            data[field_name] = False if canonical is None else sorted(canonical)
+            continue
         if value is None:
             continue
         # Enum → string
