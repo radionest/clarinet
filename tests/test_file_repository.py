@@ -99,6 +99,7 @@ def _make_record_mock(
 ) -> MagicMock:
     record = MagicMock(spec=RecordRead)
     record.id = record_id
+    record.parent_record_id = None
     record.user_id = None
     record.patient_id = "PAT001"
     record.study_uid = "1.2.3.4.5" if level != DicomQueryLevel.PATIENT else None
