@@ -26,6 +26,7 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
+from clarinet.utils.db_manager import _pydantic_json_serializer
 
 # Check exclusions are configured in schemathesis.toml [checks.*] section.
 # They apply globally (including stateful tests) via ProjectConfig.
@@ -178,6 +179,7 @@ async def test_engine():
         echo=False,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
+        json_serializer=_pydantic_json_serializer,
     )
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)

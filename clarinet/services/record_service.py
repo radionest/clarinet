@@ -9,7 +9,6 @@ from uuid import UUID
 from clarinet.exceptions.domain import (
     BusinessRuleViolationError,
     RecordEditLockedError,
-    RecordUniquePerUserError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.files import Files
@@ -216,9 +215,10 @@ class RecordService:
                 if record_type.inherit_user_from_parent and parent.user_id is not None:
                     # The route-level constraint check ran with user_id=None
                     # and could not see the inherited user — re-check here.
-                    await self.repo.ensure_unique_per_user(
+                    await self.repo.ensure_unique_by(
                         record_type,
-                        parent.user_id,
+                        user_id=parent.user_id,
+                        parent_record_id=record.parent_record_id,
                         patient_id=record.patient_id,
                         study_uid=record.study_uid,
                         series_uid=record.series_uid,
@@ -325,10 +325,10 @@ class RecordService:
             Tuple of (updated record, old status).
 
         Raises:
-            RecordConstraintViolationError: If unique_per_user is violated.
+            RecordConstraintViolationError: If unique_by is violated.
         """
         record = await self.repo.get_with_record_type(record_id)
-        await self._check_unique_per_user(user_id, record)
+        await self._check_unique_by(user_id, record)
         self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.assign_user(record_id, user_id)
         await self._record_event(
@@ -361,11 +361,11 @@ class RecordService:
             Updated record (relations loaded) with inwork status.
 
         Raises:
-            RecordConstraintViolationError: If unique_per_user is violated.
+            RecordConstraintViolationError: If unique_by is violated.
         """
         record = await self.repo.get_with_record_type(record_id)
         old_status = record.status
-        await self._check_unique_per_user(user_id, record)
+        await self._check_unique_by(user_id, record)
         self._mark_audit(record_id, actor_id)
         await self.repo.claim_record(record_id, user_id)
         updated = await self.repo.get_with_relations(record_id)
@@ -455,13 +455,13 @@ class RecordService:
             Tuple of (updated record, old status).
 
         Raises:
-            RecordConstraintViolationError: If unique_per_user is violated on auto-assign.
+            RecordConstraintViolationError: If unique_by is violated on auto-assign.
         """
         transfer_to: UUID | None = None
         if user_id is not None:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
-                await self._check_unique_per_user(user_id, record_check)
+                await self._check_unique_by(user_id, record_check)
                 self._mark_audit(record_id, actor_id)
                 await self.repo.ensure_user_assigned(record_id, user_id)
                 await self._record_event(
@@ -1134,36 +1134,32 @@ class RecordService:
 
     # ── Private helpers ──────────────────────────────────────────────────
 
-    async def _check_unique_per_user(self, user_id: UUID, record: Record) -> None:
-        """Check that assigning user_id to record does not violate unique_per_user.
+    async def _check_unique_by(self, user_id: UUID, record: Record) -> None:
+        """Check that assigning user_id to record does not violate unique_by.
 
-        Does nothing when record_type.unique_per_user is False.
+        Thin wrapper over ``RecordRepository.ensure_unique_by`` — that method
+        self-gates on ``record_type.unique_by`` (no-op when ``None``).
+        ``exclude_record_id=record.id`` excludes the record itself from the
+        match: at assignment time the candidate row already exists, so
+        without exclusion it would always match itself.
 
         Args:
             user_id: User being assigned.
             record: Record with record_type eagerly loaded.
 
         Raises:
-            RecordUniquePerUserError: If user already has a record
-                of this type for the same DICOM context.
+            RecordUniquePerUserError: If another record already exists matching
+                every selected unique_by partition for this DICOM context.
         """
-        record_type = record.record_type
-        if not record_type.unique_per_user:
-            return
-
-        count = await self.repo.count_user_records_for_context(
+        await self.repo.ensure_unique_by(
+            record.record_type,
             user_id=user_id,
-            record_type_name=record.record_type_name,
+            parent_record_id=record.parent_record_id,
             patient_id=record.patient_id,
             study_uid=record.study_uid,
             series_uid=record.series_uid,
-            level=record_type.level,
+            exclude_record_id=record.id,
         )
-        if count > 0:
-            raise RecordUniquePerUserError(
-                f"User already has a record of type '{record_type.name}' "
-                f"for this {record_type.level.lower()} context"
-            )
 
     async def _resolve_preparing_exit(
         self, record_id: int, new_status: RecordStatus

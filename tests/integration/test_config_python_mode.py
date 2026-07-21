@@ -14,6 +14,7 @@ from sqlmodel import select
 from clarinet.config.primitives import RecordDef
 from clarinet.config.python_loader import load_python_config
 from clarinet.config.reconciler import _COMPARED_FIELDS, reconcile_record_types
+from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType
 
@@ -111,15 +112,15 @@ async def test_editable_flags_forwarded_when_explicit(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_unique_per_user_forwarded_when_explicit(tmp_path) -> None:
-    """``unique_per_user`` propagates from RecordDef only when set."""
+async def test_unique_by_forwarded_when_explicit(tmp_path) -> None:
+    """``unique_by`` propagates from RecordDef only when explicitly set."""
     _write_record_types(
         tmp_path,
         """\
         from clarinet.config.primitives import RecordDef
 
-        # Explicit False — must be forwarded
-        shared = RecordDef(name="shared-rt", level="STUDY", unique_per_user=False)
+        # Explicit — must be forwarded
+        scoped = RecordDef(name="scoped-rt", level="STUDY", unique_by={"parent"})
         # Default — must NOT be forwarded
         plain = RecordDef(name="plain-rt", level="STUDY")
         """,
@@ -128,10 +129,35 @@ async def test_unique_per_user_forwarded_when_explicit(tmp_path) -> None:
     config_items = await load_python_config(tmp_path)
     by_name = {item.name: item for item in config_items}
 
-    assert "unique_per_user" in by_name["shared-rt"].model_fields_set
-    assert by_name["shared-rt"].unique_per_user is False
+    assert "unique_by" in by_name["scoped-rt"].model_fields_set
+    assert by_name["scoped-rt"].unique_by == frozenset({"parent"})
 
-    assert "unique_per_user" not in by_name["plain-rt"].model_fields_set
+    assert "unique_by" not in by_name["plain-rt"].model_fields_set
+
+
+@pytest.mark.asyncio
+async def test_legacy_unique_per_user_forwarded_as_unique_by(tmp_path) -> None:
+    """Deprecated ``unique_per_user`` kwarg still reaches the reconciler, translated."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        # Explicit legacy False — must be forwarded as unique_by=None
+        shared = RecordDef(name="shared-rt", level="STUDY", unique_per_user=False)
+        # Default — must NOT be forwarded
+        plain = RecordDef(name="plain-rt", level="STUDY")
+        """,
+    )
+
+    with pytest.warns(DeprecationWarning):
+        config_items = await load_python_config(tmp_path)
+    by_name = {item.name: item for item in config_items}
+
+    assert "unique_by" in by_name["shared-rt"].model_fields_set
+    assert by_name["shared-rt"].unique_by is None
+
+    assert "unique_by" not in by_name["plain-rt"].model_fields_set
 
 
 @pytest.mark.asyncio
@@ -141,7 +167,7 @@ async def test_shared_editing_forwarded_when_explicit(tmp_path) -> None:
         tmp_path,
         "from clarinet.config.primitives import RecordDef\n\n"
         'shared = RecordDef(name="shared-rt", level="STUDY", '
-        "shared_editing=True, unique_per_user=False)\n"
+        "shared_editing=True, unique_by=None)\n"
         'plain = RecordDef(name="plain-rt", level="STUDY")\n',
     )
 
@@ -200,7 +226,7 @@ _FORWARD_SAMPLES: dict[str, object] = {
     "data_schema": {"type": "object"},
     "ui_schema": {"name": {"ui:widget": "text"}},
     "mask_patient_data": False,
-    "unique_per_user": False,
+    "unique_by": frozenset({"parent"}),
     "parent_required": True,
     "inherit_user_from_parent": True,
     "editable": False,
@@ -282,6 +308,33 @@ async def test_bootstrap_loads_python_config(
 
 
 @pytest.mark.asyncio
+async def test_bad_output_pattern_aborts_startup(tmp_path) -> None:
+    """A RecordDef whose OUTPUT pattern can't discriminate coexisting records
+    raises ConfigLoadError naming the RecordType + FileDef, instead of
+    silently loading a broken config (which would collide on disk at runtime).
+    """
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef, FileRef, FileDef
+
+        bad_output = FileDef(pattern="result.nrrd", level="SERIES", description="Ambiguous output")
+
+        ambiguous = RecordDef(
+            name="ambiguous-type",
+            level="SERIES",
+            files=[FileRef(bad_output, "output")],
+        )
+        """,
+    )
+
+    with pytest.raises(ConfigLoadError, match="ambiguous-type") as exc_info:
+        await load_python_config(tmp_path)
+
+    assert "bad_output" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_file_refs_resolved(
     test_session: AsyncSession,
     tmp_path,
@@ -306,6 +359,10 @@ async def test_file_refs_resolved(
             name="ai-analysis",
             description="AI analysis task",
             level="SERIES",
+            # plain "master.nrrd" pattern has no {user_id}/{parent_id}/{id} —
+            # opt out of the uniqueness check (unrelated to this test's intent).
+            unique_by=None,
+            max_records=1,
             files=[FileRef(master_model, role=FileRole.OUTPUT, required=False)],
         )
         """,
@@ -576,7 +633,8 @@ async def test_single_file_mode(
         """\
         from clarinet.config.primitives import FileDef, FileRef, RecordDef
 
-        my_file = FileDef(pattern="output.nrrd", level="SERIES", description="Output file")
+        # {id} discriminates -> path-uniqueness check no-ops (unrelated to this test)
+        my_file = FileDef(pattern="output_{id}.nrrd", level="SERIES", description="Output file")
 
         single_file_type = RecordDef(
             name="single-file-type",

@@ -311,7 +311,7 @@ class RecordLimitReachedError(RecordConstraintViolationError):
 
 
 class RecordUniquePerUserError(RecordConstraintViolationError):
-    """Raised when unique_per_user constraint is violated.
+    """Raised when the unique_by constraint is violated.
 
     Expected during auto-assign when user already has a record of this type.
     """

@@ -7,13 +7,19 @@ Slicer integration settings.
 """
 
 import json as json_lib
+import warnings
 from typing import TYPE_CHECKING, Any
 
-from pydantic import field_validator, model_validator
+from pydantic import field_serializer, field_validator, model_validator
 from sqlalchemy import String
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Column, Field, Relationship, SQLModel
 
+from clarinet.models.uniqueness import (
+    DEFAULT_UNIQUE_BY,
+    canonical_unique_by,
+    legacy_unique_per_user,
+)
 from clarinet.types import (
     PortableJSON,
     RecordSchema,
@@ -74,14 +80,24 @@ class RecordTypeBase(SQLModel):
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None, ge=0, le=10000)
     min_records: int | None = Field(default=1, ge=0, le=10000)
-    # ``server_default`` matches the model default ``True`` so a freshly-created
-    # row and a migration-backfilled row agree (issue #389). ``sql_expression.true()``
-    # is the dialect-aware literal that keeps the additive-migration contract — see
-    # ``mask_patient_data`` below for why a raw ``text("1")`` breaks PostgreSQL.
-    unique_per_user: bool = Field(
-        default=True,
-        sa_column_kwargs={"server_default": sql_expression.true()},
+    # Nullable JSON column: ``None`` = no uniqueness constraint, else a canonical
+    # sorted partition set (e.g. ``["parent", "user"]``). ``server_default``
+    # matches the model default so a freshly-created row and a
+    # migration-backfilled row agree (same rationale as issue #389).
+    unique_by: frozenset[str] | None = Field(
+        default_factory=lambda: frozenset(DEFAULT_UNIQUE_BY),
+        sa_column=Column(PortableJSON, nullable=True, server_default='["parent", "user"]'),
     )
+
+    @field_validator("unique_by", mode="before")
+    @classmethod
+    def _canonical_unique_by(cls, v: object) -> frozenset[str] | None:
+        return canonical_unique_by(v)  # type: ignore[arg-type]
+
+    @field_serializer("unique_by")
+    def _ser_unique_by(self, v: frozenset[str] | None) -> list[str] | None:
+        return None if v is None else sorted(v)
+
     # See ``mask_patient_data`` below for the rationale on ``server_default`` and
     # the dialect-aware ``sql_expression.false()`` literal.
     parent_required: bool = Field(
@@ -167,7 +183,7 @@ class RecordTypeBase(SQLModel):
             "Whether any user who can access this type (holds its role_name) may "
             "edit any record of this type, not only the owner/unassigned. Each data "
             "edit reassigns ownership (record.user_id) to the editing user. Requires "
-            "unique_per_user=False."
+            "'user' not in unique_by."
         ),
     )
 
@@ -192,7 +208,7 @@ class RecordTypeBase(SQLModel):
 
     @model_validator(mode="after")
     def _validate_shared_editing(self) -> "RecordTypeBase":
-        """``shared_editing`` requires ``unique_per_user=False``.
+        """``shared_editing`` requires ``'user' not in unique_by``.
 
         Ownership churn is contradictory with per-user uniqueness (an editor who
         already owns a record of the type would 409 on the next edit). Enforced
@@ -201,8 +217,8 @@ class RecordTypeBase(SQLModel):
         ``table=True`` model, so this binds the write paths — ``RecordTypeCreate``
         bodies and config — which is where the invalid combo can enter.)
         """
-        if self.shared_editing and self.unique_per_user:
-            raise ValueError("shared_editing requires unique_per_user=False")
+        if self.shared_editing and "user" in (self.unique_by or frozenset()):
+            raise ValueError("shared_editing requires 'user' not in unique_by")
         return self
 
 
@@ -250,7 +266,8 @@ class RecordType(RecordTypeBase, table=True):
 
         Converts ORM relationships (file_links → RecordTypeFileLink → FileDefinition)
         into flat DTOs (FileDefinitionRead) by merging identity fields (name, pattern,
-        description, multiple) with per-binding fields (role, required).
+        description, multiple) with per-binding fields (role, required,
+        allow_path_collision).
 
         Used by ``RecordTypeRead.model_validator`` for API serialization.
         For DB operations that need ``FileDefinition`` ORM objects (e.g. creating
@@ -275,6 +292,7 @@ class RecordType(RecordTypeBase, table=True):
                 role=link.role,
                 required=link.required,
                 level=link.file_definition.level,
+                allow_path_collision=link.allow_path_collision,
             )
             for link in (links or [])
         ]
@@ -324,6 +342,45 @@ class RecordTypeCreate(RecordTypeBase):
     ui_schema: RecordSchema | None = None
     file_registry: list[FileDefinitionRead] | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _translate_legacy_unique_per_user(cls, data: Any) -> Any:
+        """Translate the deprecated ``unique_per_user`` key into ``unique_by``.
+
+        TOML documents (``bootstrap.py``) and API bodies reach this model as
+        dicts carrying the legacy key — it must be translated, never silently
+        ignored. An explicit ``unique_by`` in the same payload wins.
+        """
+        if isinstance(data, dict) and "unique_per_user" in data:
+            legacy = data.pop("unique_per_user")
+            warnings.warn(
+                "unique_per_user is deprecated; use unique_by",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if legacy is not None and "unique_by" not in data:
+                data["unique_by"] = legacy_unique_per_user(legacy)
+        return data
+
+    @model_validator(mode="after")
+    def _validate_output_paths(self) -> "RecordTypeCreate":
+        """Reject OUTPUT file patterns that cannot discriminate coexisting records.
+
+        Runs after ``unique_by`` canonicalization (mode="before" field
+        validator already ran) on every construction — API POST/PATCH-merge,
+        TOML load, Python config load — so a broken pattern is caught at the
+        point of the mutation. ``file_registry`` defaults to ``None`` on this
+        model (many call sites attach file links separately), and the
+        predicate treats that as "nothing to check" — safe no-op.
+
+        Imported lazily to avoid a config <-> models import cycle
+        (``clarinet.config`` imports ``clarinet.models`` at its own top level).
+        """
+        from clarinet.config.path_uniqueness import validate_output_path_uniqueness
+
+        validate_output_path_uniqueness(self)
+        return self
+
 
 class RecordTypeOptional(SQLModel):
     """Pydantic model for updating a record type with optional fields."""
@@ -360,7 +417,7 @@ class RecordTypeOptional(SQLModel):
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)
     min_records: int | None = Field(default=None)
-    unique_per_user: bool | None = Field(default=None)
+    unique_by: frozenset[str] | None = Field(default=None)
     parent_required: bool | None = Field(default=None)
     inherit_user_from_parent: bool | None = Field(default=None)
     editable: bool | None = Field(default=None)
@@ -369,6 +426,34 @@ class RecordTypeOptional(SQLModel):
 
     # File schema fields
     file_registry: list[FileDefinitionRead] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _translate_legacy_unique_per_user(cls, data: Any) -> Any:
+        """Translate the deprecated ``unique_per_user`` key into ``unique_by``.
+
+        API PATCH bodies may still carry the legacy key — it must be
+        translated, never silently ignored. An explicit ``unique_by`` in the
+        same payload wins.
+        """
+        if isinstance(data, dict) and "unique_per_user" in data:
+            legacy = data.pop("unique_per_user")
+            warnings.warn(
+                "unique_per_user is deprecated; use unique_by",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if legacy is not None and "unique_by" not in data:
+                data["unique_by"] = legacy_unique_per_user(legacy)
+        return data
+
+    @field_validator("unique_by", mode="before")
+    @classmethod
+    def _canonical_unique_by(cls, v: object) -> frozenset[str] | None:
+        # Same gatekeeper as RecordTypeBase: without it the PATCH DTO would
+        # accept garbage ([], unknown tokens, wrong case) that only the
+        # service's merged-RecordTypeCreate re-validation happens to catch.
+        return canonical_unique_by(v)  # type: ignore[arg-type]
 
     @field_validator(
         "data_schema",

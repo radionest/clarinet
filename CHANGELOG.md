@@ -4,6 +4,77 @@
 
 ### Breaking
 
+- **`RecordType.unique_by` replaces `unique_per_user`.** `unique_by:
+  frozenset[str] | None` (subset of `{"user", "parent"}`) replaces the boolean
+  `unique_per_user`: at most one record of the type may exist per unique
+  combination of the selected scopes, within the type's own DICOM-level
+  context; `None` disables the constraint (TOML spelling of off is `false` —
+  TOML has no null); an empty set is rejected (use `None`, or `max_records=1`
+  for one-per-level). Default is now `{"user", "parent"}`, versus the old
+  implicit `unique_per_user=True` (`{"user"}` only) — a type that also sets
+  `parent_record_id` now additionally partitions by parent, so distinct
+  parents may each hold their own record where previously only one existed
+  for the whole type+user. The deprecated `unique_per_user=True/False` kwarg
+  still works on `RecordDef` and in TOML/API payloads (translates to
+  `{"user"}`/`None`, emits `DeprecationWarning`; an explicit `unique_by` in
+  the same payload wins). Bound-tuple rule: a `"user"`-selecting type's check
+  is skipped while the candidate record is unassigned (pools stay creatable)
+  and closes at claim/assign time; a `{"parent"}`-only type has no such gap
+  and dedupes at creation. New `{parent_id}` file-pattern placeholder (the FK
+  column, load-independent) lets an OUTPUT pattern discriminate by parent
+  instance — unlike `{origin_type}`, which names only the parent's *type*.
+- **Output-path uniqueness is validated fail-fast.** Every non-collection
+  OUTPUT `FileRef` that hasn't opted out via `allow_path_collision=True` must
+  embed the placeholder needed to keep coexisting records from overwriting
+  each other's file: `{user_id}` for a `"user"` partition, `{parent_id}` for
+  a `"parent"` partition, the RecordType's own level-UID placeholder when the
+  file's own level is coarser than the RecordType's, and `{id}` when
+  `unique_by=None` allows 2+ coexisting records with nothing else to
+  distinguish them. Violations raise `RecordConstraintViolationError` at
+  RecordType config load (Python/TOML) and at RecordType `POST`/`PATCH` — the
+  PATCH guard re-validates the *merged* effective state, so a patch that
+  breaks its own OUTPUT patterns is rejected immediately rather than failing
+  at the next startup.
+- **`parent_record_id` is now `ON DELETE CASCADE` (was `SET NULL`).** Deleting
+  a record now cascades to its descendants at the DB level instead of
+  orphaning them with a null parent. The framework's own cascade-delete flow
+  (`RecordRepository.delete_records`, behind `DELETE /api/admin/records/{id}`)
+  already pre-collects the full subtree before deleting and emits one
+  `RecordEvent`/SSE `deleted` per collected id, so that path is unaffected.
+  Accepted trade: a record removed purely as a side effect of the DB-level
+  CASCADE — any delete path that doesn't pre-collect descendants — emits no
+  `RecordEvent` for the cascaded rows.
+- **SQLite now enforces foreign keys.** `PRAGMA foreign_keys=ON` is set on
+  every file-based SQLite connection (`:memory:` test pools are unaffected).
+  `ON DELETE CASCADE`/`SET NULL` FKs that were previously metadata-only on
+  SQLite now actually fire, and a write that used to silently leave a
+  dangling reference now fails outright. At startup, `DatabaseManager` runs
+  `PRAGMA foreign_key_check` and logs a `WARNING` per violation found in a
+  pre-existing database — diagnostic only, it never aborts startup.
+- **Downstream migration.** Generate an Alembic migration adding
+  `recordtype.unique_by` (nullable JSON) and
+  `recordtypefilelink.allow_path_collision` (bool, `server_default=false`),
+  and changing the `record.parent_record_id` FK to `ON DELETE CASCADE`. Do
+  not let a plain `server_default`-driven backfill populate `unique_by` — it
+  mis-backfills every existing row. Backfill via a `CASE` on the old
+  `unique_per_user` column instead: `true → '["user"]'`, `false`/`NULL` →
+  `NULL`. This is not optional: any existing `shared_editing=True` row
+  necessarily has `unique_per_user=False` (an already-enforced invariant),
+  and the new column's own `server_default` is `["parent", "user"]` —
+  backfilling with the server_default instead of the `CASE` would give those
+  rows a `unique_by` containing `"user"`, immediately violating
+  "`shared_editing` requires `'user' not in unique_by`". The backfilled
+  value is durable only for types whose config pins `unique_by` (or still
+  passes the legacy `unique_per_user` kwarg/key): on first startup the
+  reconciler self-heals any type whose config leaves `unique_by` unset
+  toward the new default `["parent", "user"]`, overwriting the backfilled
+  `["user"]` — pin `unique_by` explicitly for every type that must keep
+  the legacy per-user semantics. Before relying on
+  the new SQLite FK enforcement, audit for pre-existing dangling
+  `parent_record_id` rows (the startup audit only warns, it doesn't fix),
+  and expect legacy duplicate rows that violate the new default partition to
+  need resolution — `clarinet_nir_liver`'s migration drops 25 pre-existing
+  duplicate `review` records for exactly this reason.
 - **`plan/` files now import via the `clarinet_plan.` prefix (single root).**
   At startup an in-memory anchor package `clarinet_plan` is rooted at the one
   `config_tasks_path`; every plan file is a submodule of it. Sibling-by-stem

@@ -22,6 +22,7 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings, settings
 from clarinet.utils.database import get_async_session
+from clarinet.utils.db_manager import _pydantic_json_serializer
 from clarinet.utils.logger import logger
 from tests.utils.cookies import patch_cookie_forwarding
 
@@ -212,7 +213,12 @@ async def test_engine(test_settings, worker_id):
             await conn.execute(text(f'CREATE DATABASE "{worker_db}"'))
         await admin_engine.dispose()
 
-        engine = create_async_engine(f"{base_url}/{worker_db}", echo=False, pool_pre_ping=True)
+        engine = create_async_engine(
+            f"{base_url}/{worker_db}",
+            echo=False,
+            pool_pre_ping=True,
+            json_serializer=_pydantic_json_serializer,
+        )
     else:
         database_url = "sqlite+aiosqlite:///:memory:"
         engine = create_async_engine(
@@ -220,6 +226,7 @@ async def test_engine(test_settings, worker_id):
             echo=False,
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
+            json_serializer=_pydantic_json_serializer,
         )
 
     if database_url.startswith("sqlite"):

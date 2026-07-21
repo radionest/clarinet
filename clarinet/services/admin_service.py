@@ -63,9 +63,9 @@ class AdminService:
         for user in sorted(active_users, key=lambda u: u.email):
             counts = assigned.get(str(user.id), {})
             # `available` mirrors claim-next eligibility (role-scoped,
-            # unique_per_user-aware). Superusers have no roles and see the whole
+            # unique_by-aware). Superusers have no roles and see the whole
             # pool, so pass role_names=None; regular users are scoped to their
-            # roles. Computed per user because the unique_per_user filter is
+            # roles. Computed per user because the unique_by filter is
             # user-specific — one sequential query each (shared AsyncSession).
             role_names = None if user.is_superuser else [role.name for role in user.roles]
             available = await self.record_repo.count_available_pending_for_user(user.id, role_names)

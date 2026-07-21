@@ -17,6 +17,7 @@ from typing import Any
 import aiofiles
 
 from clarinet.config.primitives import FileDef, RecordDef, fileref_to_file_definition
+from clarinet.exceptions.domain import ConfigLoadError, RecordConstraintViolationError
 from clarinet.models.record import RecordTypeCreate
 from clarinet.utils.logger import logger
 from clarinet.utils.schema_bundler import bundle_external_defs
@@ -206,8 +207,8 @@ async def _to_record_type_create(
     # defaults self-heal — issue #389); an explicitly set value is always honored.
     if "mask_patient_data" in rt_def.model_fields_set:
         kwargs["mask_patient_data"] = rt_def.mask_patient_data
-    if "unique_per_user" in rt_def.model_fields_set:
-        kwargs["unique_per_user"] = rt_def.unique_per_user
+    if "unique_by" in rt_def.model_fields_set:
+        kwargs["unique_by"] = rt_def.unique_by
     if "parent_required" in rt_def.model_fields_set:
         kwargs["parent_required"] = rt_def.parent_required
     if "inherit_user_from_parent" in rt_def.model_fields_set:
@@ -229,7 +230,14 @@ async def _to_record_type_create(
     if file_registry is not None:
         kwargs["file_registry"] = file_registry
 
-    return RecordTypeCreate(**kwargs)
+    try:
+        return RecordTypeCreate(**kwargs)
+    except RecordConstraintViolationError as e:
+        raise ConfigLoadError(
+            f"Invalid record type '{rt_def.name}': {e}",
+            path=folder,
+            kind="record type",
+        ) from e
 
 
 def _ensure_record_types_imported(folder: Path | None = None) -> None:

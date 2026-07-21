@@ -68,9 +68,10 @@ class RecordSearchCriteria:
     include_unassigned: bool = False
     random_one: bool = False
     role_names: set[str] | None = None
-    # Hides unassigned records of unique_per_user types where ``user_id``
-    # already has a record at the matching DICOM level. Requires ``user_id``
-    # to be set; ``_build_criteria_query`` joins ``RecordType`` automatically.
+    # Hides unassigned records of unique_by types where ``user_id`` already
+    # has a record at the matching DICOM level (and, when "parent" is also
+    # selected, the same parent). Requires ``user_id`` to be set;
+    # ``_build_criteria_query`` joins ``RecordType`` automatically.
     exclude_unique_violations: bool = False
     data_queries: list[RecordFindResult] = field(default_factory=list)
 
@@ -323,18 +324,41 @@ def _record_file_links_eager_load() -> Any:
     )
 
 
-def _unique_per_user_violation_filter(user_id: UUID) -> Any:
-    """Build NOT(...) filter excluding unassigned records violating unique_per_user.
+async def _partitioned_unique_type_names(session: AsyncSession) -> tuple[set[str], set[str]]:
+    """Names of types with 'user' in unique_by, split by whether 'parent' is too.
+
+    DB-loaded ``RecordType`` rows skip Pydantic validation, so ``unique_by``
+    comes back as a raw JSON list (or ``None``) rather than a frozenset —
+    ``set(ub or [])`` normalizes either shape.
+    """
+    rows = (
+        await session.execute(select(RecordType.name, RecordType.unique_by))  # type: ignore[type-var]
+    ).all()
+    user_only: set[str] = set()
+    user_parent: set[str] = set()
+    for name, ub in rows:
+        parts = set(ub or [])
+        if "user" in parts:
+            (user_parent if "parent" in parts else user_only).add(name)
+    return user_only, user_parent
+
+
+def _unique_by_violation_filter(user_id: UUID, user_only: set[str], user_parent: set[str]) -> Any:
+    """Build NOT(...) filter excluding unassigned records violating unique_by.
 
     Returns a condition that, when applied to a query containing Record joined
-    with RecordType, excludes unassigned records of unique_per_user types where
-    the given user already has a record in the same DICOM context.
+    with RecordType, excludes unassigned records of ``user_only``/``user_parent``
+    types where the given user already has a record in the same DICOM context
+    (and, for ``user_parent`` types, the same ``parent_record_id``).
+    ``user_only``/``user_parent`` are the two partitions of type names
+    prefetched once per query via ``_partitioned_unique_type_names`` —
+    ``in_(set())`` on an empty set renders a false condition, so either bucket
+    being empty is safe.
     """
-    inner_r = aliased(Record, flat=True)
-    inner_subq = (
-        select(literal(1))
-        .select_from(inner_r)
-        .where(
+
+    def _ctx_exists(*, match_parent: bool) -> Any:
+        inner_r = aliased(Record, flat=True)
+        conds: list[Any] = [
             col(inner_r.user_id) == user_id,
             inner_r.record_type_name == Record.record_type_name,
             or_(
@@ -351,13 +375,27 @@ def _unique_per_user_violation_filter(user_id: UUID) -> Any:
                     inner_r.patient_id == Record.patient_id,  # type: ignore[arg-type]
                 ),
             ),
+        ]
+        if match_parent:  # NULL-safe match against the candidate row's parent
+            conds.append(
+                or_(
+                    and_(
+                        col(inner_r.parent_record_id).is_(None),
+                        col(Record.parent_record_id).is_(None),
+                    ),
+                    inner_r.parent_record_id == Record.parent_record_id,  # type: ignore[arg-type]
+                )
+            )
+        return exists(
+            select(literal(1)).select_from(inner_r).where(*conds).correlate(Record, RecordType)
         )
-        .correlate(Record, RecordType)
-    )
+
     return ~and_(
         col(Record.user_id).is_(None),
-        col(RecordType.unique_per_user).is_(True),
-        exists(inner_subq),
+        or_(
+            and_(col(Record.record_type_name).in_(user_only), _ctx_exists(match_parent=False)),
+            and_(col(Record.record_type_name).in_(user_parent), _ctx_exists(match_parent=True)),
+        ),
     )
 
 
@@ -516,7 +554,7 @@ class RecordRepository(BaseRepository[Record]):
             role_names: Optional set of role names to filter by
             include_unassigned: If True, also include records with user_id=NULL
             exclude_unique_violations: If True, hide unassigned records that
-                violate unique_per_user for this user
+                violate unique_by for this user
 
         Returns:
             List of records with patient, study, series, and record_type loaded
@@ -526,7 +564,7 @@ class RecordRepository(BaseRepository[Record]):
             if include_unassigned
             else col(Record.user_id) == user_id
         )
-        # Join RecordType unconditionally when filtering by role or unique_per_user
+        # Join RecordType unconditionally when filtering by role or unique_by
         needs_join = role_names is not None or exclude_unique_violations
         statement = select(Record).where(user_filter)
         if needs_join:
@@ -542,7 +580,10 @@ class RecordRepository(BaseRepository[Record]):
         if role_names is not None:
             statement = statement.where(col(RecordType.role_name).in_(list(role_names)))
         if exclude_unique_violations:
-            statement = statement.where(_unique_per_user_violation_filter(user_id))
+            user_only, user_parent = await _partitioned_unique_type_names(self.session)
+            statement = statement.where(
+                _unique_by_violation_filter(user_id, user_only, user_parent)
+            )
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -562,7 +603,7 @@ class RecordRepository(BaseRepository[Record]):
             role_names: Optional set of role names to filter by
             include_unassigned: If True, also include records with user_id=NULL
             exclude_unique_violations: If True, hide unassigned records that
-                violate unique_per_user for this user
+                violate unique_by for this user
 
         Returns:
             List of active records with patient, study, series, and record_type loaded
@@ -593,7 +634,10 @@ class RecordRepository(BaseRepository[Record]):
         if role_names is not None:
             statement = statement.where(col(RecordType.role_name).in_(list(role_names)))
         if exclude_unique_violations:
-            statement = statement.where(_unique_per_user_violation_filter(user_id))
+            user_only, user_parent = await _partitioned_unique_type_names(self.session)
+            statement = statement.where(
+                _unique_by_violation_filter(user_id, user_only, user_parent)
+            )
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -1032,49 +1076,6 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         return result.scalar_one()
 
-    async def count_user_records_for_context(
-        self,
-        user_id: UUID,
-        record_type_name: str,
-        patient_id: str,
-        study_uid: str | None,
-        series_uid: str | None,
-        level: str,
-    ) -> int:
-        """Count records assigned to a user for a given type and DICOM context.
-
-        Context key depends on level:
-          - PATIENT: (user_id, record_type_name, patient_id)
-          - STUDY:   (user_id, record_type_name, study_uid)
-          - SERIES:  (user_id, record_type_name, series_uid)
-
-        Args:
-            user_id: User UUID to check.
-            record_type_name: RecordType name.
-            patient_id: Patient identifier.
-            study_uid: Study UID (used for STUDY/SERIES level).
-            series_uid: Series UID (used for SERIES level).
-            level: DicomQueryLevel value as string.
-
-        Returns:
-            Count of matching records regardless of status.
-        """
-        query = select(func.count(col(Record.id))).where(
-            Record.record_type_name == record_type_name,
-            col(Record.user_id) == user_id,
-        )
-        match level:
-            case "PATIENT":
-                query = query.where(Record.patient_id == patient_id)
-            case "STUDY":
-                query = query.where(Record.study_uid == study_uid)
-            case "SERIES":
-                query = query.where(Record.series_uid == series_uid)
-            case _:
-                raise ValueError(f"Unsupported level for unique_per_user context: {level}")
-        result = await self.session.execute(query)
-        return result.scalar_one()
-
     async def get_record_type(self, name: str, *, with_files: bool = True) -> RecordType:
         """Get a RecordType by name with file_links eagerly loaded.
 
@@ -1113,8 +1114,9 @@ class RecordRepository(BaseRepository[Record]):
         """Bulk-delete records by primary key in a single SQL statement.
 
         ``RecordFileLink`` rows are cleaned up by the database-level
-        ``ondelete="CASCADE"`` FK. ``parent_record_id`` references are
-        cleared by ``ondelete="SET NULL"``.
+        ``ondelete="CASCADE"`` FK. ``parent_record_id`` children are removed
+        by the same ``ondelete="CASCADE"`` FK — no manual reverse-topological
+        deletion needed.
 
         This avoids ORM unit-of-work ordering pitfalls that apply when
         deleting self-referential rows via ``session.delete()`` without
@@ -1135,10 +1137,12 @@ class RecordRepository(BaseRepository[Record]):
         if commit:
             await self.session.commit()
             # sse-capture: explicit emit, UoW-invisible (Core bulk DML).
-            # Children whose parent_record_id is SET NULL by the FK are
-            # intentionally not emitted as "updated" (minor: parent rarely
-            # affects the UI; thin events keep the client cache eventually
-            # consistent via TTL/refetch).
+            # The primary path (collect_descendants) pre-collects the full
+            # subtree before deleting, so record_ids already names every
+            # cascade-deleted row; a straggler outside that set that the FK
+            # alone would also cascade-delete is not reflected here (minor:
+            # thin events keep the client cache eventually consistent via
+            # TTL/refetch).
             emit_entity("record", "deleted", [str(i) for i in record_ids])
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
@@ -1206,16 +1210,19 @@ class RecordRepository(BaseRepository[Record]):
     ) -> None:
         """Check if a new record can be created based on constraints.
 
-        Validates max_records, unique_per_user and parent_required constraints.
+        Validates max_records, unique_by and parent_required constraints.
 
         Args:
             record_type_name: Record type name.
             series_uid: Series UID.
             study_uid: Study UID.
-            patient_id: Patient ID (required for unique_per_user check).
-            user_id: User UUID (triggers unique_per_user check when set).
+            patient_id: Patient ID (required for the unique_by check).
+            user_id: User UUID for the unique_by check; a record type that
+                selects the "user" partition is skipped when ``None`` (see
+                ``ensure_unique_by``'s bound-tuple rule).
             parent_record_id: Proposed parent record id (used to enforce
-                ``parent_required`` on the RecordType).
+                ``parent_required`` on the RecordType, and as the "parent"
+                partition of the unique_by check).
 
         Raises:
             RecordTypeNotFoundError: If record type doesn't exist.
@@ -1250,49 +1257,79 @@ class RecordRepository(BaseRepository[Record]):
                     f"The maximum records limit ({count} of {record_type.max_records}) is reached"
                 )
 
-        # Check unique_per_user constraint
-        if user_id is not None and patient_id is not None:
-            await self.ensure_unique_per_user(
+        # Check unique_by constraint
+        if patient_id is not None:
+            await self.ensure_unique_by(
                 record_type,
-                user_id,
+                user_id=user_id,
+                parent_record_id=parent_record_id,
                 patient_id=patient_id,
                 study_uid=study_uid,
                 series_uid=series_uid,
             )
 
-    async def ensure_unique_per_user(
+    async def ensure_unique_by(
         self,
         record_type: RecordType,
-        user_id: UUID,
         *,
+        user_id: UUID | None,
+        parent_record_id: int | None,
         patient_id: str,
         study_uid: str | None,
         series_uid: str | None,
+        exclude_record_id: int | None = None,
     ) -> None:
-        """Raise if the user already has a record of this unique-per-user type.
+        """Raise if another record already matches on every selected partition.
 
-        No-op when the type is not ``unique_per_user``. Also used by
-        ``RecordService.create_record`` to re-check after parent ``user_id``
-        inheritance, which happens after the route-level constraint check.
+        No-op when ``record_type.unique_by`` is ``None``. Bound-tuple rule:
+        when "user" is a selected partition and ``user_id`` is ``None``, the
+        check is skipped entirely — an unassigned record's user axis is not
+        yet evaluable, so pools are permitted; the invariant is enforced at
+        claim/assign time via this same method with ``user_id`` set. Also
+        used by ``RecordService.create_record`` to re-check after parent
+        ``user_id`` inheritance, which happens after the route-level
+        constraint check, and by ``RecordService`` assign/claim/submit paths.
+
+        ``exclude_record_id`` excludes the record under evaluation itself
+        from the match count. Required whenever the candidate row already
+        exists in the DB (assignment-time re-checks) — otherwise it matches
+        its own row and every assignment to an already-persisted record
+        would 409 against itself. Creation-time callers pass nothing since
+        the row doesn't exist yet.
 
         Raises:
-            RecordUniquePerUserError: If a record already exists for the user
-                in the given DICOM context.
+            RecordUniquePerUserError: If another record already exists matching
+                every selected partition in the given DICOM context.
         """
-        if not record_type.unique_per_user:
+        parts = record_type.unique_by
+        if parts is None:
             return
-        user_count = await self.count_user_records_for_context(
-            user_id=user_id,
-            record_type_name=record_type.name,
-            patient_id=patient_id,
-            study_uid=study_uid,
-            series_uid=series_uid,
-            level=record_type.level,
+        if "user" in parts and user_id is None:
+            return
+        query = select(func.count(col(Record.id))).where(
+            Record.record_type_name == record_type.name,
         )
-        if user_count > 0:
+        if exclude_record_id is not None:
+            query = query.where(col(Record.id) != exclude_record_id)
+        match record_type.level:
+            case DicomQueryLevel.PATIENT:
+                query = query.where(Record.patient_id == patient_id)
+            case DicomQueryLevel.STUDY:
+                query = query.where(Record.study_uid == study_uid)
+            case DicomQueryLevel.SERIES:
+                query = query.where(Record.series_uid == series_uid)
+        if "user" in parts:
+            query = query.where(col(Record.user_id) == user_id)
+        if "parent" in parts:
+            query = query.where(
+                col(Record.parent_record_id).is_(None)
+                if parent_record_id is None
+                else Record.parent_record_id == parent_record_id
+            )
+        if (await self.session.execute(query)).scalar_one() > 0:
             raise RecordUniquePerUserError(
-                f"User already has a record of type '{record_type.name}' "
-                f"for this {record_type.level.lower()} context"
+                f"A record of type '{record_type.name}' already exists for "
+                f"unique_by={sorted(parts)} in this {record_type.level.lower()} context"
             )
 
     @staticmethod
@@ -1336,7 +1373,7 @@ class RecordRepository(BaseRepository[Record]):
             statement = statement.where(op_fn(data_field.cast(query.sql_type), query.result_value))
         return statement
 
-    def _build_criteria_query(self, criteria: RecordSearchCriteria) -> SelectOfScalar[Record]:
+    async def _build_criteria_query(self, criteria: RecordSearchCriteria) -> SelectOfScalar[Record]:
         """Build a filtered SELECT from criteria, WITHOUT ordering or pagination."""
         statement = (
             select(Record)
@@ -1422,7 +1459,10 @@ class RecordRepository(BaseRepository[Record]):
                 statement = statement.where(Record.user_id == criteria.user_id)
 
         if criteria.exclude_unique_violations and criteria.user_id:
-            statement = statement.where(_unique_per_user_violation_filter(criteria.user_id))
+            user_only, user_parent = await _partitioned_unique_type_names(self.session)
+            statement = statement.where(
+                _unique_by_violation_filter(criteria.user_id, user_only, user_parent)
+            )
 
         # Record filters
         if criteria.record_status:
@@ -1451,7 +1491,7 @@ class RecordRepository(BaseRepository[Record]):
         limit: int = 100,
     ) -> Sequence[Record]:
         """Find records by various criteria with all relations loaded."""
-        statement = self._build_criteria_query(criteria)
+        statement = await self._build_criteria_query(criteria)
 
         # Pagination — all joins are N:1, so no duplicates possible (.distinct() removed
         # because PostgreSQL cannot compare JSON columns needed by Record.data).
@@ -1480,7 +1520,7 @@ class RecordRepository(BaseRepository[Record]):
         select-then-claim atomic. SQLite omits the clause (no row locking),
         which only relaxes the in-memory test runner, never production.
         """
-        statement = self._build_criteria_query(criteria)
+        statement = await self._build_criteria_query(criteria)
         statement = statement.order_by(func.random()).limit(1)
         if for_update:
             statement = statement.with_for_update(skip_locked=True, of=Record)
@@ -1499,7 +1539,7 @@ class RecordRepository(BaseRepository[Record]):
         if criteria.random_one:
             raise ValidationError("random_one is incompatible with cursor pagination")
 
-        statement = self._build_criteria_query(criteria)
+        statement = await self._build_criteria_query(criteria)
         sort_spec = _SORT_SPECS[sort]
 
         # Optional join for modality sort (Series may not be filtered elsewhere)
@@ -1651,14 +1691,14 @@ class RecordRepository(BaseRepository[Record]):
         """Count records a user could claim right now.
 
         Counts ``pending``, unassigned records whose ``RecordType`` the user
-        may act on, excluding the user's own ``unique_per_user`` conflicts.
-        This mirrors ``claim-next`` eligibility (role-scoped and
-        ``unique_per_user``-aware), so the admin-dashboard figure matches what
-        the user can actually take from the pool.
+        may act on, excluding the user's own ``unique_by`` conflicts. This
+        mirrors ``claim-next`` eligibility (role-scoped and ``unique_by``-
+        aware), so the admin-dashboard figure matches what the user can
+        actually take from the pool.
 
         Args:
             user_id: User whose claimable pool is counted; drives the
-                ``unique_per_user`` violation filter.
+                ``unique_by`` violation filter.
             role_names: Restrict to record types in these roles. An empty list
                 yields ``0`` (a role-less regular user claims nothing).
                 ``None`` applies no role restriction — the whole pool,
@@ -1669,6 +1709,7 @@ class RecordRepository(BaseRepository[Record]):
         """
         if role_names is not None and not role_names:
             return 0
+        user_only, user_parent = await _partitioned_unique_type_names(self.session)
         query = (
             select(func.count())
             .select_from(Record)
@@ -1676,7 +1717,7 @@ class RecordRepository(BaseRepository[Record]):
             .where(
                 col(Record.user_id).is_(None),
                 col(Record.status) == RecordStatus.pending,
-                _unique_per_user_violation_filter(user_id),
+                _unique_by_violation_filter(user_id, user_only, user_parent),
             )
         )
         if role_names is not None:
@@ -1710,7 +1751,7 @@ class RecordRepository(BaseRepository[Record]):
         # become inert; the resulting subquery is a thin SELECT of the
         # three columns we actually distinct/group on below.
         subq = (
-            self._build_criteria_query(criteria)
+            (await self._build_criteria_query(criteria))
             .with_only_columns(
                 col(Record.patient_id),
                 col(Record.record_type_name),
@@ -1799,7 +1840,7 @@ class RecordRepository(BaseRepository[Record]):
         Args:
             user_id: User UUID
             exclude_unique_violations: If True, exclude unassigned records that
-                violate unique_per_user for this user
+                violate unique_by for this user
 
         Returns:
             Dict mapping RecordType to count of pending records
@@ -1819,7 +1860,10 @@ class RecordRepository(BaseRepository[Record]):
             .where(Record.status == RecordStatus.pending)
         )
         if exclude_unique_violations:
-            statement = statement.where(_unique_per_user_violation_filter(user_id))
+            user_only, user_parent = await _partitioned_unique_type_names(self.session)
+            statement = statement.where(
+                _unique_by_violation_filter(user_id, user_only, user_parent)
+            )
         statement = statement.group_by(col(RecordType.name))
         result = await self.session.execute(statement)
         rows = result.all()

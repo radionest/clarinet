@@ -249,7 +249,7 @@ async def get_my_available_record_types(
     response_model=RecordRead,
     responses={
         404: {"description": "No claimable record of this type in the pool"},
-        409: {"description": "unique_per_user violated for this user and type"},
+        409: {"description": "unique_by violated for this user and type"},
     },
 )
 async def claim_next_record(
@@ -262,7 +262,7 @@ async def claim_next_record(
 
     Powers the dashboard "take a task" action: picks one random ``pending`` record
     with no assigned user that the caller may work on (role match, no
-    ``unique_per_user`` conflict), assigns it to the caller and moves it to
+    ``unique_by`` conflict), assigns it to the caller and moves it to
     ``inwork``. The claimable scope is built by ``_build_record_search_criteria``
     exactly like the records list, so role filtering and unique-violation hiding
     stay consistent; the find-and-claim itself runs in
@@ -324,14 +324,14 @@ async def check_record_constraints(
     new_record: RecordCreate,
     repo: RecordRepositoryDep,
 ) -> None:
-    """Check if a record can be created based on max_records and unique_per_user constraints.
+    """Check if a record can be created based on max_records and unique_by constraints.
 
     Args:
         new_record: Record creation payload.
         repo: Record repository.
 
     Raises:
-        RecordConstraintViolationError: If max_records or unique_per_user is violated.
+        RecordConstraintViolationError: If max_records or unique_by is violated.
         RecordTypeNotFoundError: If the record type does not exist.
     """
     await repo.check_constraints(
@@ -1082,7 +1082,7 @@ def _build_record_search_criteria(
 
     Regular users get their roles attached, ``include_unassigned=True``, and
     ``exclude_unique_violations=True`` so unassigned context-duplicates of
-    unique_per_user types they already completed are hidden. Superusers get
+    unique_by types they already completed are hidden. Superusers get
     no role filter and no violation filter.
     """
     is_regular_user = not user.is_superuser
@@ -1131,7 +1131,7 @@ async def get_record_filter_options(
 ) -> RecordFilterOptions:
     """Distinct patient/record_type/user values within the caller's scope.
 
-    RBAC scope (role_names, unique_per_user) is applied; user-driven UI
+    RBAC scope (role_names, unique_by) is applied; user-driven UI
     filters in the body are IGNORED so the dropdowns always reflect the
     user's full accessible scope. For non-superusers, anonymized
     patient_ids are masked to their ``anon_id`` (see

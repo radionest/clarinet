@@ -244,8 +244,8 @@ class TestFindPageUniqueViolationFilter:
     """Tests for RecordSearchCriteria.exclude_unique_violations in find_page.
 
     Verifies that the criteria flag wires the existing
-    ``_unique_per_user_violation_filter`` into ``find_page`` for unassigned
-    records of ``unique_per_user`` types, while leaving non-unique types and
+    ``_unique_by_violation_filter`` into ``find_page`` for unassigned
+    records of ``unique_by`` types, while leaving non-unique types and
     superuser-style queries (flag off) untouched.
     """
 
@@ -255,7 +255,7 @@ class TestFindPageUniqueViolationFilter:
     ):
         rt = RecordType(
             name="upu-study-rt",
-            unique_per_user=True,
+            unique_by=frozenset({"user"}),
             level=DicomQueryLevel.STUDY,
         )
         test_session.add(rt)
@@ -297,7 +297,7 @@ class TestFindPageUniqueViolationFilter:
     ):
         rt = RecordType(
             name="upu-study-rt-off",
-            unique_per_user=True,
+            unique_by=frozenset({"user"}),
             level=DicomQueryLevel.STUDY,
         )
         test_session.add(rt)
@@ -339,7 +339,7 @@ class TestFindPageUniqueViolationFilter:
     ):
         rt = RecordType(
             name="non-upu-rt",
-            unique_per_user=False,
+            unique_by=None,
             level=DicomQueryLevel.STUDY,
         )
         test_session.add(rt)

@@ -202,7 +202,7 @@ class Record(RecordBase, table=True):
     parent_record_id: int | None = Field(
         default=None,
         foreign_key="record.id",
-        ondelete="SET NULL",
+        ondelete="CASCADE",
     )
     parent_record: Optional["Record"] = Relationship(
         back_populates="child_records",

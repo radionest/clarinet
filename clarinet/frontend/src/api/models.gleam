@@ -78,7 +78,7 @@ pub type RecordType {
     role_name: Option(String),
     max_records: Option(Int),
     min_records: Option(Int),
-    unique_per_user: Bool,
+    unique_by: Option(List(String)),
     parent_required: Bool,
     inherit_user_from_parent: Bool,
     editable: Bool,
@@ -253,7 +253,7 @@ pub type RecordTypeCreate {
     role_name: Option(String),
     max_records: Option(Int),
     min_records: Option(Int),
-    unique_per_user: Bool,
+    unique_by: Option(List(String)),
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
   )

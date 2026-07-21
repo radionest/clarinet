@@ -83,11 +83,11 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     ]
     series_level_types = ["series-markup"]
     for name in study_level_types:
-        rt = RecordType(name=name, level=DicomQueryLevel.STUDY, unique_per_user=False)
+        rt = RecordType(name=name, level=DicomQueryLevel.STUDY, unique_by=None)
         test_session.add(rt)
         types[name] = rt
     for name in series_level_types:
-        rt = RecordType(name=name, level=DicomQueryLevel.SERIES, unique_per_user=False)
+        rt = RecordType(name=name, level=DicomQueryLevel.SERIES, unique_by=None)
         test_session.add(rt)
         types[name] = rt
     # Constrained type for idempotency tests: at most one per study, so a flow that
@@ -95,7 +95,7 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     singleton = RecordType(
         name="singleton-child",
         level=DicomQueryLevel.STUDY,
-        unique_per_user=False,
+        unique_by=None,
         max_records=1,
     )
     test_session.add(singleton)
@@ -2001,12 +2001,12 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-summary",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         sentinel_type = RecordType(
             name="sentinel-output",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add_all([pat_type, sentinel_type])
         await test_session.commit()
@@ -2070,12 +2070,12 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-summary-any",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         sentinel_type = RecordType(
             name="sentinel-any-output",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add_all([pat_type, sentinel_type])
         await test_session.commit()
@@ -2133,7 +2133,7 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-trigger-bulk",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add(pat_type)
         await test_session.commit()
@@ -2184,7 +2184,7 @@ class TestTreeFilterContext:
         pat_type = RecordType(
             name="pat-trigger-single",
             level=DicomQueryLevel.PATIENT,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add(pat_type)
         await test_session.commit()
@@ -2237,12 +2237,12 @@ class TestTreeFilterContext:
         meta_type = RecordType(
             name="markup-meta",
             level=DicomQueryLevel.SERIES,
-            unique_per_user=False,
+            unique_by=None,
         )
         output_type = RecordType(
             name="series-output",
             level=DicomQueryLevel.SERIES,
-            unique_per_user=False,
+            unique_by=None,
         )
         test_session.add_all([meta_type, output_type])
         await test_session.commit()

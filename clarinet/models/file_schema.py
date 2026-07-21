@@ -15,6 +15,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import StringConstraints, field_validator
+from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 from clarinet.models.base import DicomQueryLevel
@@ -86,6 +87,9 @@ class RecordTypeFileLink(SQLModel, table=True):
         file_definition_id: FK to FileDefinition.id.
         role: File role in the processing pipeline (input/output/intermediate).
         required: Whether this file is required.
+        allow_path_collision: Whether this binding may share its resolved path
+            with another file of the record (opt-out of the default collision
+            guard).
     """
 
     __tablename__ = "recordtype_file_link"
@@ -102,6 +106,10 @@ class RecordTypeFileLink(SQLModel, table=True):
     )
     role: FileRole = Field(default=FileRole.OUTPUT)
     required: bool = Field(default=True)
+    allow_path_collision: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": sql_expression.false()},
+    )
 
     record_type: "RecordType" = Relationship(back_populates="file_links")
     file_definition: FileDefinition = Relationship(back_populates="record_type_links")
@@ -145,6 +153,8 @@ class FileDefinitionRead(SQLModel):
         required: Whether this file is required (from binding).
         multiple: Whether this is a collection (glob) vs singular file.
         role: File role in the processing pipeline (from binding).
+        allow_path_collision: Whether this binding may share its resolved path
+            with another file of the record (from binding).
     """
 
     name: Annotated[
@@ -157,6 +167,7 @@ class FileDefinitionRead(SQLModel):
     multiple: bool = False
     role: FileRole = FileRole.OUTPUT
     level: DicomQueryLevel | None = None
+    allow_path_collision: bool = False
 
     @field_validator("name")
     @classmethod

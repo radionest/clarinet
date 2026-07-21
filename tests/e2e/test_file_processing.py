@@ -126,6 +126,12 @@ async def rt_with_files(client: AsyncClient) -> dict:
         "description": "Record type with file definitions",
         "label": "File Test",
         "level": "SERIES",
+        # Plain "mask.nii.gz" has no {user_id}/{parent_id}/{id} placeholder —
+        # tests below write/assert that literal filename, so the pattern can't
+        # change; opt out of the uniqueness check instead (each test creates at
+        # most one "file-test" record per series, so max_records=1 holds).
+        "unique_by": None,
+        "max_records": 1,
         "file_registry": [
             {
                 "name": "input_nifti",

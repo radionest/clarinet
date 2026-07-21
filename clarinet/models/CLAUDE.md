@@ -62,12 +62,39 @@ select(Record).options(
 
 Record supports optional parent-child links via `parent_record_id` — fully independent of RecordType.
 
-**Record**: `parent_record_id` (FK → `record.id`, ON DELETE SET NULL) links to a specific parent record.
+**Record**: `parent_record_id` (FK → `record.id`, ON DELETE CASCADE — was `SET NULL`) links to a specific parent record; a DB-level delete now removes descendants too, instead of just orphaning them. The framework's own cascade-delete flow (`RecordRepository.delete_records`) already pre-collects the full subtree before deleting, so this FK is a safety net for any deletion path that doesn't.
 - Self-referencing FK with `Relationship` (parent_record / child_records)
 - Parent existence validated in `RecordService.create_record()` (raises `RecordNotFoundError` → 404)
 - `user_id` is inherited from parent only when the child's `RecordType.inherit_user_from_parent` is `True` and no explicit `user_id` is given (applied in `RecordService.create_record`)
 
 **RecordFlow**: `CreateRecordAction` supports explicit `parent_record_id` kwarg and inherits `user_id` from the triggering record if `inherit_user=True`.
+
+## Uniqueness Partitions (`RecordType.unique_by`)
+
+`unique_by: frozenset[str] | None`, subset of `{"user", "parent"}` — declared
+in config, see `clarinet/config/CLAUDE.md`. At the model layer: canonicalized
+by `clarinet/models/uniqueness.py::canonical_unique_by`; DB rows store a
+sorted JSON list, not a frozenset (`table=True` models skip Pydantic
+validation, so `RecordType.unique_by` read off the ORM is the raw list/`None`).
+
+**Bound-tuple rule**: when `"user"` is a selected partition and the candidate
+`user_id` is `None`, the uniqueness check is skipped — an unassigned record's
+user axis isn't evaluable yet, so unassigned pools stay creatable; the
+invariant closes at claim/assign time via the same check with `user_id` now
+bound. A type selecting only `{"parent"}` has no such gap — it dedupes at
+creation regardless of assignment. Enforcement lives in
+`RecordRepository.ensure_unique_by` (create/claim/assign) plus read-side pool
+filters — full method list in `.claude/rules/record-repo.md`.
+
+**`max_records` is an orthogonal, total quota** — it caps how many records of
+the type may coexist at a DICOM-level context *in total*, regardless of
+partition; `unique_by` only says how many a given partition tuple may hold
+(at most one). A type with `unique_by={"parent"}` and `max_records=4` allows
+up to 4 coexisting records at that level, one per distinct parent — raising
+`max_records` doesn't loosen the per-parent dedup, and narrowing `unique_by`
+doesn't loosen the total cap. `max_records=1` combined with `unique_by=None`
+is the idiom for a plain one-per-level singleton (no partition needed because
+only one record can ever exist).
 
 ## Search Models
 
@@ -176,6 +203,18 @@ because every inherited field becomes a DB column.
 Classes inheriting `SQLModel` (even `table=False` DTOs) take `schema_extra={...}`;
 `json_schema_extra` is Pydantic's spelling. Using the wrong one silently does nothing.
 
+## SQLite Foreign Key Enforcement
+
+SQLite does not enforce FK constraints by default. `PRAGMA foreign_keys=ON` is
+set on every file-based SQLite connection (`db_manager.py`; skipped for the
+`:memory:` test pool), so `ON DELETE CASCADE`/`SET NULL` clauses actually run
+on SQLite instead of being metadata-only. A write that used to silently leave
+a dangling reference now fails outright. A legacy database created before
+this pragma took effect may carry dangling rows (e.g. an orphaned child from
+a pre-enforcement deletion); at startup `DatabaseManager._audit_sqlite_foreign_keys`
+runs `PRAGMA foreign_key_check` and logs a `WARNING` per violation — diagnostic
+only, it never aborts startup.
+
 ## Additive migrations on populated tables
 
 **Every new non-nullable column on an existing table must declare `server_default`.**
@@ -199,7 +238,7 @@ mask_patient_data: bool = Field(
 model `default`.** A freshly-created row takes the Pydantic default; a
 migration-backfilled row takes the `server_default`. If the two disagree the row is
 born with a value the config reconciler cannot converge — issue #389, where
-`unique_per_user` shipped `default=True` with `server_default=false()`. The metadata
+`unique_per_user` (field since replaced by unique_by) shipped `default=True` with `server_default=false()`. The metadata
 guard `test_recordtype_bool_server_defaults_match_model_defaults` (in the class
 below) enforces the match for every Boolean column.
 

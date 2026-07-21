@@ -5,6 +5,8 @@ matching the current SQLModel metadata — tables, columns, foreign keys,
 unique constraints, and indexes.
 """
 
+import json
+
 import pytest
 from sqlalchemy import Boolean
 from sqlmodel import SQLModel
@@ -307,9 +309,13 @@ class TestServerDefaultsForAdditiveMigrations:
 
         # Guard against a vacuous pass: if a future server_default stops rendering
         # to a render_to_bool key, the loop would silently examine nothing and the
-        # mismatch assert would pass without checking anything. Pin the #389 field.
-        assert "unique_per_user" in examined, (
-            "guard examined no server_default for unique_per_user (the #389 field) — "
+        # mismatch assert would pass without checking anything. Pin a RecordType
+        # Boolean field that is guaranteed to keep a matching server_default.
+        # (The original #389 field, ``unique_per_user``, was replaced by the
+        # JSON-typed ``unique_by`` column — checked separately below by
+        # ``test_recordtype_unique_by_server_default_matches_model_default``.)
+        assert "mask_patient_data" in examined, (
+            "guard examined no server_default for mask_patient_data — "
             f"render_to_bool likely no longer covers its literal. Examined: {examined}"
         )
 
@@ -320,4 +326,41 @@ class TestServerDefaultsForAdditiveMigrations:
             "converge them (issue #389). Align the sa_column_kwargs "
             "server_default with the Field default.\n"
             f"Mismatches: {mismatches}"
+        )
+
+    def test_recordtype_unique_by_server_default_matches_model_default(self):
+        """Regression: ``unique_by``'s server_default must decode to the same
+        partition set as the Pydantic ``default_factory`` (``DEFAULT_UNIQUE_BY``).
+
+        Same rationale as issue #389's Boolean guard above, applied to the
+        JSON-typed replacement of ``unique_per_user``: a freshly-created row
+        and a migration-backfilled row must agree.
+        """
+        from clarinet.models import RecordType
+        from clarinet.models.uniqueness import DEFAULT_UNIQUE_BY
+
+        col = RecordType.__table__.c.unique_by
+        assert col.nullable, "unique_by must stay nullable (None = no uniqueness)"
+        assert col.server_default is not None, "unique_by must declare server_default"
+
+        rendered = json.loads(col.server_default.arg)
+        assert frozenset(rendered) == DEFAULT_UNIQUE_BY, (
+            f"unique_by server_default {rendered!r} does not match model default "
+            f"{sorted(DEFAULT_UNIQUE_BY)!r}"
+        )
+
+    def test_recordtype_file_link_allow_path_collision_has_server_default(self):
+        """Targeted regression mirroring ``test_recordtype_mask_patient_data_has_server_default``.
+
+        ``allow_path_collision`` is a NOT NULL Boolean added to an existing
+        table (``recordtype_file_link``) — it must keep its ``server_default``
+        so an additive migration does not fail on populated PostgreSQL tables
+        (PR #144/#149 bug class).
+        """
+        from clarinet.models import RecordTypeFileLink
+
+        col = RecordTypeFileLink.__table__.c.allow_path_collision
+        assert not col.nullable, "allow_path_collision must remain NOT NULL"
+        assert col.server_default is not None, (
+            "allow_path_collision must declare server_default — see clarinet/models/file_schema.py."
         )

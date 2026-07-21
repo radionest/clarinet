@@ -49,21 +49,30 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | Method | Description |
 |---|---|
 | `collect_descendants(root_id, *, for_update=False)` | BFS-collect root + descendants with full eager load. `for_update=True` locks the whole subtree |
-| `delete_records(record_ids, *, commit=True)` | Bulk SQL `DELETE` (relies on FK `ON DELETE CASCADE` for `RecordFileLink`, `SET NULL` for `parent_record_id`). `commit=False` keeps the txn / locks open for the caller |
+| `delete_records(record_ids, *, commit=True)` | Bulk SQL `DELETE` (relies on FK `ON DELETE CASCADE` for both `RecordFileLink` and `parent_record_id`). `commit=False` keeps the txn / locks open for the caller |
 
 ### Validation / counters
 
 | Method | Description |
 |---|---|
-| `check_constraints(record, record_type)` | Validate RecordType constraints (level-UID consistency, parent_required, max_records, unique_per_user) |
-| `ensure_unique_per_user(record_type, user_id, *, patient_id, study_uid, series_uid)` | Raise `RecordUniquePerUserError` if the user already has a record of this `unique_per_user` type in the context; no-op otherwise. Also re-run by `RecordService.create_record` after parent user_id inheritance |
-| `count_by_type_and_context(name, patient_id, study_uid, series_uid, level)` | Count records matching type at the given DicomQueryLevel context (PATIENT → patient_id, STUDY → study_uid, SERIES → series_uid) |
-| `count_user_records_for_context(user_id, name, patient_id, study_uid, series_uid, level)` | Count user's records for unique-per-user constraint at given DicomQueryLevel |
-| `get_available_type_counts(user_id)` | Dict of available RecordType -> count (batch-loaded to avoid N+1) |
-| `count_available_pending_for_user(user_id, role_names)` | Count of claimable records (pending + unassigned, role-scoped, `unique_per_user`-aware via `_unique_per_user_violation_filter`). `role_names=None` → whole pool (superuser); `[]` → 0. Powers the admin-dashboard `Claimable` column |
+| `check_constraints(record_type_name, series_uid, study_uid, patient_id=, user_id=, parent_record_id=)` | Validate RecordType constraints: level-UID consistency, parent_required, max_records, and (when `patient_id` is given) `unique_by` via `ensure_unique_by` |
+| `ensure_unique_by(record_type, *, user_id, parent_record_id, patient_id, study_uid, series_uid, exclude_record_id=None)` | Raise `RecordUniquePerUserError` if another record already matches on every selected `unique_by` partition in this DICOM-level context; no-op when `unique_by` is `None`. **Bound-tuple rule**: skipped entirely when `"user"` is a selected partition and `user_id` is `None` — an unassigned record's user axis isn't evaluable yet, so pools stay creatable; the check closes at claim/assign time via this same method with `user_id` bound. A `{"parent"}`-only type has no such gap and dedupes at creation. `exclude_record_id` excludes the record under evaluation from the match count — required at assignment time (`RecordService._check_unique_by`, used by assign/claim/submit-auto-assign) since the candidate row already exists; creation-time callers (`check_constraints`, and `RecordService.create_record`'s parent user_id-inheritance re-check) omit it since the row doesn't exist yet |
+| `count_by_type_and_context(record_type_name, patient_id, study_uid, series_uid, level)` | Count records matching type at the given DicomQueryLevel context (PATIENT → patient_id, STUDY → study_uid, SERIES → series_uid) |
+| `get_available_type_counts(user_id, exclude_unique_violations=False)` | Dict of available RecordType -> count (batch-loaded to avoid N+1); `exclude_unique_violations=True` drops unassigned records that would violate `unique_by` for this user |
+| `count_available_pending_for_user(user_id, role_names)` | Count of claimable records (pending + unassigned, role-scoped, `unique_by`-aware via `_unique_by_violation_filter`). `role_names=None` → whole pool (superuser); `[]` → 0. Powers the admin-dashboard `Claimable` column |
 | `get_status_counts()` | Global status counts |
 | `get_per_type_status_counts()` | Status counts per type |
 | `get_per_type_unique_users()` | Unique user count per type |
+
+## Constraint predicates: pre-insert vs post-insert reuse
+
+A count/EXISTS uniqueness or quota check written for creation (candidate row
+absent) silently matches the candidate itself when reused after the row is
+persisted (claim/assign/update) — `ensure_unique_by` did exactly this at
+assignment time, producing listed-but-unclaimable records. Whenever such a
+predicate is called with an already-persisted candidate row, it must take an
+exclude-self parameter (`exclude_record_id`-style) and have a test asserting
+the idempotent re-check case (re-validating an existing row passes).
 
 ## RecordTypeRepository Methods
 
@@ -96,7 +105,7 @@ When implementing record/entity deletion with cascade:
 - **Single transaction**: collect descendants → lock → delete files → `delete_records(commit=False)` — all in one `async with session.begin()` block. Never delete files outside the transaction boundary
 - **File cleanup**: wrap `Path.unlink()` in `try/except OSError` — files may already be missing (concurrent cleanup, manual removal). Log warnings, don't raise
 - **Conflict detection**: if a record is `inwork` (actively being edited), return 409 Conflict rather than silently deleting. Check status **after** acquiring the lock
-- **FK behaviour**: `delete_records` issues a single bulk SQL `DELETE` and relies on DB-level `ON DELETE CASCADE` (`RecordFileLink`) and `ON DELETE SET NULL` (`parent_record_id`) — no manual reverse-topological deletion needed
+- **FK behaviour**: `delete_records` issues a single bulk SQL `DELETE` and relies on DB-level `ON DELETE CASCADE` on both `RecordFileLink` and `parent_record_id` (SQLite enforces this only when `PRAGMA foreign_keys=ON`, always set for file-based SQLite — see `clarinet/models/CLAUDE.md`) — no manual reverse-topological deletion needed. `collect_descendants` still walks the full subtree first, so the emitted `deleted` event lists every removed id even though the FK would also catch stragglers
 
 ## PatientRepository: auto_id Generation
 

@@ -20,9 +20,10 @@ from clarinet.config.toml_exporter import (
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
-from clarinet.models.file_schema import RecordTypeFileLink
+from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.record_type import RecordTypeBase
+from clarinet.models.uniqueness import canonical_unique_by
 from clarinet.utils.config_loader import discover_config_files, load_record_config
 
 
@@ -262,6 +263,115 @@ async def test_file_registry_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_export_includes_allow_path_collision(tmp_path) -> None:
+    """TOML export writes allow_path_collision for an opted-out OUTPUT file,
+    and omits it (default False) for a plain file — mirrors ``multiple``.
+    """
+    import tomllib
+
+    rt = RecordType(name="collision-export", level="SERIES")
+    rt.file_links = [
+        RecordTypeFileLink(
+            record_type_name="collision-export",
+            file_definition=FileDefinition(name="report_file", pattern="report.pdf"),
+            role=FileRole.OUTPUT,
+            required=True,
+            allow_path_collision=True,
+        ),
+        RecordTypeFileLink(
+            record_type_name="collision-export",
+            file_definition=FileDefinition(name="seg_file", pattern="seg_{id}.nrrd"),
+            role=FileRole.OUTPUT,
+            required=True,
+            allow_path_collision=False,
+        ),
+    ]
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+
+    files_by_name = {f["name"]: f for f in content["file_registry"]}
+    assert files_by_name["report_file"]["allow_path_collision"] is True
+    assert "allow_path_collision" not in files_by_name["seg_file"]
+
+
+@pytest.mark.asyncio
+async def test_allow_path_collision_round_trip_survives_reexport(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """TOML(opt-out=true) -> DB (reconcile) -> re-export -> reload must keep
+    the opt-out and NOT fail config-load validation.
+
+    Regression for the boot-failure scenario: this OUTPUT file has no
+    discriminating placeholder and relies entirely on
+    ``allow_path_collision`` to pass ``validate_output_path_uniqueness``. If
+    the reconciler's DB write (``sync_file_links``) or the exporter drops
+    the flag anywhere along the way, the type fails to load on the next
+    startup with ``RecordConstraintViolationError``.
+    """
+    import tomllib
+
+    file_def = {
+        "name": "report_file",
+        "pattern": "report.pdf",  # no discriminating placeholder
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "allow_path_collision": True,
+    }
+    _write_toml(
+        tmp_path,
+        "collision-trip",
+        {
+            "name": "collision-trip",
+            "level": "SERIES",
+            "unique_by": False,
+            "max_records": 4,  # >1 coexisting, no unique_by -> {id} normally required
+            "file_registry": [file_def],
+        },
+    )
+    _write_schema(tmp_path, "collision-trip", {"type": "object"})
+
+    # Load + reconcile into DB
+    config_files = discover_config_files(str(tmp_path))
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    await reconcile_record_types(items, test_session)
+
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "collision-trip")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.file_registry[0].allow_path_collision is True  # DB write kept the flag
+
+    # Re-export to TOML (simulates the API-triggered background export)
+    export_dir = tmp_path / "export"
+    await export_record_type_to_toml(rt, export_dir)
+    _write_schema(export_dir, "collision-trip", {"type": "object"})
+
+    exported = tomllib.loads((export_dir / "collision-trip.toml").read_text())
+    assert exported["file_registry"][0]["allow_path_collision"] is True
+
+    # Reload the re-exported TOML exactly like a fresh startup would — must
+    # NOT raise RecordConstraintViolationError.
+    reload_files = discover_config_files(str(export_dir))
+    reload_props = await load_record_config(reload_files[0])
+    assert reload_props is not None
+    reloaded = RecordTypeCreate(**reload_props)
+    assert reloaded.file_registry[0].allow_path_collision is True
+
+
+@pytest.mark.asyncio
 async def test_export_includes_viewer_mode(tmp_path) -> None:
     """TOML export includes viewer_mode field."""
     import tomllib
@@ -352,19 +462,62 @@ async def test_export_includes_editable_flags(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_export_includes_unique_per_user(tmp_path) -> None:
-    """TOML export includes unique_per_user field."""
+async def test_export_includes_unique_by(tmp_path) -> None:
+    """TOML export serializes unique_by: None -> false, a set -> sorted list.
+
+    ``false`` is the required spelling for "off" (TOML has no null) — an
+    absent key would heal to the parent-inclusive default on reload and
+    silently re-enable uniqueness.
+    """
     import tomllib
 
-    rt = RecordType(
-        name="unique-test",
-        level="SERIES",
-        unique_per_user=False,
-    )
-
-    path = await export_record_type_to_toml(rt, tmp_path)
+    rt_off = RecordType(name="unique-off", level="SERIES", unique_by=None)
+    path = await export_record_type_to_toml(rt_off, tmp_path)
     content = tomllib.loads(path.read_text())
-    assert content["unique_per_user"] is False
+    assert content["unique_by"] is False
+
+    rt_user = RecordType(name="unique-user", level="SERIES", unique_by={"user"})
+    path = await export_record_type_to_toml(rt_user, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_by"] == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_export_unique_by_from_raw_db_row(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """Exporter must handle a DB-loaded row whose unique_by is a raw JSON
+    list, not just a constructed model's frozenset.
+
+    ``RecordType`` (table=True) skips Pydantic validation when SQLAlchemy
+    hydrates attributes from a query row, so a fetched row's ``unique_by``
+    is the raw JSON-decoded list (or None) as stored — unlike a directly
+    constructed ``RecordType(...)``, whose ``__init__`` runs the
+    canonicalizing field validator and always yields a frozenset.
+    """
+    import tomllib
+
+    rt = RecordType(name="db-row-unique", level="SERIES", unique_by={"parent"})
+    test_session.add(rt)
+    await test_session.commit()
+    test_session.expire_all()
+
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "db-row-unique")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    fetched = (await test_session.execute(stmt)).scalar_one()
+    assert isinstance(fetched.unique_by, list)  # raw JSON shape, not a frozenset
+
+    path = await export_record_type_to_toml(fetched, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_by"] == ["parent"]
 
 
 @pytest.mark.asyncio
@@ -385,14 +538,14 @@ async def test_export_includes_parent_required(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_export_includes_constraint_flags_default(tmp_path) -> None:
-    """TOML export includes unique_per_user/parent_required with defaults."""
+    """TOML export includes unique_by/parent_required with defaults."""
     import tomllib
 
     rt = RecordType(name="flags-default", level="SERIES")
 
     path = await export_record_type_to_toml(rt, tmp_path)
     content = tomllib.loads(path.read_text())
-    assert content["unique_per_user"] is True
+    assert content["unique_by"] == ["parent", "user"]
     assert content["parent_required"] is False
 
 
@@ -432,7 +585,7 @@ async def test_constraint_flags_round_trip(
         {
             "name": "flags-trip",
             "level": "SERIES",
-            "unique_per_user": False,
+            "unique_by": False,
             "parent_required": True,
         },
     )
@@ -448,7 +601,7 @@ async def test_constraint_flags_round_trip(
 
     stmt = select(RecordType).where(RecordType.name == "flags-trip")
     rt = (await test_session.execute(stmt)).scalar_one()
-    assert rt.unique_per_user is False
+    assert canonical_unique_by(rt.unique_by) is None
     assert rt.parent_required is True
 
     # Flip both flags in TOML → reconcile must apply them on UPDATE
@@ -458,7 +611,7 @@ async def test_constraint_flags_round_trip(
         {
             "name": "flags-trip",
             "level": "SERIES",
-            "unique_per_user": True,
+            "unique_by": ["user"],
             "parent_required": False,
         },
     )
@@ -474,9 +627,60 @@ async def test_constraint_flags_round_trip(
     result = await reconcile_record_types(items, test_session)
     assert "flags-trip" in result.updated
 
+    test_session.expire_all()
     rt = (await test_session.execute(stmt)).scalar_one()
-    assert rt.unique_per_user is True
+    assert canonical_unique_by(rt.unique_by) == frozenset({"user"})
     assert rt.parent_required is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_unique_per_user_toml_loads_translated(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """A .toml carrying the old ``unique_per_user`` key (as the previous
+    exporter wrote) still loads — translated to ``unique_by``, not silently
+    healed to the parent-inclusive default — and warns.
+    """
+    _write_toml(
+        tmp_path,
+        "legacy-flag",
+        {
+            "name": "legacy-flag",
+            "level": "SERIES",
+            "unique_per_user": False,
+        },
+    )
+    _write_schema(tmp_path, "legacy-flag", {"type": "object"})
+
+    config_files = discover_config_files(str(tmp_path))
+    props = await load_record_config(config_files[0])
+    assert props is not None
+
+    with pytest.warns(DeprecationWarning, match="unique_per_user"):
+        config_item = RecordTypeCreate(**props)
+    assert config_item.unique_by is None
+
+    await reconcile_record_types([config_item], test_session)
+
+    stmt = select(RecordType).where(RecordType.name == "legacy-flag")
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert canonical_unique_by(rt.unique_by) is None
+
+
+@pytest.mark.asyncio
+async def test_unique_by_off_export_reload_round_trip(tmp_path) -> None:
+    """Export a type with unique_by=None -> TOML `unique_by = false` -> reload -> still off."""
+    rt = RecordType(name="unique-off-trip", level="SERIES", unique_by=None)
+    await export_record_type_to_toml(rt, tmp_path)
+    _write_schema(tmp_path, "unique-off-trip", {"type": "object"})
+
+    config_files = discover_config_files(str(tmp_path))
+    props = await load_record_config(config_files[0])
+    assert props is not None
+
+    reloaded = RecordTypeCreate(**props)
+    assert reloaded.unique_by is None
 
 
 def test_exporter_covers_all_record_type_fields() -> None:

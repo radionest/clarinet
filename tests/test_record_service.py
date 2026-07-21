@@ -1123,7 +1123,8 @@ def _record_read_stub(
     return SimpleNamespace(
         record_type=SimpleNamespace(name="test_type", file_registry=file_registry),
         file_links=file_links,
-        **{"id": None, **fields},  # fields_from accesses record.id directly; callers override
+        # fields_from accesses record.id / record.parent_record_id directly; callers override
+        **{"id": None, "parent_record_id": None, **fields},
     )
 
 

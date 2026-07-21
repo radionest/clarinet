@@ -15,7 +15,11 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import ReconcileResult, reconcile_record_types
-from clarinet.exceptions.domain import ConfigLoadError, ConfigurationError
+from clarinet.exceptions.domain import (
+    ConfigLoadError,
+    ConfigurationError,
+    RecordConstraintViolationError,
+)
 from clarinet.models import RecordType, RecordTypeCreate, User, UserRole
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.utils.auth import get_password_hash
@@ -388,9 +392,19 @@ async def reconcile_config(
                 all_items.append(RecordTypeCreate(**props))
             except ConfigLoadError:
                 raise
+            except RecordConstraintViolationError as e:
+                # An OUTPUT pattern that can't discriminate coexisting records
+                # must abort startup too — same rationale as the ValidationError
+                # branch below: silently skipping it here would let the type
+                # reconcile with a broken pattern, then fail on next PATCH/export.
+                raise ConfigLoadError(
+                    f"Invalid record type config '{config_path.name}': {e}",
+                    path=config_path,
+                    kind="record type config",
+                ) from e
             except ValidationError as e:
                 # A record-type config that violates a model invariant (e.g.
-                # shared_editing + unique_per_user) must abort startup, not be
+                # shared_editing + unique_by) must abort startup, not be
                 # swallowed by the lenient handler below — otherwise the type is
                 # silently dropped and later references 404 at runtime.
                 raise ConfigurationError(

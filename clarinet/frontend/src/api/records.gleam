@@ -106,10 +106,10 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
-  use unique_per_user <- decode.optional_field(
-    "unique_per_user",
-    False,
-    decode.bool,
+  use unique_by <- decode.optional_field(
+    "unique_by",
+    None,
+    decode.optional(decode.list(decode.string)),
   )
   use parent_required <- decode.optional_field(
     "parent_required",
@@ -174,7 +174,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     role_name: role_name,
     max_records: None,
     min_records: None,
-    unique_per_user: unique_per_user,
+    unique_by: unique_by,
     parent_required: parent_required,
     inherit_user_from_parent: inherit_user_from_parent,
     editable: editable,
@@ -393,7 +393,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     decode.optional(decode.list(record_file_link_decoder())),
   )
   use is_editable <- decode.optional_field("is_editable", True, decode.bool)
-  use shared_editing <- decode.optional_field("shared_editing", False, decode.bool)
+  use shared_editing <- decode.optional_field(
+    "shared_editing",
+    False,
+    decode.bool,
+  )
   use display_anon_id <- decode.optional_field(
     "display_anon_id",
     None,
@@ -558,10 +562,10 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.int),
   )
-  use unique_per_user <- decode.optional_field(
-    "unique_per_user",
-    False,
-    decode.bool,
+  use unique_by <- decode.optional_field(
+    "unique_by",
+    None,
+    decode.optional(decode.list(decode.string)),
   )
   use parent_required <- decode.optional_field(
     "parent_required",
@@ -630,7 +634,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     role_name: role_name,
     max_records: max_records,
     min_records: min_records,
-    unique_per_user: unique_per_user,
+    unique_by: unique_by,
     parent_required: parent_required,
     inherit_user_from_parent: inherit_user_from_parent,
     editable: editable,
@@ -892,4 +896,33 @@ pub fn get_record_type(name: String) -> Promise(Result(RecordType, ApiError)) {
       "Invalid record type data",
     ))
   })
+}
+
+/// Update only the `unique_by` uniqueness constraint of a record type
+/// (PATCH /records/types/{name}). Kept as its own call, separate from the
+/// formosh-managed edit form: formosh's enum/select widgets always store
+/// and submit a plain string value, so a field whose wire shape is
+/// `null` or a JSON array of partition names can't round-trip through it.
+pub fn update_record_type_unique_by(
+  name: String,
+  unique_by: Option(List(String)),
+) -> Promise(Result(RecordType, ApiError)) {
+  let body =
+    json.object([#("unique_by", unique_by_to_json(unique_by))])
+    |> json.to_string
+  http_client.patch("/records/types/" <> uri.percent_encode(name), body)
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_type_full_decoder(),
+      "Invalid record type data",
+    ))
+  })
+}
+
+fn unique_by_to_json(value: Option(List(String))) -> json.Json {
+  case value {
+    Some(parts) -> json.array(parts, json.string)
+    None -> json.null()
+  }
 }

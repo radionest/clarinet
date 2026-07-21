@@ -9,6 +9,7 @@ from itertools import count
 from uuid import uuid4
 
 from clarinet.models.base import DicomQueryLevel
+from clarinet.models.file_schema import FileDefinitionRead
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordType, RecordTypeCreate
 from clarinet.models.study import Series, Study
@@ -105,3 +106,86 @@ def make_record_type_config(
 ) -> RecordTypeCreate:
     """Create a RecordTypeCreate schema instance for config reconciler tests."""
     return RecordTypeCreate(name=name, description=description, level=level, **extra)
+
+
+def make_record_type_create(
+    name: str,
+    level: str = "SERIES",
+    *,
+    parent_required: bool = False,
+    unique_by: frozenset[str] | set[str] | None = None,
+    max_records: int | None = None,
+    output_pattern: str | None = None,
+    multiple: bool = False,
+    file_allow_path_collision: bool = False,
+    file_level: str | None = None,
+    **extra: object,
+) -> RecordTypeCreate:
+    """Build a RecordTypeCreate with at most one OUTPUT file, for path-uniqueness tests.
+
+    ``output_pattern=None`` (default) omits ``file_registry`` entirely. When given, a
+    single OUTPUT ``FileDefinitionRead`` is attached; ``file_level`` overrides the
+    file's own DICOM level (defaults to the RecordType's own level, i.e. no
+    coarser-than-record-type mismatch).
+
+    Uses ``model_construct`` (bypasses validation): ``RecordTypeCreate`` itself
+    calls ``validate_output_path_uniqueness`` in a model validator, so a normal
+    constructor call would reject exactly the "should fail" fixtures these
+    tests build before the test even gets to call the validator explicitly.
+    """
+    file_registry = None
+    if output_pattern is not None:
+        file_registry = [
+            FileDefinitionRead(
+                name="out_file",
+                pattern=output_pattern,
+                multiple=multiple,
+                allow_path_collision=file_allow_path_collision,
+                level=file_level,
+            )
+        ]
+    return RecordTypeCreate.model_construct(
+        name=name,
+        level=level,
+        parent_required=parent_required,
+        unique_by=unique_by,
+        max_records=max_records,
+        file_registry=file_registry,
+        **extra,
+    )
+
+
+def make_record_type_create_two_outputs(
+    name: str,
+    level: str = "SERIES",
+    *,
+    parent_required: bool = False,
+    unique_by: frozenset[str] | set[str] | None = None,
+    max_records: int | None = None,
+    outputs: list[tuple[str, bool]],
+    **extra: object,
+) -> RecordTypeCreate:
+    """Build a RecordTypeCreate with several OUTPUT files, for path-uniqueness tests.
+
+    ``outputs`` is a list of ``(pattern, allow_path_collision)`` pairs — one
+    OUTPUT ``FileDefinitionRead`` per entry, auto-named ``out_0``, ``out_1``, ...
+
+    Uses ``model_construct`` — see :func:`make_record_type_create` for why.
+    """
+    file_registry = [
+        FileDefinitionRead(
+            name=f"out_{i}",
+            pattern=pattern,
+            allow_path_collision=allow_path_collision,
+        )
+        for i, (pattern, allow_path_collision) in enumerate(outputs)
+    ]
+    return RecordTypeCreate.model_construct(
+        name=name,
+        level=level,
+        parent_required=parent_required,
+        unique_by=unique_by,
+        max_records=max_records,
+        file_registry=file_registry,
+        **extra,
+    )

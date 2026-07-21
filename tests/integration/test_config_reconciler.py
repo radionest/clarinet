@@ -7,10 +7,12 @@ import pytest
 import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import _COMPARED_FIELDS, ReconcileResult, reconcile_record_types
 from clarinet.exceptions.domain import ConfigurationError
+from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
 
@@ -245,7 +247,7 @@ async def test_file_registry_diff(
     """Changed file definitions detected."""
     file_def = {
         "name": "output_seg",
-        "pattern": "seg.nrrd",
+        "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness check no-ops
         "role": "output",
         "required": True,
         "multiple": False,
@@ -326,23 +328,80 @@ async def test_none_config_matches_orm_default(
 
 
 @pytest.mark.asyncio
-async def test_unset_flag_heals_drifted_db_value(
+async def test_unique_by_reorder_is_unchanged(
     test_session: AsyncSession,
     seed_record_type: RecordType,
 ) -> None:
-    """A DB row drifted from a non-None model default heals to that default even
-    when the config leaves the flag unset. Regression for issue #389: a
-    migration-backfilled ``unique_per_user=False`` must reconcile to the
-    documented default ``True`` on restart, not survive forever.
+    """A reordered but set-equal ``unique_by`` must not trigger an update.
+
+    The DB row holds the raw JSON list ``["parent", "user"]`` (the default, as
+    written by the round-trip through ``PortableJSON``); config sets the same
+    partition as a set literal in the opposite insertion order. A naive
+    list-vs-frozenset ``==`` would report this as changed on every reconcile —
+    a list and a frozenset never compare equal in Python regardless of
+    contents. Canonical comparison must treat them as equal.
     """
-    # Drift the DB row away from the model default (True), as a backfill would.
-    seed_record_type.unique_per_user = False
+    assert seed_record_type.unique_by == ["parent", "user"]  # raw list, DB round-trip
+
+    cfg = _make_config(
+        "existing-type",
+        description="Original description",
+        label="Original",
+        unique_by={"user", "parent"},
+    )
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.unchanged == ["existing-type"]
+    assert result.updated == []
+
+
+@pytest.mark.asyncio
+async def test_unique_by_none_vs_set_is_a_change(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """DB ``None`` vs. a configured partition set is a real diff, not a no-op."""
+    seed_record_type.unique_by = None
     test_session.add(seed_record_type)
     await test_session.commit()
     test_session.expire_all()
 
-    cfg = _make_config("existing-type", description="Original description", label="Original")
-    assert "unique_per_user" not in cfg.model_fields_set  # precondition: flag unset
+    cfg = _make_config(
+        "existing-type",
+        description="Original description",
+        label="Original",
+        unique_by={"user"},
+    )
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.updated == ["existing-type"]
+    test_session.expire_all()
+    row = (
+        await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
+    ).scalar_one()
+    assert row.unique_by == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_unique_by_explicit_none_overwrites_default(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """Explicit ``unique_by=None`` is a real target value ("off") — it must
+    overwrite a DB row holding the default partition set instead of being
+    skipped as "config left this unset" (contrast with
+    ``test_none_config_matches_orm_default``, where an explicit
+    ``min_records=None`` IS treated as a no-op against that field's default).
+    """
+    assert seed_record_type.unique_by == ["parent", "user"]  # DB holds the default
+
+    cfg = _make_config(
+        "existing-type",
+        description="Original description",
+        label="Original",
+        unique_by=None,
+    )
+    assert "unique_by" in cfg.model_fields_set  # precondition: explicitly set
 
     result = await reconcile_record_types([cfg], test_session)
 
@@ -351,7 +410,38 @@ async def test_unset_flag_heals_drifted_db_value(
     row = (
         await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
     ).scalar_one()
-    assert row.unique_per_user is True
+    assert row.unique_by is None
+
+
+@pytest.mark.asyncio
+async def test_unset_flag_heals_drifted_db_value(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """A DB row drifted from a non-None model default heals to that default even
+    when the config leaves the field unset. Regression for issue #389: a
+    migration-backfilled ``unique_by=None`` must reconcile to the documented
+    default ``{"user", "parent"}`` on restart, not survive forever.
+    """
+    # Drift the DB row away from the model default ({"user", "parent"}), as a
+    # migration backfill would (direct assignment skips validation, mirroring
+    # a raw DB row).
+    seed_record_type.unique_by = None
+    test_session.add(seed_record_type)
+    await test_session.commit()
+    test_session.expire_all()
+
+    cfg = _make_config("existing-type", description="Original description", label="Original")
+    assert "unique_by" not in cfg.model_fields_set  # precondition: field unset
+
+    result = await reconcile_record_types([cfg], test_session)
+
+    assert result.updated == ["existing-type"]
+    test_session.expire_all()
+    row = (
+        await test_session.execute(select(RecordType).where(RecordType.name == "existing-type"))
+    ).scalar_one()
+    assert row.unique_by == ["parent", "user"]
 
 
 @pytest.mark.asyncio
@@ -416,6 +506,8 @@ async def test_file_level_change_triggers_update(
     test_session: AsyncSession,
 ) -> None:
     """Changing file level triggers update via _file_links_differ."""
+    # {id} discriminates regardless of unique_by/level -> path-uniqueness check
+    # no-ops here; the diff being tested is (name, role, required, level) only.
     # Create initial with no level
     config_v1 = [
         _make_config(
@@ -423,7 +515,7 @@ async def test_file_level_change_triggers_update(
             file_registry=[
                 {
                     "name": "seg_file",
-                    "pattern": "seg.nrrd",
+                    "pattern": "seg_{id}.nrrd",
                     "role": "output",
                     "required": True,
                     "multiple": False,
@@ -444,7 +536,7 @@ async def test_file_level_change_triggers_update(
             file_registry=[
                 {
                     "name": "seg_file",
-                    "pattern": "seg.nrrd",
+                    "pattern": "seg_{id}.nrrd",
                     "role": "output",
                     "required": True,
                     "multiple": False,
@@ -455,6 +547,53 @@ async def test_file_level_change_triggers_update(
     ]
     result = await reconcile_record_types(config_v2, test_session)
     assert result.updated == ["level-test1"]
+
+
+@pytest.mark.asyncio
+async def test_allow_path_collision_flip_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Toggling allow_path_collision (all else identical) must be detected as
+    a diff by _file_links_differ; identical flags across reconciles is a no-op.
+    """
+    file_def_v1 = {
+        "name": "seg_file",
+        "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness no-ops
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "allow_path_collision": True,
+    }
+    config_v1 = [_make_config("collision-flip", file_registry=[file_def_v1])]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.created == ["collision-flip"]
+
+    test_session.expire_all()
+
+    # Re-reconcile with an identical config -> no-op
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.unchanged == ["collision-flip"]
+
+    test_session.expire_all()
+
+    # Flip allow_path_collision -> must be detected as a change
+    file_def_v2 = {**file_def_v1, "allow_path_collision": False}
+    config_v2 = [_make_config("collision-flip", file_registry=[file_def_v2])]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.updated == ["collision-flip"]
+
+    test_session.expire_all()
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "collision-flip")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    row = (await test_session.execute(stmt)).scalar_one()
+    assert row.file_registry[0].allow_path_collision is False
 
 
 @pytest.mark.asyncio
@@ -973,15 +1112,15 @@ def test_reconciler_compares_all_record_type_fields() -> None:
     assert model_fields - set(_COMPARED_FIELDS) - intentionally_excluded == set()
 
 
-def test_recordtypecreate_rejects_shared_editing_with_unique_per_user() -> None:
-    """The ``shared_editing`` / ``unique_per_user`` invariant is enforced on the
+def test_recordtypecreate_rejects_shared_editing_with_unique_by() -> None:
+    """The ``shared_editing`` / ``unique_by`` invariant is enforced on the
     model (``RecordTypeBase``), so every write path that builds a
     ``RecordTypeCreate`` rejects the combo: config load AND the API
     (``POST /types`` deserializes the body into ``RecordTypeCreate`` → 422),
     not only the bootstrap config-load path.
     """
-    with pytest.raises(ValidationError, match="unique_per_user"):
-        _make_config("shared-bad", shared_editing=True, unique_per_user=True)
+    with pytest.raises(ValidationError, match="unique_by"):
+        _make_config("shared-bad", shared_editing=True, unique_by={"user"})
 
 
 @pytest.mark.asyncio
@@ -1034,6 +1173,76 @@ async def test_toml_config_load_fails_fast_on_shared_editing_invariant(
 
         with pytest.raises(ConfigurationError, match="Invalid record type config"):
             await reconcile_config(folder="/fake/path")
+
+
+@pytest.mark.asyncio
+async def test_toml_config_load_fails_fast_on_output_path_uniqueness(
+    test_session: AsyncSession,
+) -> None:
+    """TOML mode must abort startup on an OUTPUT pattern that cannot
+    discriminate coexisting records.
+
+    Mirrors the shared_editing guard above: ``RecordTypeCreate(**props)``
+    inside the per-file loop runs ``validate_output_path_uniqueness`` (via the
+    model's ``_validate_output_paths`` model_validator), which raises
+    ``RecordConstraintViolationError`` for a default ``unique_by`` (the
+    "user" partition) paired with an OUTPUT pattern missing ``{user_id}``.
+    The loop must convert that into a fatal ``ConfigLoadError`` naming the
+    record type and the config file — not the lenient ``except Exception``
+    log-and-skip, which would silently reconcile a type whose OUTPUT file
+    collides across users. Carried over from task 6's review: this branch
+    had no test.
+    """
+    from pathlib import Path
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.exceptions.domain import ConfigLoadError
+    from clarinet.utils.bootstrap import reconcile_config
+
+    bad_props = {
+        "name": "bad-output-path",
+        "level": "SERIES",
+        "file_registry": [
+            {
+                "name": "result_file",
+                "pattern": "result.txt",
+                "role": "output",
+                "required": True,
+                "multiple": False,
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "clarinet.utils.bootstrap.discover_config_files",
+            return_value=[Path("bad-output-path.toml")],
+        ),
+        patch(
+            "clarinet.utils.bootstrap.load_project_file_registry",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "clarinet.utils.bootstrap.load_record_config",
+            new_callable=AsyncMock,
+            return_value=bad_props,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.resolve_task_files",
+            side_effect=lambda props, _reg: props,
+        ),
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "toml"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        with pytest.raises(ConfigLoadError, match="bad-output-path") as exc_info:
+            await reconcile_config(folder="/fake/path")
+
+    assert exc_info.value.path == "bad-output-path.toml"
+    assert exc_info.value.kind == "record type config"
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,7 @@ async def sync_file_links(
             file_definition_id=file_def.id,
             role=role,
             required=fd.required,
+            allow_path_collision=fd.allow_path_collision,
         )
         session.add(link)
         new_links.append(link)
