@@ -1,5 +1,7 @@
 # Slicer Service Guide
 
+Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md).
+
 ## Overview
 
 HTTP-based integration with **3D Slicer** desktop application. Sends Python scripts to Slicer's built-in web server (`POST /slicer/exec`) and returns JSON responses. Router uses `build_slicer_context_async()` for DB-backed context hydration.

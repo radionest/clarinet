@@ -6,6 +6,8 @@ paths:
 
 # API — DI Aliases & Reference
 
+Deep reference: [Backend architecture](../../docs/kb/architecture.md), [Domain model](../../docs/kb/domain-model.md) (roles, capabilities, masking).
+
 ## Dependency Injection Aliases (dependencies.py)
 
 Reuse these — don't create new `Depends()` wrappers:

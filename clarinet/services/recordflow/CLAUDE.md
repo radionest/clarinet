@@ -1,5 +1,7 @@
 # RecordFlow — Workflow Automation
 
+Deep reference: [RecordFlow workflow engine](../../../docs/kb/recordflow.md).
+
 Event-driven workflow engine that creates/updates/invalidates records on status changes or data updates. Disabled by default (`recordflow_enabled = False`).
 
 ## Core Concepts

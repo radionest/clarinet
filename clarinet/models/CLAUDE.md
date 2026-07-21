@@ -1,5 +1,7 @@
 # Models Guide
 
+Deep reference: [Domain model](../../docs/kb/domain-model.md) (entities, levels, status lifecycle), [Persistence conventions](../../docs/kb/persistence.md) (schema naming, migrations).
+
 ## Schema Naming Convention
 
 | Variant | Purpose | Base class |

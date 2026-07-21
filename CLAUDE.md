@@ -4,12 +4,12 @@ Clarinet is an imaging-centric framework for structured research workflows, buil
 
 ## Architecture
 
-- Follow KISS, SOLID, DRY, YAGNI principles
-- Composition over inheritance; each module has a single purpose
-- **Repository pattern**: all DB access through `clarinet/repositories/`
-- **Service layer**: `clarinet/services/` uses repositories; routers use services/repos
-- **Dependency injection**: `Annotated[X, Depends()]` aliases in `clarinet/api/dependencies.py`
-- **Exception flow**: repos raise domain exceptions (`clarinet/exceptions/domain.py`) → exception handlers convert to HTTP responses
+Layers, DI, exception flow, the app lifespan order and the shared-`AsyncSession`
+rule: [docs/kb/architecture.md](docs/kb/architecture.md). Non-negotiables:
+
+- Follow KISS, SOLID, DRY, YAGNI principles; composition over inheritance
+- **Repository pattern**: all DB access through `clarinet/repositories/` — never query the DB in a router
+- **Dependency injection**: reuse the `Annotated[X, Depends()]` aliases in `clarinet/api/dependencies.py`
 - **Logger**: always `from clarinet.utils.logger import logger` — never import loguru directly
 - **Settings**: `from clarinet.settings import settings` — env vars with `CLARINET_` prefix
 
@@ -139,7 +139,19 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 
 ## Documentation Structure
 
+- **Knowledge base** in [`docs/kb/`](docs/kb/index.md) — durable, cross-cutting explanation (architecture, domain model, subsystems). Not auto-loaded: read the relevant page before changing behaviour in its area, and update it in the same PR when that behaviour changes.
 - **Scoped CLAUDE.md** in subdirectories — always-loaded when entering that directory
 - **Path-scoped rules** in `.claude/rules/` — auto-loaded only when editing matching files. See [`.claude/rules/README.md`](.claude/rules/README.md) for the topic index.
 
-Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.
+| Knowledge base page | Covers |
+|---|---|
+| [Architecture](docs/kb/architecture.md) | layers, DI, exception flow, lifespan order, async-session rule |
+| [Domain model](docs/kb/domain-model.md) | patient/study/series/record, record types, status lifecycle, audit, RBAC |
+| [Persistence](docs/kb/persistence.md) | SQLModel + repository conventions, eager loading, migrations, PG-only pitfalls |
+| [clarinet_plan package](docs/kb/plan-package.md) | project config modes, custom-code loading, fail-fast contract |
+| [RecordFlow](docs/kb/recordflow.md) | workflow DSL, triggers, evaluation context, invalidation semantics |
+| [Pipeline](docs/kb/pipeline.md) | TaskIQ queues, task contract, chains, retry/DLQ, run audit |
+| [Files & anonymization](docs/kb/files-and-anonymization.md) | `Files` facade, anonymized-path contract, anonymization entry points |
+| [Imaging stack](docs/kb/imaging-stack.md) | DICOM client, DICOMweb cache tiers, 3D Slicer integration |
+
+Update the most specific file. Scoped CLAUDE.md files and rules deliberately keep their own bodies — they auto-load on path match, which `docs/kb/` does not — so where the same fact lives in both, change both.

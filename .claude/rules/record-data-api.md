@@ -6,6 +6,8 @@ paths:
 ---
 # Record data API methods
 
+Deep reference: [Domain model](../../docs/kb/domain-model.md) (status lifecycle, data vs context_info).
+
 ## `record.data` — structured form payload
 
 | Method | HTTP | Precondition | Transitions to | Triggers flows |

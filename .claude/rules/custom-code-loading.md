@@ -12,6 +12,8 @@ paths:
 
 # Custom Code Loading from `plan/`
 
+Deep reference: [Project configuration and the clarinet_plan package](../../docs/kb/plan-package.md).
+
 How downstream-project Python files (`plan/` a.k.a. `settings.config_tasks_path`)
 are imported at startup. Single owner: the anchor package in
 `clarinet/config/plan_package.py` + `CustomCodeRegistry` in

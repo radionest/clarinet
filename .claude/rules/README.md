@@ -4,6 +4,8 @@ Each rule file declares a `paths:` frontmatter glob and is auto-loaded when Clau
 
 When adding a new rule: pick a focused topic, set `paths:` to the directory or file pattern where it applies, keep the file under ~150 lines. Refer back here from `CLAUDE.md` rather than duplicating the list.
 
+Durable, cross-cutting explanation lives in the knowledge base at [`docs/kb/`](../../docs/kb/index.md) — architecture, domain model, subsystem behaviour and the rationale behind them. It is not auto-loaded; rules stay file-specific and operational, pages stay conceptual. When a change alters behaviour a page describes, update the page in the same PR.
+
 ## Index
 
 | Rule file | Topic | Triggers on |

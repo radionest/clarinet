@@ -1,5 +1,7 @@
 # API Layer Guide
 
+Deep reference: [Backend architecture](../../docs/kb/architecture.md) (layers, exception flow, lifespan order).
+
 DI aliases, RBAC deps, factory patterns, DICOMweb endpoints: `.claude/rules/api-deps.md` (auto-loaded for dependencies.py and routers).
 
 ### Router Auth Levels

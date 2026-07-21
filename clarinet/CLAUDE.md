@@ -1,5 +1,7 @@
 # Backend Development Guide
 
+Deep reference: [Backend architecture](../docs/kb/architecture.md) (layers, lifespan, async-session rule), [Files and the anonymized-path contract](../docs/kb/files-and-anonymization.md).
+
 ## Async Programming
 
 - Use `AsyncSession` for DB operations: `get_async_session` from `clarinet.utils.database`

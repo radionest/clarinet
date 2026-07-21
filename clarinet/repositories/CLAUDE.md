@@ -1,5 +1,7 @@
 # Repositories Guide
 
+Deep reference: [Persistence conventions](../../docs/kb/persistence.md).
+
 ## Base Repository API
 
 `BaseRepository[ModelT]` (generic, in `base.py`) provides:

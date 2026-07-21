@@ -1,5 +1,7 @@
 # Frontend Development Guide
 
+How the SPA sits in the overall system: [Backend architecture](../../docs/kb/architecture.md).
+
 Gleam + Lustre SPA. MVU (Model-View-Update) architecture. Single JS bundle served by FastAPI at `/static/clarinet_frontend.js`.
 
 Detailed MVU reference is split across three path-scoped rule files (all auto-loaded when editing `clarinet/frontend/src/**/*.gleam`): `.claude/rules/frontend-page-contract.md` (page MVU contract, Shared/OutMsg, effects, cache, errors), `.claude/rules/frontend-routing-forms.md` (API layer, routing, list pattern, forms, server-sanitized HTML), and `.claude/rules/frontend-reference.md` (decoder gotchas, logging, pitfalls, toolchain). This file is the high-level overview.
