@@ -10,7 +10,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
@@ -96,6 +96,7 @@ class DatabaseManager:
                     cursor = dbapi_connection.cursor()
                     cursor.execute("PRAGMA journal_mode=WAL")
                     cursor.execute("PRAGMA busy_timeout=5000")
+                    cursor.execute("PRAGMA foreign_keys=ON")
                     cursor.close()
         else:
             engine = create_async_engine(
@@ -134,6 +135,28 @@ class DatabaseManager:
         async with self.async_engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
         logger.info("Database tables created (async)")
+
+        if self.async_engine.dialect.name == "sqlite":
+            await self._audit_sqlite_foreign_keys()
+
+    async def _audit_sqlite_foreign_keys(self) -> None:
+        """Log a WARNING for each row that violates a foreign key constraint.
+
+        Legacy SQLite databases created before ``PRAGMA foreign_keys=ON`` was
+        enforced may carry dangling rows (e.g. an orphaned child left behind
+        by a deletion that predates ``ON DELETE CASCADE`` enforcement). This
+        is a diagnostic only — it never aborts startup.
+        """
+        async with self.async_engine.connect() as conn:
+            result = await conn.execute(text("PRAGMA foreign_key_check"))
+            violations = result.mappings().all()
+
+        for violation in violations:
+            logger.warning(
+                f"SQLite foreign key violation: table={violation['table']}, "
+                f"rowid={violation['rowid']}, parent={violation['parent']}, "
+                f"fkid={violation['fkid']}"
+            )
 
     async def drop_db_and_tables_async(self) -> None:
         """Drop all database tables asynchronously."""
