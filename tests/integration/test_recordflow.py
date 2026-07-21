@@ -83,11 +83,11 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     ]
     series_level_types = ["series-markup"]
     for name in study_level_types:
-        rt = RecordType(name=name, level=DicomQueryLevel.STUDY, unique_per_user=False)
+        rt = RecordType(name=name, level=DicomQueryLevel.STUDY, unique_by=None)
         test_session.add(rt)
         types[name] = rt
     for name in series_level_types:
-        rt = RecordType(name=name, level=DicomQueryLevel.SERIES, unique_per_user=False)
+        rt = RecordType(name=name, level=DicomQueryLevel.SERIES, unique_by=None)
         test_session.add(rt)
         types[name] = rt
     # Constrained type for idempotency tests: at most one per study, so a flow that
@@ -95,7 +95,7 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     singleton = RecordType(
         name="singleton-child",
         level=DicomQueryLevel.STUDY,
-        unique_per_user=False,
+        unique_by=None,
         max_records=1,
     )
     test_session.add(singleton)

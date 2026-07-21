@@ -105,9 +105,7 @@ class TestSharedEditingAuthz:
     async def test_non_owner_can_patch_when_shared(
         self, editor_client, owner_user, test_session, test_patient, test_study, test_series
     ):
-        rt = await _seed_type(
-            test_session, "shared-yes", shared_editing=True, unique_per_user=False
-        )
+        rt = await _seed_type(test_session, "shared-yes", shared_editing=True, unique_by=None)
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, owner_user
         )
@@ -145,9 +143,7 @@ class TestSharedEditingAuthz:
     async def test_superuser_unaffected(
         self, client, owner_user, test_session, test_patient, test_study, test_series
     ):
-        rt = await _seed_type(
-            test_session, "shared-superuser", shared_editing=True, unique_per_user=False
-        )
+        rt = await _seed_type(test_session, "shared-superuser", shared_editing=True, unique_by=None)
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, owner_user
         )
@@ -169,9 +165,7 @@ class TestSharedEditingOwnershipTransfer:
         test_study,
         test_series,
     ):
-        rt = await _seed_type(
-            test_session, "transfer-patch", shared_editing=True, unique_per_user=False
-        )
+        rt = await _seed_type(test_session, "transfer-patch", shared_editing=True, unique_by=None)
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, owner_user
         )
@@ -191,9 +185,7 @@ class TestSharedEditingOwnershipTransfer:
     async def test_no_spurious_transfer_for_current_owner(
         self, editor_client, editor_user, test_session, test_patient, test_study, test_series
     ):
-        rt = await _seed_type(
-            test_session, "transfer-owner", shared_editing=True, unique_per_user=False
-        )
+        rt = await _seed_type(test_session, "transfer-owner", shared_editing=True, unique_by=None)
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, editor_user
         )
@@ -214,9 +206,7 @@ class TestSharedEditingComputed:
     async def test_true_when_type_shared(
         self, editor_client, owner_user, test_session, test_patient, test_study, test_series
     ):
-        rt = await _seed_type(
-            test_session, "computed-shared", shared_editing=True, unique_per_user=False
-        )
+        rt = await _seed_type(test_session, "computed-shared", shared_editing=True, unique_by=None)
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, owner_user
         )
