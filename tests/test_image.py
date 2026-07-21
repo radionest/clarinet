@@ -1896,6 +1896,37 @@ def test_difference_intersection_multi_component_per_edge_threshold() -> None:
     assert inter.is_empty
 
 
+def _fragmented_pair() -> tuple[Segmentation, Segmentation]:
+    """Base label (10 vox) overlapped by two disconnected b-components, 3 vox each.
+
+    Per-pair coverage 0.3 < 0.5 threshold; joint coverage 0.6 >= 0.5.
+    """
+    vol_a = np.zeros((10, 10, 5), dtype=np.uint8)
+    vol_a[1, 0:10, 1] = 1  # 10 voxels in a row
+    vol_b = np.zeros((10, 10, 5), dtype=np.uint8)
+    vol_b[1, 0:3, 1] = 1  # overlaps 3 voxels
+    vol_b[1, 5:8, 1] = 1  # disjoint, overlaps 3 more
+    seg_a = Segmentation()
+    seg_a._spacing = (1.0, 1.0, 1.0)
+    seg_a.img = vol_a
+    seg_b = Segmentation()
+    seg_b._spacing = (1.0, 1.0, 1.0)
+    seg_b.img = vol_b  # autolabel -> two components, labels 1 and 2
+    return seg_a, seg_b
+
+
+def test_difference_default_granularity_keeps_fragmented_overlap() -> None:
+    seg_a, seg_b = _fragmented_pair()
+    result = seg_a.difference(seg_b, max_overlap_ratio=0.5)
+    assert not result.is_empty  # each pair 0.3 < 0.5 -> kept
+
+
+def test_difference_union_granularity_removes_fragmented_overlap() -> None:
+    seg_a, seg_b = _fragmented_pair()
+    result = seg_a.difference(seg_b, max_overlap_ratio=0.5, granularity="union")
+    assert result.is_empty  # joint 0.6 >= 0.5 -> removed
+
+
 # ---------------------------------------------------------------------------
 # symmetric_difference component-level behavior (Fix 1 — reviewer)
 # ---------------------------------------------------------------------------
