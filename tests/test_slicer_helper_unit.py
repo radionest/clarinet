@@ -8,6 +8,8 @@ empty source tolerated vs flipped/foreign grid raising — is covered by the
 Slicer-gated integration tests in tests/integration/test_slicer_helper.py.
 """
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -114,3 +116,76 @@ def test_labelmap_array_none_point_data_no_attributeerror(
     image.GetPointData.return_value = None
     # Genuinely empty → tolerated (None), and crucially NOT an AttributeError.
     assert _labelmap_array_or_raise(node, MagicMock(), what="seg") is None
+
+
+# --- export_segmentation: conform_to guard/gate/fail-closed contract ---------
+#
+# Task 5 (canonicalize-segmentation-grids): only the contract is unit-tested
+# here (bundle-absent guard, missing-reference-file raise, unchanged plain
+# export, the reference_volume= removal). The SAME/REARRANGED/FOREIGN
+# classification and the re-grid mechanics themselves touch the live Slicer
+# API (arrayFromSegmentBinaryLabelmap, addVolumeFromArray, ...) and are
+# exercised end-to-end by the live-Slicer test in Task 6.
+
+
+def test_export_segmentation_conform_to_without_bundle_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """conform_to set but the correspondence bundle was never injected → raise."""
+    fake_util = MagicMock()
+    fake_util.getNode.return_value = MagicMock()
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+
+    with pytest.raises(SlicerHelperError, match="correspondence bundle"):
+        helper_mod.export_segmentation(
+            "Segmentation", "/tmp/out.seg.nrrd", conform_to="/tmp/ref.nii.gz"
+        )
+
+
+def test_export_segmentation_conform_to_missing_file_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bundle present but conform_to names an unreadable path → raise, not a crash."""
+    # Grid/grid_relation are TYPE_CHECKING-only names -- never real module
+    # attributes outside the exec'd-in-Slicer bundle, hence raising=False.
+    monkeypatch.setattr(helper_mod, "Grid", object(), raising=False)
+    monkeypatch.setattr(helper_mod, "grid_relation", object(), raising=False)
+    fake_util = MagicMock()
+    fake_util.getNode.return_value = MagicMock()
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+
+    missing = str(tmp_path / "does_not_exist.nii.gz")
+    with pytest.raises(SlicerHelperError):
+        helper_mod.export_segmentation(
+            "Segmentation", str(tmp_path / "out.seg.nrrd"), conform_to=missing
+        )
+
+
+def test_export_segmentation_plain_export_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No conform_to → today's behavior: export as-is, no grid classification."""
+    fake_util = MagicMock()
+    fake_util.getNode.return_value = MagicMock()
+
+    def _fake_export(node: object, path: str) -> None:
+        with open(path, "w"):
+            pass
+
+    fake_util.exportNode.side_effect = _fake_export
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+
+    output_path = str(tmp_path / "sub" / "out.seg.nrrd")
+    result = helper_mod.export_segmentation("Segmentation", output_path)
+
+    assert result == output_path
+    assert os.path.isfile(output_path)
+    fake_util.exportNode.assert_called_once_with(fake_util.getNode.return_value, output_path)
+
+
+def test_export_segmentation_reference_volume_kwarg_removed() -> None:
+    """reference_volume= no longer exists -- calling with it is a TypeError."""
+    with pytest.raises(TypeError):
+        helper_mod.export_segmentation(
+            "Segmentation", "/tmp/out.seg.nrrd", reference_volume=object()
+        )

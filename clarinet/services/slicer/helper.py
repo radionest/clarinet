@@ -151,7 +151,7 @@ def find_loaded_volume(path: str | None = None) -> Any:
     return None
 
 
-def assert_segmentation_matches_volume(
+def _assert_segmentation_matches_volume(
     segmentation: Any,
     volume_node: Any,
     *,
@@ -159,13 +159,14 @@ def assert_segmentation_matches_volume(
 ) -> None:
     """Raise if a segmentation's reference geometry does not match a volume's grid.
 
-    Save-time fail-fast guard. A segmentation drawn or imported on a foreign grid
-    (a different study, or a volume regenerated with a flipped axis) would export
-    onto a grid inconsistent with ``volume.nii.gz`` — silently shifting or
-    mirroring the mask relative to the canonical series volume, which downstream
-    index-wise consumers then read as zero overlap. Call this before
-    ``export_segmentation`` (or pass ``reference_volume=`` to it) so the mismatch
-    fails loudly at the source instead of corrupting saved data.
+    Private: no longer part of the public Slicer-script API (see
+    ``export_segmentation``'s ``conform_to`` for the file-export guard). Used
+    internally as a fail-fast check at two call sites -- ``load_segmentation``
+    (best-effort load-time check) and ``_export_segments_labelmap`` (the
+    correspondence-engine set-ops' own pre-regrid check, gated by their
+    ``resample=`` parameter). Compares node-to-node VTK matrices directly;
+    ``export_segmentation``'s guard instead classifies against a reference
+    file's on-disk grid via the bundled ``grid_relation``.
 
     Compares the segmentation's reference image geometry (dimensions +
     voxel-to-world matrix) against the volume within ``tol``. A no-op when the
@@ -222,37 +223,247 @@ def assert_segmentation_matches_volume(
         )
 
 
-def export_segmentation(name: str, output_path: str, *, reference_volume: Any = None) -> str:
+# TYPE_CHECKING-only: not a real import at runtime -- clarinet.services.image.grid
+# is standalone (numpy + stdlib only) and rides in the same flattened bundle as
+# the correspondence engine (see correspondence_bundle.py's _MODULES), exec'd
+# into this module's globals only when the caller passes execute(...,
+# include_correspondence=True). _read_grid_on_disk() and export_segmentation()
+# below read the symbols via globals() (see their guards); this import exists
+# solely so mypy can resolve the names and type-check the calls.
+if TYPE_CHECKING:
+    from clarinet.services.image.grid import Grid, RelationKind, grid_relation
+
+
+def _flip_lps_ras(affine: Any) -> Any:
+    """Self-inverse LPS<->RAS conversion of a 4x4 voxel-to-world affine (negate x, y rows)."""
+    flipped = affine.copy()
+    flipped[:2, :] *= -1.0
+    return flipped
+
+
+def _read_grid_on_disk(path: str) -> Grid:
+    """Read a file's on-disk voxel grid via SimpleITK metadata-only IO.
+
+    The Slicer-side counterpart to ``clarinet.services.image.grid_io.read_grid``
+    (unavailable here -- no ``clarinet`` import inside Slicer). Reads metadata
+    only (``ReadImageInformation()``), never voxel data. SimpleITK is
+    LPS-native like the bundled ``Grid``, so no LPS/RAS conversion is needed --
+    and, unlike ``slicer.util.loadVolume`` (which silently flips the slice axis
+    of any left-handed/``det<0`` grid on load), it reads the file's grid
+    faithfully. A 4-D ``.seg.nrrd`` (Slicer's layered-segmentation format)
+    reads as a 3-D vector image, so its spatial grid comes straight off
+    ``GetSize()``/``GetSpacing()``/etc. -- no 4-D special-casing.
+
+    Raises:
+        SlicerHelperError: The correspondence bundle (carrying ``Grid``) is not
+            in this session's namespace -- call ``execute(...,
+            include_correspondence=True)``; or *path* cannot be read (missing
+            file, corrupt/unsupported header, ...).
+    """
+    if "Grid" not in globals():
+        raise SlicerHelperError(
+            "_read_grid_on_disk requires the correspondence bundle; "
+            "call execute(..., include_correspondence=True)."
+        )
+    import numpy as np
+    import SimpleITK as sitk
+
+    reader = sitk.ImageFileReader()
+    reader.SetFileName(path)
+    try:
+        reader.ReadImageInformation()
+    except Exception as e:
+        raise SlicerHelperError(f"Cannot read grid from {path!r}: {e}") from e
+
+    size = reader.GetSize()
+    if len(size) != 3:
+        raise SlicerHelperError(
+            f"Expected a 3-D spatial grid at {path!r}, got {len(size)}-D (size={size})"
+        )
+    direction = np.array(reader.GetDirection()).reshape(3, 3)
+    spacing = reader.GetSpacing()
+    origin = reader.GetOrigin()
+    return Grid.from_components(
+        shape=(int(size[0]), int(size[1]), int(size[2])),
+        spacing=(float(spacing[0]), float(spacing[1]), float(spacing[2])),
+        origin=(float(origin[0]), float(origin[1]), float(origin[2])),
+        direction=direction,
+    )
+
+
+def _node_binary_labelmap_grid(seg_node: Any) -> Grid:
+    """Read a segmentation node's current binary-labelmap grid as a bundled ``Grid``.
+
+    Same geometry source as ``_assert_segmentation_matches_volume``: the
+    segmentation's recorded reference-image-geometry conversion parameter.
+    Slicer "world" space is RAS; the bundled ``Grid`` is LPS by construction,
+    so the matrix is flipped via ``_flip_lps_ras`` before building the
+    ``Grid``.
+
+    Raises:
+        SlicerHelperError: The segmentation has no recorded reference geometry
+            yet (nothing was ever loaded or created against a source volume).
+    """
+    seg = seg_node.GetSegmentation()
+    geom_param = slicer.vtkSegmentationConverter.GetReferenceImageGeometryParameterName()
+    geom_str = seg.GetConversionParameter(geom_param)
+    if not geom_str:
+        raise SlicerHelperError(
+            "export_segmentation(conform_to=...): segmentation has no recorded "
+            "reference geometry to classify -- load or create it against a "
+            "source volume first."
+        )
+    ref_geom = slicer.vtkOrientedImageData()
+    slicer.vtkSegmentationConverter.DeserializeImageGeometry(geom_str, ref_geom, False)
+
+    ras_matrix = vtk.vtkMatrix4x4()
+    ref_geom.GetImageToWorldMatrix(ras_matrix)
+
+    import numpy as np
+
+    affine_ras = np.array([[ras_matrix.GetElement(r, c) for c in range(4)] for r in range(4)])
+    dims = ref_geom.GetDimensions()
+    return Grid(shape=(int(dims[0]), int(dims[1]), int(dims[2])), affine=_flip_lps_ras(affine_ras))
+
+
+def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any, Any]:
+    """Re-grid *source_node*'s segments onto *ref_grid* by exact index rearrangement.
+
+    Builds a hidden scalar-volume node carrying *ref_grid*'s IJK-to-RAS matrix
+    (never a loaded node's -- a loaded volume's matrix may already be
+    ITK-canonicalized, which is the bug this module exists to route around)
+    and a temporary segmentation node on that grid. Each source segment's
+    binary labelmap is read back through ``arrayFromSegmentBinaryLabelmap(...,
+    referenceVolumeNode=...)``, which resamples with nearest-neighbor -- exact
+    (no interpolation blur) for a REARRANGED (signed-permutation) grid
+    relationship. Segments are copied one at a time so overlap between them
+    survives; Slicer's own writer decides shared-vs-separate layers at export
+    time, so layer structure needs no manual bookkeeping here. Any failure
+    mid-loop removes both temp nodes before re-raising.
+
+    *source_node* is only ever read -- never mutated.
+
+    Returns:
+        ``(hidden_ref_node, tmp_segmentation_node)`` -- both scene-owned; the
+        caller removes them (``slicer.mrmlScene.RemoveNode``) once done.
+    """
+    import numpy as np
+
+    nx, ny, nz = ref_grid.shape
+    placeholder = np.zeros((nz, ny, nx), dtype=np.uint8)
+    ras_affine = _flip_lps_ras(ref_grid.affine)
+    hidden_ref = slicer.util.addVolumeFromArray(
+        placeholder, ijkToRAS=ras_affine, name="_conform_ref"
+    )
+    hidden_ref.SetHideFromEditors(True)
+
+    tmp_seg = None
+    try:
+        tmp_seg = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "_conform_seg")
+        tmp_seg.CreateDefaultDisplayNodes()
+        tmp_seg.SetHideFromEditors(True)
+        tmp_seg.SetReferenceImageGeometryParameterFromVolumeNode(hidden_ref)
+
+        src_seg = source_node.GetSegmentation()
+        tmp_vtk_seg = tmp_seg.GetSegmentation()
+        for i in range(src_seg.GetNumberOfSegments()):
+            seg_id = src_seg.GetNthSegmentID(i)
+            segment = src_seg.GetSegment(seg_id)
+            arr = slicer.util.arrayFromSegmentBinaryLabelmap(source_node, seg_id, hidden_ref)
+            tmp_vtk_seg.AddEmptySegment(seg_id, segment.GetName(), segment.GetColor())
+            slicer.util.updateSegmentBinaryLabelmapFromArray(arr, tmp_seg, seg_id, hidden_ref)
+    except Exception:
+        if tmp_seg is not None:
+            slicer.mrmlScene.RemoveNode(tmp_seg)
+        slicer.mrmlScene.RemoveNode(hidden_ref)
+        raise
+
+    return hidden_ref, tmp_seg
+
+
+def export_segmentation(name: str, output_path: str, *, conform_to: str | None = None) -> str:
     """Find segmentation node by name, export to file, and verify.
 
     Args:
         name: Display name of the segmentation node in the scene.
         output_path: Absolute path where the segmentation file will be saved.
-        reference_volume: Optional ``vtkMRMLScalarVolumeNode``. When provided, the
-            segmentation's reference geometry is checked against this volume's grid
-            before export and a mismatch raises ``SlicerHelperError`` (save-time
-            fail-fast guard — see ``assert_segmentation_matches_volume``). ``None``
-            skips the check (backward-compatible default).
+        conform_to: Optional path to a reference file (e.g. the series volume)
+            whose ON-DISK grid the export must land on. When set, the node's
+            current grid is read (never a loaded node's -- see
+            ``_read_grid_on_disk``) and classified against the reference's
+            on-disk grid via the bundled ``grid_relation``: SAME exports
+            directly; REARRANGED re-grids onto the reference by exact index
+            rearrangement (no interpolation) before exporting; FOREIGN raises
+            without writing. The written file is then re-read and
+            re-classified against the reference grid -- a post-write mismatch
+            deletes the file and raises (fail-closed: no bad artifact is left
+            behind). ``None`` skips all of this and exports the node as-is
+            (today's behavior).
 
     Returns:
         The output_path on success.
 
     Raises:
-        SlicerHelperError: If the node is not found, the geometry guard fails, or
-            the file was not created.
+        SlicerHelperError: The node is not found; the file was not created;
+            ``conform_to`` is set but the script was sent without the
+            correspondence bundle (same opt-in contract as
+            ``detect_overlaps``/``subtract_segmentations``); ``conform_to``
+            names a missing/unreadable file; the node's grid classifies as
+            FOREIGN against the reference; or the written file fails the
+            post-write SAME re-check.
     """
     seg_node = slicer.util.getNode(name)
     if seg_node is None:
         raise SlicerHelperError(f"Segmentation node '{name}' not found in scene")
 
-    if reference_volume is not None:
-        assert_segmentation_matches_volume(seg_node, reference_volume)
+    if conform_to is None:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        slicer.util.exportNode(seg_node, output_path)
+        if not os.path.isfile(output_path):
+            raise SlicerHelperError(f"Export failed: file not created at {output_path}")
+        return output_path
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    slicer.util.exportNode(seg_node, output_path)
+    if "grid_relation" not in globals():
+        raise SlicerHelperError(
+            "export_segmentation(conform_to=...) requires the correspondence bundle; "
+            "call execute(..., include_correspondence=True)."
+        )
 
-    if not os.path.isfile(output_path):
-        raise SlicerHelperError(f"Export failed: file not created at {output_path}")
+    ref_grid = _read_grid_on_disk(conform_to)
+    node_grid = _node_binary_labelmap_grid(seg_node)
+    relation = grid_relation(ref_grid, node_grid)
+    if relation.kind is RelationKind.FOREIGN:
+        raise SlicerHelperError(
+            f"export_segmentation: '{name}' is on a grid foreign to reference "
+            f"{conform_to!r} -- node {node_grid.summary()} vs reference "
+            f"{ref_grid.summary()}. Conform the source before exporting "
+            "(clarinet.services.image.conform_seg_to_grid)."
+        )
+
+    export_node = seg_node
+    hidden_ref = tmp_seg = None
+    try:
+        if relation.kind is RelationKind.REARRANGED:
+            hidden_ref, tmp_seg = _reindex_segmentation_to_grid(seg_node, ref_grid)
+            export_node = tmp_seg
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        slicer.util.exportNode(export_node, output_path)
+        if not os.path.isfile(output_path):
+            raise SlicerHelperError(f"Export failed: file not created at {output_path}")
+
+        written_grid = _read_grid_on_disk(output_path)
+        if grid_relation(ref_grid, written_grid).kind is not RelationKind.SAME:
+            os.remove(output_path)
+            raise SlicerHelperError(
+                f"export_segmentation: post-write grid check failed for {output_path!r} "
+                f"against reference {conform_to!r} -- the written file was deleted."
+            )
+    finally:
+        if tmp_seg is not None:
+            slicer.mrmlScene.RemoveNode(tmp_seg)
+        if hidden_ref is not None:
+            slicer.mrmlScene.RemoveNode(hidden_ref)
 
     return output_path
 
@@ -270,7 +481,7 @@ def _labelmap_array_or_raise(labelmap_node: Any, source_node: Any, *, what: str)
       ``slicer.util.arrayFromVolume`` would then dereference ``None`` and crash
       with an opaque ``'NoneType' object has no attribute 'GetDataType'``. Raise a
       diagnosable ``SlicerHelperError`` pointing at the on-disk repair instead —
-      the set-op companion to the save-time ``assert_segmentation_matches_volume``.
+      the set-op companion to the pre-regrid ``_assert_segmentation_matches_volume``.
     - **Genuinely empty** — the source has no voxels anywhere. Pre-guard set-ops
       treated this as a no-op; preserve that. Warn and return ``None`` so the
       caller can short-circuit to its own empty-result path.
@@ -1693,7 +1904,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         if self._image_node is not None:
             try:
-                assert_segmentation_matches_volume(seg_node, self._image_node)
+                _assert_segmentation_matches_volume(seg_node, self._image_node)
             except SlicerHelperError:
                 slicer.mrmlScene.RemoveNode(seg_node)
                 raise
@@ -1979,7 +2190,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         Unless *resample* is set, a non-empty source is checked against the
         source volume's grid before re-gridding (see
-        ``assert_segmentation_matches_volume``) — a partially-overlapping
+        ``_assert_segmentation_matches_volume``) — a partially-overlapping
         misaligned grid would otherwise export non-empty-but-wrong voxels and
         slip through the empty/foreign-grid guard below undetected.
 
@@ -1994,10 +2205,10 @@ class _SegmentEditMixin(_SlicerHelperBase):
                 extent (see ``_labelmap_array_or_raise``); or, when *resample*
                 is False, a non-empty source whose recorded reference geometry
                 does not match the source volume's grid (see
-                ``assert_segmentation_matches_volume``).
+                ``_assert_segmentation_matches_volume``).
         """
         if not resample and _segmentation_has_voxels(node):
-            assert_segmentation_matches_volume(node, self._image_node)
+            _assert_segmentation_matches_volume(node, self._image_node)
         self._apply_reference_geometry(node)
         seg_logic = slicer.modules.segmentations.logic()
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", tmp_name)
