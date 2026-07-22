@@ -1,5 +1,7 @@
 # Pipeline Service — Distributed Task Queue
 
+Deep reference: [Pipeline task queue](../../../docs/kb/pipeline.md).
+
 TaskIQ-based distributed task pipeline for long-running operations (GPU processing, DICOM chains, multi-step workflows).
 
 ## Architecture

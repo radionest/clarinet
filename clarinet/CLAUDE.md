@@ -1,5 +1,7 @@
 # Backend Development Guide
 
+Deep reference: [Backend architecture](../docs/kb/architecture.md) (layers, lifespan, async-session rule), [Files and the anonymized-path contract](../docs/kb/files-and-anonymization.md).
+
 ## Async Programming
 
 - Use `AsyncSession` for DB operations: `get_async_session` from `clarinet.utils.database`
@@ -8,7 +10,7 @@
 
 `AsyncSession` is **not concurrency-safe**. All repositories in a single request share one session (and one DB connection) via FastAPI DI.
 
-**Do NOT use `asyncio.gather()` with multiple queries on a shared session.** Even read-only queries deadlock on PostgreSQL: `asyncpg` connections handle one query at a time, so concurrent coroutines block each other. This appears to work on SQLite only because `aiosqlite` serializes operations through a dedicated thread.
+**Do NOT use `asyncio.gather()` with multiple queries on a shared session.** Concurrent use is unsupported even for read-only queries: `asyncpg` connections handle one query at a time, so concurrent coroutines block each other or fail with `InterfaceError` ("another operation is in progress"). This appears to work on SQLite only because `aiosqlite` serializes operations through a dedicated thread.
 
 Use sequential `await` for all queries on a shared session. If true parallelism is needed, each coroutine must create its own session (via session factory) to get a separate connection from the pool.
 
@@ -128,8 +130,10 @@ sums = await Files(record).checksums()
 single = await Files.checksum(path)
 ```
 
-UX routers catch `AnonPathError` and serve `null`. The implementation is private
-behind `clarinet/files/_*`; never import those leaves directly.
+Nothing in `clarinet/api/` catches `AnonPathError` — leniency is a call-site
+decision made in the service layer (`fallback=True` / `Files.for_reader`)
+before a router ever sees a path. The implementation is private behind
+`clarinet/files/_*`; never import those leaves directly.
 
 ## Service Layer Overview
 

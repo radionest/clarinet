@@ -6,6 +6,8 @@ paths:
 
 # RecordRepository & RecordTypeRepository — Specialized Methods
 
+Deep reference: [Persistence conventions](../../docs/kb/persistence.md).
+
 ## RecordRepository Methods
 
 Beyond `BaseRepository`, `RecordRepository` has:

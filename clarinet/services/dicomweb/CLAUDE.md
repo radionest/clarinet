@@ -1,5 +1,7 @@
 # DICOMweb Proxy Service
 
+Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md).
+
 Translates DICOMweb HTTP requests (QIDO-RS, WADO-RS) into DICOM C-FIND/C-GET
 operations via the existing `DicomClient`, enabling OHIF Viewer to display images
 from a traditional PACS (Orthanc) that only supports DICOM Q/R.

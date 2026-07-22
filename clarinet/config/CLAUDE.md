@@ -1,5 +1,7 @@
 # Config Package Guide
 
+Deep reference: [Project configuration and the clarinet_plan package](../../docs/kb/plan-package.md).
+
 Two mutually exclusive config modes per project:
 - **TOML mode** (default): Bidirectional sync — TOML files <-> DB via API
 - **Python mode**: Python files = single source of truth, API mutations disabled

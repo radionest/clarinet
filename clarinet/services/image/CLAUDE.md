@@ -1,5 +1,7 @@
 # Image Processing Service
 
+Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md).
+
 ## Modules
 
 | File | Purpose |

@@ -1,5 +1,7 @@
 # DICOM Service
 
+Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md), [Files and the anonymized-path contract](../../../docs/kb/files-and-anonymization.md).
+
 Async DICOM client for Query/Retrieve operations against external PACS servers (e.g. Orthanc).
 
 ## Architecture

@@ -1,5 +1,7 @@
 # WorkflowGraph — visualization service
 
+Deep reference: [RecordFlow workflow engine](../../../docs/kb/recordflow.md).
+
 Read-only introspection over `RecordFlowEngine` and the pipeline registry.
 Produces a typed `WorkflowGraph` Pydantic model that the Lustre frontend
 renders as native SVG.
