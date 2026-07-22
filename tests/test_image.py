@@ -9,6 +9,7 @@ import numpy as np
 import pydicom
 import pydicom.uid
 import pytest
+import SimpleITK as sitk
 from pydicom.dataset import FileDataset
 
 from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
@@ -17,12 +18,16 @@ from clarinet.services.image import (
     Grid,
     Image,
     LayeredSegmentation,
+    RelationKind,
     Segmentation,
     coco_to_segmentation,
     conform_seg_to_grid,
+    grid_relation,
+    read_grid,
 )
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
+from clarinet.services.image.orientation import ground_truth_slice_geometry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -314,11 +319,13 @@ class TestImage:
         """DICOM direction matrix maps numpy axes to patient-space (LPS)."""
         img = Image()
         img.read_dicom_series(dicom_dir)
-        # Fixture IOP = [1,0,0, 0,1,0] (standard axial)
-        # numpy axis 0 (row index) → col_dir [0,1,0]
-        # numpy axis 1 (col index) → row_dir [1,0,0]
-        # numpy axis 2 (slice)     → slice_dir [0,0,1]
-        expected = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
+        # Fixture IOP = [1,0,0, 0,1,0] (standard axial). Post-Task-7 the array/
+        # direction follow SimpleITK's own (x, y, z) axis order (no in-plane swap):
+        # numpy axis 0 (x / Columns) → row_dir [1,0,0] (DICOM "row direction cosine"
+        #     is the direction of increasing COLUMN index — SimpleITK's x-axis)
+        # numpy axis 1 (y / Rows)    → col_dir [0,1,0]
+        # numpy axis 2 (slice)       → slice_dir [0,0,1]
+        expected = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
         np.testing.assert_array_almost_equal(img.direction, expected, decimal=4)
 
     def test_save_as_dicom_raises(self, nifti_path: Path, tmp_path: Path) -> None:
@@ -602,10 +609,14 @@ class TestDicomVolume:
         img = Image()
         img.read_dicom_series(dicom_dir)
 
-        assert img.shape == (4, 5, 3)
+        # dicom_dir: Rows=4, Columns=5, PixelSpacing=[0.5, 0.6] (row, col). Post-Task-7
+        # the array/spacing follow SimpleITK's own (x, y, z) = (Columns, Rows, slices)
+        # order — no in-plane swap — so axis 0 is Columns(5)/col-spacing(0.6) and axis
+        # 1 is Rows(4)/row-spacing(0.5), the reverse of the pre-Task-7 (rows, cols) order.
+        assert img.shape == (5, 4, 3)
         assert img._filetype == FileType.DICOM
-        assert pytest.approx(img.spacing[0], abs=1e-4) == 0.5
-        assert pytest.approx(img.spacing[1], abs=1e-4) == 0.6
+        assert pytest.approx(img.spacing[0], abs=1e-4) == 0.6
+        assert pytest.approx(img.spacing[1], abs=1e-4) == 0.5
         assert pytest.approx(img.spacing[2], abs=1e-4) == 2.0
 
     def test_empty_dir_raises(self, tmp_path: Path) -> None:
@@ -672,6 +683,7 @@ class TestDicomVolume:
         dcm_dir: Path,
         slice_pixels: dict[float, np.ndarray],
         iop: tuple[int, ...] = (1, 0, 0, 0, -1, 0),
+        pixel_spacing: tuple[float, float] = (1.0, 1.0),
     ) -> None:
         """Write an axial series mapping physical Z (mm) → (rows, cols) pixel array.
 
@@ -679,6 +691,8 @@ class TestDicomVolume:
         points along -Z, so SimpleITK orders slices opposite to the legacy ascending-
         ``ImagePositionPatient[2]`` convention — exercising the slice-axis flip. Pass
         ``iop=(1,0,0,0,1,0)`` (normal +Z) for an already-canonical series.
+        ``pixel_spacing`` is ``[row spacing, col spacing]`` (DICOM ``PixelSpacing``
+        order); defaults to the legacy symmetric 1.0mm.
         """
         dcm_dir.mkdir()
         suid = pydicom.uid.generate_uid()
@@ -699,7 +713,7 @@ class TestDicomVolume:
             ds.PixelRepresentation = 0
             ds.SamplesPerPixel = 1
             ds.PhotometricInterpretation = "MONOCHROME2"
-            ds.PixelSpacing = [1.0, 1.0]
+            ds.PixelSpacing = list(pixel_spacing)
             ds.SliceThickness = 3.0
             ds.ImageOrientationPatient = list(iop)
             ds.ImagePositionPatient = [0.0, 0.0, z]
@@ -904,6 +918,139 @@ class TestDicomVolume:
         img = Image()
         img.read_dicom_series(dcm_dir)
         np.testing.assert_allclose(img.img, expected_hu)
+
+    @staticmethod
+    def _read_dicom_series_old_epoch(
+        directory: Path,
+    ) -> tuple[np.ndarray, tuple[float, float, float], tuple[float, float, float], np.ndarray]:
+        """Verbatim pre-Task-7 ``read_dicom_series`` body (in-plane row/col swap kept).
+
+        Reconstructed here only to compare epochs in
+        ``test_epoch_change_is_lossless_index_rearrangement``. Slice-axis handling
+        (``ground_truth_slice_geometry`` + ``_canonicalize_slice_axis``) is identical
+        in both epochs, so it is applied here too — isolating exactly the in-plane
+        transpose/spacing/direction change under test.
+        """
+        directory = Path(directory)
+        reader = sitk.ImageSeriesReader()
+        series_ids = reader.GetGDCMSeriesIDs(str(directory))
+        dicom_names = reader.GetGDCMSeriesFileNames(str(directory), series_ids[0])
+        reader.SetFileNames(dicom_names)
+        image = reader.Execute()
+
+        volume = np.transpose(sitk.GetArrayFromImage(image), (1, 2, 0))
+        sx, sy, sz = image.GetSpacing()
+        spacing = (sy, sx, sz)
+        ox, oy, oz = image.GetOrigin()
+        origin = (float(ox), float(oy), float(oz))
+        d = np.array(image.GetDirection()).reshape(3, 3)
+        direction = np.ascontiguousarray(d[:, [1, 0, 2]])
+
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(
+            dicom_names, spacing[2], origin, direction
+        )
+        volume, origin, direction = _canonicalize_slice_axis(
+            volume, spacing[2], origin, direction, directory.name, exact_last_ipp
+        )
+        return volume, spacing, origin, direction
+
+    def test_read_dicom_series_roundtrips_through_save_and_read_grid(self, tmp_path: Path) -> None:
+        """The array, spacing, and direction move in lockstep: saving the read result
+        and reading its grid back from disk must reproduce the same grid
+        ``read_dicom_series`` computed in memory. This catches a write-side-only
+        reorient (e.g. array/spacing swapped but direction left behind) that an
+        in-memory-only check would miss — ``_save_nifti`` just trusts whatever
+        ``Image`` already holds.
+        """
+        dcm_dir = tmp_path / "roundtrip_series"
+        rng = np.random.default_rng(20260722)
+        z_values = [0.0, 3.0, 6.0]
+        slice_pixels = {z: rng.integers(0, 1000, size=(4, 6)).astype(np.uint16) for z in z_values}
+        self._write_axial_series(
+            dcm_dir, slice_pixels, iop=(1, 0, 0, 0, 1, 0), pixel_spacing=(0.5, 0.6)
+        )
+
+        img = Image()
+        img.read_dicom_series(dcm_dir)
+        memory_grid = img.grid
+
+        saved_path = img.save_as(tmp_path / "emitted.nii.gz", FileType.NIFTI)
+        disk_grid = read_grid(saved_path)
+
+        assert disk_grid.shape == memory_grid.shape
+        assert grid_relation(memory_grid, disk_grid).kind is RelationKind.SAME
+
+        # In-plane basis (columns 0, 1) is SimpleITK's own — not swapped.
+        reader = sitk.ImageSeriesReader()
+        series_ids = reader.GetGDCMSeriesIDs(str(dcm_dir))
+        names = reader.GetGDCMSeriesFileNames(str(dcm_dir), series_ids[0])
+        reader.SetFileNames(names)
+        sitk_direction = np.array(reader.Execute().GetDirection()).reshape(3, 3)
+        np.testing.assert_array_equal(img.direction[:, 0], sitk_direction[:, 0])
+        np.testing.assert_array_equal(img.direction[:, 1], sitk_direction[:, 1])
+
+    def test_epoch_change_is_lossless_index_rearrangement(self, tmp_path: Path) -> None:
+        """Task 7 changes the in-plane axis order but must not move any voxel
+        physically: the new-epoch grid and the old (pre-Task-7) epoch's grid must
+        classify as REARRANGED (an exact signed permutation, never FOREIGN), share an
+        identical physical bounding box, and the old volume — exactly
+        index-rearranged onto the new grid via ``Image.reindex_to(order=0)`` — must
+        reproduce the new volume exactly (zero voxel drift). Proves the epoch change
+        is a lossless relabeling, not a mirror.
+
+        Deliberately does NOT assert ``direction[2, 2] > 0`` / ``det > 0`` —
+        universal positive determinant is Task 8's change, not this one; after this
+        task alone some series may still emit ``det < 0``.
+        """
+        dcm_dir = tmp_path / "epoch_series"
+        rng = np.random.default_rng(20260722)
+        z_values = [0.0, 3.0, 6.0]
+        slice_pixels = {z: rng.integers(0, 1000, size=(4, 6)).astype(np.uint16) for z in z_values}
+        self._write_axial_series(
+            dcm_dir, slice_pixels, iop=(1, 0, 0, 0, 1, 0), pixel_spacing=(0.5, 0.6)
+        )
+
+        new_volume, new_spacing, new_origin, new_direction = read_dicom_series(dcm_dir)
+        old_volume, old_spacing, old_origin, old_direction = self._read_dicom_series_old_epoch(
+            dcm_dir
+        )
+
+        new_grid = Grid.from_components(new_volume.shape, new_spacing, new_origin, new_direction)
+        old_grid = Grid.from_components(old_volume.shape, old_spacing, old_origin, old_direction)
+
+        relation = grid_relation(new_grid, old_grid)
+        assert relation.kind is RelationKind.REARRANGED
+
+        # Physical bounding boxes identical (0.00 mm delta) — same physical volume.
+        def _bbox(grid: Grid) -> tuple[np.ndarray, np.ndarray]:
+            nx, ny, nz = grid.shape
+            corners = np.array(
+                [[i, j, k, 1.0] for i in (0, nx - 1) for j in (0, ny - 1) for k in (0, nz - 1)]
+            )
+            phys = (grid.affine @ corners.T).T[:, :3]
+            return phys.min(axis=0), phys.max(axis=0)
+
+        new_min, new_max = _bbox(new_grid)
+        old_min, old_max = _bbox(old_grid)
+        np.testing.assert_allclose(new_min, old_min, atol=1e-9)
+        np.testing.assert_allclose(new_max, old_max, atol=1e-9)
+
+        # Zero voxel drift: old volume, resampled (nearest-neighbor) onto the new
+        # grid, reproduces the new volume exactly.
+        new_image = Image()
+        new_image.spacing = new_spacing
+        new_image.origin = new_origin
+        new_image.direction = new_direction
+        new_image.img = new_volume
+
+        old_image = Image()
+        old_image.spacing = old_spacing
+        old_image.origin = old_origin
+        old_image.direction = old_direction
+        old_image.img = old_volume
+
+        reindexed = old_image.reindex_to(new_image, order=0)
+        np.testing.assert_array_equal(reindexed.img, new_volume)
 
 
 # ---------------------------------------------------------------------------
