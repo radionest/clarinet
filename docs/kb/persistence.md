@@ -29,9 +29,10 @@ inside that layer correctly.
 Repositories raise **only** from `clarinet.exceptions.domain` — never import
 `clarinet.exceptions.http` here; converting to HTTP is the API layer's job.
 
-**NULL comparisons need the SQLAlchemy spelling.** `Record.user_id == None` does
-not generate the SQL you want; use `col(Record.user_id).is_(None)` /
-`.is_not(None)`.
+**NULL comparisons: prefer the explicit SQLAlchemy spelling.**
+`Record.user_id == None` compiles to `IS NULL` and is correct, but
+`col(Record.user_id).is_(None)` / `.is_not(None)` states the intent and does
+not trip the `E711` lint rule enabled in this repo.
 
 ## Eager loading
 

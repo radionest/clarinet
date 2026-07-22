@@ -38,7 +38,7 @@ file("master_model").on_update().invalidate_all_records("create-projection")
 
 | Trigger | Fires when |
 |---|---|
-| `.on_status('x')` / `.on_finished()` | a record's status changes to `x` |
+| `.on_status('x')` / `.on_finished()` | a record's status changes to `x` — except hard invalidation, which re-fires `on_status('pending')` even when the record is already `pending` (see [Invalidation](#invalidation)) |
 | `.on_data_update()` | `PATCH /records/{id}/data` updates a finished record |
 | `.on_file_change()` | `POST /records/{id}/check-files` sees changed checksums |
 | `.on_created()` / `.on_creation()` | a patient, study or series entity is created |

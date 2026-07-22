@@ -53,10 +53,11 @@ API layer may also raise the ready-made shortcuts in `clarinet.exceptions.http`
 Every repository in one request shares a single `AsyncSession`, and therefore a
 single DB connection, via FastAPI DI.
 
-**Do not use `asyncio.gather()` for several queries on a shared session.** Even
-read-only queries deadlock on PostgreSQL: an `asyncpg` connection serves one
-query at a time, so concurrent coroutines block each other. SQLite hides the
-bug because `aiosqlite` serialises through a dedicated thread.
+**Do not use `asyncio.gather()` for several queries on a shared session.**
+Concurrent use of one session is unsupported even for read-only queries: an
+`asyncpg` connection serves one query at a time, so concurrent coroutines block
+each other or fail with `InterfaceError` ("another operation is in progress").
+SQLite hides the bug because `aiosqlite` serialises through a dedicated thread.
 
 Use sequential `await` on a shared session. For genuine parallelism, each
 coroutine must build its own session from the factory so it draws a separate

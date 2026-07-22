@@ -10,7 +10,7 @@ Deep reference: [Backend architecture](../docs/kb/architecture.md) (layers, life
 
 `AsyncSession` is **not concurrency-safe**. All repositories in a single request share one session (and one DB connection) via FastAPI DI.
 
-**Do NOT use `asyncio.gather()` with multiple queries on a shared session.** Even read-only queries deadlock on PostgreSQL: `asyncpg` connections handle one query at a time, so concurrent coroutines block each other. This appears to work on SQLite only because `aiosqlite` serializes operations through a dedicated thread.
+**Do NOT use `asyncio.gather()` with multiple queries on a shared session.** Concurrent use is unsupported even for read-only queries: `asyncpg` connections handle one query at a time, so concurrent coroutines block each other or fail with `InterfaceError` ("another operation is in progress"). This appears to work on SQLite only because `aiosqlite` serializes operations through a dedicated thread.
 
 Use sequential `await` for all queries on a shared session. If true parallelism is needed, each coroutine must create its own session (via session factory) to get a separate connection from the pool.
 

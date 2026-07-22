@@ -39,10 +39,10 @@ Repositories raise exceptions from `clarinet.exceptions.domain`:
 **NEVER** import from `clarinet.exceptions.http` in repositories — that's API layer only.
 Exception handlers in `clarinet/api/exception_handlers.py` convert domain → HTTP.
 
-## NULL Comparison Gotcha
+## NULL Comparison
 
-**WRONG:** `Record.user_id == None` (doesn't generate correct SQL)
-**RIGHT:** `col(Record.user_id).is_(None)` / `.is_not(None)`
+**Prefer:** `col(Record.user_id).is_(None)` / `.is_not(None)`
+**Also correct:** `Record.user_id == None` compiles to `IS NULL`, but trips ruff `E711` and hides the intent
 
 ## RecordSearchCriteria (record_repository.py)
 
