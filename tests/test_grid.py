@@ -482,25 +482,27 @@ class TestAssertSameGridOnDisk:
     def test_disk_assert_catches_mismatch_in_memory_same_grid_cannot_see(
         self, tmp_path: Path
     ) -> None:
-        """`Image.same_grid` only ever compares the two objects handed to it. A fresh
-        in-memory read of the (flipped) segmentation trivially agrees with a copy of
-        itself — that says nothing about whether the segmentation's *file* actually
-        matches the volume's *file*, which is the pair that matters.
-        `assert_same_grid_on_disk` reads both files fresh and catches the real
-        mismatch the in-memory comparison never had a chance to see.
+        """`Image.same_grid` only ever compares the two objects handed to it. An
+        in-memory segmentation built to share the reference volume's grid
+        legitimately passes that check against the pair that matters — but the
+        segmentation *file* that actually lands on disk can still be a separately
+        written, mirrored copy. `assert_same_grid_on_disk` reads both files fresh
+        and catches that real mismatch, which the in-memory comparison never had a
+        chance to see.
         """
-        vol_path = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        vol = Image()
+        vol.img = np.zeros((10, 10, 10), dtype=np.uint8)
+        vol_path = vol.save_as(tmp_path / "vol.nii.gz", FileType.NIFTI)
+
+        seg_inmem = Image(template=vol, copy_data=True)
+        assert seg_inmem.same_grid(vol)  # in-memory guard: passes on the pair that matters
+
         seg_path = _write_volume(
             tmp_path / "seg.nrrd",
             FileType.NRRD,
             origin=(0.0, 0.0, 9.0),
             direction=_Z_FLIP,
         )
-
-        seg_read = Image()
-        seg_read.read(seg_path)
-        seg_copy = Image(template=seg_read, copy_data=True)
-        assert seg_read.same_grid(seg_copy)  # in-memory guard: "looks fine"
 
         with pytest.raises(GeometryMismatchError):
             assert_same_grid_on_disk(vol_path, seg_path)
