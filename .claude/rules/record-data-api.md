@@ -12,9 +12,9 @@ Deep reference: [Domain model](../../docs/kb/domain-model.md) (status lifecycle,
 
 | Method | HTTP | Precondition | Transitions to | Triggers flows |
 |---|---|---|---|---|
-| `submit_record_data(id, data)` | POST | pending/blocked | finished | `on_status()` |
+| `submit_record_data(id, data)` | POST | any status except blocked/preparing/finished | finished | `on_status()` |
 | `update_record_data(id, data)` | PATCH | finished | finished | `on_data_update()` |
-| `prefill_record_data(id, data, method=)` | POST/PUT/PATCH | pending/blocked | stays | none |
+| `prefill_record_data(id, data, method=)` | POST/PUT/PATCH | pending/blocked/preparing | stays | none |
 
 `prefill_record_data` methods:
 - `POST` (default) — fails if data already exists

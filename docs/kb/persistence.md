@@ -6,7 +6,7 @@ tags: [sqlmodel, repositories, migrations, alembic, postgres]
 timestamp: 2026-07-21T19:46:32Z
 ---
 
-The repository layer owns every DB access; see [Backend architecture](/architecture.md)
+The repository layer owns every DB access; see [Backend architecture](./architecture.md)
 for how it sits under services and routers. This page is about writing the code
 inside that layer correctly.
 

@@ -130,8 +130,10 @@ sums = await Files(record).checksums()
 single = await Files.checksum(path)
 ```
 
-UX routers catch `AnonPathError` and serve `null`. The implementation is private
-behind `clarinet/files/_*`; never import those leaves directly.
+Nothing in `clarinet/api/` catches `AnonPathError` — leniency is a call-site
+decision made in the service layer (`fallback=True` / `Files.for_reader`)
+before a router ever sees a path. The implementation is private behind
+`clarinet/files/_*`; never import those leaves directly.
 
 ## Service Layer Overview
 

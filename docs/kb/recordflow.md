@@ -10,7 +10,7 @@ RecordFlow is what turns a pile of record types into a study protocol: it
 reacts to events and creates the next piece of work. It is **disabled by
 default** (`recordflow_enabled = False`) and reads `*_flow.py` files from
 `recordflow_paths`, which must live inside `config_tasks_path` — see
-[The clarinet_plan package](/plan-package.md).
+[The clarinet_plan package](./plan-package.md).
 
 ```python
 from clarinet.services.recordflow import Field, record, study, file
@@ -59,7 +59,7 @@ Actions are typed Pydantic models, not dicts, and the engine dispatches on
 | `.add_record()` / `.create_record()` | `CreateRecordAction` |
 | `.update_record(name, status=, strategy=)` | `UpdateRecordAction` |
 | `.invalidate_records(*types, mode=, callback=)` | `InvalidateRecordsAction` |
-| `.pipeline(name)` / `.do_task(fn)` | `PipelineAction` — see [Pipeline](/pipeline.md) |
+| `.pipeline(name)` / `.do_task(fn)` | `PipelineAction` — see [Pipeline](./pipeline.md) |
 | `.call(fn)` | `CallFunctionAction` |
 
 Conditions come in two flavours: `.if_(...)` for cross-record comparisons

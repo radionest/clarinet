@@ -81,7 +81,7 @@ def compare(msg: PipelineMessage, ctx: SyncTaskContext) -> dict:
 `records` (a query helper), `client` and `msg`. To resolve files of a *different*
 record you already hold, use `ctx.files_for(record)`; for lookup by criteria use
 `ctx.records.file_path(...)`. Path resolution has its own safety contract:
-[Files and anonymization](/files-and-anonymization.md).
+[Files and anonymization](./files-and-anonymization.md).
 
 ## Chains
 

@@ -3,7 +3,7 @@ type: Concept
 title: Domain model
 description: The Patient/Study/Series/Record hierarchy, what a RecordType declares, the record status lifecycle, and how record data, files and audit events hang off a record.
 tags: [domain, records, dicom, lifecycle, rbac]
-timestamp: 2026-07-21T19:46:32Z
+timestamp: 2026-07-22T04:35:40Z
 ---
 
 Everything in Clarinet hangs off a four-level hierarchy borrowed from DICOM. A
@@ -22,7 +22,10 @@ erDiagram
 ```
 
 Records may additionally form a tree among themselves through
-`Record.parent_record_id`, independently of the DICOM hierarchy.
+`Record.parent_record_id`, independently of the DICOM hierarchy — a
+self-referencing FK with **`ON DELETE CASCADE`**, so a DB-level delete removes
+descendants rather than orphaning them. Parent existence is validated in
+`RecordService.create_record()`.
 
 ## Levels
 
@@ -58,42 +61,10 @@ from it as `f"{settings.anon_id_prefix}_{auto_id}"`.
 A `RecordType` is the project's declaration of one kind of work. It names the
 JSON Schema for the record's data, the role allowed to do it, the files it
 consumes and produces, and optional 3D Slicer scripts. Projects declare record
-types in TOML or Python — see [The clarinet_plan package](/plan-package.md).
-
-Behavioural flags worth knowing:
-
-| Flag | Effect |
-|---|---|
-| `unique_by` | uniqueness partition set, a subset of `{"user", "parent"}` (default both). At most one record per partition tuple, scoped within the type's own DICOM level. `None` disables uniqueness; an empty set is rejected |
-| `shared_editing` | any role-holder may edit any record of the type; each edit reassigns ownership to the editor. Requires `'user' not in unique_by` |
-| `editable` / `edit_window_days` | when false or expired, non-superusers get 409 on mutating a finished record |
-| `inherit_user_from_parent` | a created child inherits `user_id` from its `parent_record_id` when no explicit user is given |
-| `parent_required` | creation without `parent_record_id` returns 409 `PARENT_REQUIRED` |
-| `max_records` | hard cap per DICOM-level context; exceeding it raises `RecordLimitReachedError`. `max_records=0` is the deprecation sentinel — blocks new records while keeping the type registered |
-| `min_records` | advisory only — surfaced in admin stats, enforced nowhere |
-
-`unique_by` and `max_records` are **orthogonal**. `max_records` caps how many
-records may coexist at a level *in total*, regardless of partition; `unique_by`
-only says a given partition tuple holds at most one. So `unique_by={"parent"}`
-with `max_records=4` allows four coexisting records, one per distinct parent —
-raising the cap does not loosen the per-parent dedup, and narrowing the
-partition does not loosen the cap. A plain one-per-level singleton is
-`unique_by=None` plus `max_records=1`.
-
-**Bound-tuple rule:** when `"user"` is a selected partition but the candidate
-`user_id` is still `None`, the check is skipped — an unassigned record's user
-axis is not evaluable yet, so unassigned pools stay creatable. The invariant
-closes at claim/assign time, when the same check runs with `user_id` bound. A
-type partitioned only by `{"parent"}` has no such gap.
-
-The deprecated `unique_per_user=True/False` kwarg still works in config: it
-translates to `{"user"}` / `None`, emits a `DeprecationWarning`, and is ignored
-when `unique_by` is also given.
-
-Parent–child links are independent of RecordType: `Record.parent_record_id` is a
-self-referencing FK with **`ON DELETE CASCADE`**, so a DB-level delete removes
-descendants rather than orphaning them. Parent existence is validated in
-`RecordService.create_record()`.
+types in TOML or Python — see [The clarinet_plan package](./plan-package.md).
+The behavioural flags (`unique_by`, `shared_editing`, `editable`,
+`max_records`, …) and their composition rules have their own page:
+[RecordType flags and uniqueness](./record-types.md).
 
 ## Status lifecycle
 
@@ -166,7 +137,7 @@ relationship `file_links`; read metadata through the `file_registry` DTO.
 `RecordRead.files` and `RecordRead.file_checksums` are deprecated.
 
 Turning a definition into a path on disk is a separate concern with its own
-safety contract: [Files and anonymization](/files-and-anonymization.md).
+safety contract: [Files and anonymization](./files-and-anonymization.md).
 
 ## Audit trail
 

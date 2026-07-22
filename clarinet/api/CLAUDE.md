@@ -22,23 +22,10 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 
 ## Application Lifespan (app.py)
 
-Startup sequence:
-1. Database init (`db_manager.create_db_and_tables_async()`)
-1b. Default roles (`add_default_user_roles()`)
-1c. Anchor the `clarinet_plan` package + load registries: `activate_plan_package(config_tasks_path)` → `_ensure_record_types_imported()` (imports record types, sets FileDef names before validators read them) → `_load_plan_registries()` (clears the 3 registries + `_register_builtin_hydrators()`, then `load_custom_validators/hydrators/slicer_hydrators`). Must run BEFORE `reconcile_config` so the registries are populated when reconcile validates `RecordType.data_validators` and `RecordType.slicer_context_hydrators` names. Loading contract: `.claude/rules/custom-code-loading.md`
-2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names, validator names, and slicer-hydrator names
-2b. Load project file registry from tasks folder
-3. Admin user creation (`ensure_admin_exists()`)
-4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
-5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB
-6. Session cleanup service start (if `session_cleanup_enabled`)
-7. DICOMweb cache init (if `dicomweb_enabled`) → `app.state.dicomweb_cache`; cleanup service → `app.state.dicomweb_cleanup`
-
-Any `ConfigLoadError` from steps 1c/2/2b/4/5 (a broken plan/ `.py` file) is converted to
-`StartupError(component="Config")` — the server refuses to start instead of running without
-custom validators/hydrators/flows. Loading contract: `.claude/rules/custom-code-loading.md`.
-
-Shutdown (reverse order): stop DICOMweb cleanup → flush DICOMweb cache → stop session cleanup → shutdown pipeline broker → close RecordFlow client → close DB.
+Startup order (12 steps), fail-fast gates (`verify_migrations_applied`,
+`ConfigLoadError` → `StartupError`), `app.state.*` population and the
+non-reverse shutdown sequence: [Backend architecture — Application lifespan](../../docs/kb/architecture.md#application-lifespan).
+Plan-code loading contract: `.claude/rules/custom-code-loading.md`.
 
 ## Middleware (middleware.py)
 

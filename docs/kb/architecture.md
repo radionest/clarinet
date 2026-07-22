@@ -3,7 +3,7 @@ type: Subsystem
 title: Backend architecture
 description: How a request flows through routers, services and repositories, what the application lifespan builds, and the async rules that constrain every layer.
 tags: [architecture, fastapi, layers, lifespan, async]
-timestamp: 2026-07-21T19:46:32Z
+timestamp: 2026-07-22T04:35:40Z
 ---
 
 Clarinet is an imaging-centric framework for structured research workflows. A
@@ -36,12 +36,12 @@ flowchart TD
 Dependency injection goes through the `Annotated[X, Depends()]` aliases in
 `clarinet/api/dependencies.py` — reuse an existing alias instead of writing a
 new `Depends()` wrapper. Writing models and repositories correctly:
-[Persistence conventions](/persistence.md).
+[Persistence conventions](./persistence.md).
 
 ## Exception flow
 
 Repositories and services raise from `clarinet.exceptions.domain` (root base
-`ClarinetError`, ~17 second-tier bases such as `EntityNotFoundError`,
+`ClarinetError`, with second-tier bases such as `EntityNotFoundError`,
 `AuthorizationError`, `ConfigurationError`, `PipelineError`).
 `setup_exception_handlers(app)` in `clarinet/api/exception_handlers.py` maps
 them onto HTTP responses, so routers need no error handling of their own. The
@@ -75,7 +75,7 @@ non-session work (HTTP calls, `asyncio.to_thread` CPU work).
 3. Anchor the plan package: `activate_plan_package()` →
    `_ensure_record_types_imported()` → `compute_fingerprint()` (pins the
    startup snapshot before any later `plan/` edit) → `_load_plan_registries()`.
-   See [The clarinet_plan package](/plan-package.md). Must precede step 4 so
+   See [The clarinet_plan package](./plan-package.md). Must precede step 4 so
    reconciliation can validate validator and hydrator names.
 4. `reconcile_config()` → `app.state.config_mode`, `app.state.config_tasks_path`
 5. Project file registry → `app.state.project_file_registry`
@@ -115,8 +115,8 @@ lifespan. Shut the old resource down, then immediately install a fresh one —
 | Surface | Where |
 |---|---|
 | ASGI app | `clarinet.api.app:app` (module-level `create_app(root_path=settings.root_url)`) |
-| CLI | `clarinet.cli.main:main` — argparse; groups `init`, `run`, `db`, `admin`, `worker`, `session`, `rabbitmq`, `ohif`, `quarto`, `agent`, `anon`, `deploy`, `frontend` |
-| Worker | `clarinet worker` → `clarinet/services/pipeline/worker.py` — see [Pipeline](/pipeline.md) |
+| CLI | `clarinet.cli.main:main` — argparse; groups `init`, `init-migrations`, `run`, `db`, `admin`, `worker`, `session`, `rabbitmq`, `ohif`, `quarto`, `agent`, `anon`, `deploy`, `frontend` |
+| Worker | `clarinet worker` → `clarinet/services/pipeline/worker.py` — see [Pipeline](./pipeline.md) |
 | Settings | `from clarinet.settings import settings`; env vars use the `CLARINET_` prefix, TOML files are `settings.toml` / `settings.custom.toml` |
 | Logger | `from clarinet.utils.logger import logger` — never import loguru directly |
 

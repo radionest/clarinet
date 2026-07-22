@@ -75,7 +75,7 @@ whether or not the parent was loaded. `{origin_type}` names only the parent's
 *type*, never a same-type instance, so it never satisfies the parent rule. A
 single binding opts out with `FileRef(..., allow_path_collision=True)`.
 
-This is the natural consequence of [`unique_by`](/domain-model.md): if two
+This is the natural consequence of [`unique_by`](./record-types.md): if two
 records may legitimately coexist, their output files need distinct paths, and
 the framework refuses to start a project whose *declaration proves* they would
 collide. The guard is only as strong as that declaration: the `parent` rule is

@@ -44,7 +44,7 @@ and friends). The test PACS is Orthanc on `localhost:4242`, AET `ORTHANC`, with
 its REST API on `:8042`.
 
 Anonymization, and the path contract that governs where anonymized files land,
-are covered in [Files and the anonymized-path contract](/files-and-anonymization.md).
+are covered in [Files and the anonymized-path contract](./files-and-anonymization.md).
 
 ## DICOMweb proxy
 

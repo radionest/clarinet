@@ -77,7 +77,7 @@ decision is made in the service layer before a router ever sees a path.
 `AnonPathError` raised in a worker is retried `pipeline_retry_count` times with
 exponential backoff before landing in the DLQ. That is usually the right shape:
 the race window closes as soon as the anonymization run finishes, so a retry
-succeeds. See [Pipeline](/pipeline.md).
+succeeds. See [Pipeline](./pipeline.md).
 
 ## Anonymization surface
 
@@ -115,5 +115,5 @@ the run cleanly.
 
 What a name like `"mask"` means is declared by the project's file registry —
 `FileDefinition` rows linked to record types and records. That side of the
-system is covered in [Domain model](/domain-model.md) and, in detail, in
+system is covered in [Domain model](./domain-model.md) and, in detail, in
 `.claude/rules/file-registry.md`.
