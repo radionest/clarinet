@@ -11,7 +11,7 @@ paths:
 - `record('type_name')` — create flow for a record type (always creates new instance)
 - `file(file_obj)` — create flow for a project-level file (accepts `.name` attr or string)
 - `series()` / `study()` / `patient()` — create entity creation flow
-- `.on_status('status')` — trigger on status change
+- `.on_status('status')` — trigger on status change (hard invalidation re-fires `on_status('pending')` even when already pending — see Invalidation Semantics)
 - `.on_finished()` — shorthand for `.on_status('finished')`
 - `.on_data_update()` — trigger when finished record's data is updated via PATCH
 - `.on_created()` — trigger on entity creation (for entity flows)
