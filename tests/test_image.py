@@ -1854,6 +1854,212 @@ class TestConformSegToGrid:
         src.read(seg_path)
         assert float(src._direction[2, 2]) == -1.0
 
+    # -- relation gate: SAME / REARRANGED (exact) / FOREIGN --
+
+    def test_conform_noop_for_offset_within_relation_tolerance(self, tmp_path: Path) -> None:
+        """A 0.3-voxel origin shift is inside grid_relation's 0.5-voxel SAME window —
+        the new gate must treat it as a no-op, even though it would have failed the
+        old tight-atol `same_grid` check (documents the intentional D7 loosening)."""
+        shape = (8, 8, 8)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[1:4, 1:4, 1:4] = 1
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(shape=shape, origin=(0.3, 0.0, 0.0), data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is False
+
+        untouched = Segmentation(autolabel=False)
+        untouched.read(seg_path)
+        assert untouched.origin[0] == pytest.approx(0.3)  # file untouched
+
+    def test_conform_raises_geometry_mismatch_for_foreign_grid(self, tmp_path: Path) -> None:
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[3:6, 3:6, 3:6] = 7
+        seg_path = tmp_path / "seg.seg.nrrd"
+        # 0.6-voxel origin shift: outside grid_relation's 0.5-voxel offset window -> FOREIGN
+        _make_seg(shape=shape, origin=(0.6, 0.0, 0.0), data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        with pytest.raises(GeometryMismatchError):
+            conform_seg_to_grid(seg_path, vol_path)
+
+        # nothing written: the source file is untouched by the failed attempt
+        untouched = Segmentation(autolabel=False)
+        untouched.read(seg_path)
+        assert untouched.origin[0] == pytest.approx(0.6)
+
+    def test_conform_allow_resample_repairs_foreign_grid(self, tmp_path: Path) -> None:
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[3:6, 3:6, 3:6] = 7
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(shape=shape, origin=(0.6, 0.0, 0.0), data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        changed = conform_seg_to_grid(seg_path, vol_path, allow_resample=True)
+        assert changed is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        assert fixed.same_grid(vol)
+        assert np.sum(fixed.img == 7) > 0  # label survived the approximate resample
+
+    def test_conform_repairs_mirror_exactly(self, tmp_path: Path) -> None:
+        """X-axis mirror repaired exactly: full-array hand-computed check (not just
+        'grid matches'), on an axis distinct from the Z-mirror baseline tests above."""
+        shape = (10, 8, 6)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        rng = np.random.default_rng(20260723)
+        seg_data = rng.integers(0, 4, size=shape).astype(np.uint8)
+        mirrored_dir = np.diag([-1.0, 1.0, 1.0])
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(
+            shape=shape, origin=(shape[0] - 1.0, 0.0, 0.0), direction=mirrored_dir, data=seg_data
+        ).save_as(seg_path, FileType.NRRD)
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        expected = np.flip(seg_data, axis=0)
+        np.testing.assert_array_equal(fixed.img, expected)
+
+    def test_conform_repairs_inplane_transpose_exactly(self, tmp_path: Path) -> None:
+        """Pure X/Y in-plane transpose (no mirror) repaired exactly: full-array
+        hand-computed check against np.transpose."""
+        ref_shape = (10, 8, 6)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, ref_shape)
+
+        seg_shape = (8, 10, 6)
+        rng = np.random.default_rng(20260723)
+        seg_data = rng.integers(0, 4, size=seg_shape).astype(np.uint8)
+        swap_dir = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(shape=seg_shape, direction=swap_dir, data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        expected = np.transpose(seg_data, (1, 0, 2))
+        assert fixed.img.shape == ref_shape
+        np.testing.assert_array_equal(fixed.img, expected)
+
+    def test_conform_4d_layered_rejects_non_nrrd_out_path(self, tmp_path: Path) -> None:
+        """A 4-D layered input can't be written to a NIfTI out_path — that format has
+        no layered equivalent — so the mismatch must fail fast, not silently write
+        NRRD bytes under a .nii.gz name."""
+        shape = (5, 5, 5)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        mirrored_dir = np.diag([1.0, 1.0, -1.0])
+        space_dirs = np.vstack([np.full(3, np.nan), mirrored_dir])
+        seg_path = tmp_path / "layered.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            np.zeros((1, *shape), dtype=np.uint8),
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": space_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "a",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+            },
+        )
+        out_path = tmp_path / "out.nii.gz"
+
+        with pytest.raises(ImageError, match="NRRD"):
+            conform_seg_to_grid(seg_path, vol_path, out_path=out_path)
+
+
+class TestConformLayeredSegToGrid:
+    """4-D layer-preserving repair — the reason conform_seg_to_grid must not go
+    through LayeredSegmentation.from_layers (it would force one segment per layer
+    at LabelValue=1, dropping non-1 labels and multi-segment-per-layer structure).
+    """
+
+    def test_conform_4d_layered_preserves_labels_and_names(self, tmp_path: Path) -> None:
+        shape = (6, 7, 5)  # spatial (X, Y, Z)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = Image()
+        vol._direction = np.eye(3)
+        vol._origin = (0.0, 0.0, 0.0)
+        vol._spacing = (1.0, 1.0, 1.0)
+        vol.img = np.zeros(shape, dtype=np.uint8)
+        vol.save_as(vol_path, FileType.NIFTI)
+
+        rng = np.random.default_rng(20260723)
+        layer0 = np.where(rng.integers(0, 2, size=shape) == 1, 1, 0).astype(np.uint8)  # label 1
+        layer1 = np.where(rng.integers(0, 2, size=shape) == 1, 2, 0).astype(np.uint8)  # label 2
+        data = np.stack([layer0, layer1], axis=0)  # (2, X, Y, Z)
+
+        mirrored_dir = np.diag([1.0, 1.0, -1.0])  # Z-mirror, same physical volume
+        space_dirs = np.vstack([np.full(3, np.nan), mirrored_dir])
+        seg_path = tmp_path / "layered.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": space_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "cortex",
+                "Segment0_ID": "Segment_0",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+                "Segment0_Extent": f"0 {shape[0] - 1} 0 {shape[1] - 1} 0 {shape[2] - 1}",
+                "Segment1_Name": "lesion",
+                "Segment1_ID": "Segment_1",
+                "Segment1_LabelValue": "2",
+                "Segment1_Layer": "1",
+                "Segment1_Extent": f"0 {shape[0] - 1} 0 {shape[1] - 1} 0 {shape[2] - 1}",
+            },
+        )
+
+        changed = conform_seg_to_grid(seg_path, vol_path)
+        assert changed is True
+
+        out_data, out_header = nrrd.read(str(seg_path))
+        assert out_data.shape == (2, *shape)  # both layers survive
+        assert _label_to_name(out_header) == {1: "cortex", 2: "lesion"}  # both names+labels
+        assert out_header["Segment0_Layer"] == "0"
+        assert out_header["Segment1_Layer"] == "1"
+        assert not any("Extent" in k for k in out_header)  # stale grid extent dropped
+
+        expected_layer0 = np.flip(layer0, axis=2)
+        expected_layer1 = np.flip(layer1, axis=2)
+        np.testing.assert_array_equal(out_data[0], expected_layer0)
+        np.testing.assert_array_equal(out_data[1], expected_layer1)
+
+        # round-trips through the public reader too, not just the raw header dict
+        seg_meta = LayeredSegmentation.read_header(seg_path)
+        assert seg_meta.segments == [("cortex", 0, 1), ("lesion", 1, 2)]
+
 
 def _label_to_name(header: dict) -> dict[int, str]:
     """Map LabelValue -> Name from contiguous Segment{i}_* header blocks."""
