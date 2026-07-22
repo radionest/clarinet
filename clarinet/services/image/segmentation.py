@@ -509,6 +509,8 @@ class Segmentation(Image):
         Returns:
             New Segmentation with only the kept labels.
         """
+        if granularity not in ("label", "union"):
+            raise ValueError(f"granularity must be 'label' or 'union', got {granularity!r}")
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
         other = self._align_other(other, resample=resample)  # type: ignore[assignment]

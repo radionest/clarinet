@@ -2025,12 +2025,14 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         Removal decisions run the same path as the image service's
         ``Segmentation.difference``: ``correspond()`` -> ``Difference()`` ->
-        ``KeepPlan``. Scalar thresholds derive the strategy via the bundled
-        ``strategy_from_thresholds``: with ``max_overlap_ratio`` set the ratio
-        wins (a segment is removed iff ``overlap / size >= max_overlap_ratio``
-        against its best-scoring counterpart; ``max_overlap`` is ignored),
-        otherwise a segment is removed when its largest single-pair overlap
-        exceeds ``max_overlap`` voxels.
+        ``KeepPlan``. Operands enter the graph labeled per segment (segment ``i`` ->
+        label ``i+1``): a multi-island segment is scored as one label, unlike
+        server-side autolabel arrays where each connected component is its own label.
+        Scalar thresholds derive the strategy via the bundled
+        ``strategy_from_thresholds``: with ``max_overlap_ratio`` set the ratio wins (a
+        segment is removed iff ``overlap / size >= max_overlap_ratio`` against its
+        best-scoring counterpart; ``max_overlap`` is ignored), otherwise a segment is
+        removed when its largest single-pair overlap exceeds ``max_overlap`` voxels.
 
         Args:
             seg_a: Segmentation to subtract from (SegmentationBuilder or node).

@@ -1927,6 +1927,12 @@ def test_difference_union_granularity_removes_fragmented_overlap() -> None:
     assert result.is_empty  # joint 0.6 >= 0.5 -> removed
 
 
+def test_difference_rejects_unknown_granularity() -> None:
+    seg_a, seg_b = _fragmented_pair()
+    with pytest.raises(ValueError, match="granularity"):
+        seg_a.difference(seg_b, granularity="unoin")  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # symmetric_difference component-level behavior (Fix 1 — reviewer)
 # ---------------------------------------------------------------------------

@@ -107,9 +107,16 @@ def test_engine_parameter_parity() -> None:
 
     Runtime-only names are the documented exclusions: node handling on the
     Slicer side (operands + output_name), the operand on the image side.
+    Shared parameters must also agree on default values.
     """
     import inspect
 
-    sub = set(inspect.signature(SlicerHelper.subtract_segmentations).parameters)
-    diff = set(inspect.signature(Segmentation.difference).parameters)
-    assert sub - {"self", "seg_a", "seg_b", "output_name"} == diff - {"self", "other"}
+    sub_params = inspect.signature(SlicerHelper.subtract_segmentations).parameters
+    diff_params = inspect.signature(Segmentation.difference).parameters
+    sub = set(sub_params) - {"self", "seg_a", "seg_b", "output_name"}
+    diff = set(diff_params) - {"self", "other"}
+    assert sub == diff
+    for name in sorted(sub):
+        assert sub_params[name].default == diff_params[name].default, (
+            f"default for {name!r} differs between runtimes"
+        )
