@@ -26,6 +26,7 @@ from clarinet.services.image.correspondence import (
     ThresholdMatch,
     correspond,
     render,
+    strategy_from_thresholds,
 )
 from clarinet.services.image.correspondence import (
     AppendMerge as _AppendMergeOp,
@@ -469,11 +470,13 @@ class Segmentation(Image):
         strategy: MatchingStrategy | None = None,
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
+        granularity: Literal["label", "union"] = "label",
         resample: bool = False,
     ) -> Segmentation:
         """Difference with tolerance: keep ROIs from self not sufficiently overlapping other.
 
-        A label is kept when it is *unmatched* under the strategy. Default strategy:
+        A label is kept when it is *unmatched* under the strategy. Default strategy,
+        derived by the shared ``strategy_from_thresholds``:
         ``ThresholdMatch(AbsoluteOverlap(), min_score=max_overlap + 1)`` — keeps labels
         whose largest single-component overlap is at most ``max_overlap``. When
         ``max_overlap_ratio`` is provided the ratio takes precedence: a label is
@@ -488,6 +491,12 @@ class Segmentation(Image):
             max_overlap_ratio: Maximum coverage (inter/size_a) to tolerate.
                 When set, takes precedence over ``max_overlap``. ``None`` disables
                 the ratio check.
+            granularity: How ``other`` enters the overlap graph. ``"label"``
+                (default): each label scored separately — a label of ``self`` is
+                removed when its best single-pair score meets the threshold.
+                ``"union"``: all labels of ``other`` flattened to one mask —
+                ``self`` labels are scored against their combined extent
+                (legacy Slicer sum-over-union semantics).
             resample: If True, resample ``other`` onto this grid when they differ.
                 If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
@@ -500,15 +509,15 @@ class Segmentation(Image):
         Returns:
             New Segmentation with only the kept labels.
         """
+        if granularity not in ("label", "union"):
+            raise ValueError(f"granularity must be 'label' or 'union', got {granularity!r}")
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
         other = self._align_other(other, resample=resample)  # type: ignore[assignment]
+        other_img = (other.img > 0).astype(np.uint8) if granularity == "union" else other.img
         if strategy is None:
-            if max_overlap_ratio is not None:
-                strategy = ThresholdMatch(Coverage("a"), min_score=max_overlap_ratio)
-            else:
-                strategy = ThresholdMatch(AbsoluteOverlap(), min_score=float(max_overlap + 1))
-        corr = correspond(self.img, other.img, spacing=self.spacing, strategy=strategy)
+            strategy = strategy_from_thresholds(max_overlap, max_overlap_ratio)
+        corr = correspond(self.img, other_img, spacing=self.spacing, strategy=strategy)
         # autolabel=False so render's labels survive the img setter (union, by contrast, binarizes then relabels)
         out = Segmentation(autolabel=False, template=self)
         out.img = render(_DifferenceOp()(corr), self.img, other.img, relabel=False)

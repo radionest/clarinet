@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from clarinet.services.image.correspondence.measures import AbsoluteOverlap, Coverage
 from clarinet.services.image.correspondence.model import (
     Correspondence,
     MatchGroup,
@@ -93,3 +94,19 @@ class GreedyArgmax:
         matched_b = {m.b_labels[0] for m in matches}
         ua, ub = _unmatched(graph, matched_a, matched_b)
         return Correspondence(matches=tuple(matches), unmatched_a=ua, unmatched_b=ub)
+
+
+def strategy_from_thresholds(
+    max_overlap: int = 0, max_overlap_ratio: float | None = None
+) -> ThresholdMatch:
+    """Derive the difference-matching strategy from legacy scalar thresholds.
+
+    Ratio takes precedence: with ``max_overlap_ratio`` set, a label is matched
+    (removed from a difference) iff ``inter / size_a >= max_overlap_ratio``
+    (``Coverage("a")``), and ``max_overlap`` is ignored. Otherwise
+    ``AbsoluteOverlap`` with ``min_score = max_overlap + 1`` keeps labels whose
+    largest single-pair overlap is at most ``max_overlap``.
+    """
+    if max_overlap_ratio is not None:
+        return ThresholdMatch(Coverage("a"), min_score=max_overlap_ratio)
+    return ThresholdMatch(AbsoluteOverlap(), min_score=float(max_overlap + 1))

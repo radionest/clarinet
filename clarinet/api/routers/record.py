@@ -531,6 +531,7 @@ async def _process_submission(
             validator_script,
             context,
             request_timeout=60.0,
+            include_correspondence=True,
         )
 
         # If the validator returned __execResult, merge it into validated_data

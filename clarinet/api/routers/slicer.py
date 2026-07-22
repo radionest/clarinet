@@ -30,6 +30,7 @@ class SlicerExecRequest(BaseModel):
 
     script: str
     context: dict[str, Any] | None = None
+    include_correspondence: bool = False
 
 
 class SlicerExecResponse(BaseModel):
@@ -59,7 +60,12 @@ async def execute_script(
         JSON response from Slicer.
     """
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
-    return await service.execute(slicer_url, request.script, request.context)
+    return await service.execute(
+        slicer_url,
+        request.script,
+        request.context,
+        include_correspondence=request.include_correspondence,
+    )
 
 
 @router.post("/exec/raw")
@@ -198,7 +204,9 @@ async def open_record_in_slicer(
     # Append record_id store so validation can verify the same record is open
     open_script = record_read.record_type.slicer_script + "\nstore_record_id(record_id)"
 
-    result = await service.execute(slicer_url, open_script, context, request_timeout=60.0)
+    result = await service.execute(
+        slicer_url, open_script, context, request_timeout=60.0, include_correspondence=True
+    )
 
     logger.info(
         f"Slicer open operation completed: record_id={record_id}",
@@ -279,7 +287,9 @@ async def validate_record_in_slicer(
         "validate_record_id(record_id)\n" + record_read.record_type.slicer_result_validator
     )
 
-    result = await service.execute(slicer_url, validator_script, context, request_timeout=60.0)
+    result = await service.execute(
+        slicer_url, validator_script, context, request_timeout=60.0, include_correspondence=True
+    )
 
     logger.info(
         f"Slicer validation operation completed: record_id={record_id}",
