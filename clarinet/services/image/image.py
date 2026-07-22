@@ -19,11 +19,72 @@ from clarinet.exceptions.domain import (
     ImageReadError,
     ImageWriteError,
 )
+from clarinet.services.image.grid import Grid
 from clarinet.utils.logger import logger
 
 # Internal representation uses LPS (DICOM native). NIfTI uses RAS.
 # Flip X and Y to convert between them (the matrix is its own inverse).
 _LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0])
+# LAS differs from LPS only in the y axis (Anterior vs Posterior); also self-inverse.
+_LAS_TO_LPS = np.diag([1.0, -1.0, 1.0])
+
+_NRRD_SPACE_LPS = frozenset({"left-posterior-superior", "lps"})
+_NRRD_SPACE_RAS = frozenset({"right-anterior-superior", "ras"})
+_NRRD_SPACE_LAS = frozenset({"left-anterior-superior", "las"})
+
+
+def _nrrd_space_to_lps(
+    space: str | None,
+    space_directions: np.ndarray,
+    space_origin: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Convert NRRD ``space directions``/``space origin`` into clarinet's internal LPS.
+
+    Honors the header's ``space`` field (case-insensitive; full name or abbreviation,
+    e.g. ``"right-anterior-superior"`` or ``"RAS"``). LPS passes through unchanged;
+    RAS/LAS are converted by negating the affected world components of every direction
+    row and of the origin (same transform for both — they express vectors/points in the
+    same declared coordinate system). Slicer always writes LPS (probe P6) — this only
+    affects third-party files.
+
+    Shared by :meth:`Image.read_nrrd` and
+    :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation._apply_grid_from_header`;
+    callers pre-slice ``space_directions`` to the 3 spatial rows (a 4-D layered header's
+    row 0 is the ``none`` list axis, not a spatial direction).
+
+    Args:
+        space: The header's ``space`` field (``None`` if the header omits it).
+        space_directions: ``(3, 3)`` array; each row is one axis's world-space
+            direction vector (spacing baked in), expressed in the header's ``space``.
+        space_origin: ``(3,)`` world-space origin in the header's ``space``, or
+            ``None`` if the header has no ``space origin``.
+
+    Returns:
+        ``(space_directions, space_origin)`` re-expressed in LPS. The second element
+        is ``None`` iff *space_origin* was ``None``.
+
+    Raises:
+        ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
+    """
+    normalized = (space or "").strip().lower()
+    if normalized in _NRRD_SPACE_LPS:
+        return space_directions, space_origin
+    if normalized in _NRRD_SPACE_RAS:
+        transform = _LPS_TO_RAS  # self-inverse: also converts RAS -> LPS
+    elif normalized in _NRRD_SPACE_LAS:
+        transform = _LAS_TO_LPS
+    else:
+        raise ImageReadError(
+            f"Unsupported NRRD space {space!r}: expected left-posterior-superior/LPS, "
+            "right-anterior-superior/RAS, or left-anterior-superior/LAS"
+        )
+    # Each space_directions row is a per-axis world vector [x, y, z]; post-multiplying
+    # by the (diagonal) transform scales those world x/y/z *columns*, i.e. negates the
+    # same components in every row. space_origin is a single such vector, pre-multiplied
+    # for the conventional matrix-vector form (equivalent for a diagonal transform).
+    dirs_lps = space_directions @ transform
+    origin_lps = None if space_origin is None else transform @ space_origin
+    return dirs_lps, origin_lps
 
 
 # Matches a per-segment NRRD header key, e.g. "Segment0_Name" -> ("0", "Name").
@@ -259,29 +320,44 @@ class Image:
         A[:3, 3] = np.array(self._origin)
         return A
 
+    @property
+    def grid(self) -> Grid:
+        """This image's voxel grid as a :class:`Grid` value object.
+
+        Uses only the first 3 shape dims — an ``Image`` read via the generic 4-D-tolerant
+        path (e.g. a 4-D NIfTI) still exposes a 3-D spatial grid; :class:`Grid` requires
+        exactly 3.
+        """
+        shape = self.shape
+        return Grid.from_components(
+            (shape[0], shape[1], shape[2]), self.spacing, self.origin, self.direction
+        )
+
     def same_grid(self, other: Image, *, atol: float = 1e-4) -> bool:
         """Check whether two images share the same voxel grid.
 
-        Grid identity = same shape AND ``affine_4x4`` (origin, spacing, direction)
-        equal within ``atol``. Tolerance — not exact equality — because on-disk
-        formats carry different float precision (cf. ITK Coordinate/DirectionTolerance).
+        Grid identity = same shape AND affine (origin, spacing, direction) equal within
+        ``atol``. Tolerance — not exact equality — because on-disk formats carry
+        different float precision (cf. ITK Coordinate/DirectionTolerance).
+
+        Deliberately NOT delegated to :func:`~clarinet.services.image.grid.grid_relation`:
+        that predicate's ``SAME`` verdict allows a half-voxel offset window (meant for
+        disk-boundary mirror detection in ``grid_io.assert_same_grid_on_disk``), which
+        would silently loosen this method's near-exact pre-overlay guard. Sources its
+        affine from :attr:`grid` (single formula authority) but keeps its own tight,
+        atol-only comparison on the full affine.
         """
         if self.shape != other.shape:
             return False
-        return bool(np.allclose(self.affine_4x4, other.affine_4x4, atol=atol, rtol=0))
+        return bool(np.allclose(self.grid.affine, other.grid.affine, atol=atol, rtol=0))
 
     def _grid_summary(self) -> str:
         """One-line grid description for mismatch diagnostics.
 
-        Prints the full direction matrix (not just its diagonal) so an oblique
-        or off-diagonal flip is visible in the error, not only an axis-aligned one.
+        Thin wrapper — :class:`Grid` (via :attr:`grid`) is the single formatting
+        authority; see :meth:`Grid.summary`.
         """
-        return (
-            f"shape={tuple(self.shape)}, "
-            f"origin={tuple(round(float(x), 3) for x in self._origin)}, "
-            f"spacing={tuple(round(float(x), 3) for x in self._spacing)}, "
-            f"direction={np.round(self._direction, 3).tolist()}"
-        )
+        return self.grid.summary()
 
     def assert_same_grid(self, other: Image, *, atol: float = 1e-4) -> None:
         """Raise :class:`GeometryMismatchError` if *other* is not on this image's grid.
@@ -412,7 +488,10 @@ class Image:
                 pynrrd reads the file's native dtype (never float64); ``None`` keeps it.
 
         Raises:
-            ImageReadError: If the file cannot be read.
+            ImageReadError: If the file cannot be read; if the header is not 3-D (use
+                :class:`~clarinet.services.image.layered_segmentation.LayeredSegmentation`
+                for a 4-D multi-layer ``.seg.nrrd``); or if ``space directions`` is
+                present with an unsupported/missing ``space`` field.
         """
         file_path = Path(file_path)
         data: np.ndarray | None = None
@@ -427,24 +506,38 @@ class Image:
         self._nrrd_header = header
         self._source_path = file_path
 
+        sizes = [int(s) for s in header["sizes"]]
+        if len(sizes) != 3:
+            raise ImageReadError(
+                f"{file_path}: read_nrrd expects a 3-D volume, got a {len(sizes)}-D header "
+                f"(sizes={sizes}). A 4-D multi-layer .seg.nrrd is read via "
+                "LayeredSegmentation, or grid_io.read_grid for grid-only access."
+            )
+
         # Prefer space directions (carries both spacing and orientation)
         space_dirs = header.get("space directions")
         if space_dirs is not None:
-            arr = np.asarray(space_dirs[:3], dtype=float)
+            raw_origin = header.get("space origin")
+            arr, origin = _nrrd_space_to_lps(
+                header.get("space"),
+                np.asarray(space_dirs[:3], dtype=float),
+                np.asarray(raw_origin[:3], dtype=float) if raw_origin is not None else None,
+            )
             norms = np.linalg.norm(arr, axis=1)
             self.spacing = (float(norms[0]), float(norms[1]), float(norms[2]))
             self._direction = (arr / norms[:, np.newaxis]).T
+            if origin is not None:
+                self._origin = (float(origin[0]), float(origin[1]), float(origin[2]))
         else:
             spacings = header.get("spacings")
             if spacings is not None:
                 self.spacing = tuple(spacings[:3])
+            space_origin = header.get("space origin")
+            if space_origin is not None:
+                vals = space_origin[:3]
+                self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
 
-        space_origin = header.get("space origin")
-        if space_origin is not None:
-            vals = space_origin[:3]
-            self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
-
-        self._shape = tuple(int(s) for s in header["sizes"])
+        self._shape = tuple(sizes)
         self._filetype = FileType.NRRD
 
         if not load_data:

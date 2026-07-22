@@ -14,7 +14,9 @@ from pydicom.dataset import FileDataset
 from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
 from clarinet.services.image import (
     FileType,
+    Grid,
     Image,
+    LayeredSegmentation,
     Segmentation,
     coco_to_segmentation,
     conform_seg_to_grid,
@@ -448,6 +450,146 @@ class TestImage:
         full.read(nrrd_path)
         sl = Image().read_slice(nrrd_path, 4, axis=2)
         np.testing.assert_array_equal(sl, full.img[:, :, 4])
+
+
+# ---------------------------------------------------------------------------
+# NRRD reader hardening: `space` field honored, loud rejection of non-3-D
+# ---------------------------------------------------------------------------
+
+
+class TestNrrdReaderHardening:
+    """NRRD `space` honored (LPS/RAS/LAS); read_nrrd raises loudly on non-3-D."""
+
+    @pytest.mark.parametrize(
+        ("space_value", "flip"),
+        [
+            ("left-posterior-superior", (1.0, 1.0, 1.0)),
+            ("LPS", (1.0, 1.0, 1.0)),
+            ("right-anterior-superior", (-1.0, -1.0, 1.0)),
+            ("RAS", (-1.0, -1.0, 1.0)),
+            ("Right-Anterior-Superior", (-1.0, -1.0, 1.0)),
+            ("left-anterior-superior", (1.0, -1.0, 1.0)),
+            ("LAS", (1.0, -1.0, 1.0)),
+        ],
+    )
+    def test_nrrd_space_field_converts_to_lps(
+        self, tmp_path: Path, space_value: str, flip: tuple[float, float, float]
+    ) -> None:
+        """NRRD `space` (LPS/RAS/LAS; full name or abbreviation; case-insensitive)
+        reads to the same physical grid as an LPS-native NRRD of the same volume."""
+        shape = (4, 4, 4)
+        data = np.zeros(shape, dtype=np.int16)
+        lps_dirs = np.array([[0.5, 0.0, 0.0], [0.0, 0.6, 0.0], [0.0, 0.0, 0.7]])
+        lps_origin = np.array([10.0, 20.0, 30.0])
+        flip_arr = np.array(flip)
+
+        lps_path = tmp_path / "lps_ref.nrrd"
+        nrrd.write(
+            str(lps_path),
+            data,
+            {
+                "space directions": lps_dirs,
+                "space origin": lps_origin,
+                "space": "left-posterior-superior",
+            },
+        )
+        other_path = tmp_path / "other.nrrd"
+        nrrd.write(
+            str(other_path),
+            data,
+            {
+                "space directions": lps_dirs * flip_arr,
+                "space origin": lps_origin * flip_arr,
+                "space": space_value,
+            },
+        )
+
+        img_lps = Image()
+        img_lps.read(lps_path)
+        img_other = Image()
+        img_other.read(other_path)
+
+        assert img_other.same_grid(img_lps)
+
+    @pytest.mark.parametrize(
+        "space_value",
+        ["scanner-xyz", None, "", "  ", "right-anterior-superior-time"],
+    )
+    def test_nrrd_unsupported_or_missing_space_raises(
+        self, tmp_path: Path, space_value: str | None
+    ) -> None:
+        """`space directions` present with a bad/absent `space` raises rather than
+        silently assuming LPS (a RAS-native file would otherwise be misread)."""
+        header = {
+            "space directions": np.eye(3),
+            "space origin": np.zeros(3),
+        }
+        if space_value is not None:
+            header["space"] = space_value
+        path = tmp_path / "bad_space.nrrd"
+        nrrd.write(str(path), np.zeros((4, 4, 4), dtype=np.int16), header)
+
+        with pytest.raises(ImageReadError):
+            Image().read(path)
+
+    def test_read_nrrd_4d_raises(self, tmp_path: Path) -> None:
+        """Image.read on a 4-D layered .seg.nrrd raises loudly instead of silently
+        building a grid with a NaN direction/spacing row from the list axis."""
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        layer[1:3, 1:3, 1:3] = 1
+        seg = LayeredSegmentation.from_layers(
+            [("seg_a", layer)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        path = tmp_path / "layered.seg.nrrd"
+        seg.save(path)
+
+        img = Image()
+        with pytest.raises(ImageReadError, match="LayeredSegmentation"):
+            img.read(path)
+        # No partial/bad state survives the raise (the pre-fix behavior built a grid
+        # with a NaN direction/spacing row straight from the list-axis header row).
+        assert not np.isnan(img.spacing).any()
+        assert not np.isnan(img.direction).any()
+
+    def test_layered_segmentation_honors_ras_space(self, tmp_path: Path) -> None:
+        """LayeredSegmentation._apply_grid_from_header shares `_nrrd_space_to_lps`
+        with read_nrrd — a RAS-tagged 4-D header converts too, not just 3-D."""
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        layer[1:3, 1:3, 1:3] = 1
+        lps_seg = LayeredSegmentation.from_layers(
+            [("a", layer)],
+            spacing=(0.5, 0.6, 0.7),
+            origin=(10.0, 20.0, 30.0),
+            direction=np.eye(3),
+        )
+        lps_path = tmp_path / "lps.seg.nrrd"
+        lps_seg.save(lps_path)
+
+        ras_path = tmp_path / "ras.seg.nrrd"
+        ras_header = {
+            "dimension": 4,
+            "space": "right-anterior-superior",
+            "kinds": ["list", "domain", "domain", "domain"],
+            "space directions": np.vstack([np.full(3, np.nan), np.diag([-0.5, -0.6, 0.7])]),
+            "space origin": np.array([-10.0, -20.0, 30.0]),
+            "encoding": "raw",
+            "Segment0_ID": "Segment_0",
+            "Segment0_Name": "a",
+            "Segment0_LabelValue": "1",
+            "Segment0_Layer": "0",
+        }
+        nrrd.write(str(ras_path), layer[np.newaxis, ...], ras_header)
+
+        seg_lps = LayeredSegmentation.read_header(lps_path)
+        seg_ras = LayeredSegmentation.read_header(ras_path)
+
+        assert seg_ras.shape == seg_lps.shape
+        assert pytest.approx(seg_ras.spacing, abs=1e-9) == seg_lps.spacing
+        assert pytest.approx(seg_ras.origin, abs=1e-9) == seg_lps.origin
+        np.testing.assert_allclose(seg_ras.direction, seg_lps.direction, atol=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -1244,7 +1386,15 @@ class TestSegmentation:
     def test_segmentation_metadata_only_read(self, tmp_path: Path) -> None:
         data = np.zeros((6, 6, 4), dtype=np.uint8)
         path = tmp_path / "mask.seg.nrrd"
-        nrrd.write(str(path), data, {"space directions": np.eye(3), "space origin": np.zeros(3)})
+        nrrd.write(
+            str(path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+            },
+        )
         seg = Segmentation(autolabel=False)
         seg.read(path, load_data=False)
         assert seg.has_data is False
@@ -1400,6 +1550,59 @@ class TestSpatialAlignment:
         a = _make_seg(origin=(0.0, 0.0, 0.0))
         b = _make_seg(origin=(0.0, 0.0, 1e-6))
         assert a.same_grid(b)
+
+    def test_same_grid_rejects_offset_within_grid_relation_tolerance(self) -> None:
+        """A 0.1-voxel origin shift is well inside grid_relation's 0.5-voxel offset
+        window but must still fail same_grid's near-exact atol=1e-4 check — same_grid
+        must NOT inherit grid_relation's looser tolerance via the .grid delegation."""
+        a = _make_seg(spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+        b = _make_seg(spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.1))  # 0.1 voxel
+        assert not a.same_grid(b)
+
+    # -- grid property --
+
+    def test_image_grid_matches_from_components(self) -> None:
+        img = Image()
+        img.spacing = (0.5, 0.6, 0.7)
+        img.origin = (1.0, -2.5, 3.25)
+        img.direction = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        img.img = np.zeros((10, 12, 8), dtype=np.uint8)
+
+        grid = img.grid
+        expected = Grid.from_components(
+            (img.shape[0], img.shape[1], img.shape[2]), img.spacing, img.origin, img.direction
+        )
+        assert grid.shape == expected.shape == (10, 12, 8)
+        assert np.array_equal(grid.affine, expected.affine)
+        assert np.array_equal(grid.affine, img.affine_4x4)  # same formula, byte-identical
+
+    def test_layered_segmentation_grid_matches_from_components(self) -> None:
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        direction = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        seg = LayeredSegmentation.from_layers(
+            [("a", layer)], spacing=(0.5, 0.6, 0.7), origin=(1.0, 2.0, 3.0), direction=direction
+        )
+
+        grid = seg.grid
+        expected = Grid.from_components(seg.shape, seg.spacing, seg.origin, seg.direction)
+        assert grid.shape == expected.shape == (4, 5, 6)
+        assert np.array_equal(grid.affine, expected.affine)
+
+    def test_grid_summary_delegates_to_grid_summary_unchanged_format(self) -> None:
+        seg = _make_seg(
+            shape=(5, 6, 7),
+            spacing=(0.5, 0.6, 0.7),
+            origin=(1.0, 2.0, 3.0),
+            direction=np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float),
+        )
+
+        text = seg._grid_summary()
+
+        assert text == seg.grid.summary()
+        assert text == (
+            "shape=(5, 6, 7), origin=(1.0, 2.0, 3.0), spacing=(0.5, 0.6, 0.7), "
+            "direction=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]]"
+        )
 
     # -- reindex_to --
 

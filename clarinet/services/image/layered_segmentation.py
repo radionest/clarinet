@@ -22,6 +22,8 @@ import nrrd
 import numpy as np
 
 from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
+from clarinet.services.image.grid import Grid
+from clarinet.services.image.image import _nrrd_space_to_lps
 from clarinet.utils.logger import logger
 
 
@@ -78,6 +80,11 @@ class LayeredSegmentation:
     def segments(self) -> list[tuple[str, int, int]]:
         """``(name, layer_index, label_value)`` per segment."""
         return list(self._segments)
+
+    @property
+    def grid(self) -> Grid:
+        """This layered segmentation's shared 3-D voxel grid as a :class:`Grid`."""
+        return Grid.from_components(self.shape, self.spacing, self.origin, self.direction)
 
     # -- construction --
 
@@ -197,20 +204,30 @@ class LayeredSegmentation:
         """Populate spacing/origin/direction/shape from a 4-D NRRD header.
 
         Spatial directions are rows 1..3 of ``space directions`` (row 0 is the ``none``
-        list axis). NRRD is LPS-native — no RAS flip.
+        list axis). Honors the header's ``space`` field via the shared
+        ``_nrrd_space_to_lps`` helper (LPS as-is; RAS/LAS converted; anything else
+        raises) — the same conversion :meth:`Image.read_nrrd` applies to 3-D NRRD.
         """
         sizes = [int(s) for s in header["sizes"]]
         self._shape = (sizes[1], sizes[2], sizes[3])
         space_dirs = header.get("space directions")
         if space_dirs is not None:
-            arr = np.asarray(space_dirs[1:4], dtype=float)  # skip the nan list-axis row
+            raw_origin = header.get("space origin")
+            arr, origin = _nrrd_space_to_lps(
+                header.get("space"),
+                np.asarray(space_dirs[1:4], dtype=float),  # skip the nan list-axis row
+                np.asarray(raw_origin[:3], dtype=float) if raw_origin is not None else None,
+            )
             norms = np.linalg.norm(arr, axis=1)
             self._spacing = (float(norms[0]), float(norms[1]), float(norms[2]))
             self._direction = (arr / norms[:, np.newaxis]).T
-        space_origin = header.get("space origin")
-        if space_origin is not None:
-            vals = space_origin[:3]
-            self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
+            if origin is not None:
+                self._origin = (float(origin[0]), float(origin[1]), float(origin[2]))
+        else:
+            space_origin = header.get("space origin")
+            if space_origin is not None:
+                vals = space_origin[:3]
+                self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
 
     # -- voxel read --
 
