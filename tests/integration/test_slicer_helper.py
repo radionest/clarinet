@@ -925,6 +925,210 @@ __execResult = {'raised': raised, 'bypassed': bypassed}
     assert result["bypassed"] is True
 
 
+async def test_export_segmentation_conform_to_roundtrip(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """conform_to repairs the load-time slice mirror end-to-end (design D4, Release A gate).
+
+    Writes a synthetic left-handed (``det<0``) volume to disk, loads it (Slicer
+    silently flips the slice axis), paints a fresh two-segment OVERLAPPING
+    segmentation (distinct names; Slicer stores each overlapping segment in its
+    own layer with the natural per-layer label value 1), then exports twice:
+
+    * plain (``conform_to=None``) -> the export lands on the loaded node's
+      flipped grid, so it relates to the on-disk volume as REARRANGED;
+    * ``conform_to=<volume>`` -> re-gridded back onto the volume's on-disk grid
+      (SAME, ``det<0`` verbatim), both overlapping layers + both segment names +
+      per-segment label values preserved, voxels physically coincident with the
+      plain export. The conformed file must stay metadata-identical to the plain
+      export -- only the grid differs -- which pins Minor 2: the REARRANGED
+      rebuild must not renumber layers/segments.
+
+    A FOREIGN reference (different-shape / shifted-grid volume) must raise and
+    write no file.
+    """
+    context = {"working_folder": "/tmp"}
+    script = """
+import os
+import numpy as np
+import SimpleITK as sitk
+
+base = os.path.join(working_folder, 't6_conform')
+os.makedirs(base, exist_ok=True)
+vol_path = os.path.join(base, 'lh_volume.nrrd')
+foreign_path = os.path.join(base, 'foreign_volume.nrrd')
+plain_path = os.path.join(base, 'export_plain.seg.nrrd')
+conf_path = os.path.join(base, 'export_conformed.seg.nrrd')
+foreign_out = os.path.join(base, 'export_foreign.seg.nrrd')
+for p in (vol_path, foreign_path, plain_path, conf_path, foreign_out):
+    if os.path.isfile(p):
+        os.remove(p)
+
+nx, ny, nz = 6, 6, 6
+
+# 1. Left-handed (det<0) source volume, written verbatim to disk via sitk.
+vol_arr = np.zeros((nz, ny, nx), dtype=np.int16)   # sitk array is (z, y, x)
+vol_arr[1:4, 2:4, 1:3] = 100
+vimg = sitk.GetImageFromArray(vol_arr)
+vimg.SetSpacing((1.0, 1.0, 1.0))
+vimg.SetOrigin((0.0, 0.0, 0.0))
+vimg.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0))  # det = -1
+sitk.WriteImage(vimg, vol_path)
+
+# Foreign reference: different shape + shifted origin -> guaranteed FOREIGN.
+farr = np.zeros((5, 7, 8), dtype=np.int16)   # -> grid shape (8, 7, 5)
+fimg = sitk.GetImageFromArray(farr)
+fimg.SetSpacing((1.0, 1.0, 1.0))
+fimg.SetOrigin((50.0, 60.0, 70.0))
+fimg.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+sitk.WriteImage(fimg, foreign_path)
+
+vol_grid = _read_grid_on_disk(vol_path)
+vol_det = float(np.linalg.det(vol_grid.direction))
+
+
+def _sitk_layers_and_coords(path):
+    img = sitk.ReadImage(path)
+    ncomp = int(img.GetNumberOfComponentsPerPixel())
+    arr = sitk.GetArrayFromImage(img)
+    if arr.ndim == 3:
+        arr = arr[..., None]
+    labelset = sorted({int(v) for v in np.unique(arr) if v != 0})
+    fg = (arr != 0).any(axis=-1)
+    zz, yy, xx = np.nonzero(fg)
+    coords = set()
+    for xi, yi, zi in zip(xx.tolist(), yy.tolist(), zz.tolist()):
+        wp = img.TransformIndexToPhysicalPoint((int(xi), int(yi), int(zi)))
+        coords.add((round(wp[0], 2), round(wp[1], 2), round(wp[2], 2)))
+    return ncomp, labelset, coords
+
+
+def _loadback_name_labels(path):
+    node = slicer.util.loadSegmentation(path)
+    vseg = node.GetSegmentation()
+    out = {}
+    for i in range(vseg.GetNumberOfSegments()):
+        sid = vseg.GetNthSegmentID(i)
+        seg_i = vseg.GetSegment(sid)
+        out[seg_i.GetName()] = int(seg_i.GetLabelValue())
+    slicer.mrmlScene.RemoveNode(node)
+    return out
+
+
+# 2. Load the left-handed volume (Slicer flips the slice axis) + overlapping seg.
+s = SlicerHelper(working_folder)
+loaded = s.load_volume(vol_path, window=(-100, 200))
+seg = s.create_segmentation('RoundTrip')
+seg.add_segment('Alpha', (1.0, 0.0, 0.0)).add_segment('Beta', (0.0, 1.0, 0.0))
+seg.node.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+vtk_seg = seg.node.GetSegmentation()
+sid_a = vtk_seg.GetNthSegmentID(0)
+sid_b = vtk_seg.GetNthSegmentID(1)
+
+mask_a = np.zeros((nz, ny, nx), dtype=np.uint8)
+mask_b = np.zeros((nz, ny, nx), dtype=np.uint8)
+mask_a[1:3, 2:4, 1:3] = 1
+mask_b[2:4, 2:4, 1:3] = 1   # overlaps Alpha at z=2
+slicer.util.updateSegmentBinaryLabelmapFromArray(mask_a, seg.node, sid_a, loaded)
+slicer.util.updateSegmentBinaryLabelmapFromArray(mask_b, seg.node, sid_b, loaded)
+
+# Overlapping segments live one-per-layer; Slicer gives each the per-layer
+# foreground value 1. Identity is carried by the distinct NAMES (a genuinely
+# distinct non-1 pair is not co-representable with 2 layers -- SetLabelValue
+# collapses the overlap at export). Capture the natural label values as-is.
+source_labels = {
+    vtk_seg.GetSegment(sid_a).GetName(): int(vtk_seg.GetSegment(sid_a).GetLabelValue()),
+    vtk_seg.GetSegment(sid_b).GetName(): int(vtk_seg.GetSegment(sid_b).GetLabelValue()),
+}
+
+result = {'vol_det': vol_det, 'source_labels': source_labels}
+
+# 3a. Plain export -> REARRANGED vs the on-disk volume grid.
+try:
+    export_segmentation('RoundTrip', plain_path)
+    result['plain_written'] = os.path.isfile(plain_path)
+    plain_grid = _read_grid_on_disk(plain_path)
+    result['plain_relation'] = grid_relation(plain_grid, vol_grid).kind.value
+    ncomp_p, labels_p, coords_p = _sitk_layers_and_coords(plain_path)
+    result['plain_layers'] = ncomp_p
+    result['plain_labelset'] = labels_p
+    result['plain_names_labels'] = _loadback_name_labels(plain_path)
+except Exception as exc:
+    result['plain_error'] = repr(exc)
+    coords_p = None
+
+# 3b. Conformed export -> SAME grid, det<0 verbatim, structure preserved.
+try:
+    export_segmentation('RoundTrip', conf_path, conform_to=vol_path)
+    result['conf_written'] = os.path.isfile(conf_path)
+    conf_grid = _read_grid_on_disk(conf_path)
+    result['conf_relation'] = grid_relation(conf_grid, vol_grid).kind.value
+    result['conf_det'] = float(np.linalg.det(conf_grid.direction))
+    ncomp_c, labels_c, coords_c = _sitk_layers_and_coords(conf_path)
+    result['conf_layers'] = ncomp_c
+    result['conf_labelset'] = labels_c
+    result['conf_names_labels'] = _loadback_name_labels(conf_path)
+    result['coincident'] = (coords_p is not None and coords_c == coords_p)
+    result['coord_count'] = [
+        (len(coords_p) if coords_p is not None else -1),
+        len(coords_c),
+    ]
+except Exception as exc:
+    result['conf_error'] = repr(exc)
+
+# 4. FOREIGN reference -> raise, write nothing.
+foreign_raised = False
+foreign_msg = ''
+try:
+    export_segmentation('RoundTrip', foreign_out, conform_to=foreign_path)
+except SlicerHelperError as exc:
+    foreign_raised = True
+    foreign_msg = str(exc)
+result['foreign_raised'] = foreign_raised
+result['foreign_msg'] = foreign_msg[:200]
+result['foreign_no_file'] = not os.path.isfile(foreign_out)
+
+__execResult = result
+"""
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
+    assert isinstance(result, dict)
+    assert "plain_error" not in result, result.get("plain_error")
+    assert "conf_error" not in result, result.get("conf_error")
+
+    # Left-handed source; overlapping segments carry Slicer's natural per-layer
+    # label value under distinct names.
+    assert result["vol_det"] < 0
+    assert result["source_labels"] == {"Alpha": 1, "Beta": 1}
+
+    # Plain export mirrors the load-time slice flip: REARRANGED vs the volume.
+    assert result["plain_written"] is True
+    assert result["plain_relation"] == "rearranged"
+    assert result["plain_layers"] == 2
+
+    # Conformed export lands back on the volume's on-disk grid, det<0 verbatim.
+    assert result["conf_written"] is True
+    assert result["conf_relation"] == "same"
+    assert result["conf_det"] < 0
+    assert result["conf_layers"] == 2
+
+    # Both segment names AND per-segment label values survive the re-grid, and
+    # the conformed export stays metadata-identical to the plain one -- only the
+    # grid differs (Minor 2: the REARRANGED rebuild must not renumber layers).
+    assert result["conf_names_labels"] == result["source_labels"]
+    assert result["conf_names_labels"] == result["plain_names_labels"]
+    assert result["conf_labelset"] == result["plain_labelset"]
+
+    # Re-gridded voxels are physically coincident with the plain export.
+    assert result["coincident"] is True, result.get("coord_count")
+
+    # FOREIGN reference is refused and leaves no artifact behind.
+    assert result["foreign_raised"] is True
+    assert result["foreign_no_file"] is True
+
+
 async def test_merge_as_pool_guards_grid_mismatch(
     slicer_service: SlicerService,
     slicer_url: str,
