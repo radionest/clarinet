@@ -452,9 +452,19 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
         if not os.path.isfile(output_path):
             raise SlicerHelperError(f"Export failed: file not created at {output_path}")
 
-        written_grid = _read_grid_on_disk(output_path)
-        if grid_relation(ref_grid, written_grid).kind is not RelationKind.SAME:
-            os.remove(output_path)
+        try:
+            written_grid = _read_grid_on_disk(output_path)
+            written_same = grid_relation(ref_grid, written_grid).kind is RelationKind.SAME
+        except Exception as exc:
+            if os.path.isfile(output_path):
+                os.remove(output_path)
+            raise SlicerHelperError(
+                f"export_segmentation: post-write verification failed for {output_path!r} "
+                f"against reference {conform_to!r} -- the written file was deleted."
+            ) from exc
+        if not written_same:
+            if os.path.isfile(output_path):
+                os.remove(output_path)
             raise SlicerHelperError(
                 f"export_segmentation: post-write grid check failed for {output_path!r} "
                 f"against reference {conform_to!r} -- the written file was deleted."
