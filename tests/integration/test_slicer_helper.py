@@ -1016,6 +1016,19 @@ def _loadback_name_labels(path):
     return out
 
 
+def _node_state(node):
+    v = node.GetSegmentation()
+    n = v.GetNumberOfSegments()
+    names = []
+    labels = {}
+    for i in range(n):
+        sid = v.GetNthSegmentID(i)
+        s_i = v.GetSegment(sid)
+        names.append(s_i.GetName())
+        labels[s_i.GetName()] = int(s_i.GetLabelValue())
+    return {'count': n, 'names': sorted(names), 'labels': labels}
+
+
 # 2. Load the left-handed volume (Slicer flips the slice axis) + overlapping seg.
 s = SlicerHelper(working_folder)
 loaded = s.load_volume(vol_path, window=(-100, 200))
@@ -1042,7 +1055,10 @@ source_labels = {
     vtk_seg.GetSegment(sid_b).GetName(): int(vtk_seg.GetSegment(sid_b).GetLabelValue()),
 }
 
-result = {'vol_det': vol_det, 'source_labels': source_labels}
+# Snapshot the caller's node BEFORE any export -- the re-grid must never mutate it.
+source_before = _node_state(seg.node)
+
+result = {'vol_det': vol_det, 'source_labels': source_labels, 'source_before': source_before}
 
 # 3a. Plain export -> REARRANGED vs the on-disk volume grid.
 try:
@@ -1074,6 +1090,8 @@ try:
         (len(coords_p) if coords_p is not None else -1),
         len(coords_c),
     ]
+    # The caller's original node must be untouched by the conform re-grid.
+    result['source_after'] = _node_state(seg.node)
 except Exception as exc:
     result['conf_error'] = repr(exc)
 
@@ -1108,10 +1126,11 @@ __execResult = result
     assert result["plain_relation"] == "rearranged"
     assert result["plain_layers"] == 2
 
-    # Conformed export lands back on the volume's on-disk grid, det<0 verbatim.
+    # Conformed export lands back on the volume's on-disk grid, det = -1.0 verbatim
+    # (conf_relation == "same" already pins the full affine; this is precision).
     assert result["conf_written"] is True
     assert result["conf_relation"] == "same"
-    assert result["conf_det"] < 0
+    assert abs(result["conf_det"] + 1.0) < 1e-6
     assert result["conf_layers"] == 2
 
     # Both segment names AND per-segment label values survive the re-grid, and
@@ -1121,11 +1140,23 @@ __execResult = result
     assert result["conf_names_labels"] == result["plain_names_labels"]
     assert result["conf_labelset"] == result["plain_labelset"]
 
-    # Re-gridded voxels are physically coincident with the plain export.
+    # Re-gridded voxels are physically coincident with the plain export -- and the
+    # paint was non-empty (8 + 8 - 4 overlap), so coincidence cannot pass vacuously.
+    assert result["coord_count"] == [12, 12]
     assert result["coincident"] is True, result.get("coord_count")
 
-    # FOREIGN reference is refused and leaves no artifact behind.
+    # The conform re-grid never mutates the caller's original node -- segment count,
+    # names, and per-segment label values are identical before and after export.
+    assert result["source_before"] == {
+        "count": 2,
+        "names": ["Alpha", "Beta"],
+        "labels": {"Alpha": 1, "Beta": 1},
+    }
+    assert result["source_after"] == result["source_before"]
+
+    # FOREIGN reference is refused for the right reason and leaves no artifact behind.
     assert result["foreign_raised"] is True
+    assert "foreign" in result["foreign_msg"].lower()
     assert result["foreign_no_file"] is True
 
 
