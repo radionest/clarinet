@@ -71,6 +71,22 @@
     `False`.
   - `mask_patient_data` heals to `True` — strictly more masking (fail-safe).
   Set the affected flag explicitly in that type's config to keep the old value.
+- **`SlicerHelper.subtract_segmentations` runs the shared correspondence
+  engine.** Removal verdicts follow the identical `correspond()` →
+  `Difference()` → `KeepPlan` path as `Segmentation.difference`, with one shared
+  parameter set: new keyword-only `strategy=` (override built from bundle
+  symbols) and `granularity="label"|"union"` (per-segment default vs the legacy
+  sum-over-union flattening). The method now **requires the correspondence
+  bundle** — it raises `SlicerHelperError` regardless of operand content unless
+  the script ran with `include_correspondence=True`; record open/validate and
+  the submit-path validator now always include the bundle, and ad-hoc `/exec`
+  opts in via the new `SlicerExecRequest.include_correspondence` field. Verdicts
+  shift in three cases vs the legacy voxel loop: fragmented sub-threshold
+  overlap is now kept by default (`granularity="union"` restores removal), the
+  ratio boundary tightened from `>` to `>=`, and with both scalars set the ratio
+  wins (`max_overlap` is ignored). The scalars→strategy derivation is shared as
+  `strategy_from_thresholds` in `clarinet.services.image.correspondence` and
+  ships inside the bundle.
 
 ### Added
 
@@ -110,22 +126,6 @@
   dict per overlapping segment pair (`[]` when disjoint or a source is empty), reusing
   the same reference-grid guards as `subtract_segmentations`; raises `SlicerHelperError`
   unless the bundle was included. Additive — no new dependency.
-- **`SlicerHelper.subtract_segmentations` runs the shared correspondence engine
-  (breaking).** Removal verdicts follow the identical `correspond()` →
-  `Difference()` → `KeepPlan` path as `Segmentation.difference`, with one shared
-  parameter set: new keyword-only `strategy=` (override built from bundle
-  symbols) and `granularity="label"|"union"` (per-segment default vs the legacy
-  sum-over-union flattening). The method now **requires the correspondence
-  bundle** — it raises `SlicerHelperError` regardless of operand content unless
-  the script ran with `include_correspondence=True`; record open/validate and
-  the submit-path validator now always include the bundle, and ad-hoc `/exec`
-  opts in via the new `SlicerExecRequest.include_correspondence` field. Verdicts
-  shift in three cases vs the legacy voxel loop: fragmented sub-threshold
-  overlap is now kept by default (`granularity="union"` restores removal), the
-  ratio boundary tightened from `>` to `>=`, and with both scalars set the ratio
-  wins (`max_overlap` is ignored). The scalars→strategy derivation is shared as
-  `strategy_from_thresholds` in `clarinet.services.image.correspondence` and
-  ships inside the bundle.
 - **`clarinet.scripting` frame for downstream operational scripts.** New
   `@script` decorator + `ScriptCtx` (`from clarinet.scripting import script,
   ScriptCtx`) synthesize a single-command typer app with standard options
