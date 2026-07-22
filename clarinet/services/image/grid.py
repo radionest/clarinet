@@ -1,15 +1,22 @@
 """Grid value object and relation classifier — the shared grid vocabulary.
 
-Pure core: **numpy + stdlib only, zero ``clarinet`` imports**. A later task
+Pure core: **numpy + stdlib only, zero framework imports**. A later task
 appends this module to the Slicer helper's script bundle (alongside
 ``correspondence/*``, see ``correspondence_bundle.py``), where it must run
-standalone inside Slicer's embedded Python — which has neither ``clarinet``
-nor ``nibabel``/``pynrrd`` on its path. That constraint applies from this
-module's introduction, not just once the bundle wiring lands: it carries no
-raise-policy of its own — :func:`grid_relation` always returns a verdict
+standalone inside Slicer's embedded Python — which has neither the framework
+package nor ``nibabel``/``pynrrd`` on its path. That constraint applies from
+this module's introduction, not just once the bundle wiring lands: it carries
+no raise-policy of its own — :func:`grid_relation` always returns a verdict
 (``FOREIGN`` included, never an exception) so callers in either runtime can
 layer their own fail-fast assert on top (``GeometryMismatchError``
-clarinet-side, ``SlicerHelperError`` Slicer-side).
+server-side, ``SlicerHelperError`` Slicer-side).
+
+Note for maintainers: this module ships as source text inside the Slicer
+script bundle (``correspondence_bundle.py``), which strips only
+``from <framework> import`` / ``import <framework>`` lines and asserts the
+resulting text never contains that package's bare name — keep prose here
+generic ("the framework", "server-side") rather than naming it, or the
+bundle's no-self-reference test will fail.
 """
 
 from __future__ import annotations
@@ -143,8 +150,8 @@ def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
 
     Never raises for a mismatched grid — ``FOREIGN`` is a normal return
     value, not an exception; disk-level fail-fast asserts belong to a later,
-    clarinet-only module (this one also ships in the Slicer bundle, which has
-    no clarinet exceptions to raise).
+    server-only module (this one also ships in the Slicer bundle, which has
+    no framework exceptions to raise).
 
     Composes ``M = inv(a.affine) @ b.affine`` — the transform from ``b``'s
     voxel-index space into ``a``'s. ``REARRANGED`` iff ``M``'s linear part is

@@ -92,6 +92,31 @@ def test_bundle_exposes_strategy_derivation() -> None:
     assert callable(ns["strategy_from_thresholds"])
 
 
+def test_bundle_includes_grid_module() -> None:
+    """Task 5: grid.py rides in the same bundle as the correspondence engine.
+
+    ``export_segmentation``'s ``conform_to`` classifies against a reference
+    file's on-disk grid via the bundled ``Grid``/``grid_relation``/
+    ``RelationKind``, resolved through ``globals()`` exactly like
+    ``build_overlap_graph`` above.
+    """
+    bundle = build_correspondence_bundle()
+    ns: dict = {"__name__": "_bundle"}
+    exec(bundle, ns)
+    assert "Grid" in ns
+    assert "RelationKind" in ns
+    assert callable(ns["grid_relation"])
+
+    a = ns["Grid"].from_components(
+        shape=(2, 2, 2), spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), direction=np.eye(3)
+    )
+    b = ns["Grid"].from_components(
+        shape=(2, 2, 2), spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), direction=np.eye(3)
+    )
+    relation = ns["grid_relation"](a, b)
+    assert relation.kind is ns["RelationKind"].SAME
+
+
 def test_bundle_derivation_matches_native() -> None:
     """Identical scalars -> identical strategies, bundled and native alike."""
     from clarinet.services.image.correspondence.matching import strategy_from_thresholds
