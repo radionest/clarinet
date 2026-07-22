@@ -358,10 +358,13 @@ direction-only flip would mirror the data). No-op when the slice axis already po
 
 ### Spacing, Origin, Direction
 
-Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization:
-- `GetSpacing()` returns `(x, y, z)`, mapped to internal `(row=y, col=x, slice=z)`
+Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization.
+The array, spacing, and direction all use SimpleITK's own `(x, y, z)` axis order — DICOM
+IOP in-plane order, no in-plane row/column swap:
+- `GetArrayFromImage()`'s `(z, y, x)` becomes the internal `(x, y, z)` array via `transpose(2, 1, 0)` — matches `GetSize()`'s axis order
+- `GetSpacing()` returns `(x, y, z)`, used as-is
 - `GetOrigin()` returns `(x, y, z)` in LPS, first overridden by the ground-truth IPP correction above — moved to the opposite slice end (the exact last-slice IPP, not an extrapolation) if the axis is flipped
-- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention, then the slice column is sign-normalized
+- `GetDirection()` reshaped to a 3×3 matrix is used as-is — column *i* already matches array axis *i*, so no reorder is needed. Only the slice column (axis 2) is still adjusted, by the ground-truth IPP correction and `_canonicalize_slice_axis`'s sign normalization above; the in-plane columns (0, 1) pass through untouched
 
 `RescaleSlope`/`RescaleIntercept` are applied automatically by GDCM during `Execute()`.
 

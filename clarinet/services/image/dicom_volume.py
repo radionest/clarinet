@@ -24,8 +24,9 @@ def read_dicom_series(
         directory: Path to a directory containing DICOM files.
 
     Returns:
-        Tuple of (3D numpy array shaped (rows, cols, slices),
-        spacing (row, col, slice) in mm,
+        Tuple of (3D numpy array in DICOM IOP in-plane order, shaped like
+        SimpleITK's own ``GetSize()`` (x, y, z),
+        spacing (x, y, z) in mm,
         origin (x, y, z) in LPS,
         direction 3x3 matrix — columns correspond to numpy axes).
 
@@ -58,23 +59,25 @@ def read_dicom_series(
     except RuntimeError as e:
         raise ImageReadError(f"Failed to read DICOM series from {directory}: {e}") from e
 
-    # SimpleITK → internal convention mapping
-    # Array: SimpleITK (z, y, x) → internal (rows=y, cols=x, slices=z)
-    volume = np.transpose(sitk.GetArrayFromImage(image), (1, 2, 0))
+    # SimpleITK → internal convention mapping (DICOM IOP in-plane order — no
+    # in-plane row/column swap; only the slice axis, column 2, is adjusted below).
+    # Array: SimpleITK (z, y, x) → internal (x, y, z) — matches GetSize() order.
+    volume = np.transpose(sitk.GetArrayFromImage(image), (2, 1, 0))
 
-    # Spacing: SimpleITK (x, y, z) → internal (row=y, col=x, slice=z)
+    # Spacing: SimpleITK (x, y, z) — used as-is, matches the array above.
     sx, sy, sz = image.GetSpacing()
-    spacing = (sy, sx, sz)
+    spacing = (sx, sy, sz)
 
     # Origin: (x, y, z) in LPS — matches internal convention
     ox, oy, oz = image.GetOrigin()
     origin = (float(ox), float(oy), float(oz))
 
-    # Direction: SimpleITK columns (x, y, z) → internal columns (y, x, z).
-    # Fancy indexing returns a non-contiguous view; force C-contiguous so
-    # downstream consumers can rely on .tobytes() / C-extension passing.
+    # Direction: SimpleITK columns (x, y, z) — used as-is; column i already
+    # matches array axis i, so no reorder is needed. reshape() already returns a
+    # fresh contiguous array; ascontiguousarray is kept defensively so downstream
+    # consumers can still rely on .tobytes() / C-extension passing.
     d = np.array(image.GetDirection()).reshape(3, 3)
-    direction = np.ascontiguousarray(d[:, [1, 0, 2]])
+    direction = np.ascontiguousarray(d)
 
     origin, direction, exact_last_ipp = ground_truth_slice_geometry(
         dicom_names, spacing[2], origin, direction
