@@ -1,12 +1,17 @@
-"""Tests for clarinet.services.image.grid — Grid value object + grid_relation classifier."""
+"""Tests for clarinet.services.image.grid (Grid + grid_relation) and
+clarinet.services.image.grid_io (read_grid / assert_same_grid_on_disk)."""
 
 import itertools
+from pathlib import Path
 
+import nibabel
 import numpy as np
 import pytest
 
-from clarinet.services.image import Image
+from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
+from clarinet.services.image import FileType, Image, LayeredSegmentation
 from clarinet.services.image.grid import Grid, GridRelation, RelationKind, grid_relation
+from clarinet.services.image.grid_io import assert_same_grid_on_disk, read_grid
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -291,3 +296,211 @@ class TestGridRelation:
 
         assert grid_relation(a, b, atol=1e-8).kind is RelationKind.FOREIGN
         assert grid_relation(a, b, atol=1e-3).kind is RelationKind.SAME
+
+
+# ---------------------------------------------------------------------------
+# read_grid / assert_same_grid_on_disk (clarinet-side disk IO)
+# ---------------------------------------------------------------------------
+
+# Z-flip convention used throughout test_image.py's TestSpatialAlignment: direction
+# negates axis 2, origin shifts to the far end so the flip is a pure re-index of the
+# *same* physical volume (not a translated one).
+_Z_FLIP = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+
+
+def _write_volume(
+    path: Path,
+    filetype: FileType,
+    *,
+    shape: tuple[int, int, int] = (10, 10, 10),
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+) -> Path:
+    """Write a synthetic 3-D Image with explicit LPS grid metadata."""
+    img = Image()
+    img.spacing = spacing
+    img.origin = origin
+    img.direction = np.eye(3) if direction is None else direction
+    img.img = np.zeros(shape, dtype=np.uint8)
+    return img.save_as(path, filetype)
+
+
+def _write_layered_seg(
+    path: Path,
+    *,
+    shape: tuple[int, int, int] = (10, 10, 10),
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+    num_layers: int = 2,
+) -> Path:
+    """Write a synthetic 4-D (L, X, Y, Z) layered segmentation NRRD."""
+    layers = [(f"segment_{i}", np.zeros(shape, dtype=np.uint8)) for i in range(num_layers)]
+    seg = LayeredSegmentation.from_layers(
+        layers,
+        spacing=spacing,
+        origin=origin,
+        direction=np.eye(3) if direction is None else direction,
+    )
+    return seg.save(path)
+
+
+class TestReadGrid:
+    def test_nifti_matches_image_components(self, tmp_path: Path) -> None:
+        shape = (10, 12, 8)
+        spacing = (0.5, 0.6, 0.7)
+        origin = (1.0, -2.5, 3.25)
+        path = _write_volume(
+            tmp_path / "vol.nii.gz",
+            FileType.NIFTI,
+            shape=shape,
+            spacing=spacing,
+            origin=origin,
+            direction=_OBLIQUE_DIRECTION,
+        )
+
+        grid = read_grid(path)
+
+        img = Image()
+        img.read(path, load_data=False)
+        expected = Grid.from_components(img.shape, img.spacing, img.origin, img.direction)
+        assert grid.shape == expected.shape == shape
+        assert np.allclose(grid.affine, expected.affine, atol=1e-6)
+
+    def test_nrrd_matches_image_components(self, tmp_path: Path) -> None:
+        shape = (10, 12, 8)
+        spacing = (0.5, 0.6, 0.7)
+        origin = (1.0, -2.5, 3.25)
+        path = _write_volume(
+            tmp_path / "vol.nrrd",
+            FileType.NRRD,
+            shape=shape,
+            spacing=spacing,
+            origin=origin,
+            direction=_OBLIQUE_DIRECTION,
+        )
+
+        grid = read_grid(path)
+
+        img = Image()
+        img.read(path, load_data=False)
+        expected = Grid.from_components(img.shape, img.spacing, img.origin, img.direction)
+        assert grid.shape == expected.shape == shape
+        assert np.allclose(grid.affine, expected.affine, atol=1e-6)
+
+    def test_layered_seg_reads_spatial_grid_not_list_axis(self, tmp_path: Path) -> None:
+        shape = (6, 7, 5)
+        spacing = (0.5, 0.6, 0.7)
+        origin = (1.0, 2.0, 3.0)
+        path = _write_layered_seg(
+            tmp_path / "seg.seg.nrrd",
+            shape=shape,
+            spacing=spacing,
+            origin=origin,
+            direction=_OBLIQUE_DIRECTION,
+        )
+
+        grid = read_grid(path)
+
+        # NOT the (L, X, Y, Z) row read naively off the header — the spatial grid only.
+        seg = LayeredSegmentation.read_header(path)
+        assert grid.shape == seg.shape == shape
+        expected = Grid.from_components(seg.shape, seg.spacing, seg.origin, seg.direction)
+        assert np.allclose(grid.affine, expected.affine, atol=1e-6)
+
+    def test_nifti_4d_truncates_to_spatial_shape(self, tmp_path: Path) -> None:
+        data = np.zeros((5, 6, 7, 3), dtype=np.int16)  # (X, Y, Z, T)
+        affine = np.diag([0.5, 0.6, 0.7, 1.0])
+        nib_img = nibabel.Nifti1Image(data, affine, dtype=np.int16)
+        path = tmp_path / "4d.nii.gz"
+        nibabel.save(nib_img, str(path))
+
+        grid = read_grid(path)
+
+        assert grid.shape == (5, 6, 7)
+
+    def test_ras_nifti_vs_lps_nrrd_same_physical_volume(self, tmp_path: Path) -> None:
+        """NIfTI (RAS-native, converted on read) and NRRD (LPS-native, no conversion)
+        of the same physical volume must read back to equal LPS grids."""
+        img = Image()
+        img.spacing = (0.5, 0.6, 0.7)
+        img.origin = (1.0, -2.5, 3.25)
+        img.direction = _OBLIQUE_DIRECTION
+        img.img = np.zeros((10, 9, 8), dtype=np.uint8)
+        nifti_path = img.save_as(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        nrrd_path = img.save_as(tmp_path / "vol.nrrd", FileType.NRRD)
+
+        grid_nifti = read_grid(nifti_path)
+        grid_nrrd = read_grid(nrrd_path)
+
+        assert grid_nifti.shape == grid_nrrd.shape
+        assert grid_relation(grid_nifti, grid_nrrd).kind is RelationKind.SAME
+
+    def test_unsupported_extension_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "vol.mha"
+
+        with pytest.raises(ImageError, match="Unsupported file extension"):
+            read_grid(path)
+
+    def test_corrupt_nrrd_header_wraps_as_image_read_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "corrupt.nrrd"
+        path.write_bytes(b"not a real nrrd file")
+
+        with pytest.raises(ImageReadError):
+            read_grid(path)
+
+
+class TestAssertSameGridOnDisk:
+    def test_matching_grids_across_formats_pass(self, tmp_path: Path) -> None:
+        img = Image()
+        img.spacing = (0.5, 0.6, 0.7)
+        img.origin = (1.0, -2.5, 3.25)
+        img.direction = _OBLIQUE_DIRECTION
+        img.img = np.zeros((10, 9, 8), dtype=np.uint8)
+        nifti_path = img.save_as(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        nrrd_path = img.save_as(tmp_path / "vol.nrrd", FileType.NRRD)
+
+        assert_same_grid_on_disk(nifti_path, nrrd_path)  # no raise
+
+    def test_mirrored_pair_raises_with_both_summaries(self, tmp_path: Path) -> None:
+        vol_path = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        seg_path = _write_volume(
+            tmp_path / "seg.nrrd",
+            FileType.NRRD,
+            origin=(0.0, 0.0, 9.0),
+            direction=_Z_FLIP,
+        )
+
+        with pytest.raises(GeometryMismatchError) as exc_info:
+            assert_same_grid_on_disk(vol_path, seg_path)
+
+        message = str(exc_info.value)
+        assert read_grid(vol_path).summary() in message
+        assert read_grid(seg_path).summary() in message
+
+    def test_disk_assert_catches_mismatch_in_memory_same_grid_cannot_see(
+        self, tmp_path: Path
+    ) -> None:
+        """`Image.same_grid` only ever compares the two objects handed to it. A fresh
+        in-memory read of the (flipped) segmentation trivially agrees with a copy of
+        itself — that says nothing about whether the segmentation's *file* actually
+        matches the volume's *file*, which is the pair that matters.
+        `assert_same_grid_on_disk` reads both files fresh and catches the real
+        mismatch the in-memory comparison never had a chance to see.
+        """
+        vol_path = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        seg_path = _write_volume(
+            tmp_path / "seg.nrrd",
+            FileType.NRRD,
+            origin=(0.0, 0.0, 9.0),
+            direction=_Z_FLIP,
+        )
+
+        seg_read = Image()
+        seg_read.read(seg_path)
+        seg_copy = Image(template=seg_read, copy_data=True)
+        assert seg_read.same_grid(seg_copy)  # in-memory guard: "looks fine"
+
+        with pytest.raises(GeometryMismatchError):
+            assert_same_grid_on_disk(vol_path, seg_path)
