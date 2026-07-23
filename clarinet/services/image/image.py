@@ -314,11 +314,14 @@ class Image:
 
     @property
     def affine_4x4(self) -> np.ndarray:
-        """4x4 voxel-to-physical affine matrix in LPS coordinates."""
-        A = np.eye(4)
-        A[:3, :3] = self._direction * np.array(self.spacing)
-        A[:3, 3] = np.array(self._origin)
-        return A
+        """4x4 voxel-to-physical affine matrix in LPS coordinates.
+
+        Assembled by :meth:`Grid.assemble_affine` — the single formula authority,
+        shared with :attr:`grid`. Deliberately not routed through :attr:`grid`, which
+        also requires a shape; this property must work on a shape-less image
+        (direction/spacing/origin set, no data or header loaded).
+        """
+        return Grid.assemble_affine(self._direction, self.spacing, self._origin)
 
     @property
     def grid(self) -> Grid:
