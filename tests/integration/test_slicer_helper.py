@@ -4,10 +4,17 @@ These tests send the helper DSL + user code to a real Slicer and verify
 the workspace is set up correctly.
 """
 
+import shutil
+from pathlib import Path
 from typing import ClassVar
 
+import numpy as np
+import pydicom
+import pydicom.uid
 import pytest
+from pydicom.dataset import FileDataset
 
+from clarinet.services.image import FileType, Image
 from clarinet.services.slicer.helper import PacsHelper, SlicerHelper
 from clarinet.services.slicer.service import SlicerService
 
@@ -1212,3 +1219,151 @@ __execResult = {'raised': raised, 'bypassed': bypassed}
     assert isinstance(result, dict)
     assert result["raised"] is True
     assert result["bypassed"] is True
+
+
+def _write_canonical_axial_series(dcm_dir: Path) -> None:
+    """Write a standard axial (canonical +Z) synthetic DICOM series.
+
+    Mirrors ``tests/test_image.py``'s ``TestDicomVolume`` construction
+    (``dicom_dir`` / ``_write_axial_series``): ``ImageOrientationPatient =
+    [1, 0, 0, 0, 1, 0]`` (positive-dominant IOP normal, +Z) with ascending
+    ``ImagePositionPatient[2]``. ``Image.read_dicom_series`` emits this as a
+    canonical right-handed (``det > 0``) volume under the Release-B converter
+    epoch (Tasks 7-8). Asymmetric ``Rows``/``Columns`` and ``PixelSpacing`` keep
+    the grid non-degenerate, so a SAME classification cannot pass under symmetry.
+    """
+    dcm_dir.mkdir(parents=True, exist_ok=True)
+    suid = pydicom.uid.generate_uid()
+    rows, cols = 8, 10
+    for i in range(6):
+        filename = dcm_dir / f"slice_{i:03d}.dcm"
+        file_meta = pydicom.Dataset()
+        file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+        file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+        file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+
+        ds = FileDataset(str(filename), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+        ds.SeriesInstanceUID = suid
+        ds.Rows = rows
+        ds.Columns = cols
+        ds.BitsAllocated = 16
+        ds.BitsStored = 16
+        ds.HighBit = 15
+        ds.PixelRepresentation = 0
+        ds.SamplesPerPixel = 1
+        ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.PixelSpacing = [0.7, 0.9]  # asymmetric row/col spacing
+        ds.SliceThickness = 2.0
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        ds.ImagePositionPatient = [0.0, 0.0, float(i * 2)]
+        ds.InstanceNumber = i + 1
+        ds.PixelData = np.full((rows, cols), 100 + i * 10, dtype=np.uint16).tobytes()
+        pydicom.dcmwrite(str(filename), ds)
+
+
+async def test_fresh_seg_on_canonical_volume_exports_same_without_conform(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """Release B live gate (probe P6): a fresh segmentation painted on a
+    canonical (``det > 0``) converter-emitted volume exports grid-identical
+    (SAME) with **no** ``conform_to`` step.
+
+    Exercises the whole Release-B chain end-to-end: a synthetic standard axial
+    DICOM series -> ``Image.read_dicom_series`` (the Tasks 7-8 canonical
+    converter, now emitting ``det > 0``) -> ``save_as`` NIfTI -> live Slicer
+    load -> fresh paint -> plain export. Because the emitted volume is
+    right-handed, Slicer 5.10 loads it byte-faithful (no ITK slice-axis flip,
+    P1), so the fresh segmentation's grid already coincides with the on-disk
+    volume grid -- the plain export is SAME with no conform round-trip (P6).
+    This is the no-conform counterpart to the Release-A ``conform_to`` gate
+    (``test_export_segmentation_conform_to_roundtrip``), whose left-handed
+    volume needs the conform step to reach SAME.
+
+    The gate fails if EITHER half regresses: a converter that stops emitting
+    ``det > 0`` (Slicer would flip it at load -> the fresh export lands
+    REARRANGED vs the on-disk volume), OR a Slicer/sitk that starts
+    canonicalizing ``det > 0`` volumes at load (loaded grid != on-disk grid ->
+    REARRANGED). Either way the plain export would no longer classify SAME.
+    """
+    base = Path("/tmp/t9_canon_gate")
+    shutil.rmtree(base, ignore_errors=True)
+    dcm_dir = base / "axial_series"
+    _write_canonical_axial_series(dcm_dir)
+
+    # Convert via the canonical converter; the emitted grid must be right-handed.
+    img = Image()
+    img.read_dicom_series(dcm_dir)
+    emitted_det = float(np.linalg.det(np.asarray(img.direction)))
+    assert emitted_det > 0, f"converter emitted a non-canonical grid: det={emitted_det}"
+
+    vol_path = base / "volume.nii.gz"
+    img.save_as(vol_path, FileType.NIFTI)
+
+    context = {"working_folder": str(base), "vol_path": str(vol_path)}
+    script = """
+import os
+import numpy as np
+import SimpleITK as sitk
+
+# 1. Load the canonical (det>0) converter-emitted volume. Slicer 5.10 loads a
+#    right-handed grid byte-faithful (P1) -- no slice-axis flip at load time.
+s = SlicerHelper(working_folder)
+loaded = s.load_volume(vol_path, window=(-100, 300))
+
+# The on-disk volume grid, read faithfully -- never via loadVolume (pitfall 7).
+vol_grid = _read_grid_on_disk(vol_path)
+vol_det = float(np.linalg.det(vol_grid.direction))
+
+# 2. Fresh segmentation on the loaded volume; paint one interior marker block.
+seg = s.create_segmentation('CanonFresh')
+seg.add_segment('Marker', (1.0, 0.0, 0.0))
+seg.node.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+sid = seg.node.GetSegmentation().GetNthSegmentID(0)
+
+arr = slicer.util.arrayFromVolume(loaded)   # (z, y, x)
+mask = np.zeros(arr.shape, dtype=np.uint8)
+zc, yc, xc = [d // 2 for d in arr.shape]
+mask[max(0, zc - 1):zc + 2, max(0, yc - 1):yc + 2, max(0, xc - 1):xc + 2] = 1
+painted_voxels = int(mask.sum())
+slicer.util.updateSegmentBinaryLabelmapFromArray(mask, seg.node, sid, loaded)
+
+# 3. Export WITHOUT conform_to -- the whole point of the gate.
+export_path = os.path.join(working_folder, 'fresh_export.seg.nrrd')
+if os.path.isfile(export_path):
+    os.remove(export_path)
+export_segmentation('CanonFresh', export_path)
+
+# 4. Classify the exported grid against the on-disk volume grid.
+exported_grid = _read_grid_on_disk(export_path)
+exported_det = float(np.linalg.det(exported_grid.direction))
+relation = grid_relation(exported_grid, vol_grid).kind.value
+
+# Non-vacuous: the painted marker actually reached the exported file (a grid
+# relation compares geometry only -- an empty seg could pass SAME vacuously).
+exp_arr = sitk.GetArrayFromImage(sitk.ReadImage(export_path))
+exported_fg = int((exp_arr != 0).sum())
+
+__execResult = {
+    'vol_det': vol_det,
+    'exported_det': exported_det,
+    'relation': relation,
+    'painted_voxels': painted_voxels,
+    'exported_fg': exported_fg,
+    'exported_written': os.path.isfile(export_path),
+}
+"""
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
+
+    assert isinstance(result, dict)
+    assert result.get("exported_written") is True, result
+    # Canonical on disk AND after export -- neither the converter nor Slicer flipped it.
+    assert result["vol_det"] > 0, result
+    assert result["exported_det"] > 0, result
+    # Non-vacuous: the painted marker survived verbatim to the exported file.
+    assert result["painted_voxels"] > 0, result
+    assert result["exported_fg"] == result["painted_voxels"], result
+    # THE GATE: a fresh seg on a canonical volume is grid-identical with NO conform_to.
+    assert result["relation"] == "same", result
