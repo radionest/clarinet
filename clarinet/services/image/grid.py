@@ -81,6 +81,25 @@ class Grid:
         if self.affine.shape != (4, 4):
             raise ValueError(f"affine must be a 4x4 matrix, got shape {self.affine.shape}")
 
+    @staticmethod
+    def assemble_affine(
+        direction: np.ndarray,
+        spacing: tuple[float, float, float],
+        origin: tuple[float, float, float],
+    ) -> np.ndarray:
+        """Assemble the 4x4 LPS voxel-to-physical affine from grid components.
+
+        Single formula authority for the affine: ``direction``'s columns (unit
+        vectors per axis) scaled per-column by ``spacing``, with ``origin`` in the
+        translation column. Shared by :meth:`from_components` and the image class's
+        ``affine_4x4`` property — the latter needs the affine on a shape-less image
+        and so cannot construct a full :class:`Grid`.
+        """
+        affine = np.eye(4)
+        affine[:3, :3] = np.asarray(direction, dtype=float) * np.array(spacing, dtype=float)
+        affine[:3, 3] = np.array(origin, dtype=float)
+        return affine
+
     @classmethod
     def from_components(
         cls,
@@ -91,12 +110,10 @@ class Grid:
     ) -> Grid:
         """Build a Grid from shape/spacing/origin/direction components (LPS).
 
-        Assembles the affine exactly like ``Image.affine_4x4``: the linear
-        part is ``direction`` scaled per-column by ``spacing`` (``direction``'s
-        columns are unit vectors per axis), the translation is ``origin``.
-        Matching components on both sides therefore produce a byte-identical
-        affine — the two are meant to be interchangeable representations of
-        the same grid.
+        Assembles the affine via :meth:`assemble_affine` (shared with the image
+        class's ``affine_4x4``), so matching components on both sides produce a
+        byte-identical affine — the two are interchangeable representations of the
+        same grid.
         """
         direction_arr = np.asarray(direction, dtype=float)
         if direction_arr.shape != (3, 3):
@@ -105,9 +122,7 @@ class Grid:
             raise ValueError(f"spacing must be a 3-tuple, got length {len(spacing)}")
         if len(origin) != 3:
             raise ValueError(f"origin must be a 3-tuple, got length {len(origin)}")
-        affine = np.eye(4)
-        affine[:3, :3] = direction_arr * np.array(spacing, dtype=float)
-        affine[:3, 3] = np.array(origin, dtype=float)
+        affine = cls.assemble_affine(direction_arr, spacing, origin)
         return cls(shape=(int(shape[0]), int(shape[1]), int(shape[2])), affine=affine)
 
     @property
