@@ -27,8 +27,27 @@ def build_correspondence_bundle() -> str:
     dropping every ``from clarinet ...`` / ``import clarinet ...`` line
     (including multi-line parenthesized ones -- a naive single-line strip
     would leave dangling ``    Name,`` continuation lines and raise
-    ``SyntaxError``) and every ``from __future__ import ...`` line. Result is
-    cached after the first call since the source text never changes at
+    ``SyntaxError``) and every per-module ``from __future__ import ...`` line,
+    then prepending a two-line prelude.
+
+    The prelude is load-bearing for exec'ing this text as a *synthetic* module:
+
+    1. ``from __future__ import annotations`` -- Slicer's bundled Python (3.9)
+       and CI (3.12) evaluate annotations eagerly, so a self-referential
+       annotation such as ``grid``'s ``Grid.from_components(...) -> Grid`` (and
+       any ``X | None`` union under 3.9) would raise at class-definition time
+       without it. It must be the first line (a future import cannot follow
+       other statements).
+    2. A ``sys.modules.setdefault(__name__, ...)`` self-registration -- with (1)
+       active, annotations are strings, and ``@dataclass`` resolves them via
+       ``sys.modules[cls.__module__].__dict__`` while detecting ClassVar/InitVar.
+       When this text is exec'd under a ``__name__`` that is not a real module
+       (e.g. the tests' ``"_bundle"``), that lookup would raise ``AttributeError``
+       on ``None``; registering an empty stand-in module makes the lookup resolve
+       (to "not a ClassVar", correct here) instead of crashing. A no-op when
+       ``__name__`` is already a real module (e.g. Slicer's ``__main__``).
+
+    Result is cached after the first call since the source text never changes at
     runtime.
     """
     global _cache
@@ -51,5 +70,10 @@ def build_correspondence_bundle() -> str:
                 continue
             out.append(line)
         out.append("")
-    _cache = "\n".join(out)
+    _cache = (
+        "from __future__ import annotations\n"
+        "import sys as _bundle_sys, types as _bundle_types\n"
+        "_bundle_sys.modules.setdefault(__name__, _bundle_types.ModuleType(__name__))\n"
+        + "\n".join(out)
+    )
     return _cache

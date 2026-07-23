@@ -31,14 +31,21 @@ def test_bundle_has_no_clarinet_imports() -> None:
         assert not _CLARINET_TOKEN_RE.search(line.strip())
 
 
-def test_bundle_has_at_most_one_future_import() -> None:
+def test_bundle_starts_with_single_future_import() -> None:
+    """Exactly one ``from __future__ import annotations``, as the bundle's first line.
+
+    Slicer's bundled Python (3.9) and CI (3.12) evaluate annotations eagerly, so
+    grid's self-referential ``Grid.from_components(...) -> Grid`` NameErrors at
+    class-definition time without it. More than one future import -- or one sitting
+    below other code -- is itself a SyntaxError.
+    """
     bundle = build_correspondence_bundle()
+    lines = bundle.splitlines()
     future_imports = [
-        line
-        for line in bundle.splitlines()
-        if line.strip().startswith("from __future__ import annotations")
+        line for line in lines if line.strip().startswith("from __future__ import annotations")
     ]
-    assert len(future_imports) <= 1
+    assert len(future_imports) == 1
+    assert lines[0].strip() == "from __future__ import annotations"
 
 
 def test_bundle_parses_under_python_39_grammar() -> None:
