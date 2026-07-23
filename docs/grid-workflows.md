@@ -99,7 +99,7 @@ deliberately do not share an implementation — see the
    in-plane basis in DICOM's own IOP order end-to-end — array, spacing, and
    direction move together, with no internal row/column swap
    (`dicom_volume.py:68-86`), verified by a save+`read_grid` round-trip test
-   (`tests/test_image.py:1095`,
+   (`tests/test_image.py:1130`,
    `test_read_dicom_series_roundtrips_through_save_and_read_grid`).
 2. **The slice axis comes from `ImagePositionPatient` (IPP) progression, not
    IOP.** SimpleITK/GDCM can derive an internally-inconsistent slice-axis sign on
@@ -494,12 +494,12 @@ route through `_read_grid_on_disk` for every grid read.
   including a deliberately negative-dominant-normal series, GDCM's own file sort
   already puts `dot(slice_dir, n) > 0` **before any canonicalization runs at
   all** — see `test_negative_dominant_normal_series_already_canonical`
-  (`tests/test_image.py:724`). This means the epoch's *visible* on-disk change
+  (`tests/test_image.py:759`). This means the epoch's *visible* on-disk change
   for most real series is almost always just the in-plane transpose (dropping
   the row/column swap), not a slice-order reversal; the slice-sense flip
   condition mostly fires for the degenerate-fallback and hand-constructed/
   synthetic cases exercised directly against `_canonicalize_slice_axis`
-  (`tests/test_image.py:913`,
+  (`tests/test_image.py:948`,
   `test_canonicalize_negative_dominant_normal_flips_when_old_rule_would_not`).
   This is an empirical characteristic of GDCM's current sort implementation, not
   a documented DICOM or ITK contract — treat it as a debugging heuristic
