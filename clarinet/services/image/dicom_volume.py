@@ -11,6 +11,12 @@ from clarinet.exceptions.domain import ImageReadError
 from clarinet.services.image.orientation import ground_truth_slice_geometry
 from clarinet.utils.logger import logger
 
+_DEGENERATE_NORMAL_EPS = 1e-6
+"""Threshold for the IOP-normal degeneracy checks in ``_canonicalize_slice_axis``:
+below this either the in-plane columns don't yield a meaningful cross product
+(``|n|``) or the slice axis is too close to orthogonal to ``n`` to trust
+``dot(slice_dir, n)``'s sign. Both fall back to the +dominant-axis rule."""
+
 
 def read_dicom_series(
     directory: Path,
@@ -101,7 +107,7 @@ def _canonicalize_slice_axis(
     name: str,
     exact_last_position: tuple[float, float, float] | None = None,
 ) -> tuple[np.ndarray, tuple[float, float, float], np.ndarray]:
-    """Normalise the slice axis to point along the +sense of its dominant axis.
+    """Normalise the slice axis to the canonical IOP-normal side.
 
     DICOM→NIfTI conversion must be reproducible across framework versions: a series
     re-converted later (repair, anonymization path migration, manual re-run) must
@@ -121,13 +127,28 @@ def _canonicalize_slice_axis(
     (unlike a direction-only flip, which mirrors the data through the origin
     plane). No-op when the slice axis already points the canonical way.
 
+    Canonical sense (D6): the slice axis is flipped, when needed, to align with
+    the IOP normal ``n = cross(direction[:, 0], direction[:, 1])`` — the physical
+    normal implied by the in-plane row/column directions — rather than with a
+    fixed +dominant-axis convention. Since ``det([r, c, s]) = n·s``, this makes
+    the emitted determinant **positive for every series with a non-degenerate
+    IOP**, including ones whose IOP normal itself has a negative-dominant
+    component (where the old +dominant rule would have landed on ``det < 0``).
+    The flip stays the geometry-preserving index rearrangement described above —
+    never a direction-only mirror, which remains forbidden (the #247/#453 bug
+    class). #412's real invariant was always version-stability plus
+    geometry-preservation of the slice axis, not the +dominant-axis anchor
+    itself; re-anchoring to the IOP-normal side is compatible with it and
+    removes the residual left-handed population the old anchor left behind.
+    When the in-plane columns are degenerate/unavailable (``|n| ≈ 0``) or the
+    slice axis is nearly orthogonal to ``n`` (``|dot(slice_dir, n)| ≈ 0``, so its
+    side cannot be judged reliably), falls back to the +dominant-axis rule and
+    logs a warning — conversion never fails on this.
+
     Scope — this stabilizes *future* conversions. Segmentations that were frozen
     on a divergent earlier-epoch grid stay physically correct but still need
     ``clarinet.services.image.conform_seg_to_grid`` (PR #393) to re-align by index
-    against a re-converted volume. The canonical frame may be left-handed (det < 0) for
-    series whose in-plane axes oppose the slice normal — this is valid (NIfTI /
-    NRRD / ITK all support a negative-determinant direction), matches the
-    pre-#221 reader, and no framework consumer depends on a positive determinant.
+    against a re-converted volume.
 
     ``exact_last_position``, when given (DICOM IPP ground truth was established
     by ``ground_truth_slice_geometry``), is used verbatim as the flipped origin
@@ -137,15 +158,31 @@ def _canonicalize_slice_axis(
     when ``None`` (ground truth unavailable).
     """
     slice_dir = direction[:, 2]
+    # n = the physical IOP normal implied by the in-plane row/column directions
+    # (post-Task-7, direction[:, 0:2] are IOP-ordered, so this is exactly the
+    # DICOM normal). Canonical sense (D6) = the side of n, not a fixed axis.
+    n = np.cross(direction[:, 0], direction[:, 1])
+    n_norm = float(np.linalg.norm(n))
+    dot_n = float(np.dot(slice_dir, n))
     # argmax resolves a perfectly diagonal (equal-magnitude) slice normal to the
-    # first axis deterministically, so the canonical choice stays reproducible.
+    # first axis deterministically, so the fallback choice stays reproducible.
     dominant = int(np.argmax(np.abs(slice_dir)))
-    if slice_dir[dominant] >= 0:
+    if n_norm < _DEGENERATE_NORMAL_EPS or abs(dot_n) < _DEGENERATE_NORMAL_EPS * n_norm:
+        logger.warning(
+            f"Degenerate/near-in-plane IOP normal in {name} "
+            f"(n={np.round(n, 3).tolist()}, |n|={n_norm:.3g}, dot={dot_n:.3g}); "
+            f"falling back to the +dominant-axis rule for slice-sense canonicalization"
+        )
+        flip = slice_dir[dominant] < 0
+    else:
+        flip = dot_n < 0
+
+    if not flip:
         return volume, origin, direction
 
     logger.info(
         f"Canonicalizing DICOM slice axis in {name} "
-        f"(flipping slice direction {np.round(slice_dir, 3).tolist()} to +{dominant}-axis)"
+        f"(flipping slice direction {np.round(slice_dir, 3).tolist()})"
     )
     if exact_last_position is not None:
         new_origin = np.asarray(exact_last_position, dtype=float)
