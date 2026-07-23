@@ -27,6 +27,8 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NRRD spacing resolution**: tries `spacings` key first, then `space directions` diagonal. Falls back to default `(1.0, 1.0, 1.0)` if neither is present.
 
+**NRRD read failures** (breaking): `read`/`read_nrrd` raise `ImageReadError` on a 4-D `.seg.nrrd` — read layered segmentations via `LayeredSegmentation` or `grid_io.read_grid` instead of building a degenerate NaN grid — and on a 3-D NRRD whose `space directions` are present without a supported `space` field. The `space` field is now honored (LPS as-is, RAS/LAS converted, anything else — including missing `space` — raises), so a third-party RAS/LAS file that was previously misread as LPS now fails loudly; this only affects non-Slicer files, since Slicer always writes LPS.
+
 **DICOM slice sorting**: GDCM orders by `ImagePositionPatient` projected onto the slice normal (→ `InstanceNumber` fallback); the reader then canonicalizes the slice axis to a version-stable orientation (see "Slice-Axis Canonicalization" below).
 
 **DICOM error tolerance**: non-DICOM files and DICOM files without `pixel_array` are silently skipped. Only raises `ImageReadError` if zero valid slices remain.
