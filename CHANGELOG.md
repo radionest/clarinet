@@ -159,6 +159,58 @@
   set the ratio wins (`max_overlap` is ignored). The scalars→strategy derivation
   is shared as `strategy_from_thresholds` in
   `clarinet.services.image.correspondence` and ships inside the bundle.
+- **`export_segmentation`'s `reference_volume=` parameter is removed;
+  `conform_to=` is the only export guard.** The old parameter compared two
+  in-memory Slicer objects that Slicer's own load-time canonicalization had
+  already flipped identically, so it could not detect the mirror it existed to
+  catch (see the new `docs/grid-workflows.md`). `conform_to=<path to the
+  reference volume file>` reads the reference's **on-disk** grid instead and
+  classifies the segmentation node's current grid against it: `SAME` exports
+  as-is, `REARRANGED` re-grids exactly onto the reference before exporting
+  (layer/label-preserving, caller's node untouched), `FOREIGN` raises without
+  writing; the written file is then re-read and re-classified, deleting it on
+  any post-write mismatch. `assert_segmentation_matches_volume` is now private
+  (`_assert_segmentation_matches_volume`) and remains only as
+  `load_segmentation`'s best-effort load-time check. **Downstream migration:**
+  replace `export_segmentation(name, path, reference_volume=<node>)` with
+  `export_segmentation(name, path, conform_to=<volume file path>)` — a
+  `TypeError` on upgrade names every call site that needs it.
+- **`conform_seg_to_grid` raises on a `FOREIGN` grid pair by default.** It
+  previously resampled unconditionally, including onto an unrelated study's
+  grid. It now classifies the pair first (`SAME` no-op, `REARRANGED` exact
+  index rearrangement, `FOREIGN` raises `GeometryMismatchError`) and only
+  resamples a foreign pair when the caller passes `allow_resample=True`. Also
+  gained a 4-D `(L, X, Y, Z)` layered `.seg.nrrd` repair path (preserves every
+  segment's name/label value/layer verbatim), alongside the existing 3-D path.
+  **Downstream migration:** a script relying on the old unconditional resample
+  for genuinely unrelated grids must add `allow_resample=True`; a same-study
+  pair that was always `SAME`/`REARRANGED` needs no change.
+- **`Image.read`/`Image.read_nrrd` raise `ImageReadError` on a 4-D NRRD, and on
+  a 3-D NRRD whose `space directions` are present without a supported `space`
+  field.** A 4-D `.seg.nrrd` previously built a silently-wrong NaN-valued grid
+  instead of raising — read it via `LayeredSegmentation` or `grid_io.read_grid`
+  instead. A NRRD with `space directions` but no (or an unrecognized) `space`
+  was previously treated as LPS regardless, silently misreading third-party
+  RAS/LAS files; `space` is now honored (LPS as-is, RAS/LAS converted, anything
+  else raises). **Downstream migration:** a clarinet-written NRRD from before
+  2026-03-08 that carries `space directions` without a `space` field now fails
+  to read — see `clarinet/docs/migration-orientation-0.10.17.md` for the
+  one-time re-save fix.
+- **DICOM→NIfTI conversion changes on-disk grid layout for every
+  newly-converted volume (grid epoch).** The in-plane axis order now follows
+  `ImageOrientationPatient` end-to-end (array, spacing, and direction move
+  together — the internal row/column swap is gone), and the canonical slice
+  sense is now the side of the IOP normal (`det = normal · slice > 0`,
+  universal for non-degenerate series) instead of a fixed +dominant-axis
+  convention. The change is always an exact, physically-equivalent index
+  rearrangement (`REARRANGED`, zero voxel drift — never `FOREIGN`, never a
+  mirror), but every legacy segmentation now sits on a different index grid
+  than a freshly re-converted volume of the same series. **Blast radius:** any
+  project comparing a pre-epoch segmentation against a re-converted volume by
+  voxel index. **Remediation:** re-convert affected volumes, then conform
+  legacy segmentations once against the new grid (`conform_seg_to_grid`,
+  idempotent, exact for `REARRANGED` pairs) — see the conversion-orientation
+  epoch section in `clarinet/docs/migration-orientation-0.10.17.md`.
 
 ### Added
 

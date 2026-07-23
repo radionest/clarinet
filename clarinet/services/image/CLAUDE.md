@@ -43,4 +43,5 @@ volume = await asyncio.to_thread(image.read, path)
 
 ## Detailed Documentation
 
-See [/docs/image-service.md](/docs/image-service.md) for full behavioral reference (cross-format spacing, set operation semantics, HU correction pipeline, COCO converter, DICOM reader).
+- [/docs/image-service.md](/docs/image-service.md) — full behavioral reference (cross-format spacing, set operation semantics, HU correction pipeline, COCO converter, DICOM reader).
+- [/docs/grid-workflows.md](/docs/grid-workflows.md) — grid lifecycle, the `Grid`/`GridRelation`/`RelationKind` vocabulary, dev-API decision table, design rationale, and live-Slicer probe evidence behind the conform-on-export/canonical-conversion machinery.
