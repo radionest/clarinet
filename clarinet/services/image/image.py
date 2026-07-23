@@ -744,8 +744,9 @@ class Image:
             header["space directions"] = space_dirs
             header["space origin"] = np.array(self._origin)
             header.pop("spacings", None)  # space directions supersedes spacings
-            if "space" not in header:
-                header["space"] = "left-posterior-superior"
+            # Internal representation is always LPS — never inherit a stale foreign
+            # `space` label carried over from self._nrrd_header.
+            header["space"] = "left-posterior-superior"
             nrrd.write(str(path), self.img, header)
         except Exception as e:
             raise ImageWriteError(f"Failed to write NRRD file: {path}") from e

@@ -518,6 +518,41 @@ class TestNrrdReaderHardening:
 
         assert img_other.same_grid(img_lps)
 
+    def test_nrrd_ras_roundtrip_relabels_space_to_lps(self, tmp_path: Path) -> None:
+        """Reading an RAS-native NRRD and re-saving must relabel `space` as LPS.
+
+        The written `space directions`/`space origin` are always the internal LPS
+        representation; inheriting the stale foreign `space` string would make a
+        later space-honoring read double-flip X/Y (this is the core regression
+        proof — the round-trip must land on the exact same grid, not just close)."""
+        shape = (4, 4, 4)
+        data = np.zeros(shape, dtype=np.int16)
+        ras_dirs = np.array([[-0.5, 0.0, 0.0], [0.0, -0.6, 0.0], [0.0, 0.0, 0.7]])
+        ras_origin = np.array([-10.0, -20.0, 30.0])
+        ras_path = tmp_path / "ras_source.nrrd"
+        nrrd.write(
+            str(ras_path),
+            data,
+            {
+                "space directions": ras_dirs,
+                "space origin": ras_origin,
+                "space": "right-anterior-superior",
+            },
+        )
+
+        img = Image()
+        img.read(ras_path)
+
+        out_path = tmp_path / "resaved.nrrd"
+        img.save_as(out_path, FileType.NRRD)
+
+        header = nrrd.read_header(str(out_path))
+        assert header["space"] == "left-posterior-superior"
+
+        reread = Image()
+        reread.read(out_path)
+        assert reread.same_grid(img)  # no double-flip: stable round-trip
+
     @pytest.mark.parametrize(
         "space_value",
         ["scanner-xyz", None, "", "  ", "right-anterior-superior-time"],
@@ -2344,6 +2379,56 @@ class TestConformLayeredSegToGrid:
         # round-trips through the public reader too, not just the raw header dict
         seg_meta = LayeredSegmentation.read_header(seg_path)
         assert seg_meta.segments == [("cortex", 0, 1), ("lesion", 1, 2)]
+
+    def test_conform_4d_layered_relabels_space_to_lps(self, tmp_path: Path) -> None:
+        """A layered source whose header carries a foreign `space` (RAS) must still
+        write LPS-labeled output. `_conform_layered_seg` builds `new_header` from the
+        source header and overwrites `space directions`/`space origin` with the
+        reference grid's LPS values, but previously never touched `space` — inheriting
+        whatever foreign label the source carried alongside the newly-LPS numbers."""
+        shape = (6, 7, 5)  # spatial (X, Y, Z)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = Image()
+        vol._direction = np.eye(3)
+        vol._origin = (0.0, 0.0, 0.0)
+        vol._spacing = (1.0, 1.0, 1.0)
+        vol.img = np.zeros(shape, dtype=np.uint8)
+        vol.save_as(vol_path, FileType.NIFTI)
+
+        layer0 = np.zeros(shape, dtype=np.uint8)
+        layer0[1:3, 1:3, 1:3] = 1
+        data = layer0[np.newaxis]  # (1, X, Y, Z)
+
+        # Same physical grid as the LPS `mirrored_dir=diag([1,1,-1])` fixture above
+        # (Z-mirror relative to vol, so the grids are REARRANGED, not SAME — required
+        # for conform_seg_to_grid to actually run the write path), re-expressed under
+        # RAS labeling (negate the X/Y world columns per _nrrd_space_to_lps).
+        ras_dirs = np.vstack([np.full(3, np.nan), np.diag([-1.0, -1.0, -1.0])])
+        seg_path = tmp_path / "layered_ras.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            data,
+            {
+                "space": "right-anterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": ras_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "a",
+                "Segment0_ID": "Segment_0",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+            },
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        out_header = nrrd.read_header(str(seg_path))
+        assert out_header["space"] == "left-posterior-superior"
+
+        # No double-flip: same voxels the LPS-native fixture produces (Z-mirror).
+        out_data, _ = nrrd.read(str(seg_path))
+        np.testing.assert_array_equal(out_data[0], np.flip(layer0, axis=2))
 
 
 def _label_to_name(header: dict) -> dict[int, str]:
