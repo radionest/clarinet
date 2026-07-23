@@ -19,8 +19,19 @@ from clarinet.services.image.correspondence import graph, matching, measures, mo
 _MODULES = (model, measures, matching, operations, graph, grid)
 _cache: str | None = None
 
+_FUTURE_LINE = "from __future__ import annotations\n"
+_SELF_REGISTER_LINES = (
+    "import sys as _bundle_sys, types as _bundle_types\n"
+    "_bundle_sys.modules.setdefault(__name__, _bundle_types.ModuleType(__name__))\n"
+)
 
-def build_correspondence_bundle() -> str:
+
+def _prelude(standalone: bool) -> str:
+    """Prelude prepended to the flattened body; see :func:`build_correspondence_bundle`."""
+    return (_FUTURE_LINE if standalone else "") + _SELF_REGISTER_LINES
+
+
+def build_correspondence_bundle(*, standalone: bool = True) -> str:
     """Return the correspondence engine + grid module source, flattened and import-free.
 
     Concatenates ``inspect.getsource()`` of each module in ``_MODULES``,
@@ -47,12 +58,21 @@ def build_correspondence_bundle() -> str:
        (to "not a ClassVar", correct here) instead of crashing. A no-op when
        ``__name__`` is already a real module (e.g. Slicer's ``__main__``).
 
-    Result is cached after the first call since the source text never changes at
-    runtime.
+    ``standalone=False`` omits (1) only, for callers that concatenate this text
+    *after* other source which already opens the compiled unit with a future
+    import -- ``SlicerService._build_script`` composes ``helper.py + bundle +
+    runner``, and a second future import mid-unit is a ``SyntaxError`` ("must
+    occur at the beginning of the file"), so the composed Slicer script would
+    not compile at all. Part (2) is emitted either way: it is a no-op under a
+    real ``__name__`` and still needed when the composed text is exec'd under a
+    synthetic one.
+
+    The flattened body is cached after the first call since the source text
+    never changes at runtime; the prelude is cheap and composed per call.
     """
     global _cache
     if _cache is not None:
-        return _cache
+        return _prelude(standalone) + _cache
     out: list[str] = []
     for mod in _MODULES:
         skip_paren = False
@@ -70,10 +90,5 @@ def build_correspondence_bundle() -> str:
                 continue
             out.append(line)
         out.append("")
-    _cache = (
-        "from __future__ import annotations\n"
-        "import sys as _bundle_sys, types as _bundle_types\n"
-        "_bundle_sys.modules.setdefault(__name__, _bundle_types.ModuleType(__name__))\n"
-        + "\n".join(out)
-    )
-    return _cache
+    _cache = "\n".join(out)
+    return _prelude(standalone) + _cache
