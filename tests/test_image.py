@@ -721,17 +721,21 @@ class TestDicomVolume:
             ds.PixelData = pixels.astype(np.uint16).tobytes()
             pydicom.dcmwrite(str(filename), ds)
 
-    def test_negative_z_axial_series_canonicalized(self, tmp_path: Path) -> None:
-        """DICOM→NIfTI conversion must be slice-order canonical and version-stable.
+    def test_negative_dominant_normal_series_already_canonical(self, tmp_path: Path) -> None:
+        """D6: canonical slice sense is the IOP-normal side, not a fixed
+        +dominant-axis convention.
 
-        An axial series whose IOP slice normal points along -Z (common on MRI) is
-        ordered by SimpleITK opposite to the legacy ascending-
-        ``ImagePositionPatient[2]`` convention used by the pre-#221 reader. The
-        reader normalises the slice axis to the positive sense of its dominant axis
-        (here Z), so re-converting a series always yields the same grid —
-        preventing the projection/doctor-seg index-reversed Z-flip.
+        This fixture's IOP normal itself is negative-dominant (row=(1,0,0),
+        col=(0,-1,0) -> n=(0,0,-1)). GDCM always sorts a series ascending along
+        its own row x col normal, so the ground-truth-corrected slice_dir
+        already aligns with n (dot > 0) — no flip is needed, and the emitted
+        determinant is positive via the negative-dominant slice axis itself.
+        Pre-Task-8 this same fixture WAS flipped (the old rule looked only at
+        the dominant axis's sign, which was negative here, ignoring that -Z was
+        already the canonical/IOP-normal sense) — this is the D6 divergence,
+        not a regression.
         """
-        dcm_dir = tmp_path / "neg_z_series"
+        dcm_dir = tmp_path / "neg_dominant_series"
         # value encodes |Z|: Z=0 -> 100, Z=-3 -> 130, Z=-6 -> 160
         self._write_axial_series(
             dcm_dir,
@@ -740,12 +744,13 @@ class TestDicomVolume:
 
         volume, _spacing, origin, direction = read_dicom_series(dcm_dir)
 
-        # Slice axis points +Z (canonical); origin sits at the minimum physical Z.
-        assert direction[2, 2] > 0
-        assert pytest.approx(origin[2], abs=1e-4) == -6.0
-        # In-array slices run ascending physical Z: Z=-6 (160) first, Z=0 (100) last.
-        assert int(volume[0, 0, 0]) == 160
-        assert int(volume[0, 0, -1]) == 100
+        assert np.linalg.det(direction) > 0
+        assert direction[2, 2] < 0  # canonical sense here IS negative-Z (aligned with n)
+        assert pytest.approx(origin[2], abs=1e-4) == 0.0  # no flip: origin unchanged
+        # In-array slices stay in GDCM's own ascending-n order: Z=0 (100) first,
+        # Z=-6 (160) last — unlike the pre-D6 reader, which flipped this series.
+        assert int(volume[0, 0, 0]) == 100
+        assert int(volume[0, 0, -1]) == 160
 
     def test_positive_z_axial_series_unchanged(self, tmp_path: Path) -> None:
         """A series whose slice axis already points +Z is passed through untouched
@@ -767,6 +772,28 @@ class TestDicomVolume:
         assert pytest.approx(origin[2], abs=1e-4) == 0.0
         assert int(volume[0, 0, 0]) == 100
         assert int(volume[0, 0, -1]) == 160
+
+    def test_standard_axial_series_det_positive_matches_ground_truth_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """A standard +Z axial series (positive-dominant IOP normal) is
+        unaffected by D6 — no flip either way — and must emit a right-handed
+        grid (det > 0) that is exactly the DICOM ground-truth grid (SAME, not
+        merely REARRANGED)."""
+        dcm_dir = tmp_path / "std_axial_det"
+        self._write_axial_series(
+            dcm_dir,
+            {z: np.full((4, 5), int(100 + z * 10)) for z in (0.0, 3.0, 6.0)},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        volume, spacing, origin, direction = read_dicom_series(dcm_dir)
+
+        assert np.linalg.det(direction) > 0
+
+        emitted = Grid.from_components(volume.shape, spacing, origin, direction)
+        ground_truth = Grid.from_components(volume.shape, spacing, (0.0, 0.0, 0.0), np.eye(3))
+        assert grid_relation(emitted, ground_truth).kind is RelationKind.SAME
 
     def test_wobbly_spacing_correct_series_byte_identical(self, tmp_path: Path) -> None:
         """A correctly-ordered (+Z, non-flip) series with irregular inter-slice
@@ -793,11 +820,16 @@ class TestDicomVolume:
         assert int(volume[0, 0, -1]) == 195
 
     def test_canonicalization_preserves_geometry(self, tmp_path: Path) -> None:
-        """Slice-axis canonicalisation flips the array, origin and direction
-        together, so every voxel keeps its physical location — unlike a
-        direction-only flip, which would mirror the data through the origin plane.
-        A single marked voxel must map, via the voxel→LPS affine, to its true DICOM
-        physical position and land on the canonical (last) slice index.
+        """The in-plane (row/col cosine + spacing) → physical mapping is correct
+        regardless of the slice-sense question: a single marked voxel must map,
+        via the voxel→LPS affine, to its true DICOM physical position.
+
+        This fixture's IOP normal is negative-dominant (see
+        ``test_negative_dominant_normal_series_already_canonical``), so under D6
+        no flip happens here — unlike pre-Task-8, where the +dominant-axis rule
+        flipped it and landed the marker on the last slice index instead of the
+        first. Physical position is unaffected either way (geometry-preserving
+        by construction, and here trivially so since nothing moves).
         """
         dcm_dir = tmp_path / "marked_series"
         marker = 999
@@ -814,7 +846,7 @@ class TestDicomVolume:
         idx = np.argwhere(img.img == marker)
         assert idx.shape[0] == 1
         r, c, k = (int(v) for v in idx[0])
-        assert k == 2  # Z=0 is the maximum physical Z → last slice after canon
+        assert k == 0  # no flip under D6 (negative-dominant normal, already canonical)
         phys = img.affine_4x4 @ np.array([r, c, k, 1.0])
         # IOP rowdir(col index)=[1,0,0], coldir(row index)=[0,-1,0], 1 mm spacing,
         # slice IPP z=0 → physical (col, -row, 0) = (2, -1, 0) in LPS.
@@ -849,6 +881,112 @@ class TestDicomVolume:
         _, new_origin, _ = _canonicalize_slice_axis(volume, 3.0, origin, direction, "no_gt")
 
         assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_canonicalize_flips_when_slice_dir_opposes_iop_normal(self) -> None:
+        """A slice_dir that opposes the (positive-dominant) IOP normal
+        n = cross(col0, col1) must be flipped onto the IOP-normal side: det
+        becomes positive and a marker voxel — placed at the in-plane origin
+        (index 0,0) so only the slice axis contributes to its physical
+        position — keeps that physical position exactly."""
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        marker = 999
+        volume[0, 0, 0] = marker
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        n = np.cross(direction[:, 0], direction[:, 1])
+        np.testing.assert_allclose(n, [0.0, 0.0, 1.0])  # positive-dominant IOP normal
+        assert np.linalg.det(direction) < 0  # slice_dir opposes n -> left-handed pre-flip
+
+        new_volume, new_origin, new_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "opposing", exact_last_position=(0.0, 0.0, -6.0)
+        )
+
+        assert np.linalg.det(new_direction) > 0
+        idx = np.argwhere(new_volume == marker)
+        assert idx.shape[0] == 1
+        ix, iy, iz = (int(v) for v in idx[0])
+        assert (ix, iy, iz) == (0, 0, 2)  # reversed: index 0 of 3 -> index 2
+        # in-plane index (0,0) => physical position is exactly the slice's own
+        # IPP, carried verbatim (not approximated) via exact_last_position.
+        assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_canonicalize_negative_dominant_normal_flips_when_old_rule_would_not(
+        self,
+    ) -> None:
+        """D6's key divergence from the old +dominant-axis rule: for a
+        negative-dominant IOP normal (row=(1,0,0), col=(0,-1,0) -> n=(0,0,-1)),
+        a slice_dir with a POSITIVE dominant component opposes n and must be
+        flipped — even though the old rule (``slice_dir[dominant] >= 0``) would
+        have left it untouched. det ends up positive; the marker (in-plane
+        index (0,0)) keeps its physical position via ``exact_last_position``.
+        """
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        marker = 999
+        volume[0, 0, 0] = marker
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+        n = np.cross(direction[:, 0], direction[:, 1])
+        np.testing.assert_allclose(n, [0.0, 0.0, -1.0])  # negative-dominant IOP normal
+        assert np.linalg.det(direction) < 0  # left-handed pre-flip
+
+        new_volume, new_origin, new_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "neg_dominant", exact_last_position=(0.0, 0.0, -6.0)
+        )
+
+        assert np.linalg.det(new_direction) > 0
+        assert new_direction[2, 2] < 0  # canonical sense here IS negative-Z (aligned with n)
+        idx = np.argwhere(new_volume == marker)
+        assert idx.shape[0] == 1
+        ix, iy, iz = (int(v) for v in idx[0])
+        assert (ix, iy, iz) == (0, 0, 2)
+        assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_canonicalize_degenerate_normal_falls_back_to_dominant_rule(self) -> None:
+        """Degenerate in-plane columns (here: row == col, zero cross product)
+        can't derive an IOP normal — falls back to the +dominant-axis rule
+        (matching the pre-D6 behavior) and logs a warning; conversion never
+        fails on this."""
+        from clarinet.utils.logger import logger as clarinet_logger
+
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+        n = np.cross(direction[:, 0], direction[:, 1])
+        np.testing.assert_allclose(n, [0.0, 0.0, 0.0], atol=1e-9)
+
+        captured: list[str] = []
+        sink_id = clarinet_logger.add(
+            lambda message: captured.append(message.record["message"]), level="WARNING"
+        )
+        try:
+            _, _new_origin, new_direction = _canonicalize_slice_axis(
+                volume, 3.0, origin, direction, "degenerate"
+            )
+        finally:
+            clarinet_logger.remove(sink_id)
+
+        assert new_direction[2, 2] > 0  # +dominant-axis fallback rule applied
+        assert any("egenerate" in m for m in captured)
+
+    def test_canonicalize_reconversion_is_idempotent(self) -> None:
+        """Re-running canonicalization on an already-canonical grid (as a repair
+        script or a second conversion pass would) is a no-op — the defining D6
+        promise that re-converting a series always lands on the identical grid.
+        """
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+
+        once_volume, once_origin, once_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "first_pass", exact_last_position=(0.0, 0.0, -6.0)
+        )
+        twice_volume, twice_origin, twice_direction = _canonicalize_slice_axis(
+            once_volume, 3.0, once_origin, once_direction, "second_pass"
+        )
+
+        np.testing.assert_array_equal(twice_volume, once_volume)
+        assert twice_origin == once_origin
+        np.testing.assert_array_equal(twice_direction, once_direction)
 
     def test_read_dicom_series_routes_through_ground_truth(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
