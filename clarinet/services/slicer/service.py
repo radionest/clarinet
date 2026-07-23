@@ -204,9 +204,13 @@ class SlicerService:
         (docstring, then ``from __future__ import annotations``) — Slicer runs
         Python 3.9, where that import must be the first statement of the exec
         unit or ``X | None`` annotations raise ``TypeError`` at definition
-        time. ``build_correspondence_bundle()`` has its per-module future
-        imports stripped (Task 1), so placing it after the helper keeps
-        exactly one, legally positioned, future import in the composed script.
+        time. ``build_correspondence_bundle()`` strips its per-module future
+        imports (Task 1) and re-emits one of its own only for standalone exec,
+        so it is requested here with ``standalone=False``: placing it after the
+        helper keeps exactly one, legally positioned, future import in the
+        composed script. Two would not merely be redundant — a future import
+        after other statements is a ``SyntaxError``, so the whole script would
+        fail to compile.
         """
         ctx_lines = "".join(
             f"    globals()[{key!r}] = {value!r}\n" for key, value in (context or {}).items()
@@ -227,6 +231,6 @@ _run()
 del _run"""
 
         if include_correspondence:
-            bundle = build_correspondence_bundle()
+            bundle = build_correspondence_bundle(standalone=False)
             return "\n".join([self._helper_source, "", bundle, "", runner])
         return "\n".join([self._helper_source, "", runner])
