@@ -810,6 +810,9 @@ def _conform_layered_seg(seg_path: Path, grid_path: Path, target: Path, *, seg_g
         [np.full(3, np.nan), (ref_grid.direction * np.array(ref_grid.spacing)).T]
     )
     new_header["space origin"] = np.array(ref_grid.origin)
+    # Written directions/origin are always internal-LPS; never inherit the source
+    # header's possibly-foreign `space` label.
+    new_header["space"] = "left-posterior-superior"
 
     try:
         nrrd.write(str(target), rearranged, new_header)
