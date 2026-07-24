@@ -28,8 +28,8 @@ zero overlap, with no exception raised, because the code never checked.
 NIfTI is RAS on disk — converted at the read/write boundary
 (`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:27-29`). NRRD honors
 its own `space` header field: LPS passes through as-is, RAS/LAS are converted, and
-anything else raises `ImageReadError` (`_nrrd_space_to_lps`,
-`clarinet/services/image/image.py:36`) — Slicer itself always writes LPS (Probe P6
+anything else raises `ImageReadError` (`nrrd_space_to_lps`,
+`clarinet/services/image/image.py:57`) — Slicer itself always writes LPS (Probe P6
 below), so this only affects third-party NRRD files.
 
 **The voxel-to-physical affine** (`affine_4x4`) is a 4×4 matrix: the 3×3 linear

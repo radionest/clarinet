@@ -23,7 +23,7 @@ import numpy as np
 
 from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
 from clarinet.services.image.grid import Grid
-from clarinet.services.image.image import _nrrd_space_to_lps
+from clarinet.services.image.image import _nrrd_space_transform, nrrd_space_to_lps
 from clarinet.utils.logger import logger
 
 
@@ -205,7 +205,7 @@ class LayeredSegmentation:
 
         Spatial directions are rows 1..3 of ``space directions`` (row 0 is the ``none``
         list axis). Honors the header's ``space`` field via the shared
-        ``_nrrd_space_to_lps`` helper (LPS as-is; RAS/LAS converted; anything else
+        ``nrrd_space_to_lps`` helper (LPS as-is; RAS/LAS converted; anything else
         raises) — the same conversion :meth:`Image.read_nrrd` applies to 3-D NRRD.
         """
         sizes = [int(s) for s in header["sizes"]]
@@ -213,7 +213,7 @@ class LayeredSegmentation:
         space_dirs = header.get("space directions")
         if space_dirs is not None:
             raw_origin = header.get("space origin")
-            arr, origin = _nrrd_space_to_lps(
+            arr, origin = nrrd_space_to_lps(
                 header.get("space"),
                 np.asarray(space_dirs[1:4], dtype=float),  # skip the nan list-axis row
                 np.asarray(raw_origin[:3], dtype=float) if raw_origin is not None else None,
@@ -226,8 +226,10 @@ class LayeredSegmentation:
         else:
             space_origin = header.get("space origin")
             if space_origin is not None:
-                vals = space_origin[:3]
-                self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
+                origin_arr = np.asarray(space_origin[:3], dtype=float)
+                if "space" in header:
+                    origin_arr = _nrrd_space_transform(header["space"]) @ origin_arr
+                self._origin = (float(origin_arr[0]), float(origin_arr[1]), float(origin_arr[2]))
 
     # -- voxel read --
 

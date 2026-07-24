@@ -33,7 +33,28 @@ _NRRD_SPACE_RAS = frozenset({"right-anterior-superior", "ras"})
 _NRRD_SPACE_LAS = frozenset({"left-anterior-superior", "las"})
 
 
-def _nrrd_space_to_lps(
+def _nrrd_space_transform(space: str | None) -> np.ndarray:
+    """3x3 world-coordinate transform taking the header's ``space`` into LPS.
+
+    Identity for LPS; the diagonal X/Y (RAS) or Y (LAS) sign flip otherwise.
+
+    Raises:
+        ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
+    """
+    normalized = (space or "").strip().lower()
+    if normalized in _NRRD_SPACE_LPS:
+        return np.eye(3)
+    if normalized in _NRRD_SPACE_RAS:
+        return _LPS_TO_RAS  # self-inverse: also converts RAS -> LPS
+    if normalized in _NRRD_SPACE_LAS:
+        return _LAS_TO_LPS
+    raise ImageReadError(
+        f"Unsupported NRRD space {space!r}: expected left-posterior-superior/LPS, "
+        "right-anterior-superior/RAS, or left-anterior-superior/LAS"
+    )
+
+
+def nrrd_space_to_lps(
     space: str | None,
     space_directions: np.ndarray,
     space_origin: np.ndarray | None,
@@ -50,7 +71,9 @@ def _nrrd_space_to_lps(
     Shared by :meth:`Image.read_nrrd` and
     :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation._apply_grid_from_header`;
     callers pre-slice ``space_directions`` to the 3 spatial rows (a 4-D layered header's
-    row 0 is the ``none`` list axis, not a spatial direction).
+    row 0 is the ``none`` list axis, not a spatial direction). Package-internal-public
+    (not exported from ``clarinet.services.image``): both modules import it directly
+    from this module rather than via a private cross-module import.
 
     Args:
         space: The header's ``space`` field (``None`` if the header omits it).
@@ -66,18 +89,7 @@ def _nrrd_space_to_lps(
     Raises:
         ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
     """
-    normalized = (space or "").strip().lower()
-    if normalized in _NRRD_SPACE_LPS:
-        return space_directions, space_origin
-    if normalized in _NRRD_SPACE_RAS:
-        transform = _LPS_TO_RAS  # self-inverse: also converts RAS -> LPS
-    elif normalized in _NRRD_SPACE_LAS:
-        transform = _LAS_TO_LPS
-    else:
-        raise ImageReadError(
-            f"Unsupported NRRD space {space!r}: expected left-posterior-superior/LPS, "
-            "right-anterior-superior/RAS, or left-anterior-superior/LAS"
-        )
+    transform = _nrrd_space_transform(space)
     # Each space_directions row is a per-axis world vector [x, y, z]; post-multiplying
     # by the (diagonal) transform scales those world x/y/z *columns*, i.e. negates the
     # same components in every row. space_origin is a single such vector, pre-multiplied
@@ -493,8 +505,10 @@ class Image:
         Raises:
             ImageReadError: If the file cannot be read; if the header is not 3-D (use
                 :class:`~clarinet.services.image.layered_segmentation.LayeredSegmentation`
-                for a 4-D multi-layer ``.seg.nrrd``); or if ``space directions`` is
-                present with an unsupported/missing ``space`` field.
+                for a 4-D multi-layer ``.seg.nrrd``); if ``space directions`` is
+                present with an unsupported/missing ``space`` field; or if ``space
+                origin`` is present alongside an unsupported ``space`` (a header with
+                no ``space`` key at all keeps the origin raw).
         """
         file_path = Path(file_path)
         data: np.ndarray | None = None
@@ -521,7 +535,7 @@ class Image:
         space_dirs = header.get("space directions")
         if space_dirs is not None:
             raw_origin = header.get("space origin")
-            arr, origin = _nrrd_space_to_lps(
+            arr, origin = nrrd_space_to_lps(
                 header.get("space"),
                 np.asarray(space_dirs[:3], dtype=float),
                 np.asarray(raw_origin[:3], dtype=float) if raw_origin is not None else None,
@@ -537,8 +551,13 @@ class Image:
                 self.spacing = tuple(spacings[:3])
             space_origin = header.get("space origin")
             if space_origin is not None:
-                vals = space_origin[:3]
-                self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
+                origin_arr = np.asarray(space_origin[:3], dtype=float)
+                # `space` is honored whenever present (same rule as the
+                # directions branch); only a header with no `space` key keeps
+                # the raw origin — legacy leniency for spacings-only files.
+                if "space" in header:
+                    origin_arr = _nrrd_space_transform(header["space"]) @ origin_arr
+                self._origin = (float(origin_arr[0]), float(origin_arr[1]), float(origin_arr[2]))
 
         self._shape = tuple(sizes)
         self._filetype = FileType.NRRD

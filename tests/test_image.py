@@ -601,7 +601,7 @@ class TestNrrdReaderHardening:
         assert img._source_path is None
 
     def test_layered_segmentation_honors_ras_space(self, tmp_path: Path) -> None:
-        """LayeredSegmentation._apply_grid_from_header shares `_nrrd_space_to_lps`
+        """LayeredSegmentation._apply_grid_from_header shares `nrrd_space_to_lps`
         with read_nrrd — a RAS-tagged 4-D header converts too, not just 3-D."""
         layer = np.zeros((4, 5, 6), dtype=np.uint8)
         layer[1:3, 1:3, 1:3] = 1
@@ -636,6 +636,62 @@ class TestNrrdReaderHardening:
         assert pytest.approx(seg_ras.spacing, abs=1e-9) == seg_lps.spacing
         assert pytest.approx(seg_ras.origin, abs=1e-9) == seg_lps.origin
         np.testing.assert_allclose(seg_ras.direction, seg_lps.direction, atol=1e-9)
+
+    @staticmethod
+    def _fake_nrrd_read(monkeypatch: pytest.MonkeyPatch, header: dict) -> None:
+        data = np.zeros((4, 4, 4), dtype=np.int16)
+        monkeypatch.setattr(
+            "clarinet.services.image.image.nrrd.read", lambda p, *a, **k: (data, header)
+        )
+
+    def test_origin_only_header_honors_ras_space(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """spacings + space origin + space=RAS (no space directions): the origin
+        converts to LPS exactly like the directions branch would convert it."""
+        self._fake_nrrd_read(
+            monkeypatch,
+            {
+                "sizes": [4, 4, 4],
+                "spacings": [1.0, 1.0, 1.0],
+                "space origin": np.array([-10.0, -20.0, 30.0]),
+                "space": "right-anterior-superior",
+            },
+        )
+        img = Image()
+        img.read_nrrd(tmp_path / "ras_origin_only.nrrd")
+        assert img.origin == (10.0, 20.0, 30.0)
+
+    def test_origin_only_header_unsupported_space_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fake_nrrd_read(
+            monkeypatch,
+            {
+                "sizes": [4, 4, 4],
+                "spacings": [1.0, 1.0, 1.0],
+                "space origin": np.array([1.0, 2.0, 3.0]),
+                "space": "scanner-xyz",
+            },
+        )
+        with pytest.raises(ImageReadError, match="Unsupported NRRD space"):
+            Image().read_nrrd(tmp_path / "bad_space_origin_only.nrrd")
+
+    def test_origin_only_header_without_space_kept_raw(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No `space` key at all: legacy leniency — origin applied verbatim."""
+        self._fake_nrrd_read(
+            monkeypatch,
+            {
+                "sizes": [4, 4, 4],
+                "spacings": [1.0, 1.0, 1.0],
+                "space origin": np.array([-10.0, -20.0, 30.0]),
+            },
+        )
+        img = Image()
+        img.read_nrrd(tmp_path / "no_space_origin_only.nrrd")
+        assert img.origin == (-10.0, -20.0, 30.0)
 
 
 # ---------------------------------------------------------------------------
@@ -2406,7 +2462,7 @@ class TestConformLayeredSegToGrid:
         # Same physical grid as the LPS `mirrored_dir=diag([1,1,-1])` fixture above
         # (Z-mirror relative to vol, so the grids are REARRANGED, not SAME — required
         # for conform_seg_to_grid to actually run the write path), re-expressed under
-        # RAS labeling (negate the X/Y world columns per _nrrd_space_to_lps).
+        # RAS labeling (negate the X/Y world columns per nrrd_space_to_lps).
         ras_dirs = np.vstack([np.full(3, np.nan), np.diag([-1.0, -1.0, -1.0])])
         seg_path = tmp_path / "layered_ras.seg.nrrd"
         nrrd.write(
