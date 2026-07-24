@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Literal, Self
 
+import nrrd
 import numpy as np
 from skimage.measure import label, regionprops
 from skimage.measure._regionprops import _RegionProperties
@@ -18,7 +19,7 @@ from skimage.morphology import (  # type: ignore[attr-defined]
     opening,
 )
 
-from clarinet.exceptions.domain import ImageError
+from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageWriteError
 from clarinet.services.image.correspondence import (
     AbsoluteOverlap,
     Coverage,
@@ -40,7 +41,14 @@ from clarinet.services.image.correspondence import (
 from clarinet.services.image.correspondence import (
     SymmetricDifference as _SymmetricDifferenceOp,
 )
-from clarinet.services.image.image import FileType, Image, _is_segment_key
+from clarinet.services.image.grid import Grid, RelationKind, grid_relation
+from clarinet.services.image.grid_io import read_grid
+from clarinet.services.image.image import (
+    FileType,
+    Image,
+    _is_grid_dependent_segment_key,
+    _is_segment_key,
+)
 from clarinet.utils.logger import logger
 
 PropName = Literal["axis_major_length", "num_pixels", "area"]
@@ -668,34 +676,66 @@ def conform_seg_to_grid(
     *,
     out_path: Path | str | None = None,
     atol: float = 1e-4,
+    allow_resample: bool = False,
 ) -> bool:
     """Repair a segmentation file so it shares *grid_path*'s voxel grid.
 
-    Reads the segmentation and a reference image (e.g. the series ``volume.nii.gz``);
-    if their grids differ, resamples the segmentation onto the reference grid
-    (nearest-neighbour, labels preserved) and writes it back. A no-op when the grids
-    already match.
+    Classifies the pair with :func:`~clarinet.services.image.grid.grid_relation`
+    before touching anything:
+
+    - ``SAME`` — grids already match (within ``grid_relation``'s half-voxel offset
+      tolerance); no-op, returns ``False``.
+    - ``REARRANGED`` — a signed-permutation relation (any mix of axis mirrors and
+      in-plane transposes). Repaired by an *exact* index rearrangement: nearest-
+      neighbour resampling lands precisely on voxel centers for this class of
+      transform, so no interpolation blur is introduced.
+    - ``FOREIGN`` — anything else (a genuine rotation, a sub-voxel shift, or an
+      unrelated grid). Raises :class:`GeometryMismatchError` and writes nothing,
+      unless *allow_resample* opts into a true (approximate) nearest-neighbour
+      resample.
+
+    Handles both a single-array 3-D segmentation (``.seg.nrrd`` / ``.nii``) and a
+    4-D layered ``(L, X, Y, Z)`` Slicer ``.seg.nrrd``
+    (:class:`~clarinet.services.image.layered_segmentation.LayeredSegmentation`),
+    dispatching on the segmentation file's on-disk dimensionality. The 4-D path
+    preserves the original NRRD header verbatim — every ``Segment{i}_Name`` /
+    ``LabelValue`` / ``Layer`` / ``Color`` and the layer count — except the
+    grid-bound fields (``space directions`` / ``space origin``, and the now-stale
+    ``Segment{i}_Extent``). It deliberately does not go through
+    :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation.from_layers`,
+    which forces one segment per layer at ``LabelValue=1`` and would silently drop
+    any other label value or multi-segment-per-layer structure.
 
     Intended for downstream repair scripts that fix historically misaligned
-    ``.seg.nrrd`` files (e.g. projection/segmentation Z-flips) against the canonical
+    segmentation files (e.g. projection/segmentation Z-flips) against the canonical
     series volume.
 
     Args:
         seg_path: Segmentation file to repair.
-        grid_path: Reference image whose grid is the target (``volume.nii.gz`` / .nrrd).
+        grid_path: Reference file whose grid is the target — any format ``read_grid``
+            supports, including a 4-D layered ``.seg.nrrd``.
         out_path: Where to write the conformed segmentation. Defaults to *seg_path*
             (in-place overwrite).
-        atol: Grid-equality tolerance passed to :meth:`Image.same_grid`.
+        atol: Grid-equality tolerance passed to :func:`grid_relation`.
+        allow_resample: When the grids are ``FOREIGN``, resample instead of raising.
+            Off by default: a silent resample of an unrelated grid can mask a real
+            misalignment rather than surface it. Unlike the set operations'
+            ``resample=`` (which re-grids ``other`` for any relation), this gates
+            only the ``FOREIGN`` case — ``REARRANGED`` always repairs exactly.
 
     Returns:
-        True if a resample was performed, False if the grids already matched.
+        True if the file was (re)written, False if the grids already matched.
 
     Raises:
-        ImageError: If *out_path* has an unsupported extension.
+        ImageError: *out_path* has an unsupported extension, or a 4-D layered input
+            targets a non-NRRD extension (the layered format has no NIfTI equivalent).
+        GeometryMismatchError: the grids are ``FOREIGN`` and *allow_resample* is False.
     """
+    seg_path = Path(seg_path)
+    grid_path = Path(grid_path)
     # Resolve target format up front so an unsupported extension fails before
     # reading two images off disk.
-    target = Path(out_path) if out_path is not None else Path(seg_path)
+    target = Path(out_path) if out_path is not None else seg_path
     suffixes = target.suffixes
     if ".nrrd" in suffixes:
         filetype = FileType.NRRD
@@ -704,15 +744,94 @@ def conform_seg_to_grid(
     else:
         raise ImageError(f"Cannot infer format for {target.name}: expected .nrrd, .nii, or .nii.gz")
 
-    seg = Segmentation(autolabel=False)
-    seg.read(Path(seg_path))
-    reference = Image()
-    reference.read(Path(grid_path))
+    seg_grid = read_grid(seg_path)
+    ref_grid = read_grid(grid_path)
+    # Reference-first, matching the documented grid_relation convention (only
+    # .kind is consumed here, and kind is order-symmetric).
+    rel = grid_relation(ref_grid, seg_grid, atol=atol)
 
-    if seg.same_grid(reference, atol=atol):
+    if rel.kind is RelationKind.SAME:
         return False
+    if rel.kind is RelationKind.FOREIGN and not allow_resample:
+        raise GeometryMismatchError(
+            f"{seg_path.name} does not occupy the same or a rearranged grid relative "
+            f"to {grid_path.name} (pass allow_resample=True to resample anyway):\n"
+            f"  {seg_path}: {seg_grid.summary()}\n"
+            f"  {grid_path}: {ref_grid.summary()}"
+        )
 
-    conformed = seg.reindex_to(reference, order=0)
-    conformed.save_as(target, filetype)
-    logger.info(f"Conformed segmentation {Path(seg_path).name} onto grid of {Path(grid_path).name}")
+    is_layered = ".nrrd" in seg_path.suffixes and len(nrrd.read_header(str(seg_path))["sizes"]) == 4
+    if is_layered and filetype is not FileType.NRRD:
+        raise ImageError(
+            f"Cannot write a 4-D layered segmentation to {target.name}: the layered "
+            "format is NRRD-only."
+        )
+
+    if is_layered:
+        _conform_layered_seg(seg_path, target, seg_grid=seg_grid, ref_grid=ref_grid)
+    else:
+        seg = Segmentation(autolabel=False)
+        seg.read(seg_path)
+        conformed = seg.reindex_to(_grid_template(ref_grid), order=0)
+        conformed.save_as(target, filetype)
+
+    logger.info(f"Conformed segmentation {seg_path.name} onto grid of {grid_path.name}")
     return True
+
+
+def _grid_template(grid: Grid) -> Image:
+    """Shape-bearing Image on *grid*, as a ``reindex_to`` target.
+
+    Built from an already-read :class:`Grid` instead of re-reading the
+    reference file, so any reference ``read_grid`` understands (a 3-D volume,
+    a 4-D layered ``.seg.nrrd``, a 4-D NIfTI) can serve as the target grid.
+    """
+    template = Image()
+    template.spacing = grid.spacing
+    template.origin = grid.origin
+    template.direction = grid.direction
+    template.img = np.zeros(grid.shape, dtype=np.uint8)
+    return template
+
+
+def _conform_layered_seg(seg_path: Path, target: Path, *, seg_grid: Grid, ref_grid: Grid) -> None:
+    """4-D layer-preserving repair for :func:`conform_seg_to_grid` (see its docstring).
+
+    Rearranges each layer's voxels onto *ref_grid* via the same proven
+    ``reindex_to`` machinery the 3-D path uses — each layer wrapped as an
+    :class:`Image` on *seg_grid* (an ``Image``, not a ``Segmentation``: the
+    latter's ``img`` setter forces uint8 and would silently truncate a wider
+    label dtype), resampled with ``order=0`` — then writes the original NRRD
+    header back verbatim except the grid-bound fields. Never
+    :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation.from_layers`,
+    which would collapse every layer to a single ``LabelValue=1`` segment.
+    """
+    data, header = nrrd.read(str(seg_path))  # (L, X, Y, Z)
+
+    ref_template = _grid_template(ref_grid)
+    rearranged = np.empty((data.shape[0], *ref_grid.shape), dtype=data.dtype)
+    for layer_index in range(data.shape[0]):
+        layer_img = Image()
+        layer_img.direction = seg_grid.direction
+        layer_img.origin = seg_grid.origin
+        layer_img.spacing = seg_grid.spacing
+        layer_img.img = data[layer_index]
+        rearranged[layer_index] = layer_img.reindex_to(ref_template, order=0).img
+
+    # Preserve the header verbatim except the grid-bound fields: every Segment{i}_Name /
+    # LabelValue / Layer / Color, and the layer count, survive untouched. Dropping stale
+    # extents (grid-dependent) mirrors _reconcile_segment_metadata's 3-D behavior; "sizes"
+    # and "dimension" are recomputed by nrrd.write from `rearranged`'s own shape.
+    new_header = {k: v for k, v in header.items() if not _is_grid_dependent_segment_key(k)}
+    new_header["space directions"] = np.vstack(
+        [np.full(3, np.nan), (ref_grid.direction * np.array(ref_grid.spacing)).T]
+    )
+    new_header["space origin"] = np.array(ref_grid.origin)
+    # Written directions/origin are always internal-LPS; never inherit the source
+    # header's possibly-foreign `space` label.
+    new_header["space"] = "left-posterior-superior"
+
+    try:
+        nrrd.write(str(target), rearranged, new_header)
+    except Exception as e:
+        raise ImageWriteError(f"Failed to write conformed layered NRRD: {target}") from e

@@ -199,3 +199,28 @@ class TestIsVolumeMisoriented:
         _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))
         with pytest.raises(OrientationUnverifiable):
             is_volume_misoriented(nii, tmp_path / "degeniop")
+
+    def test_negative_dominant_normal_canonical_not_misoriented(self, tmp_path):
+        # row=(1,0,0), col=(0,-1,0) -> n=(0,0,-1) (negative-dominant normal).
+        # Under D6 the expected origin is the IPP endpoint with the SMALLER
+        # projection onto the raw n — since n points -Z, that is the endpoint
+        # with the LARGER Z (opposite of the head-forced pre-D6 selection).
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0], iop=(1, 0, 0, 0, -1, 0))
+        nii = tmp_path / "canonical.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 6.0))
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is False
+
+    def test_negative_dominant_normal_pre_epoch_misoriented(self, tmp_path):
+        # Same series; origin at the OLD (+dominant-axis / head-forced) feet-end
+        # selection (Z=0) is now the WRONG endpoint under D6 -> misoriented.
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0], iop=(1, 0, 0, 0, -1, 0))
+        nii = tmp_path / "pre_epoch.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 0.0))
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is True
+
+    def test_negative_dominant_normal_idempotent(self, tmp_path):
+        _series(tmp_path, "dcm", [0.0, 3.0, 6.0], iop=(1, 0, 0, 0, -1, 0))
+        nii = tmp_path / "remediated.nii.gz"
+        _nifti_with_lps_origin(nii, (0.0, 0.0, 6.0))
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is False
+        assert is_volume_misoriented(nii, tmp_path / "dcm") is False

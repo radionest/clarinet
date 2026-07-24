@@ -1,0 +1,270 @@
+"""Grid value object and relation classifier — the shared grid vocabulary.
+
+Pure core: **numpy + stdlib only, zero framework imports**. A later task
+appends this module to the Slicer helper's script bundle (alongside
+``correspondence/*``, see ``correspondence_bundle.py``), where it must run
+standalone inside Slicer's embedded Python — which has neither the framework
+package nor ``nibabel``/``pynrrd`` on its path. That constraint applies from
+this module's introduction, not just once the bundle wiring lands: it carries
+no raise-policy of its own — :func:`grid_relation` always returns a verdict
+(``FOREIGN`` included, never an exception) so callers in either runtime can
+layer their own fail-fast assert on top (``GeometryMismatchError``
+server-side, ``SlicerHelperError`` Slicer-side).
+
+Note for maintainers: this module ships as source text inside the Slicer
+script bundle (``correspondence_bundle.py``), which strips only
+``from <framework> import`` / ``import <framework>`` lines and asserts the
+resulting text never contains that package's bare name — keep prose here
+generic ("the framework", "server-side") rather than naming it, or the
+bundle's no-self-reference test will fail.
+"""
+
+from __future__ import annotations
+
+import enum
+from dataclasses import dataclass
+
+import numpy as np
+
+# Per-axis translation tolerance for REARRANGED, in voxels (index-space units,
+# not mm — see grid_relation). A permutation/flip relationship maps one grid's
+# index space onto the other's via an exact integer offset (0, or shape-1 for
+# a flipped axis); on-disk formats can carry enough float rounding to blur
+# that by a fraction of a voxel, so the "correct" target is accepted as long
+# as it is nearer than any neighbouring voxel center — i.e. within half a
+# voxel. Not derived from `atol`: the two tolerances answer different
+# questions (is the linear part a clean permutation vs. which integer offset
+# a noisy float is nearest to) and conflating them would make the offset
+# window shrink for a caller who only meant to loosen the permutation check.
+_OFFSET_TOL_VOXELS = 0.5
+
+
+class RelationKind(enum.Enum):
+    """Taxonomy of how two grids relate, returned by :func:`grid_relation`."""
+
+    SAME = "same"
+    REARRANGED = "rearranged"
+    FOREIGN = "foreign"
+
+
+@dataclass(frozen=True)
+class GridRelation:
+    """Verdict of :func:`grid_relation`: a kind, plus detail for ``REARRANGED``.
+
+    ``perm``/``flips`` are ``None`` for ``SAME``/``FOREIGN`` — only a
+    ``REARRANGED`` verdict carries a well-defined axis correspondence to
+    report (e.g. for a mismatch message or a re-indexing repair step).
+    Construction enforces that invariant; prefer the :meth:`same` /
+    :meth:`foreign` / :meth:`rearranged` constructors.
+    """
+
+    kind: RelationKind
+    perm: tuple[int, int, int] | None = None  # source axis feeding each output axis
+    flips: tuple[bool, bool, bool] | None = None  # whether that mapping is negated
+
+    def __post_init__(self) -> None:
+        if self.kind is RelationKind.REARRANGED:
+            if self.perm is None or self.flips is None:
+                raise ValueError("REARRANGED requires both perm and flips")
+        elif self.perm is not None or self.flips is not None:
+            raise ValueError(f"{self.kind.name} carries no perm/flips detail")
+
+    @classmethod
+    def same(cls) -> GridRelation:
+        return cls(kind=RelationKind.SAME)
+
+    @classmethod
+    def foreign(cls) -> GridRelation:
+        return cls(kind=RelationKind.FOREIGN)
+
+    @classmethod
+    def rearranged(cls, perm: tuple[int, int, int], flips: tuple[bool, bool, bool]) -> GridRelation:
+        return cls(kind=RelationKind.REARRANGED, perm=perm, flips=flips)
+
+
+@dataclass(frozen=True, eq=False)
+class Grid:
+    """A voxel grid: shape plus a 4x4 voxel-to-world affine, LPS by construction.
+
+    ``eq``/``hash`` are deliberately left at default object identity
+    (``eq=False``): a frozen dataclass's auto-generated ``__eq__`` would
+    compare the ``affine`` field with ``==``, and numpy raises on the
+    resulting array's ambiguous truth value. Grids are compared via
+    :func:`grid_relation`, never ``==``.
+
+    The affine is defensively copied and frozen read-only at construction —
+    a Grid never aliases caller-owned memory.
+    """
+
+    shape: tuple[int, int, int]
+    affine: np.ndarray
+
+    def __post_init__(self) -> None:
+        if len(self.shape) != 3:
+            raise ValueError(f"shape must be a 3-tuple, got length {len(self.shape)}")
+        affine = np.array(self.affine, dtype=float)  # always a fresh copy
+        if affine.shape != (4, 4):
+            raise ValueError(f"affine must be a 4x4 matrix, got shape {affine.shape}")
+        affine.setflags(write=False)
+        # Frozen dataclass: route the normalized copy through object.__setattr__.
+        object.__setattr__(self, "affine", affine)
+
+    @staticmethod
+    def assemble_affine(
+        direction: np.ndarray,
+        spacing: tuple[float, float, float],
+        origin: tuple[float, float, float],
+    ) -> np.ndarray:
+        """Assemble the 4x4 LPS voxel-to-physical affine from grid components.
+
+        Single formula authority for the affine: ``direction``'s columns (unit
+        vectors per axis) scaled per-column by ``spacing``, with ``origin`` in the
+        translation column. Shared by :meth:`from_components` and the image class's
+        ``affine_4x4`` property — the latter needs the affine on a shape-less image
+        and so cannot construct a full :class:`Grid`.
+        """
+        affine = np.eye(4)
+        affine[:3, :3] = np.asarray(direction, dtype=float) * np.array(spacing, dtype=float)
+        affine[:3, 3] = np.array(origin, dtype=float)
+        return affine
+
+    @classmethod
+    def from_components(
+        cls,
+        shape: tuple[int, int, int],
+        spacing: tuple[float, float, float],
+        origin: tuple[float, float, float],
+        direction: np.ndarray,
+    ) -> Grid:
+        """Build a Grid from shape/spacing/origin/direction components (LPS).
+
+        Assembles the affine via :meth:`assemble_affine` (shared with the image
+        class's ``affine_4x4``), so matching components on both sides produce a
+        byte-identical affine — the two are interchangeable representations of the
+        same grid.
+        """
+        direction_arr = np.asarray(direction, dtype=float)
+        if direction_arr.shape != (3, 3):
+            raise ValueError(f"direction must be a 3x3 matrix, got shape {direction_arr.shape}")
+        if len(spacing) != 3:
+            raise ValueError(f"spacing must be a 3-tuple, got length {len(spacing)}")
+        if len(origin) != 3:
+            raise ValueError(f"origin must be a 3-tuple, got length {len(origin)}")
+        affine = cls.assemble_affine(direction_arr, spacing, origin)
+        return cls(shape=(int(shape[0]), int(shape[1]), int(shape[2])), affine=affine)
+
+    @property
+    def origin(self) -> tuple[float, float, float]:
+        """Patient-space origin (x, y, z) in mm — the affine's translation column."""
+        o = self.affine[:3, 3]
+        return (float(o[0]), float(o[1]), float(o[2]))
+
+    @property
+    def spacing(self) -> tuple[float, float, float]:
+        """Voxel spacing in mm (x, y, z) — the column norms of the affine's linear part."""
+        norms = np.linalg.norm(self.affine[:3, :3], axis=0)
+        return (float(norms[0]), float(norms[1]), float(norms[2]))
+
+    @property
+    def direction(self) -> np.ndarray:
+        """3x3 direction cosine matrix (columns = unit direction vectors per axis)."""
+        linear = self.affine[:3, :3]
+        spacing = np.linalg.norm(linear, axis=0)
+        safe_spacing = np.where(spacing == 0, 1.0, spacing)
+        return linear / safe_spacing
+
+    def summary(self) -> str:
+        """One-line grid description (shape/origin/spacing/direction) for diagnostics.
+
+        Prints the full direction matrix (not just its diagonal) so an
+        oblique or off-diagonal flip is visible in a mismatch message, not
+        only an axis-aligned one. Ported from ``Image._grid_summary``.
+        """
+        return (
+            f"shape={tuple(self.shape)}, "
+            f"origin={tuple(round(float(x), 3) for x in self.origin)}, "
+            f"spacing={tuple(round(float(x), 3) for x in self.spacing)}, "
+            f"direction={np.round(self.direction, 3).tolist()}"
+        )
+
+
+def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
+    """Classify how grid ``b`` relates to grid ``a``.
+
+    Never raises for a mismatched grid — ``FOREIGN`` is a normal return
+    value, not an exception; disk-level fail-fast asserts belong to a later,
+    server-only module (this one also ships in the Slicer bundle, which has
+    no framework exceptions to raise). A degenerate grid whose affine is
+    singular (e.g. a zero-spacing axis) classifies as ``FOREIGN`` for the
+    same reason.
+
+    Argument convention: pass the *reference/target* grid as ``a`` and the
+    *candidate/source* grid as ``b``. ``kind`` is order-symmetric, but
+    ``perm``/``flips`` are not — swapping the arguments inverts them
+    (``perm[i]`` is the ``b``-axis feeding ``a``-axis ``i``). Both runtimes
+    follow reference-first: the Slicer-side export guard passes
+    ``(reference grid, node grid)``; the server-side conform repair passes
+    ``(reference grid, segmentation grid)``.
+
+    Composes ``M = inv(a.affine) @ b.affine`` — the transform from ``b``'s
+    voxel-index space into ``a``'s. ``REARRANGED`` iff ``M``'s linear part is
+    a signed permutation matrix (each row and each column has exactly one
+    entry ~= +-1, the rest ~0, within ``atol``) and, for every axis mapping
+    ``b``-axis ``j`` onto ``a``-axis ``i`` with sign ``s``:
+    ``b.shape[j] == a.shape[i]`` and the translation ``M[i, 3]`` is within
+    half a voxel of the exact target for that sign (``0`` for ``s=+1``,
+    ``a.shape[i] - 1`` for ``s=-1``). ``SAME`` is the identity instance of
+    that same check (no permutation, no flips, zero offset). Everything else
+    — a non-permutation linear part (e.g. a genuine rotation), a shape
+    mismatch, or an offset outside the half-voxel window — is ``FOREIGN``.
+
+    The half-voxel tolerance is what makes ``REARRANGED`` mean "every voxel
+    center of one grid lands exactly on a voxel center of the other,
+    floating-point noise aside": it is the widest window that cannot
+    straddle two neighbouring voxel centers, so it never misclassifies a
+    genuinely different alignment as an exact one.
+
+    Works identically for axis-aligned and oblique ``direction`` matrices —
+    the predicate operates purely on the index-space transform ``M``, never
+    on world-axis labels.
+    """
+    try:
+        m = np.linalg.inv(a.affine) @ b.affine
+    except np.linalg.LinAlgError:
+        # Degenerate grid (singular affine — e.g. a zero-spacing axis from a
+        # corrupt header): not comparable to anything, and this function
+        # promises to never raise for a mismatched grid.
+        return GridRelation.foreign()
+    linear = m[:3, :3]
+    offset = m[:3, 3]
+
+    perm = [-1, -1, -1]
+    flips = [False, False, False]
+    used_cols: set[int] = set()
+
+    for i in range(3):
+        row = linear[i]
+        hits = [j for j in range(3) if not np.isclose(row[j], 0.0, atol=atol)]
+        if len(hits) != 1:
+            return GridRelation.foreign()
+        j = hits[0]
+        value = row[j]
+        if not np.isclose(abs(value), 1.0, atol=atol) or j in used_cols:
+            return GridRelation.foreign()
+        used_cols.add(j)
+        perm[i] = j
+        flips[i] = bool(value < 0)
+
+    for i in range(3):
+        j = perm[i]
+        if b.shape[j] != a.shape[i]:
+            return GridRelation.foreign()
+        target = float(a.shape[i] - 1) if flips[i] else 0.0
+        if abs(offset[i] - target) > _OFFSET_TOL_VOXELS:
+            return GridRelation.foreign()
+
+    perm_t = (perm[0], perm[1], perm[2])
+    flips_t = (flips[0], flips[1], flips[2])
+    if perm_t == (0, 1, 2) and flips_t == (False, False, False):
+        return GridRelation.same()
+    return GridRelation.rearranged(perm_t, flips_t)

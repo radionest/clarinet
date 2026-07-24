@@ -1,5 +1,9 @@
 # Update Log
 
+## 2026-07-24
+
+* **Update**: [Imaging stack](./imaging-stack.md) — the image-processing section now also points at [`docs/grid-workflows.md`](../grid-workflows.md), the behavioural reference for the voxel-grid model, grid-relation classification (SAME/REARRANGED/FOREIGN) and conform-on-export introduced by the canonical-segmentation-grids work.
+
 ## 2026-07-22
 
 * **Creation**: [RecordType flags and uniqueness](./record-types.md) — split out of the domain model page, which had crossed the size guideline; the flags and uniqueness semantics are what config authors need on their own.

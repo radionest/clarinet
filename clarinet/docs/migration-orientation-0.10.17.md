@@ -70,3 +70,82 @@ Review your project's call sites for these three functions:
 - If a call site intentionally relied on the old silent re-grid — e.g. deliberately
   combining segmentations from a divergent earlier-epoch grid — pass `resample=True`
   to keep the legacy behavior.
+
+## 6. Conversion-orientation epoch (grid canonicalization)
+
+A later fix changes the DICOM→NIfTI converter's on-disk grid layout for every
+newly-converted volume (see the CHANGELOG's *Breaking* entry for the exact
+release this landed in): the in-plane axis order now follows
+`ImageOrientationPatient` order end-to-end (no more internal row/column swap),
+and the canonical slice sense is now the side of the IOP normal instead of a
+fixed +dominant-axis convention. The change is always an exact,
+physically-equivalent index rearrangement — never a mirror, never a
+shape/rotation change — but it means a segmentation painted against a
+pre-epoch volume no longer shares an index grid with the same series
+re-converted after upgrading. Full design rationale and probe evidence:
+[`docs/grid-workflows.md`](../../docs/grid-workflows.md).
+
+### Detect
+
+Two complementary, framework-level primitives (no project-specific script
+needed to detect):
+
+```python
+from clarinet.services.image import RelationKind, grid_relation, read_grid
+
+relation = grid_relation(read_grid(seg_path), read_grid(volume_path))
+if relation.kind is not RelationKind.SAME:
+    ...  # REARRANGED: same series, different-epoch grid. FOREIGN: unrelated grid.
+```
+
+`is_volume_misoriented(volume_nifti, dicom_dir)` (used in step 2 above) also
+covers this epoch — it still raises `OrientationUnverifiable` rather than
+guessing when ground truth can't be established.
+
+### Repair
+
+Idempotent, and exact for the `REARRANGED` case this epoch produces (a signed
+permutation — nearest-neighbour resampling lands precisely on voxel centers, no
+blur):
+
+```python
+from clarinet.services.image import conform_seg_to_grid
+
+conform_seg_to_grid(seg_path, volume_path)  # in place; or out_path=... to copy
+```
+
+Handles both a single-array 3-D segmentation and a 4-D layered Slicer
+`.seg.nrrd` (segment names/label values/layers preserved). Raises
+`GeometryMismatchError` instead of resampling if the pair turns out to be
+genuinely unrelated (`FOREIGN`) — pass `allow_resample=True` only once that has
+been confirmed intentional.
+
+### Guard future exports
+
+Any Slicer script that exports a segmentation against a volume should pass
+`conform_to=<volume file path>` to `export_segmentation` — this both repairs a
+`REARRANGED` node transparently and refuses (rather than silently mis-exports)
+a `FOREIGN` one. See
+[`.claude/rules/slicer-helper-api.md`](../../.claude/rules/slicer-helper-api.md).
+
+### Also: pre-2026-03-08 clarinet NRRDs may now fail to read
+
+Independently of the epoch above, a clarinet-written NRRD (including a
+`.seg.nrrd`) saved **before 2026-03-08** can carry `space directions` without a
+`space` field. `Image.read_nrrd`/`LayeredSegmentation.read_header` now honor
+the `space` field strictly and raise `ImageReadError` on that combination
+instead of silently assuming LPS. Every clarinet/Slicer-authored NRRD has
+always physically been LPS, so the fix is a one-time header patch, not a
+geometry change — read and rewrite the header directly with `pynrrd` (not
+through `Image`, which is exactly what now raises on this file):
+
+```python
+import nrrd
+
+data, header = nrrd.read(str(seg_path))
+header.setdefault("space", "left-posterior-superior")
+nrrd.write(str(seg_path), data, header)
+```
+
+After this one-time re-save the file reads normally through `Image` /
+`LayeredSegmentation` / `read_grid` again.

@@ -78,7 +78,12 @@ def dicom_series_dir(tmp_path: Path, synthetic_volume: np.ndarray) -> Path:
         ds.ImagePositionPatient = [0.0, 0.0, float(i * VOLUME_SPACING[2])]
         ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
         ds.InstanceNumber = i + 1
-        ds.PixelData = synthetic_volume[:, :, i].tobytes()
+        # .T: read_dicom_series' IOP in-plane order reads pixel_array[row, col] back
+        # into volume[col, row] (axis 0 = x = column direction), so pixel_array must
+        # be the transpose of synthetic_volume's (axis0, axis1) slice for the
+        # read-back volume to reproduce synthetic_volume exactly (VOLUME_SHAPE is
+        # square, so Rows/Columns stay valid either way — only content order flips).
+        ds.PixelData = synthetic_volume[:, :, i].T.tobytes()
         pydicom.dcmwrite(str(filename), ds)
 
     return dcm_dir
