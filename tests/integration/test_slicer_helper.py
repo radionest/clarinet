@@ -4,10 +4,17 @@ These tests send the helper DSL + user code to a real Slicer and verify
 the workspace is set up correctly.
 """
 
+import shutil
+from pathlib import Path
 from typing import ClassVar
 
+import numpy as np
+import pydicom
+import pydicom.uid
 import pytest
+from pydicom.dataset import FileDataset
 
+from clarinet.services.image import FileType, Image
 from clarinet.services.slicer.helper import PacsHelper, SlicerHelper
 from clarinet.services.slicer.service import SlicerService
 
@@ -925,6 +932,241 @@ __execResult = {'raised': raised, 'bypassed': bypassed}
     assert result["bypassed"] is True
 
 
+async def test_export_segmentation_conform_to_roundtrip(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """conform_to repairs the load-time slice mirror end-to-end (design D4, Release A gate).
+
+    Writes a synthetic left-handed (``det<0``) volume to disk, loads it (Slicer
+    silently flips the slice axis), paints a fresh two-segment OVERLAPPING
+    segmentation (distinct names; Slicer stores each overlapping segment in its
+    own layer with the natural per-layer label value 1), then exports twice:
+
+    * plain (``conform_to=None``) -> the export lands on the loaded node's
+      flipped grid, so it relates to the on-disk volume as REARRANGED;
+    * ``conform_to=<volume>`` -> re-gridded back onto the volume's on-disk grid
+      (SAME, ``det<0`` verbatim), both overlapping layers + both segment names +
+      per-segment label values preserved, voxels physically coincident with the
+      plain export. The conformed file must stay metadata-identical to the plain
+      export -- only the grid differs -- which pins Minor 2: the REARRANGED
+      rebuild must not renumber layers/segments.
+
+    A FOREIGN reference (different-shape / shifted-grid volume) must raise and
+    write no file.
+    """
+    context = {"working_folder": "/tmp"}
+    script = """
+import os
+import numpy as np
+import SimpleITK as sitk
+
+base = os.path.join(working_folder, 't6_conform')
+os.makedirs(base, exist_ok=True)
+vol_path = os.path.join(base, 'lh_volume.nrrd')
+foreign_path = os.path.join(base, 'foreign_volume.nrrd')
+plain_path = os.path.join(base, 'export_plain.seg.nrrd')
+conf_path = os.path.join(base, 'export_conformed.seg.nrrd')
+foreign_out = os.path.join(base, 'export_foreign.seg.nrrd')
+for p in (vol_path, foreign_path, plain_path, conf_path, foreign_out):
+    if os.path.isfile(p):
+        os.remove(p)
+
+nx, ny, nz = 6, 6, 6
+
+# 1. Left-handed (det<0) source volume, written verbatim to disk via sitk.
+vol_arr = np.zeros((nz, ny, nx), dtype=np.int16)   # sitk array is (z, y, x)
+vol_arr[1:4, 2:4, 1:3] = 100
+vimg = sitk.GetImageFromArray(vol_arr)
+vimg.SetSpacing((1.0, 1.0, 1.0))
+vimg.SetOrigin((0.0, 0.0, 0.0))
+vimg.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0))  # det = -1
+sitk.WriteImage(vimg, vol_path)
+
+# Foreign reference: different shape + shifted origin -> guaranteed FOREIGN.
+farr = np.zeros((5, 7, 8), dtype=np.int16)   # -> grid shape (8, 7, 5)
+fimg = sitk.GetImageFromArray(farr)
+fimg.SetSpacing((1.0, 1.0, 1.0))
+fimg.SetOrigin((50.0, 60.0, 70.0))
+fimg.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+sitk.WriteImage(fimg, foreign_path)
+
+vol_grid = _read_grid_on_disk(vol_path)
+vol_det = float(np.linalg.det(vol_grid.direction))
+
+
+def _sitk_layers_and_coords(path):
+    img = sitk.ReadImage(path)
+    ncomp = int(img.GetNumberOfComponentsPerPixel())
+    arr = sitk.GetArrayFromImage(img)
+    if arr.ndim == 3:
+        arr = arr[..., None]
+    labelset = sorted({int(v) for v in np.unique(arr) if v != 0})
+    fg = (arr != 0).any(axis=-1)
+    zz, yy, xx = np.nonzero(fg)
+    coords = set()
+    for xi, yi, zi in zip(xx.tolist(), yy.tolist(), zz.tolist()):
+        wp = img.TransformIndexToPhysicalPoint((int(xi), int(yi), int(zi)))
+        coords.add((round(wp[0], 2), round(wp[1], 2), round(wp[2], 2)))
+    return ncomp, labelset, coords
+
+
+def _loadback_name_labels(path):
+    node = slicer.util.loadSegmentation(path)
+    vseg = node.GetSegmentation()
+    out = {}
+    for i in range(vseg.GetNumberOfSegments()):
+        sid = vseg.GetNthSegmentID(i)
+        seg_i = vseg.GetSegment(sid)
+        out[seg_i.GetName()] = int(seg_i.GetLabelValue())
+    slicer.mrmlScene.RemoveNode(node)
+    return out
+
+
+def _node_state(node):
+    v = node.GetSegmentation()
+    n = v.GetNumberOfSegments()
+    names = []
+    labels = {}
+    for i in range(n):
+        sid = v.GetNthSegmentID(i)
+        s_i = v.GetSegment(sid)
+        names.append(s_i.GetName())
+        labels[s_i.GetName()] = int(s_i.GetLabelValue())
+    return {'count': n, 'names': sorted(names), 'labels': labels}
+
+
+# 2. Load the left-handed volume (Slicer flips the slice axis) + overlapping seg.
+s = SlicerHelper(working_folder)
+loaded = s.load_volume(vol_path, window=(-100, 200))
+seg = s.create_segmentation('RoundTrip')
+seg.add_segment('Alpha', (1.0, 0.0, 0.0)).add_segment('Beta', (0.0, 1.0, 0.0))
+seg.node.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+vtk_seg = seg.node.GetSegmentation()
+sid_a = vtk_seg.GetNthSegmentID(0)
+sid_b = vtk_seg.GetNthSegmentID(1)
+
+mask_a = np.zeros((nz, ny, nx), dtype=np.uint8)
+mask_b = np.zeros((nz, ny, nx), dtype=np.uint8)
+mask_a[1:3, 2:4, 1:3] = 1
+mask_b[2:4, 2:4, 1:3] = 1   # overlaps Alpha at z=2
+slicer.util.updateSegmentBinaryLabelmapFromArray(mask_a, seg.node, sid_a, loaded)
+slicer.util.updateSegmentBinaryLabelmapFromArray(mask_b, seg.node, sid_b, loaded)
+
+# Overlapping segments live one-per-layer; Slicer gives each the per-layer
+# foreground value 1. Identity is carried by the distinct NAMES (a genuinely
+# distinct non-1 pair is not co-representable with 2 layers -- SetLabelValue
+# collapses the overlap at export). Capture the natural label values as-is.
+source_labels = {
+    vtk_seg.GetSegment(sid_a).GetName(): int(vtk_seg.GetSegment(sid_a).GetLabelValue()),
+    vtk_seg.GetSegment(sid_b).GetName(): int(vtk_seg.GetSegment(sid_b).GetLabelValue()),
+}
+
+# Snapshot the caller's node BEFORE any export -- the re-grid must never mutate it.
+source_before = _node_state(seg.node)
+
+result = {'vol_det': vol_det, 'source_labels': source_labels, 'source_before': source_before}
+
+# 3a. Plain export -> REARRANGED vs the on-disk volume grid.
+try:
+    export_segmentation('RoundTrip', plain_path)
+    result['plain_written'] = os.path.isfile(plain_path)
+    plain_grid = _read_grid_on_disk(plain_path)
+    result['plain_relation'] = grid_relation(plain_grid, vol_grid).kind.value
+    ncomp_p, labels_p, coords_p = _sitk_layers_and_coords(plain_path)
+    result['plain_layers'] = ncomp_p
+    result['plain_labelset'] = labels_p
+    result['plain_names_labels'] = _loadback_name_labels(plain_path)
+except Exception as exc:
+    result['plain_error'] = repr(exc)
+    coords_p = None
+
+# 3b. Conformed export -> SAME grid, det<0 verbatim, structure preserved.
+try:
+    export_segmentation('RoundTrip', conf_path, conform_to=vol_path)
+    result['conf_written'] = os.path.isfile(conf_path)
+    conf_grid = _read_grid_on_disk(conf_path)
+    result['conf_relation'] = grid_relation(conf_grid, vol_grid).kind.value
+    result['conf_det'] = float(np.linalg.det(conf_grid.direction))
+    ncomp_c, labels_c, coords_c = _sitk_layers_and_coords(conf_path)
+    result['conf_layers'] = ncomp_c
+    result['conf_labelset'] = labels_c
+    result['conf_names_labels'] = _loadback_name_labels(conf_path)
+    result['coincident'] = (coords_p is not None and coords_c == coords_p)
+    result['coord_count'] = [
+        (len(coords_p) if coords_p is not None else -1),
+        len(coords_c),
+    ]
+    # The caller's original node must be untouched by the conform re-grid.
+    result['source_after'] = _node_state(seg.node)
+except Exception as exc:
+    result['conf_error'] = repr(exc)
+
+# 4. FOREIGN reference -> raise, write nothing.
+foreign_raised = False
+foreign_msg = ''
+try:
+    export_segmentation('RoundTrip', foreign_out, conform_to=foreign_path)
+except SlicerHelperError as exc:
+    foreign_raised = True
+    foreign_msg = str(exc)
+result['foreign_raised'] = foreign_raised
+result['foreign_msg'] = foreign_msg[:200]
+result['foreign_no_file'] = not os.path.isfile(foreign_out)
+
+__execResult = result
+"""
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
+    assert isinstance(result, dict)
+    assert "plain_error" not in result, result.get("plain_error")
+    assert "conf_error" not in result, result.get("conf_error")
+
+    # Left-handed source; overlapping segments carry Slicer's natural per-layer
+    # label value under distinct names.
+    assert result["vol_det"] < 0
+    assert result["source_labels"] == {"Alpha": 1, "Beta": 1}
+
+    # Plain export mirrors the load-time slice flip: REARRANGED vs the volume.
+    assert result["plain_written"] is True
+    assert result["plain_relation"] == "rearranged"
+    assert result["plain_layers"] == 2
+
+    # Conformed export lands back on the volume's on-disk grid, det = -1.0 verbatim
+    # (conf_relation == "same" already pins the full affine; this is precision).
+    assert result["conf_written"] is True
+    assert result["conf_relation"] == "same"
+    assert abs(result["conf_det"] + 1.0) < 1e-6
+    assert result["conf_layers"] == 2
+
+    # Both segment names AND per-segment label values survive the re-grid, and
+    # the conformed export stays metadata-identical to the plain one -- only the
+    # grid differs (Minor 2: the REARRANGED rebuild must not renumber layers).
+    assert result["conf_names_labels"] == result["source_labels"]
+    assert result["conf_names_labels"] == result["plain_names_labels"]
+    assert result["conf_labelset"] == result["plain_labelset"]
+
+    # Re-gridded voxels are physically coincident with the plain export -- and the
+    # paint was non-empty (8 + 8 - 4 overlap), so coincidence cannot pass vacuously.
+    assert result["coord_count"] == [12, 12]
+    assert result["coincident"] is True, result.get("coord_count")
+
+    # The conform re-grid never mutates the caller's original node -- segment count,
+    # names, and per-segment label values are identical before and after export.
+    assert result["source_before"] == {
+        "count": 2,
+        "names": ["Alpha", "Beta"],
+        "labels": {"Alpha": 1, "Beta": 1},
+    }
+    assert result["source_after"] == result["source_before"]
+
+    # FOREIGN reference is refused for the right reason and leaves no artifact behind.
+    assert result["foreign_raised"] is True
+    assert "foreign" in result["foreign_msg"].lower()
+    assert result["foreign_no_file"] is True
+
+
 async def test_merge_as_pool_guards_grid_mismatch(
     slicer_service: SlicerService,
     slicer_url: str,
@@ -977,3 +1219,151 @@ __execResult = {'raised': raised, 'bypassed': bypassed}
     assert isinstance(result, dict)
     assert result["raised"] is True
     assert result["bypassed"] is True
+
+
+def _write_canonical_axial_series(dcm_dir: Path) -> None:
+    """Write a standard axial (canonical +Z) synthetic DICOM series.
+
+    Mirrors ``tests/test_image.py``'s ``TestDicomVolume`` construction
+    (``dicom_dir`` / ``_write_axial_series``): ``ImageOrientationPatient =
+    [1, 0, 0, 0, 1, 0]`` (positive-dominant IOP normal, +Z) with ascending
+    ``ImagePositionPatient[2]``. ``Image.read_dicom_series`` emits this as a
+    canonical right-handed (``det > 0``) volume under the Release-B converter
+    epoch (Tasks 7-8). Asymmetric ``Rows``/``Columns`` and ``PixelSpacing`` keep
+    the grid non-degenerate, so a SAME classification cannot pass under symmetry.
+    """
+    dcm_dir.mkdir(parents=True, exist_ok=True)
+    suid = pydicom.uid.generate_uid()
+    rows, cols = 8, 10
+    for i in range(6):
+        filename = dcm_dir / f"slice_{i:03d}.dcm"
+        file_meta = pydicom.Dataset()
+        file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+        file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+        file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+
+        ds = FileDataset(str(filename), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+        ds.SeriesInstanceUID = suid
+        ds.Rows = rows
+        ds.Columns = cols
+        ds.BitsAllocated = 16
+        ds.BitsStored = 16
+        ds.HighBit = 15
+        ds.PixelRepresentation = 0
+        ds.SamplesPerPixel = 1
+        ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.PixelSpacing = [0.7, 0.9]  # asymmetric row/col spacing
+        ds.SliceThickness = 2.0
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        ds.ImagePositionPatient = [0.0, 0.0, float(i * 2)]
+        ds.InstanceNumber = i + 1
+        ds.PixelData = np.full((rows, cols), 100 + i * 10, dtype=np.uint16).tobytes()
+        pydicom.dcmwrite(str(filename), ds)
+
+
+async def test_fresh_seg_on_canonical_volume_exports_same_without_conform(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """Release B live gate (probe P6): a fresh segmentation painted on a
+    canonical (``det > 0``) converter-emitted volume exports grid-identical
+    (SAME) with **no** ``conform_to`` step.
+
+    Exercises the whole Release-B chain end-to-end: a synthetic standard axial
+    DICOM series -> ``Image.read_dicom_series`` (the Tasks 7-8 canonical
+    converter, now emitting ``det > 0``) -> ``save_as`` NIfTI -> live Slicer
+    load -> fresh paint -> plain export. Because the emitted volume is
+    right-handed, Slicer 5.10 loads it byte-faithful (no ITK slice-axis flip,
+    P1), so the fresh segmentation's grid already coincides with the on-disk
+    volume grid -- the plain export is SAME with no conform round-trip (P6).
+    This is the no-conform counterpart to the Release-A ``conform_to`` gate
+    (``test_export_segmentation_conform_to_roundtrip``), whose left-handed
+    volume needs the conform step to reach SAME.
+
+    The gate fails if EITHER half regresses: a converter that stops emitting
+    ``det > 0`` (Slicer would flip it at load -> the fresh export lands
+    REARRANGED vs the on-disk volume), OR a Slicer/sitk that starts
+    canonicalizing ``det > 0`` volumes at load (loaded grid != on-disk grid ->
+    REARRANGED). Either way the plain export would no longer classify SAME.
+    """
+    base = Path("/tmp/t9_canon_gate")
+    shutil.rmtree(base, ignore_errors=True)
+    dcm_dir = base / "axial_series"
+    _write_canonical_axial_series(dcm_dir)
+
+    # Convert via the canonical converter; the emitted grid must be right-handed.
+    img = Image()
+    img.read_dicom_series(dcm_dir)
+    emitted_det = float(np.linalg.det(np.asarray(img.direction)))
+    assert emitted_det > 0, f"converter emitted a non-canonical grid: det={emitted_det}"
+
+    vol_path = base / "volume.nii.gz"
+    img.save_as(vol_path, FileType.NIFTI)
+
+    context = {"working_folder": str(base), "vol_path": str(vol_path)}
+    script = """
+import os
+import numpy as np
+import SimpleITK as sitk
+
+# 1. Load the canonical (det>0) converter-emitted volume. Slicer 5.10 loads a
+#    right-handed grid byte-faithful (P1) -- no slice-axis flip at load time.
+s = SlicerHelper(working_folder)
+loaded = s.load_volume(vol_path, window=(-100, 300))
+
+# The on-disk volume grid, read faithfully -- never via loadVolume (pitfall 7).
+vol_grid = _read_grid_on_disk(vol_path)
+vol_det = float(np.linalg.det(vol_grid.direction))
+
+# 2. Fresh segmentation on the loaded volume; paint one interior marker block.
+seg = s.create_segmentation('CanonFresh')
+seg.add_segment('Marker', (1.0, 0.0, 0.0))
+seg.node.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+sid = seg.node.GetSegmentation().GetNthSegmentID(0)
+
+arr = slicer.util.arrayFromVolume(loaded)   # (z, y, x)
+mask = np.zeros(arr.shape, dtype=np.uint8)
+zc, yc, xc = [d // 2 for d in arr.shape]
+mask[max(0, zc - 1):zc + 2, max(0, yc - 1):yc + 2, max(0, xc - 1):xc + 2] = 1
+painted_voxels = int(mask.sum())
+slicer.util.updateSegmentBinaryLabelmapFromArray(mask, seg.node, sid, loaded)
+
+# 3. Export WITHOUT conform_to -- the whole point of the gate.
+export_path = os.path.join(working_folder, 'fresh_export.seg.nrrd')
+if os.path.isfile(export_path):
+    os.remove(export_path)
+export_segmentation('CanonFresh', export_path)
+
+# 4. Classify the exported grid against the on-disk volume grid.
+exported_grid = _read_grid_on_disk(export_path)
+exported_det = float(np.linalg.det(exported_grid.direction))
+relation = grid_relation(exported_grid, vol_grid).kind.value
+
+# Non-vacuous: the painted marker actually reached the exported file (a grid
+# relation compares geometry only -- an empty seg could pass SAME vacuously).
+exp_arr = sitk.GetArrayFromImage(sitk.ReadImage(export_path))
+exported_fg = int((exp_arr != 0).sum())
+
+__execResult = {
+    'vol_det': vol_det,
+    'exported_det': exported_det,
+    'relation': relation,
+    'painted_voxels': painted_voxels,
+    'exported_fg': exported_fg,
+    'exported_written': os.path.isfile(export_path),
+}
+"""
+    result = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
+
+    assert isinstance(result, dict)
+    assert result.get("exported_written") is True, result
+    # Canonical on disk AND after export -- neither the converter nor Slicer flipped it.
+    assert result["vol_det"] > 0, result
+    assert result["exported_det"] > 0, result
+    # Non-vacuous: the painted marker survived verbatim to the exported file.
+    assert result["painted_voxels"] > 0, result
+    assert result["exported_fg"] == result["painted_voxels"], result
+    # THE GATE: a fresh seg on a canonical volume is grid-identical with NO conform_to.
+    assert result["relation"] == "same", result

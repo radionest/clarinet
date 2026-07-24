@@ -9,18 +9,25 @@ import numpy as np
 import pydicom
 import pydicom.uid
 import pytest
+import SimpleITK as sitk
 from pydicom.dataset import FileDataset
 
 from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
 from clarinet.services.image import (
     FileType,
+    Grid,
     Image,
+    LayeredSegmentation,
+    RelationKind,
     Segmentation,
     coco_to_segmentation,
     conform_seg_to_grid,
+    grid_relation,
+    read_grid,
 )
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
+from clarinet.services.image.orientation import ground_truth_slice_geometry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -312,11 +319,13 @@ class TestImage:
         """DICOM direction matrix maps numpy axes to patient-space (LPS)."""
         img = Image()
         img.read_dicom_series(dicom_dir)
-        # Fixture IOP = [1,0,0, 0,1,0] (standard axial)
-        # numpy axis 0 (row index) → col_dir [0,1,0]
-        # numpy axis 1 (col index) → row_dir [1,0,0]
-        # numpy axis 2 (slice)     → slice_dir [0,0,1]
-        expected = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
+        # Fixture IOP = [1,0,0, 0,1,0] (standard axial). Post-Task-7 the array/
+        # direction follow SimpleITK's own (x, y, z) axis order (no in-plane swap):
+        # numpy axis 0 (x / Columns) → row_dir [1,0,0] (DICOM "row direction cosine"
+        #     is the direction of increasing COLUMN index — SimpleITK's x-axis)
+        # numpy axis 1 (y / Rows)    → col_dir [0,1,0]
+        # numpy axis 2 (slice)       → slice_dir [0,0,1]
+        expected = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
         np.testing.assert_array_almost_equal(img.direction, expected, decimal=4)
 
     def test_save_as_dicom_raises(self, nifti_path: Path, tmp_path: Path) -> None:
@@ -451,6 +460,181 @@ class TestImage:
 
 
 # ---------------------------------------------------------------------------
+# NRRD reader hardening: `space` field honored, loud rejection of non-3-D
+# ---------------------------------------------------------------------------
+
+
+class TestNrrdReaderHardening:
+    """NRRD `space` honored (LPS/RAS/LAS); read_nrrd raises loudly on non-3-D."""
+
+    @pytest.mark.parametrize(
+        ("space_value", "flip"),
+        [
+            ("left-posterior-superior", (1.0, 1.0, 1.0)),
+            ("LPS", (1.0, 1.0, 1.0)),
+            ("right-anterior-superior", (-1.0, -1.0, 1.0)),
+            ("RAS", (-1.0, -1.0, 1.0)),
+            ("Right-Anterior-Superior", (-1.0, -1.0, 1.0)),
+            ("left-anterior-superior", (1.0, -1.0, 1.0)),
+            ("LAS", (1.0, -1.0, 1.0)),
+        ],
+    )
+    def test_nrrd_space_field_converts_to_lps(
+        self, tmp_path: Path, space_value: str, flip: tuple[float, float, float]
+    ) -> None:
+        """NRRD `space` (LPS/RAS/LAS; full name or abbreviation; case-insensitive)
+        reads to the same physical grid as an LPS-native NRRD of the same volume."""
+        shape = (4, 4, 4)
+        data = np.zeros(shape, dtype=np.int16)
+        lps_dirs = np.array([[0.5, 0.0, 0.0], [0.0, 0.6, 0.0], [0.0, 0.0, 0.7]])
+        lps_origin = np.array([10.0, 20.0, 30.0])
+        flip_arr = np.array(flip)
+
+        lps_path = tmp_path / "lps_ref.nrrd"
+        nrrd.write(
+            str(lps_path),
+            data,
+            {
+                "space directions": lps_dirs,
+                "space origin": lps_origin,
+                "space": "left-posterior-superior",
+            },
+        )
+        other_path = tmp_path / "other.nrrd"
+        nrrd.write(
+            str(other_path),
+            data,
+            {
+                "space directions": lps_dirs * flip_arr,
+                "space origin": lps_origin * flip_arr,
+                "space": space_value,
+            },
+        )
+
+        img_lps = Image()
+        img_lps.read(lps_path)
+        img_other = Image()
+        img_other.read(other_path)
+
+        assert img_other.same_grid(img_lps)
+
+    def test_nrrd_ras_roundtrip_relabels_space_to_lps(self, tmp_path: Path) -> None:
+        """Reading an RAS-native NRRD and re-saving must relabel `space` as LPS.
+
+        The written `space directions`/`space origin` are always the internal LPS
+        representation; inheriting the stale foreign `space` string would make a
+        later space-honoring read double-flip X/Y (this is the core regression
+        proof — the round-trip must land on the exact same grid, not just close)."""
+        shape = (4, 4, 4)
+        data = np.zeros(shape, dtype=np.int16)
+        ras_dirs = np.array([[-0.5, 0.0, 0.0], [0.0, -0.6, 0.0], [0.0, 0.0, 0.7]])
+        ras_origin = np.array([-10.0, -20.0, 30.0])
+        ras_path = tmp_path / "ras_source.nrrd"
+        nrrd.write(
+            str(ras_path),
+            data,
+            {
+                "space directions": ras_dirs,
+                "space origin": ras_origin,
+                "space": "right-anterior-superior",
+            },
+        )
+
+        img = Image()
+        img.read(ras_path)
+
+        out_path = tmp_path / "resaved.nrrd"
+        img.save_as(out_path, FileType.NRRD)
+
+        header = nrrd.read_header(str(out_path))
+        assert header["space"] == "left-posterior-superior"
+
+        reread = Image()
+        reread.read(out_path)
+        assert reread.same_grid(img)  # no double-flip: stable round-trip
+
+    @pytest.mark.parametrize(
+        "space_value",
+        ["scanner-xyz", None, "", "  ", "right-anterior-superior-time"],
+    )
+    def test_nrrd_unsupported_or_missing_space_raises(
+        self, tmp_path: Path, space_value: str | None
+    ) -> None:
+        """`space directions` present with a bad/absent `space` raises rather than
+        silently assuming LPS (a RAS-native file would otherwise be misread)."""
+        header = {
+            "space directions": np.eye(3),
+            "space origin": np.zeros(3),
+        }
+        if space_value is not None:
+            header["space"] = space_value
+        path = tmp_path / "bad_space.nrrd"
+        nrrd.write(str(path), np.zeros((4, 4, 4), dtype=np.int16), header)
+
+        with pytest.raises(ImageReadError):
+            Image().read(path)
+
+    def test_read_nrrd_4d_raises(self, tmp_path: Path) -> None:
+        """Image.read on a 4-D layered .seg.nrrd raises loudly instead of silently
+        building a grid with a NaN direction/spacing row from the list axis."""
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        layer[1:3, 1:3, 1:3] = 1
+        seg = LayeredSegmentation.from_layers(
+            [("seg_a", layer)],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        path = tmp_path / "layered.seg.nrrd"
+        seg.save(path)
+
+        img = Image()
+        with pytest.raises(ImageReadError, match="LayeredSegmentation"):
+            img.read(path)
+        # No partial/bad state survives the raise (the pre-fix behavior built a grid
+        # with a NaN direction/spacing row straight from the list-axis header row).
+        assert not np.isnan(img.spacing).any()
+        assert not np.isnan(img.direction).any()
+
+    def test_layered_segmentation_honors_ras_space(self, tmp_path: Path) -> None:
+        """LayeredSegmentation._apply_grid_from_header shares `_nrrd_space_to_lps`
+        with read_nrrd — a RAS-tagged 4-D header converts too, not just 3-D."""
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        layer[1:3, 1:3, 1:3] = 1
+        lps_seg = LayeredSegmentation.from_layers(
+            [("a", layer)],
+            spacing=(0.5, 0.6, 0.7),
+            origin=(10.0, 20.0, 30.0),
+            direction=np.eye(3),
+        )
+        lps_path = tmp_path / "lps.seg.nrrd"
+        lps_seg.save(lps_path)
+
+        ras_path = tmp_path / "ras.seg.nrrd"
+        ras_header = {
+            "dimension": 4,
+            "space": "right-anterior-superior",
+            "kinds": ["list", "domain", "domain", "domain"],
+            "space directions": np.vstack([np.full(3, np.nan), np.diag([-0.5, -0.6, 0.7])]),
+            "space origin": np.array([-10.0, -20.0, 30.0]),
+            "encoding": "raw",
+            "Segment0_ID": "Segment_0",
+            "Segment0_Name": "a",
+            "Segment0_LabelValue": "1",
+            "Segment0_Layer": "0",
+        }
+        nrrd.write(str(ras_path), layer[np.newaxis, ...], ras_header)
+
+        seg_lps = LayeredSegmentation.read_header(lps_path)
+        seg_ras = LayeredSegmentation.read_header(ras_path)
+
+        assert seg_ras.shape == seg_lps.shape
+        assert pytest.approx(seg_ras.spacing, abs=1e-9) == seg_lps.spacing
+        assert pytest.approx(seg_ras.origin, abs=1e-9) == seg_lps.origin
+        np.testing.assert_allclose(seg_ras.direction, seg_lps.direction, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
 # DICOM volume tests
 # ---------------------------------------------------------------------------
 
@@ -460,10 +644,14 @@ class TestDicomVolume:
         img = Image()
         img.read_dicom_series(dicom_dir)
 
-        assert img.shape == (4, 5, 3)
+        # dicom_dir: Rows=4, Columns=5, PixelSpacing=[0.5, 0.6] (row, col). Post-Task-7
+        # the array/spacing follow SimpleITK's own (x, y, z) = (Columns, Rows, slices)
+        # order — no in-plane swap — so axis 0 is Columns(5)/col-spacing(0.6) and axis
+        # 1 is Rows(4)/row-spacing(0.5), the reverse of the pre-Task-7 (rows, cols) order.
+        assert img.shape == (5, 4, 3)
         assert img._filetype == FileType.DICOM
-        assert pytest.approx(img.spacing[0], abs=1e-4) == 0.5
-        assert pytest.approx(img.spacing[1], abs=1e-4) == 0.6
+        assert pytest.approx(img.spacing[0], abs=1e-4) == 0.6
+        assert pytest.approx(img.spacing[1], abs=1e-4) == 0.5
         assert pytest.approx(img.spacing[2], abs=1e-4) == 2.0
 
     def test_empty_dir_raises(self, tmp_path: Path) -> None:
@@ -530,6 +718,7 @@ class TestDicomVolume:
         dcm_dir: Path,
         slice_pixels: dict[float, np.ndarray],
         iop: tuple[int, ...] = (1, 0, 0, 0, -1, 0),
+        pixel_spacing: tuple[float, float] = (1.0, 1.0),
     ) -> None:
         """Write an axial series mapping physical Z (mm) → (rows, cols) pixel array.
 
@@ -537,6 +726,8 @@ class TestDicomVolume:
         points along -Z, so SimpleITK orders slices opposite to the legacy ascending-
         ``ImagePositionPatient[2]`` convention — exercising the slice-axis flip. Pass
         ``iop=(1,0,0,0,1,0)`` (normal +Z) for an already-canonical series.
+        ``pixel_spacing`` is ``[row spacing, col spacing]`` (DICOM ``PixelSpacing``
+        order); defaults to the legacy symmetric 1.0mm.
         """
         dcm_dir.mkdir()
         suid = pydicom.uid.generate_uid()
@@ -557,7 +748,7 @@ class TestDicomVolume:
             ds.PixelRepresentation = 0
             ds.SamplesPerPixel = 1
             ds.PhotometricInterpretation = "MONOCHROME2"
-            ds.PixelSpacing = [1.0, 1.0]
+            ds.PixelSpacing = list(pixel_spacing)
             ds.SliceThickness = 3.0
             ds.ImageOrientationPatient = list(iop)
             ds.ImagePositionPatient = [0.0, 0.0, z]
@@ -565,17 +756,21 @@ class TestDicomVolume:
             ds.PixelData = pixels.astype(np.uint16).tobytes()
             pydicom.dcmwrite(str(filename), ds)
 
-    def test_negative_z_axial_series_canonicalized(self, tmp_path: Path) -> None:
-        """DICOM→NIfTI conversion must be slice-order canonical and version-stable.
+    def test_negative_dominant_normal_series_already_canonical(self, tmp_path: Path) -> None:
+        """D6: canonical slice sense is the IOP-normal side, not a fixed
+        +dominant-axis convention.
 
-        An axial series whose IOP slice normal points along -Z (common on MRI) is
-        ordered by SimpleITK opposite to the legacy ascending-
-        ``ImagePositionPatient[2]`` convention used by the pre-#221 reader. The
-        reader normalises the slice axis to the positive sense of its dominant axis
-        (here Z), so re-converting a series always yields the same grid —
-        preventing the projection/doctor-seg index-reversed Z-flip.
+        This fixture's IOP normal itself is negative-dominant (row=(1,0,0),
+        col=(0,-1,0) -> n=(0,0,-1)). GDCM always sorts a series ascending along
+        its own row x col normal, so the ground-truth-corrected slice_dir
+        already aligns with n (dot > 0) — no flip is needed, and the emitted
+        determinant is positive via the negative-dominant slice axis itself.
+        Pre-Task-8 this same fixture WAS flipped (the old rule looked only at
+        the dominant axis's sign, which was negative here, ignoring that -Z was
+        already the canonical/IOP-normal sense) — this is the D6 divergence,
+        not a regression.
         """
-        dcm_dir = tmp_path / "neg_z_series"
+        dcm_dir = tmp_path / "neg_dominant_series"
         # value encodes |Z|: Z=0 -> 100, Z=-3 -> 130, Z=-6 -> 160
         self._write_axial_series(
             dcm_dir,
@@ -584,12 +779,13 @@ class TestDicomVolume:
 
         volume, _spacing, origin, direction = read_dicom_series(dcm_dir)
 
-        # Slice axis points +Z (canonical); origin sits at the minimum physical Z.
-        assert direction[2, 2] > 0
-        assert pytest.approx(origin[2], abs=1e-4) == -6.0
-        # In-array slices run ascending physical Z: Z=-6 (160) first, Z=0 (100) last.
-        assert int(volume[0, 0, 0]) == 160
-        assert int(volume[0, 0, -1]) == 100
+        assert np.linalg.det(direction) > 0
+        assert direction[2, 2] < 0  # canonical sense here IS negative-Z (aligned with n)
+        assert pytest.approx(origin[2], abs=1e-4) == 0.0  # no flip: origin unchanged
+        # In-array slices stay in GDCM's own ascending-n order: Z=0 (100) first,
+        # Z=-6 (160) last — unlike the pre-D6 reader, which flipped this series.
+        assert int(volume[0, 0, 0]) == 100
+        assert int(volume[0, 0, -1]) == 160
 
     def test_positive_z_axial_series_unchanged(self, tmp_path: Path) -> None:
         """A series whose slice axis already points +Z is passed through untouched
@@ -611,6 +807,28 @@ class TestDicomVolume:
         assert pytest.approx(origin[2], abs=1e-4) == 0.0
         assert int(volume[0, 0, 0]) == 100
         assert int(volume[0, 0, -1]) == 160
+
+    def test_standard_axial_series_det_positive_matches_ground_truth_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """A standard +Z axial series (positive-dominant IOP normal) is
+        unaffected by D6 — no flip either way — and must emit a right-handed
+        grid (det > 0) that is exactly the DICOM ground-truth grid (SAME, not
+        merely REARRANGED)."""
+        dcm_dir = tmp_path / "std_axial_det"
+        self._write_axial_series(
+            dcm_dir,
+            {z: np.full((4, 5), int(100 + z * 10)) for z in (0.0, 3.0, 6.0)},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        volume, spacing, origin, direction = read_dicom_series(dcm_dir)
+
+        assert np.linalg.det(direction) > 0
+
+        emitted = Grid.from_components(volume.shape, spacing, origin, direction)
+        ground_truth = Grid.from_components(volume.shape, spacing, (0.0, 0.0, 0.0), np.eye(3))
+        assert grid_relation(emitted, ground_truth).kind is RelationKind.SAME
 
     def test_wobbly_spacing_correct_series_byte_identical(self, tmp_path: Path) -> None:
         """A correctly-ordered (+Z, non-flip) series with irregular inter-slice
@@ -637,11 +855,16 @@ class TestDicomVolume:
         assert int(volume[0, 0, -1]) == 195
 
     def test_canonicalization_preserves_geometry(self, tmp_path: Path) -> None:
-        """Slice-axis canonicalisation flips the array, origin and direction
-        together, so every voxel keeps its physical location — unlike a
-        direction-only flip, which would mirror the data through the origin plane.
-        A single marked voxel must map, via the voxel→LPS affine, to its true DICOM
-        physical position and land on the canonical (last) slice index.
+        """The in-plane (row/col cosine + spacing) → physical mapping is correct
+        regardless of the slice-sense question: a single marked voxel must map,
+        via the voxel→LPS affine, to its true DICOM physical position.
+
+        This fixture's IOP normal is negative-dominant (see
+        ``test_negative_dominant_normal_series_already_canonical``), so under D6
+        no flip happens here — unlike pre-Task-8, where the +dominant-axis rule
+        flipped it and landed the marker on the last slice index instead of the
+        first. Physical position is unaffected either way (geometry-preserving
+        by construction, and here trivially so since nothing moves).
         """
         dcm_dir = tmp_path / "marked_series"
         marker = 999
@@ -658,7 +881,7 @@ class TestDicomVolume:
         idx = np.argwhere(img.img == marker)
         assert idx.shape[0] == 1
         r, c, k = (int(v) for v in idx[0])
-        assert k == 2  # Z=0 is the maximum physical Z → last slice after canon
+        assert k == 0  # no flip under D6 (negative-dominant normal, already canonical)
         phys = img.affine_4x4 @ np.array([r, c, k, 1.0])
         # IOP rowdir(col index)=[1,0,0], coldir(row index)=[0,-1,0], 1 mm spacing,
         # slice IPP z=0 → physical (col, -row, 0) = (2, -1, 0) in LPS.
@@ -693,6 +916,112 @@ class TestDicomVolume:
         _, new_origin, _ = _canonicalize_slice_axis(volume, 3.0, origin, direction, "no_gt")
 
         assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_canonicalize_flips_when_slice_dir_opposes_iop_normal(self) -> None:
+        """A slice_dir that opposes the (positive-dominant) IOP normal
+        n = cross(col0, col1) must be flipped onto the IOP-normal side: det
+        becomes positive and a marker voxel — placed at the in-plane origin
+        (index 0,0) so only the slice axis contributes to its physical
+        position — keeps that physical position exactly."""
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        marker = 999
+        volume[0, 0, 0] = marker
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        n = np.cross(direction[:, 0], direction[:, 1])
+        np.testing.assert_allclose(n, [0.0, 0.0, 1.0])  # positive-dominant IOP normal
+        assert np.linalg.det(direction) < 0  # slice_dir opposes n -> left-handed pre-flip
+
+        new_volume, new_origin, new_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "opposing", exact_last_position=(0.0, 0.0, -6.0)
+        )
+
+        assert np.linalg.det(new_direction) > 0
+        idx = np.argwhere(new_volume == marker)
+        assert idx.shape[0] == 1
+        ix, iy, iz = (int(v) for v in idx[0])
+        assert (ix, iy, iz) == (0, 0, 2)  # reversed: index 0 of 3 -> index 2
+        # in-plane index (0,0) => physical position is exactly the slice's own
+        # IPP, carried verbatim (not approximated) via exact_last_position.
+        assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_canonicalize_negative_dominant_normal_flips_when_old_rule_would_not(
+        self,
+    ) -> None:
+        """D6's key divergence from the old +dominant-axis rule: for a
+        negative-dominant IOP normal (row=(1,0,0), col=(0,-1,0) -> n=(0,0,-1)),
+        a slice_dir with a POSITIVE dominant component opposes n and must be
+        flipped — even though the old rule (``slice_dir[dominant] >= 0``) would
+        have left it untouched. det ends up positive; the marker (in-plane
+        index (0,0)) keeps its physical position via ``exact_last_position``.
+        """
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        marker = 999
+        volume[0, 0, 0] = marker
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+        n = np.cross(direction[:, 0], direction[:, 1])
+        np.testing.assert_allclose(n, [0.0, 0.0, -1.0])  # negative-dominant IOP normal
+        assert np.linalg.det(direction) < 0  # left-handed pre-flip
+
+        new_volume, new_origin, new_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "neg_dominant", exact_last_position=(0.0, 0.0, -6.0)
+        )
+
+        assert np.linalg.det(new_direction) > 0
+        assert new_direction[2, 2] < 0  # canonical sense here IS negative-Z (aligned with n)
+        idx = np.argwhere(new_volume == marker)
+        assert idx.shape[0] == 1
+        ix, iy, iz = (int(v) for v in idx[0])
+        assert (ix, iy, iz) == (0, 0, 2)
+        assert new_origin == (0.0, 0.0, -6.0)
+
+    def test_canonicalize_degenerate_normal_falls_back_to_dominant_rule(self) -> None:
+        """Degenerate in-plane columns (here: row == col, zero cross product)
+        can't derive an IOP normal — falls back to the +dominant-axis rule
+        (matching the pre-D6 behavior) and logs a warning; conversion never
+        fails on this."""
+        from clarinet.utils.logger import logger as clarinet_logger
+
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+        n = np.cross(direction[:, 0], direction[:, 1])
+        np.testing.assert_allclose(n, [0.0, 0.0, 0.0], atol=1e-9)
+
+        captured: list[str] = []
+        sink_id = clarinet_logger.add(
+            lambda message: captured.append(message.record["message"]), level="WARNING"
+        )
+        try:
+            _, _new_origin, new_direction = _canonicalize_slice_axis(
+                volume, 3.0, origin, direction, "degenerate"
+            )
+        finally:
+            clarinet_logger.remove(sink_id)
+
+        assert new_direction[2, 2] > 0  # +dominant-axis fallback rule applied
+        assert any("egenerate" in m for m in captured)
+
+    def test_canonicalize_reconversion_is_idempotent(self) -> None:
+        """Re-running canonicalization on an already-canonical grid (as a repair
+        script or a second conversion pass would) is a no-op — the defining D6
+        promise that re-converting a series always lands on the identical grid.
+        """
+        volume = np.zeros((2, 2, 3), dtype=np.int16)
+        origin = (0.0, 0.0, 0.0)
+        direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+
+        once_volume, once_origin, once_direction = _canonicalize_slice_axis(
+            volume, 3.0, origin, direction, "first_pass", exact_last_position=(0.0, 0.0, -6.0)
+        )
+        twice_volume, twice_origin, twice_direction = _canonicalize_slice_axis(
+            once_volume, 3.0, once_origin, once_direction, "second_pass"
+        )
+
+        np.testing.assert_array_equal(twice_volume, once_volume)
+        assert twice_origin == once_origin
+        np.testing.assert_array_equal(twice_direction, once_direction)
 
     def test_read_dicom_series_routes_through_ground_truth(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -762,6 +1091,139 @@ class TestDicomVolume:
         img = Image()
         img.read_dicom_series(dcm_dir)
         np.testing.assert_allclose(img.img, expected_hu)
+
+    @staticmethod
+    def _read_dicom_series_old_epoch(
+        directory: Path,
+    ) -> tuple[np.ndarray, tuple[float, float, float], tuple[float, float, float], np.ndarray]:
+        """Verbatim pre-Task-7 ``read_dicom_series`` body (in-plane row/col swap kept).
+
+        Reconstructed here only to compare epochs in
+        ``test_epoch_change_is_lossless_index_rearrangement``. Slice-axis handling
+        (``ground_truth_slice_geometry`` + ``_canonicalize_slice_axis``) is identical
+        in both epochs, so it is applied here too — isolating exactly the in-plane
+        transpose/spacing/direction change under test.
+        """
+        directory = Path(directory)
+        reader = sitk.ImageSeriesReader()
+        series_ids = reader.GetGDCMSeriesIDs(str(directory))
+        dicom_names = reader.GetGDCMSeriesFileNames(str(directory), series_ids[0])
+        reader.SetFileNames(dicom_names)
+        image = reader.Execute()
+
+        volume = np.transpose(sitk.GetArrayFromImage(image), (1, 2, 0))
+        sx, sy, sz = image.GetSpacing()
+        spacing = (sy, sx, sz)
+        ox, oy, oz = image.GetOrigin()
+        origin = (float(ox), float(oy), float(oz))
+        d = np.array(image.GetDirection()).reshape(3, 3)
+        direction = np.ascontiguousarray(d[:, [1, 0, 2]])
+
+        origin, direction, exact_last_ipp = ground_truth_slice_geometry(
+            dicom_names, spacing[2], origin, direction
+        )
+        volume, origin, direction = _canonicalize_slice_axis(
+            volume, spacing[2], origin, direction, directory.name, exact_last_ipp
+        )
+        return volume, spacing, origin, direction
+
+    def test_read_dicom_series_roundtrips_through_save_and_read_grid(self, tmp_path: Path) -> None:
+        """The array, spacing, and direction move in lockstep: saving the read result
+        and reading its grid back from disk must reproduce the same grid
+        ``read_dicom_series`` computed in memory. This catches a write-side-only
+        reorient (e.g. array/spacing swapped but direction left behind) that an
+        in-memory-only check would miss — ``_save_nifti`` just trusts whatever
+        ``Image`` already holds.
+        """
+        dcm_dir = tmp_path / "roundtrip_series"
+        rng = np.random.default_rng(20260722)
+        z_values = [0.0, 3.0, 6.0]
+        slice_pixels = {z: rng.integers(0, 1000, size=(4, 6)).astype(np.uint16) for z in z_values}
+        self._write_axial_series(
+            dcm_dir, slice_pixels, iop=(1, 0, 0, 0, 1, 0), pixel_spacing=(0.5, 0.6)
+        )
+
+        img = Image()
+        img.read_dicom_series(dcm_dir)
+        memory_grid = img.grid
+
+        saved_path = img.save_as(tmp_path / "emitted.nii.gz", FileType.NIFTI)
+        disk_grid = read_grid(saved_path)
+
+        assert disk_grid.shape == memory_grid.shape
+        assert grid_relation(memory_grid, disk_grid).kind is RelationKind.SAME
+
+        # In-plane basis (columns 0, 1) is SimpleITK's own — not swapped.
+        reader = sitk.ImageSeriesReader()
+        series_ids = reader.GetGDCMSeriesIDs(str(dcm_dir))
+        names = reader.GetGDCMSeriesFileNames(str(dcm_dir), series_ids[0])
+        reader.SetFileNames(names)
+        sitk_direction = np.array(reader.Execute().GetDirection()).reshape(3, 3)
+        np.testing.assert_array_equal(img.direction[:, 0], sitk_direction[:, 0])
+        np.testing.assert_array_equal(img.direction[:, 1], sitk_direction[:, 1])
+
+    def test_epoch_change_is_lossless_index_rearrangement(self, tmp_path: Path) -> None:
+        """Task 7 changes the in-plane axis order but must not move any voxel
+        physically: the new-epoch grid and the old (pre-Task-7) epoch's grid must
+        classify as REARRANGED (an exact signed permutation, never FOREIGN), share an
+        identical physical bounding box, and the old volume — exactly
+        index-rearranged onto the new grid via ``Image.reindex_to(order=0)`` — must
+        reproduce the new volume exactly (zero voxel drift). Proves the epoch change
+        is a lossless relabeling, not a mirror.
+
+        Deliberately does NOT assert ``direction[2, 2] > 0`` / ``det > 0`` —
+        universal positive determinant is Task 8's change, not this one; after this
+        task alone some series may still emit ``det < 0``.
+        """
+        dcm_dir = tmp_path / "epoch_series"
+        rng = np.random.default_rng(20260722)
+        z_values = [0.0, 3.0, 6.0]
+        slice_pixels = {z: rng.integers(0, 1000, size=(4, 6)).astype(np.uint16) for z in z_values}
+        self._write_axial_series(
+            dcm_dir, slice_pixels, iop=(1, 0, 0, 0, 1, 0), pixel_spacing=(0.5, 0.6)
+        )
+
+        new_volume, new_spacing, new_origin, new_direction = read_dicom_series(dcm_dir)
+        old_volume, old_spacing, old_origin, old_direction = self._read_dicom_series_old_epoch(
+            dcm_dir
+        )
+
+        new_grid = Grid.from_components(new_volume.shape, new_spacing, new_origin, new_direction)
+        old_grid = Grid.from_components(old_volume.shape, old_spacing, old_origin, old_direction)
+
+        relation = grid_relation(new_grid, old_grid)
+        assert relation.kind is RelationKind.REARRANGED
+
+        # Physical bounding boxes identical (0.00 mm delta) — same physical volume.
+        def _bbox(grid: Grid) -> tuple[np.ndarray, np.ndarray]:
+            nx, ny, nz = grid.shape
+            corners = np.array(
+                [[i, j, k, 1.0] for i in (0, nx - 1) for j in (0, ny - 1) for k in (0, nz - 1)]
+            )
+            phys = (grid.affine @ corners.T).T[:, :3]
+            return phys.min(axis=0), phys.max(axis=0)
+
+        new_min, new_max = _bbox(new_grid)
+        old_min, old_max = _bbox(old_grid)
+        np.testing.assert_allclose(new_min, old_min, atol=1e-9)
+        np.testing.assert_allclose(new_max, old_max, atol=1e-9)
+
+        # Zero voxel drift: old volume, resampled (nearest-neighbor) onto the new
+        # grid, reproduces the new volume exactly.
+        new_image = Image()
+        new_image.spacing = new_spacing
+        new_image.origin = new_origin
+        new_image.direction = new_direction
+        new_image.img = new_volume
+
+        old_image = Image()
+        old_image.spacing = old_spacing
+        old_image.origin = old_origin
+        old_image.direction = old_direction
+        old_image.img = old_volume
+
+        reindexed = old_image.reindex_to(new_image, order=0)
+        np.testing.assert_array_equal(reindexed.img, new_volume)
 
 
 # ---------------------------------------------------------------------------
@@ -1244,7 +1706,15 @@ class TestSegmentation:
     def test_segmentation_metadata_only_read(self, tmp_path: Path) -> None:
         data = np.zeros((6, 6, 4), dtype=np.uint8)
         path = tmp_path / "mask.seg.nrrd"
-        nrrd.write(str(path), data, {"space directions": np.eye(3), "space origin": np.zeros(3)})
+        nrrd.write(
+            str(path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+            },
+        )
         seg = Segmentation(autolabel=False)
         seg.read(path, load_data=False)
         assert seg.has_data is False
@@ -1400,6 +1870,59 @@ class TestSpatialAlignment:
         a = _make_seg(origin=(0.0, 0.0, 0.0))
         b = _make_seg(origin=(0.0, 0.0, 1e-6))
         assert a.same_grid(b)
+
+    def test_same_grid_rejects_offset_within_grid_relation_tolerance(self) -> None:
+        """A 0.1-voxel origin shift is well inside grid_relation's 0.5-voxel offset
+        window but must still fail same_grid's near-exact atol=1e-4 check — same_grid
+        must NOT inherit grid_relation's looser tolerance via the .grid delegation."""
+        a = _make_seg(spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+        b = _make_seg(spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.1))  # 0.1 voxel
+        assert not a.same_grid(b)
+
+    # -- grid property --
+
+    def test_image_grid_matches_from_components(self) -> None:
+        img = Image()
+        img.spacing = (0.5, 0.6, 0.7)
+        img.origin = (1.0, -2.5, 3.25)
+        img.direction = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        img.img = np.zeros((10, 12, 8), dtype=np.uint8)
+
+        grid = img.grid
+        expected = Grid.from_components(
+            (img.shape[0], img.shape[1], img.shape[2]), img.spacing, img.origin, img.direction
+        )
+        assert grid.shape == expected.shape == (10, 12, 8)
+        assert np.array_equal(grid.affine, expected.affine)
+        assert np.array_equal(grid.affine, img.affine_4x4)  # same formula, byte-identical
+
+    def test_layered_segmentation_grid_matches_from_components(self) -> None:
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        direction = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        seg = LayeredSegmentation.from_layers(
+            [("a", layer)], spacing=(0.5, 0.6, 0.7), origin=(1.0, 2.0, 3.0), direction=direction
+        )
+
+        grid = seg.grid
+        expected = Grid.from_components(seg.shape, seg.spacing, seg.origin, seg.direction)
+        assert grid.shape == expected.shape == (4, 5, 6)
+        assert np.array_equal(grid.affine, expected.affine)
+
+    def test_grid_summary_delegates_to_grid_summary_unchanged_format(self) -> None:
+        seg = _make_seg(
+            shape=(5, 6, 7),
+            spacing=(0.5, 0.6, 0.7),
+            origin=(1.0, 2.0, 3.0),
+            direction=np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float),
+        )
+
+        text = seg._grid_summary()
+
+        assert text == seg.grid.summary()
+        assert text == (
+            "shape=(5, 6, 7), origin=(1.0, 2.0, 3.0), spacing=(0.5, 0.6, 0.7), "
+            "direction=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]]"
+        )
 
     # -- reindex_to --
 
@@ -1650,6 +2173,262 @@ class TestConformSegToGrid:
         src = Segmentation(autolabel=False)
         src.read(seg_path)
         assert float(src._direction[2, 2]) == -1.0
+
+    # -- relation gate: SAME / REARRANGED (exact) / FOREIGN --
+
+    def test_conform_noop_for_offset_within_relation_tolerance(self, tmp_path: Path) -> None:
+        """A 0.3-voxel origin shift is inside grid_relation's 0.5-voxel SAME window —
+        the new gate must treat it as a no-op, even though it would have failed the
+        old tight-atol `same_grid` check (documents the intentional D7 loosening)."""
+        shape = (8, 8, 8)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[1:4, 1:4, 1:4] = 1
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(shape=shape, origin=(0.3, 0.0, 0.0), data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is False
+
+        untouched = Segmentation(autolabel=False)
+        untouched.read(seg_path)
+        assert untouched.origin[0] == pytest.approx(0.3)  # file untouched
+
+    def test_conform_raises_geometry_mismatch_for_foreign_grid(self, tmp_path: Path) -> None:
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[3:6, 3:6, 3:6] = 7
+        seg_path = tmp_path / "seg.seg.nrrd"
+        # 0.6-voxel origin shift: outside grid_relation's 0.5-voxel offset window -> FOREIGN
+        _make_seg(shape=shape, origin=(0.6, 0.0, 0.0), data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        with pytest.raises(GeometryMismatchError):
+            conform_seg_to_grid(seg_path, vol_path)
+
+        # nothing written: the source file is untouched by the failed attempt
+        untouched = Segmentation(autolabel=False)
+        untouched.read(seg_path)
+        assert untouched.origin[0] == pytest.approx(0.6)
+
+    def test_conform_allow_resample_repairs_foreign_grid(self, tmp_path: Path) -> None:
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[3:6, 3:6, 3:6] = 7
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(shape=shape, origin=(0.6, 0.0, 0.0), data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        changed = conform_seg_to_grid(seg_path, vol_path, allow_resample=True)
+        assert changed is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        assert fixed.same_grid(vol)
+        assert np.sum(fixed.img == 7) > 0  # label survived the approximate resample
+
+    def test_conform_repairs_mirror_exactly(self, tmp_path: Path) -> None:
+        """X-axis mirror repaired exactly: full-array hand-computed check (not just
+        'grid matches'), on an axis distinct from the Z-mirror baseline tests above."""
+        shape = (10, 8, 6)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        rng = np.random.default_rng(20260723)
+        seg_data = rng.integers(0, 4, size=shape).astype(np.uint8)
+        mirrored_dir = np.diag([-1.0, 1.0, 1.0])
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(
+            shape=shape, origin=(shape[0] - 1.0, 0.0, 0.0), direction=mirrored_dir, data=seg_data
+        ).save_as(seg_path, FileType.NRRD)
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        expected = np.flip(seg_data, axis=0)
+        np.testing.assert_array_equal(fixed.img, expected)
+
+    def test_conform_repairs_inplane_transpose_exactly(self, tmp_path: Path) -> None:
+        """Pure X/Y in-plane transpose (no mirror) repaired exactly: full-array
+        hand-computed check against np.transpose."""
+        ref_shape = (10, 8, 6)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, ref_shape)
+
+        seg_shape = (8, 10, 6)
+        rng = np.random.default_rng(20260723)
+        seg_data = rng.integers(0, 4, size=seg_shape).astype(np.uint8)
+        swap_dir = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(shape=seg_shape, direction=swap_dir, data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        expected = np.transpose(seg_data, (1, 0, 2))
+        assert fixed.img.shape == ref_shape
+        np.testing.assert_array_equal(fixed.img, expected)
+
+    def test_conform_4d_layered_rejects_non_nrrd_out_path(self, tmp_path: Path) -> None:
+        """A 4-D layered input can't be written to a NIfTI out_path — that format has
+        no layered equivalent — so the mismatch must fail fast, not silently write
+        NRRD bytes under a .nii.gz name."""
+        shape = (5, 5, 5)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        mirrored_dir = np.diag([1.0, 1.0, -1.0])
+        space_dirs = np.vstack([np.full(3, np.nan), mirrored_dir])
+        seg_path = tmp_path / "layered.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            np.zeros((1, *shape), dtype=np.uint8),
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": space_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "a",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+            },
+        )
+        out_path = tmp_path / "out.nii.gz"
+
+        with pytest.raises(ImageError, match="NRRD"):
+            conform_seg_to_grid(seg_path, vol_path, out_path=out_path)
+
+
+class TestConformLayeredSegToGrid:
+    """4-D layer-preserving repair — the reason conform_seg_to_grid must not go
+    through LayeredSegmentation.from_layers (it would force one segment per layer
+    at LabelValue=1, dropping non-1 labels and multi-segment-per-layer structure).
+    """
+
+    def test_conform_4d_layered_preserves_labels_and_names(self, tmp_path: Path) -> None:
+        shape = (6, 7, 5)  # spatial (X, Y, Z)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = Image()
+        vol._direction = np.eye(3)
+        vol._origin = (0.0, 0.0, 0.0)
+        vol._spacing = (1.0, 1.0, 1.0)
+        vol.img = np.zeros(shape, dtype=np.uint8)
+        vol.save_as(vol_path, FileType.NIFTI)
+
+        rng = np.random.default_rng(20260723)
+        layer0 = np.where(rng.integers(0, 2, size=shape) == 1, 1, 0).astype(np.uint8)  # label 1
+        layer1 = np.where(rng.integers(0, 2, size=shape) == 1, 2, 0).astype(np.uint8)  # label 2
+        data = np.stack([layer0, layer1], axis=0)  # (2, X, Y, Z)
+
+        mirrored_dir = np.diag([1.0, 1.0, -1.0])  # Z-mirror, same physical volume
+        space_dirs = np.vstack([np.full(3, np.nan), mirrored_dir])
+        seg_path = tmp_path / "layered.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": space_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "cortex",
+                "Segment0_ID": "Segment_0",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+                "Segment0_Extent": f"0 {shape[0] - 1} 0 {shape[1] - 1} 0 {shape[2] - 1}",
+                "Segment1_Name": "lesion",
+                "Segment1_ID": "Segment_1",
+                "Segment1_LabelValue": "2",
+                "Segment1_Layer": "1",
+                "Segment1_Extent": f"0 {shape[0] - 1} 0 {shape[1] - 1} 0 {shape[2] - 1}",
+            },
+        )
+
+        changed = conform_seg_to_grid(seg_path, vol_path)
+        assert changed is True
+
+        out_data, out_header = nrrd.read(str(seg_path))
+        assert out_data.shape == (2, *shape)  # both layers survive
+        assert _label_to_name(out_header) == {1: "cortex", 2: "lesion"}  # both names+labels
+        assert out_header["Segment0_Layer"] == "0"
+        assert out_header["Segment1_Layer"] == "1"
+        assert not any("Extent" in k for k in out_header)  # stale grid extent dropped
+
+        expected_layer0 = np.flip(layer0, axis=2)
+        expected_layer1 = np.flip(layer1, axis=2)
+        np.testing.assert_array_equal(out_data[0], expected_layer0)
+        np.testing.assert_array_equal(out_data[1], expected_layer1)
+
+        # round-trips through the public reader too, not just the raw header dict
+        seg_meta = LayeredSegmentation.read_header(seg_path)
+        assert seg_meta.segments == [("cortex", 0, 1), ("lesion", 1, 2)]
+
+    def test_conform_4d_layered_relabels_space_to_lps(self, tmp_path: Path) -> None:
+        """A layered source whose header carries a foreign `space` (RAS) must still
+        write LPS-labeled output. `_conform_layered_seg` builds `new_header` from the
+        source header and overwrites `space directions`/`space origin` with the
+        reference grid's LPS values, but previously never touched `space` — inheriting
+        whatever foreign label the source carried alongside the newly-LPS numbers."""
+        shape = (6, 7, 5)  # spatial (X, Y, Z)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = Image()
+        vol._direction = np.eye(3)
+        vol._origin = (0.0, 0.0, 0.0)
+        vol._spacing = (1.0, 1.0, 1.0)
+        vol.img = np.zeros(shape, dtype=np.uint8)
+        vol.save_as(vol_path, FileType.NIFTI)
+
+        layer0 = np.zeros(shape, dtype=np.uint8)
+        layer0[1:3, 1:3, 1:3] = 1
+        data = layer0[np.newaxis]  # (1, X, Y, Z)
+
+        # Same physical grid as the LPS `mirrored_dir=diag([1,1,-1])` fixture above
+        # (Z-mirror relative to vol, so the grids are REARRANGED, not SAME — required
+        # for conform_seg_to_grid to actually run the write path), re-expressed under
+        # RAS labeling (negate the X/Y world columns per _nrrd_space_to_lps).
+        ras_dirs = np.vstack([np.full(3, np.nan), np.diag([-1.0, -1.0, -1.0])])
+        seg_path = tmp_path / "layered_ras.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            data,
+            {
+                "space": "right-anterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": ras_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "a",
+                "Segment0_ID": "Segment_0",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+            },
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        out_header = nrrd.read_header(str(seg_path))
+        assert out_header["space"] == "left-posterior-superior"
+
+        # No double-flip: same voxels the LPS-native fixture produces (Z-mirror).
+        out_data, _ = nrrd.read(str(seg_path))
+        np.testing.assert_array_equal(out_data[0], np.flip(layer0, axis=2))
 
 
 def _label_to_name(header: dict) -> dict[int, str]:

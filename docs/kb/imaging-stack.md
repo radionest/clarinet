@@ -139,4 +139,6 @@ that moment the record is `inwork` and mid-transition, so prefill rejects it,
 and write, DICOM series read-only, segmentation morphology and set operations,
 a component-correspondence engine). Call it from pipeline tasks inside
 `asyncio.to_thread()`. Full behavioural reference:
-[`docs/image-service.md`](../image-service.md).
+[`docs/image-service.md`](../image-service.md). See also
+[`docs/grid-workflows.md`](../grid-workflows.md) for the voxel-grid model,
+grid-relation classification (SAME/REARRANGED/FOREIGN), and conform-on-export.

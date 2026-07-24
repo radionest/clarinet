@@ -24,14 +24,15 @@ from clarinet.exceptions.domain import ImageError, ImageReadError
 from clarinet.utils.logger import logger
 
 _AXIAL_DOMINANCE_THRESHOLD = 0.8
-"""Minimum |head_dir[2]| (DICOM ground-truth slice normal's Z-component) required
-to trust the axial "toward head" check.
+"""Minimum |normal[2]| (DICOM ground-truth IOP normal's Z-component) required
+to trust the axial-dominance check.
 
-Below this the ground-truth slice normal is not cleanly aligned with the physical
-S/I axis (oblique gantry, or a coronal/sagittal series), so a sign-only check is
-not meaningful and detection refuses to judge (raises OrientationUnverifiable).
-Deliberately checked against the DICOM ground truth, not the NIfTI's own affine
-— see module docstring."""
+Below this the ground-truth IOP normal is not cleanly aligned with the physical
+S/I axis (oblique gantry, or a coronal/sagittal series), so the check is not
+meaningful and detection refuses to judge (raises OrientationUnverifiable). The
+check is on magnitude only (sign-independent — D6's raw, unforced normal has the
+same |Z|-component as the old head-forced one), and deliberately against the
+DICOM ground truth, not the NIfTI's own affine — see module docstring."""
 
 
 def _read_ipp(path: str) -> np.ndarray:
@@ -121,13 +122,17 @@ def _series_file_names(directory: Path) -> list[str]:
     return list(names)
 
 
-def _head_direction_from_series(
+def _iop_normal_from_series(
     directory: Path,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (unit head-direction in LPS, IPP_first, IPP_last) for a series.
+    """Return (raw unit IOP normal in LPS, IPP_first, IPP_last) for a series.
 
-    Head direction is the IOP slice normal forced to point toward +Z (feet→head);
-    first/last are per GDCM's own sort order, read directly via pydicom.
+    The normal is ``cross(row_cosines, col_cosines)`` from the first file's
+    ``ImageOrientationPatient`` — *not* forced toward either side. Under D6 the
+    converter's canonical slice sense already is whichever side this raw normal
+    points to, so the expected origin (see ``is_volume_misoriented``) must be
+    derived from it unforced. First/last are per GDCM's own sort order, read
+    directly via pydicom.
     """
     dicom_names = _series_file_names(directory)
     first = pydicom.dcmread(dicom_names[0], stop_before_pixels=True)
@@ -137,24 +142,26 @@ def _head_direction_from_series(
     norm = float(np.linalg.norm(normal))
     if norm == 0.0:
         raise ValueError(f"degenerate ImageOrientationPatient {iop} (zero cross product)")
-    if normal[2] < 0:
-        normal = -normal
-    head_dir = normal / norm
+    unit_normal = normal / norm
     ipp_first = np.array([float(v) for v in first.ImagePositionPatient])
     ipp_last = np.array([float(v) for v in last.ImagePositionPatient])
-    return head_dir, ipp_first, ipp_last
+    return unit_normal, ipp_first, ipp_last
 
 
 def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
-    """True iff the on-disk NIfTI's slice origin disagrees with the ground-truth
-    DICOM feet position (i.e. it was produced by the pre-#453 reader).
+    """True iff the on-disk NIfTI's slice origin disagrees with the expected
+    IOP-normal-side origin (i.e. it was produced by a pre-#453 or pre-D6 reader).
 
     Idempotent: a corrected/remediated volume returns False, so re-running a
     remediation script is safe. Reconstructs the origin from the NIfTI affine
     (RAS→LPS, mirroring ``_LPS_TO_RAS`` in ``image.py``) and compares it to the
-    feet-end IPP within ``0.5 * slice_spacing``. The "is this axial?" guard is
-    checked against the DICOM ground truth (``head_dir``), never the NIfTI's
-    own affine — see module docstring.
+    expected origin within ``0.5 * slice_spacing``. Under D6 the canonical slice
+    sense is the side of the raw (unforced) IOP normal ``n``, so the expected
+    origin is the IPP endpoint with the **smaller** projection onto ``n`` — the
+    feet-end IPP when ``n`` points head-ward (the common case, unchanged from
+    the pre-D6 detector), the opposite end for a negative-dominant-normal
+    series. The "is this axial?" guard is checked against the DICOM ground
+    truth (``normal``), never the NIfTI's own affine — see module docstring.
 
     Raises ``OrientationUnverifiable`` when ground truth cannot be established
     (unreadable/absent series, or a non-dominantly-axial series the sign check
@@ -167,22 +174,21 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
     origin = np.asarray(lps @ affine[:3, 3], dtype=float)
 
     try:
-        head_dir, ipp_first, ipp_last = _head_direction_from_series(Path(dicom_dir))
+        normal, ipp_first, ipp_last = _iop_normal_from_series(Path(dicom_dir))
     except Exception as exc:
         raise OrientationUnverifiable(
             f"cannot read ground-truth geometry for {dicom_dir}: {exc}"
         ) from exc
 
-    if abs(head_dir[2]) < _AXIAL_DOMINANCE_THRESHOLD:
+    if abs(normal[2]) < _AXIAL_DOMINANCE_THRESHOLD:
         raise OrientationUnverifiable(
-            f"series {dicom_dir} is not dominantly axial "
-            f"(head_dir={np.round(head_dir, 3).tolist()})"
+            f"series {dicom_dir} is not dominantly axial (normal={np.round(normal, 3).tolist()})"
         )
 
-    proj_first = float(np.dot(ipp_first, head_dir))
-    proj_last = float(np.dot(ipp_last, head_dir))
-    feet = np.asarray(ipp_first if proj_first < proj_last else ipp_last, dtype=float)
+    proj_first = float(np.dot(ipp_first, normal))
+    proj_last = float(np.dot(ipp_last, normal))
+    expected_origin = np.asarray(ipp_first if proj_first < proj_last else ipp_last, dtype=float)
     # 0.5 * spacing, not 1.0 * spacing: a full-slice-span tolerance sits exactly on the
     # boundary for an "origin one slice-span off" misorientation (np.allclose treats
     # |delta| == atol as equal), which would let that exact case slip past detection.
-    return not np.allclose(origin, feet, atol=0.5 * spacing[2])
+    return not np.allclose(origin, expected_origin, atol=0.5 * spacing[2])

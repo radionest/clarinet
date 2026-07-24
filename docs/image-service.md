@@ -27,6 +27,8 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NRRD spacing resolution**: tries `spacings` key first, then `space directions` diagonal. Falls back to default `(1.0, 1.0, 1.0)` if neither is present.
 
+**NRRD read failures** (breaking): `read`/`read_nrrd` raise `ImageReadError` on a 4-D `.seg.nrrd` — read layered segmentations via `LayeredSegmentation` or `grid_io.read_grid` instead of building a degenerate NaN grid — and on a 3-D NRRD whose `space directions` are present without a supported `space` field. The `space` field is now honored (LPS as-is, RAS/LAS converted, anything else — including missing `space` — raises), so a third-party RAS/LAS file that was previously misread as LPS now fails loudly; this only affects non-Slicer files, since Slicer always writes LPS.
+
 **DICOM slice sorting**: GDCM orders by `ImagePositionPatient` projected onto the slice normal (→ `InstanceNumber` fallback); the reader then canonicalizes the slice axis to a version-stable orientation (see "Slice-Axis Canonicalization" below).
 
 **DICOM error tolerance**: non-DICOM files and DICOM files without `pixel_array` are silently skipped. Only raises `ImageReadError` if zero valid slices remain.
@@ -170,7 +172,7 @@ Available measures: `IoU`, `Dice`, `Coverage`, `OverlapCoefficient`, `AbsoluteOv
 |---|---|---|
 | `a.same_grid(b, *, atol=1e-4)` | `bool` | Grids equal within tolerance (shape + affine). |
 | `a.assert_same_grid(b, *, atol=1e-4)` | `None` | Raises `GeometryMismatchError` with a diagnostic if grids differ. |
-| `conform_seg_to_grid(seg_path, grid_path, *, out_path=None)` | `bool` | Repair helper: resample a `.seg.nrrd` onto a reference volume's grid (in place or to `out_path`); returns whether a resample was needed. For batch-fixing historically misaligned files. |
+| `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `bool` | Repair helper: classifies the pair via `grid_relation` first — `SAME` is a no-op (`False`), `REARRANGED` (mirror/transpose) repairs by an exact index rearrangement (3-D and 4-D layered `.seg.nrrd`, layer/label-preserving), `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True`. For batch-fixing historically misaligned files. See [`docs/grid-workflows.md`](/docs/grid-workflows.md) for the SAME/REARRANGED/FOREIGN decision table. |
 
 ### Deprecated Operators
 
@@ -345,23 +347,36 @@ unreadable DICOM tags).
 
 ### Slice-Axis Canonicalization
 
-The reader normalizes the slice axis so it points along the **positive sense of its dominant
-anatomical axis** (`_canonicalize_slice_axis`). This makes the conversion **reproducible across
-framework versions**: a series re-converted later (repair, anonymization path migration, manual
-re-run) lands on the *identical* voxel grid. Without it, the slice-ordering convention drifts
-between readers — the pre-#221 hand-written reader sorted by ascending `ImagePositionPatient[2]`,
-while GDCM sorts along the IOP slice normal, which can point either way — so a segmentation frozen
-on one grid and another frozen on the other end up on physically equivalent but **index-reversed**
-grids (the projection/inspector-seg Z-flip). The flip is **geometry-preserving**: the array, origin,
-and slice direction are reversed *together*, so every voxel keeps its physical position (a
-direction-only flip would mirror the data). No-op when the slice axis already points the canonical way.
+The reader normalizes the slice axis so it points along the **canonical sense of the IOP
+normal** — the side of `cross(direction[:, 0], direction[:, 1])`, the physical normal implied
+by the DICOM row/column directions (`_canonicalize_slice_axis`). Since
+`det([row, col, slice]) = normal · slice_dir`, this makes the emitted determinant **positive for
+every series with a non-degenerate `ImageOrientationPatient`**; it falls back to the previous
+fixed positive-dominant-axis rule (plus a logged warning) only when the in-plane columns are
+degenerate or the slice axis is too close to orthogonal to the normal to judge reliably. This
+makes the conversion **reproducible across framework versions**: a series re-converted later
+(repair, anonymization path migration, manual re-run) lands on the *identical* voxel grid.
+Without it, the slice-ordering convention drifts between readers — the pre-#221 hand-written
+reader sorted by ascending `ImagePositionPatient[2]`, while GDCM sorts along the IOP slice
+normal, which can point either way — so a segmentation frozen on one grid and another frozen on
+the other end up on physically equivalent but **index-reversed** grids (the projection/inspector-seg
+Z-flip). The flip is **geometry-preserving**: the array, origin, and slice direction are reversed
+*together*, so every voxel keeps its physical position (a direction-only flip would mirror the
+data). No-op when the slice axis already points the canonical way.
+
+See also: [`docs/grid-workflows.md`](/docs/grid-workflows.md) for the design rationale behind
+the IOP-normal canonical sense, the live-Slicer probe evidence, and the full
+`Grid`/`GridRelation`/`RelationKind` vocabulary.
 
 ### Spacing, Origin, Direction
 
-Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization:
-- `GetSpacing()` returns `(x, y, z)`, mapped to internal `(row=y, col=x, slice=z)`
+Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization.
+The array, spacing, and direction all use SimpleITK's own `(x, y, z)` axis order — DICOM
+IOP in-plane order, no in-plane row/column swap:
+- `GetArrayFromImage()`'s `(z, y, x)` becomes the internal `(x, y, z)` array via `transpose(2, 1, 0)` — matches `GetSize()`'s axis order
+- `GetSpacing()` returns `(x, y, z)`, used as-is
 - `GetOrigin()` returns `(x, y, z)` in LPS, first overridden by the ground-truth IPP correction above — moved to the opposite slice end (the exact last-slice IPP, not an extrapolation) if the axis is flipped
-- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention, then the slice column is sign-normalized
+- `GetDirection()` reshaped to a 3×3 matrix is used as-is — column *i* already matches array axis *i*, so no reorder is needed. Only the slice column (axis 2) is still adjusted, by the ground-truth IPP correction and `_canonicalize_slice_axis`'s sign normalization above; the in-plane columns (0, 1) pass through untouched
 
 `RescaleSlope`/`RescaleIntercept` are applied automatically by GDCM during `Execute()`.
 
