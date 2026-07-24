@@ -1167,6 +1167,183 @@ __execResult = result
     assert result["foreign_no_file"] is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.xdist_group("slicer")
+async def test_export_segmentation_conform_shared_layer_matrix(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """Issue #500: conform export must survive every layer representation.
+
+    Rows: (a) shared-layer source with custom values {3,7}; (b) mixed
+    shared+separate (overlapping) source; (c) empty segment among non-empty;
+    (d) fresh two-segment non-overlapping paint (P-A: separate layers).
+    Every row asserts per-segment physical voxel coincidence between the
+    conformed file and the plain export, plus name->label equality (D5).
+    """
+    context = {"working_folder": "/tmp"}
+    script = """
+import os
+import numpy as np
+import SimpleITK as sitk
+import vtk
+
+base = os.path.join(working_folder, 't7_shared'); os.makedirs(base, exist_ok=True)
+vol_path = os.path.join(base, 'lh_volume.nrrd')
+
+nx = ny = nz = 6
+vol_arr = np.zeros((nz, ny, nx), dtype=np.int16); vol_arr[1:4, 2:4, 1:3] = 100
+vimg = sitk.GetImageFromArray(vol_arr)
+vimg.SetDirection((1.0,0,0, 0,1.0,0, 0,0,-1.0))   # det<0 -> loaded node REARRANGED vs disk
+sitk.WriteImage(vimg, vol_path)
+loaded = slicer.util.loadVolume(vol_path)
+seg_logic = slicer.modules.segmentations.logic()
+
+
+def _per_segment_world_coords(path):
+    node = slicer.util.loadSegmentation(path)
+    out = {}
+    try:
+        v = node.GetSegmentation()
+        for i in range(v.GetNumberOfSegments()):
+            sid = v.GetNthSegmentID(i)
+            name = v.GetSegment(sid).GetName()
+            extracted = _extract_segment_labelmap(node, sid)
+            coords = set()
+            if extracted is not None:
+                lm, _ = extracted
+                m = vtk.vtkMatrix4x4(); lm.GetImageToWorldMatrix(m)
+                mask = _labelmap_to_mask(lm)
+                ext = lm.GetExtent()
+                if mask is not None:
+                    for k, j, i2 in zip(*[a.tolist() for a in np.nonzero(mask)]):
+                        p = m.MultiplyPoint((ext[0] + i2, ext[2] + j, ext[4] + k, 1.0))
+                        coords.add((round(p[0], 2), round(p[1], 2), round(p[2], 2)))
+            out.setdefault(name, set()).update(coords)
+    finally:
+        slicer.mrmlScene.RemoveNode(node)
+    return out
+
+
+def _labels_of(path):
+    node = slicer.util.loadSegmentation(path)
+    try:
+        v = node.GetSegmentation()
+        return {v.GetSegment(v.GetNthSegmentID(i)).GetName():
+                int(v.GetSegment(v.GetNthSegmentID(i)).GetLabelValue())
+                for i in range(v.GetNumberOfSegments())}
+    finally:
+        slicer.mrmlScene.RemoveNode(node)
+
+
+def _row(node_name, tag):
+    plain = os.path.join(base, tag + '_plain.seg.nrrd')
+    conf = os.path.join(base, tag + '_conf.seg.nrrd')
+    for p in (plain, conf):
+        if os.path.isfile(p):
+            os.remove(p)
+    export_segmentation(node_name, plain)
+    export_segmentation(node_name, conf, conform_to=vol_path)
+    pc, cc = _per_segment_world_coords(plain), _per_segment_world_coords(conf)
+    return {
+        'coincident': {n: (cc.get(n) == c) for n, c in pc.items()},
+        'labels_equal': _labels_of(plain) == _labels_of(conf),
+        'conf_relation': grid_relation(_read_grid_on_disk(conf),
+                                       _read_grid_on_disk(vol_path)).kind.value,
+        'nonempty': all(len(c) > 0 for n, c in pc.items() if n not in ('Empty',)),
+        'tmp_gone': (slicer.mrmlScene.GetFirstNodeByName('_conform_ref') is None
+                     and slicer.mrmlScene.GetFirstNodeByName('_conform_seg') is None),
+    }
+
+
+def _identity(node):
+    v = node.GetSegmentation()
+    return sorted((v.GetSegment(v.GetNthSegmentID(i)).GetName(),
+                   int(v.GetSegment(v.GetNthSegmentID(i)).GetLabelValue()))
+                  for i in range(v.GetNumberOfSegments()))
+
+
+result = {}
+m = vtk.vtkMatrix4x4(); loaded.GetIJKToRASMatrix(m)
+
+# Row (a): shared layer via ImportLabelmapToSegmentationNode, custom values {3,7}
+lab = np.zeros((nz, ny, nx), dtype=np.uint8)
+lab[1:3, 2:4, 1:3] = 3; lab[3:5, 2:4, 1:3] = 7
+lab_scalar = slicer.util.addVolumeFromArray(lab, name='_lab_a_src')
+lab_scalar.SetIJKToRASMatrix(m)
+lab_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', '_lab_a')
+slicer.modules.volumes.logic().CreateLabelVolumeFromVolume(slicer.mrmlScene, lab_node, lab_scalar)
+slicer.util.updateVolumeFromArray(lab_node, lab)
+slicer.mrmlScene.RemoveNode(lab_scalar)
+seg_a = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'SharedA')
+seg_a.CreateDefaultDisplayNodes()
+seg_logic.ImportLabelmapToSegmentationNode(lab_node, seg_a)
+seg_a.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+a_before = _identity(seg_a)
+try:
+    result['a'] = _row('SharedA', 'a')
+    result['a_source_intact'] = (_identity(seg_a) == a_before)
+except SlicerHelperError as exc:
+    result['a_error'] = str(exc)[:200]
+
+# Row (b): mixed — shared layer (2 segs) + one overlapping segment on its own layer
+seg_b = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'MixedB')
+seg_b.CreateDefaultDisplayNodes()
+seg_logic.ImportLabelmapToSegmentationNode(lab_node, seg_b)
+seg_b.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+vb = seg_b.GetSegmentation()
+vb.AddEmptySegment('ovl', 'Overlap', (0.0, 0.0, 1.0))
+mo = np.zeros((nz, ny, nx), dtype=np.uint8); mo[1:4, 2:4, 1:3] = 1  # overlaps both
+slicer.util.updateSegmentBinaryLabelmapFromArray(mo, seg_b, 'ovl', loaded)
+try:
+    result['b'] = _row('MixedB', 'b')
+except SlicerHelperError as exc:
+    result['b_error'] = str(exc)[:200]
+
+# Row (c): empty named segment among non-empty (roster parity plain vs conf)
+seg_c = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'EmptyC')
+seg_c.CreateDefaultDisplayNodes()
+seg_logic.ImportLabelmapToSegmentationNode(lab_node, seg_c)
+seg_c.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+seg_c.GetSegmentation().AddEmptySegment('emp', 'Empty', (0.5, 0.5, 0.5))
+try:
+    r = _row('EmptyC', 'c')
+    pl = os.path.join(base, 'c_plain.seg.nrrd'); cf = os.path.join(base, 'c_conf.seg.nrrd')
+    r['roster_equal'] = sorted(_labels_of(pl)) == sorted(_labels_of(cf))
+    result['c'] = r
+except SlicerHelperError as exc:
+    result['c_error'] = str(exc)[:200]
+
+# Row (d): fresh two-segment non-overlapping paint (P-A said: shared layer)
+s = SlicerHelper(working_folder)
+fd = s.create_segmentation('FreshD')
+fd.add_segment('A', (1.0, 0, 0)).add_segment('B', (0, 1.0, 0))
+fd.node.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+vd = fd.node.GetSegmentation()
+ma = np.zeros((nz, ny, nx), dtype=np.uint8); ma[1:3, 2:4, 1:3] = 1
+mb = np.zeros((nz, ny, nx), dtype=np.uint8); mb[3:5, 2:4, 1:3] = 1
+slicer.util.updateSegmentBinaryLabelmapFromArray(ma, fd.node, vd.GetNthSegmentID(0), loaded)
+slicer.util.updateSegmentBinaryLabelmapFromArray(mb, fd.node, vd.GetNthSegmentID(1), loaded)
+try:
+    result['d'] = _row('FreshD', 'd')
+except SlicerHelperError as exc:
+    result['d_error'] = str(exc)[:200]
+
+__execResult = result
+"""
+    response = await slicer_service.execute(slicer_url, script, context=context, include_correspondence=True)
+    for row in ("a", "b", "c", "d"):
+        assert f"{row}_error" not in response, f"row {row}: {response.get(f'{row}_error')}"
+        data = response[row]
+        assert data["conf_relation"] == "same", f"row {row}: {data}"
+        assert data["labels_equal"], f"row {row}: labels diverged: {data}"
+        assert data["nonempty"], f"row {row}: a voxeled segment came back empty: {data}"
+        assert all(data["coincident"].values()), f"row {row}: {data['coincident']}"
+        assert data["tmp_gone"], f"row {row}: temp conform nodes leaked into the scene"
+    assert response["c"]["roster_equal"], f"row c roster: {response['c']}"
+    assert response["a_source_intact"], "conform re-grid mutated the caller's node"
+
+
 async def test_merge_as_pool_guards_grid_mismatch(
     slicer_service: SlicerService,
     slicer_url: str,
