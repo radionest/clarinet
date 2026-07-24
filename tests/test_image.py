@@ -590,11 +590,15 @@ class TestNrrdReaderHardening:
 
         img = Image()
         with pytest.raises(ImageReadError, match="LayeredSegmentation"):
-            img.read(path)
+            img.read_nrrd(path)
         # No partial/bad state survives the raise (the pre-fix behavior built a grid
         # with a NaN direction/spacing row straight from the list-axis header row).
         assert not np.isnan(img.spacing).any()
         assert not np.isnan(img.direction).any()
+        # No partial state at all: the header must not be retained either — a
+        # later save_as() on this discarded object must not see stale 4-D keys.
+        assert img._nrrd_header is None
+        assert img._source_path is None
 
     def test_layered_segmentation_honors_ras_space(self, tmp_path: Path) -> None:
         """LayeredSegmentation._apply_grid_from_header shares `_nrrd_space_to_lps`

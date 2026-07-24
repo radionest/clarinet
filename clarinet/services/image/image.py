@@ -506,9 +506,6 @@ class Image:
         except Exception as e:
             raise ImageReadError(f"Failed to read NRRD file: {file_path}") from e
 
-        self._nrrd_header = header
-        self._source_path = file_path
-
         sizes = [int(s) for s in header["sizes"]]
         if len(sizes) != 3:
             raise ImageReadError(
@@ -516,6 +513,9 @@ class Image:
                 f"(sizes={sizes}). A 4-D multi-layer .seg.nrrd is read via "
                 "LayeredSegmentation, or grid_io.read_grid for grid-only access."
             )
+
+        self._nrrd_header = header
+        self._source_path = file_path
 
         # Prefer space directions (carries both spacing and orientation)
         space_dirs = header.get("space directions")
