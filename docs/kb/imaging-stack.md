@@ -3,7 +3,7 @@ type: Subsystem
 title: Imaging stack
 description: How Clarinet talks to imaging systems — the async DICOM client against PACS, the DICOMweb proxy and its four-tier cache behind OHIF, and the HTTP integration with 3D Slicer.
 tags: [dicom, pacs, dicomweb, ohif, slicer, imaging]
-timestamp: 2026-07-21T19:46:32Z
+timestamp: 2026-07-24T11:33:48Z
 ---
 
 Three integrations, each pointing at a different consumer of the same images.
