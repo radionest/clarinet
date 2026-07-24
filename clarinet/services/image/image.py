@@ -37,6 +37,9 @@ def nrrd_space_transform(space: str | None) -> np.ndarray:
     """3x3 world-coordinate transform taking the header's ``space`` into LPS.
 
     Identity for LPS; the diagonal X/Y (RAS) or Y (LAS) sign flip otherwise.
+    Package-internal-public (not exported from ``clarinet.services.image``):
+    :mod:`layered_segmentation` imports it directly from this module rather
+    than via a private cross-module import.
 
     Raises:
         ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.

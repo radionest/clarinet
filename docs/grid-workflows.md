@@ -35,7 +35,7 @@ below), so this only affects third-party NRRD files.
 **The voxel-to-physical affine** (`affine_4x4`) is a 4×4 matrix: the 3×3 linear
 part is `direction` scaled per-column by `spacing` (each `direction` column is a
 unit vector for that array axis), and the translation column is `origin`.
-`Image.affine_4x4` (`clarinet/services/image/image.py:316`) and
+`Image.affine_4x4` (`clarinet/services/image/image.py:328`) and
 `Grid.from_components` (`clarinet/services/image/grid.py:85`) build this matrix by
 the identical formula — the two are meant to be interchangeable representations of
 the same grid.
@@ -144,13 +144,13 @@ explain actually happens:
   it exports mirrored relative to the on-disk volume file, even though it looked
   correctly aligned to the user on screen the whole time.
 - `export_segmentation(name, output_path, *, conform_to=None)`
-  (`clarinet/services/slicer/helper.py:384`) is the write-boundary guard.
+  (`clarinet/services/slicer/helper.py:416`) is the write-boundary guard.
   `conform_to=<reference file path>` reads the reference's **on-disk** grid
   (`_read_grid_on_disk`, `helper.py:244` — via `sitk.ImageFileReader`, never a
   loaded node, never `loadVolume` — Probe P2), classifies the segmentation node's
   *current* grid against it: `SAME` exports directly; `REARRANGED` re-grids
   **exactly** onto the reference by index rearrangement on a temporary node
-  (`_reindex_segmentation_to_grid`, `helper.py:329`, no interpolation, overlapping
+  (`_reindex_segmentation_to_grid`, `helper.py:335`, no interpolation, overlapping
   layers preserved — Probe P5), never mutating the caller's node; `FOREIGN` raises
   `SlicerHelperError` and writes nothing. The written file is then re-read and
   re-classified against the reference — any mismatch (or read failure) deletes it
@@ -207,7 +207,7 @@ correspondence-engine set-ops' own pre-regrid check
 | `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:378`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
-| `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:384` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
+| `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:416` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
