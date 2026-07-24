@@ -319,6 +319,15 @@ class TestGridRelation:
         assert rearranged.perm == (1, 0, 2)
         assert rearranged.flips == (False, True, False)
 
+    def test_singular_affine_is_foreign_not_an_exception(self) -> None:
+        """A degenerate grid (zero-spacing axis — corrupt header, 2-D-as-3-D file)
+        must classify FOREIGN; the docstring promises grid_relation never raises."""
+        singular = Grid.from_components((4, 4, 4), (1.0, 1.0, 0.0), (0.0, 0.0, 0.0), np.eye(3))
+        regular = Grid.from_components((4, 4, 4), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0), np.eye(3))
+
+        assert grid_relation(singular, regular).kind is RelationKind.FOREIGN
+        assert grid_relation(regular, singular).kind is RelationKind.FOREIGN
+
 
 # ---------------------------------------------------------------------------
 # read_grid / assert_same_grid_on_disk (clarinet-side disk IO)

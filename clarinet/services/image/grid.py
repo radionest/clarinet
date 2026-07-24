@@ -189,7 +189,9 @@ def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
     Never raises for a mismatched grid — ``FOREIGN`` is a normal return
     value, not an exception; disk-level fail-fast asserts belong to a later,
     server-only module (this one also ships in the Slicer bundle, which has
-    no framework exceptions to raise).
+    no framework exceptions to raise). A degenerate grid whose affine is
+    singular (e.g. a zero-spacing axis) classifies as ``FOREIGN`` for the
+    same reason.
 
     Composes ``M = inv(a.affine) @ b.affine`` — the transform from ``b``'s
     voxel-index space into ``a``'s. ``REARRANGED`` iff ``M``'s linear part is
@@ -213,7 +215,13 @@ def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
     the predicate operates purely on the index-space transform ``M``, never
     on world-axis labels.
     """
-    m = np.linalg.inv(a.affine) @ b.affine
+    try:
+        m = np.linalg.inv(a.affine) @ b.affine
+    except np.linalg.LinAlgError:
+        # Degenerate grid (singular affine — e.g. a zero-spacing axis from a
+        # corrupt header): not comparable to anything, and this function
+        # promises to never raise for a mismatched grid.
+        return GridRelation.foreign()
     linear = m[:3, :3]
     offset = m[:3, 3]
 
