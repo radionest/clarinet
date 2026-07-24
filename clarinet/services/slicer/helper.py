@@ -333,29 +333,45 @@ def _node_binary_labelmap_grid(seg_node: Any) -> Grid:
 
 
 def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any, Any]:
-    """Re-grid *source_node*'s segments onto *ref_grid* by exact index rearrangement.
+    """Re-grid *source_node*'s segments onto *ref_grid* via a per-layer bake.
 
     Builds a hidden scalar-volume node carrying *ref_grid*'s IJK-to-RAS matrix
     (never a loaded node's -- a loaded volume's matrix may already be
     ITK-canonicalized, which is the bug this module exists to route around)
-    and a temporary segmentation node on that grid. Each source segment's
-    binary labelmap is read back through ``arrayFromSegmentBinaryLabelmap(...,
-    referenceVolumeNode=...)``, which resamples with nearest-neighbor -- exact
-    (no interpolation blur) for a REARRANGED (signed-permutation) grid
-    relationship. Segments are copied one at a time so overlap between them
-    survives; Slicer's own writer decides shared-vs-separate layers at export
-    time, so layer structure needs no manual bookkeeping here. Any failure
-    mid-loop removes both temp nodes before re-raising.
+    and a temporary segmentation node on that grid. Segments are grouped by
+    their shared binary-labelmap layer -- representation-object identity
+    (VTK address string, never python ``id()``), the very object pitfall 1
+    warns is *shared* is exactly the per-layer handle needed here (D1/D2).
+    Each layer's multi-label ``vtkOrientedImageData`` is resampled onto the
+    reference grid in one shot via
+    ``vtkOrientedImageDataResample.ResampleOrientedImageToReferenceOrientedImage``
+    (nearest-neighbor -- exact, no interpolation blur, for a REARRANGED
+    signed-permutation grid relationship) and imported via
+    ``ImportLabelmapToSegmentationNode``, which bakes each segment's label
+    value into its own voxels -- the only way a shared layer's custom values
+    (e.g. ``{3, 7}``) survive the writer's layer collapse. Imported segments
+    are matched back to their source segment by (layer, label value) and
+    renamed/recolored; label values need no restore -- they arrive correct
+    from the bake (D3). Segments with no voxels are re-added as named
+    empties via ``AddEmptySegment`` + ``SetLabelValue``. Any failure removes
+    both temp nodes before re-raising.
 
     *source_node* is only ever read -- never mutated.
 
-    Segment ids, names, colors, and label values are copied verbatim.
+    Segment names, colors, and label values match the source. Voxel-less
+    segments keep their source id; a voxeled segment's id may be regenerated
+    by Slicer on import instead -- ``RemoveSegment``+``AddSegment`` re-keying
+    was rejected because Slicer regenerates the segment's *label value* on
+    re-add (probe P-C part 3: ``value_kept == False``), which would corrupt
+    custom values. Ids and order are therefore not part of the conformance
+    contract -- callers and validators match segments by name.
 
     Returns:
         ``(hidden_ref_node, tmp_segmentation_node)`` -- both scene-owned; the
         caller removes them (``slicer.mrmlScene.RemoveNode``) once done.
     """
     import numpy as np
+    import vtkSegmentationCorePython as vtkSegCore
 
     nx, ny, nz = ref_grid.shape
     placeholder = np.zeros((nz, ny, nx), dtype=np.uint8)
@@ -372,17 +388,76 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
         tmp_seg.SetHideFromEditors(True)
         tmp_seg.SetReferenceImageGeometryParameterFromVolumeNode(hidden_ref)
 
+        # Reference geometry for the per-layer resample (matrix from the same
+        # ras_affine the hidden volume carries -- no vtk top-level import).
+        ref_image = vtkSegCore.vtkOrientedImageData()
+        ref_image.SetExtent(0, nx - 1, 0, ny - 1, 0, nz - 1)
+        ref_image.SetImageToWorldMatrix(slicer.util.vtkMatrixFromArray(ras_affine))
+
         src_seg = source_node.GetSegmentation()
         tmp_vtk_seg = tmp_seg.GetSegmentation()
+        seg_logic = slicer.modules.segmentations.logic()
+
+        # Group segments by shared layer. The shared representation object
+        # (pitfall 1's trap) is the per-layer handle; identity via VTK address
+        # string, never python id() of the wrapper. Emptiness itself cannot be
+        # read off that same shared object's extent -- once a segmentation has
+        # any converted layer, EVERY segment's "Binary labelmap" representation
+        # is that one shared, combined-extent object (pitfall 1), so a
+        # genuinely voxel-less segment sharing a non-empty layer would read as
+        # non-empty too. is_segment_empty() isolates per-segment via the
+        # node-level GetBinaryLabelmapRepresentation instead (same primitive
+        # Task 2's guard uses), so it stays correct for that case.
+        layers: dict[str, tuple[Any, list[str]]] = {}
+        empty_ids: list[str] = []
         for i in range(src_seg.GetNumberOfSegments()):
             seg_id = src_seg.GetNthSegmentID(i)
+            if is_segment_empty(source_node, seg_id):
+                empty_ids.append(seg_id)
+                continue
+            rep = src_seg.GetSegment(seg_id).GetRepresentation("Binary labelmap")
+            addr = rep.GetAddressAsString("vtkOrientedImageData")
+            layers.setdefault(addr, (rep, []))[1].append(seg_id)
+
+        for rep, seg_ids in layers.values():
+            resampled = vtkSegCore.vtkOrientedImageData()
+            ok = vtkSegCore.vtkOrientedImageDataResample.ResampleOrientedImageToReferenceOrientedImage(
+                rep, ref_image, resampled, False, False
+            )
+            if not ok:
+                raise SlicerHelperError(
+                    "export_segmentation: per-layer resample onto the reference grid failed"
+                )
+            before = tmp_vtk_seg.GetNumberOfSegments()
+            seg_logic.ImportLabelmapToSegmentationNode(resampled, tmp_seg, "")
+            # Imported segments carry the layer's label values in their voxels;
+            # re-key them to the source ids and restore names/colors by value.
+            by_value = {int(src_seg.GetSegment(sid).GetLabelValue()): sid for sid in seg_ids}
+            imported = [
+                tmp_vtk_seg.GetNthSegmentID(j)
+                for j in range(before, tmp_vtk_seg.GetNumberOfSegments())
+            ]
+            for imp_id in imported:
+                seg_obj = tmp_vtk_seg.GetSegment(imp_id)
+                src_id = by_value.get(int(seg_obj.GetLabelValue()))
+                if src_id is None:
+                    raise SlicerHelperError(
+                        "export_segmentation: re-grid produced a label value absent "
+                        "from the source layer"
+                    )
+                source_segment = src_seg.GetSegment(src_id)
+                seg_obj.SetName(source_segment.GetName())
+                seg_obj.SetColor(source_segment.GetColor())
+                # generated-ids: keep the imported id. Do NOT RemoveSegment+AddSegment
+                # to re-key to src_id -- probe P-C part 3 showed Slicer regenerates the
+                # segment's label value on re-add (3 -> max+1), corrupting custom values.
+                # Label values are already correct from the layer bake; imported segment
+                # ids may differ from the source (not part of the D5 invariant; validators
+                # match by name).
+
+        for seg_id in empty_ids:
             segment = src_seg.GetSegment(seg_id)
-            arr = slicer.util.arrayFromSegmentBinaryLabelmap(source_node, seg_id, hidden_ref)
             tmp_vtk_seg.AddEmptySegment(seg_id, segment.GetName(), segment.GetColor())
-            slicer.util.updateSegmentBinaryLabelmapFromArray(arr, tmp_seg, seg_id, hidden_ref)
-            # updateSegmentBinaryLabelmapFromArray resets the segment to a fresh
-            # auto LabelValue; copy the source's afterwards so a loaded
-            # .seg.nrrd's custom values survive the re-grid.
             tmp_vtk_seg.GetSegment(seg_id).SetLabelValue(segment.GetLabelValue())
     except Exception:
         if tmp_seg is not None:
