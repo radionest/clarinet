@@ -167,13 +167,13 @@
   reference volume file>` reads the reference's **on-disk** grid instead and
   classifies the segmentation node's current grid against it: `SAME` exports
   as-is, `REARRANGED` re-grids exactly onto the reference before exporting
-  (layer/label-preserving for a source whose segments live on separate
-  labelmap layers; caller's node untouched), `FOREIGN` raises without
-  writing; the written file is then re-read and re-classified, deleting it on
-  any post-write mismatch — including when a non-empty source produced zero
-  written voxels, the current fail-closed behavior for a source whose
-  segments share one labelmap layer (e.g. loaded from a `.seg.nrrd` with
-  custom label values; issue #500 tracks the full fix).
+  (layer/label-preserving for every layer representation — shared, separate,
+  or mixed; caller's node untouched), `FOREIGN` raises without writing; the
+  written file is then re-read and re-classified, deleting it on any
+  post-write mismatch, including a strict per-segment check: any source
+  segment with voxels that has no voxeled counterpart in the written file
+  (matched by name) also deletes the file and raises, naming the lost
+  segment(s).
   `assert_segmentation_matches_volume` is now private
   (`_assert_segmentation_matches_volume`) and remains only as
   `load_segmentation`'s best-effort load-time check. **Downstream migration:**
@@ -357,6 +357,31 @@
   WHERE study_uid = ''`, same for `series_uid`). A prod DB that dropped the
   patient FK as a stopgap must also normalize `''` patient ids before
   re-adding it.
+- **Conform-on-export re-grids per layer; shared-layer segmentations
+  preserved (#500).** `export_segmentation(conform_to=...)`'s `REARRANGED`
+  repair previously read each segment through
+  `arrayFromSegmentBinaryLabelmap`, which returns all-zero voxels for
+  segments stored in a shared binary-labelmap layer — the normal
+  representation of a loaded `.seg.nrrd` with non-overlapping segments — so a
+  shared-layer (or mixed shared+separate) source lost some or all of its
+  segments' voxels on conform-export, and custom label values did not
+  survive even when voxels did. The repair now groups segments by their
+  shared labelmap layer, resamples each layer's multi-label image onto the
+  reference grid in one shot (nearest-neighbor — exact for the REARRANGED
+  signed-permutation relation), and imports it via
+  `ImportLabelmapToSegmentationNode`, which bakes each segment's label value
+  into its own voxels; names and colors are restored by matching the baked
+  value back to the source. This preserves every segment's voxels and custom
+  label values for any layer representation — shared, separate, or mixed.
+  Imported segment ids may differ from the source's (not part of the
+  conformance contract; validators match by name). The post-write guard also
+  tightened: it now fails closed on any single segment's voxel loss (matched
+  by name, duplicate names compared by count), not just total loss — a
+  mixed-representation source that previously lost only its shared-layer
+  segments silently now raises instead. A source whose segments are *all*
+  voxel-less has no layer to import, so the re-grid materializes the
+  reference extent as an all-zero labelmap; without it Slicer's writer emits
+  a degenerate 1×1×1 file and the post-write grid check deletes it.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

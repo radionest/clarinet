@@ -144,22 +144,27 @@ explain actually happens:
   it exports mirrored relative to the on-disk volume file, even though it looked
   correctly aligned to the user on screen the whole time.
 - `export_segmentation(name, output_path, *, conform_to=None)`
-  (`clarinet/services/slicer/helper.py:416`) is the write-boundary guard.
+  (`clarinet/services/slicer/helper.py:510`) is the write-boundary guard.
   `conform_to=<reference file path>` reads the reference's **on-disk** grid
   (`_read_grid_on_disk`, `helper.py:244` — via `sitk.ImageFileReader`, never a
   loaded node, never `loadVolume` — Probe P2), classifies the segmentation node's
   *current* grid against it: `SAME` exports directly; `REARRANGED` re-grids
-  **exactly** onto the reference by index rearrangement on a temporary node
-  (`_reindex_segmentation_to_grid`, `helper.py:335`, no interpolation, overlapping
-  layers preserved — Probe P5), never mutating the caller's node; `FOREIGN` raises
-  `SlicerHelperError` and writes nothing. The written file is then re-read and
-  re-classified against the reference — any mismatch (or read failure) deletes it
-  and raises, so a bad artifact never survives on disk. The `REARRANGED` re-grid
-  preserves segment ids, names, colors, and label values only for a source whose
-  segments live on separate labelmap layers; a source whose segments share one
-  labelmap layer (e.g. loaded from a `.seg.nrrd` with custom label values)
-  currently fails closed instead of silently writing a voxel-less file — known
-  limitation, tracked as issue #500.
+  **exactly** onto the reference **per layer** on a temporary node
+  (`_reindex_segmentation_to_grid`, `helper.py:335`): segments are grouped by
+  their shared binary-labelmap layer, each layer's multi-label image is
+  resampled onto the reference grid in one shot (nearest-neighbor, no
+  interpolation blur — exact for a signed-permutation relation) and
+  re-imported, which bakes each segment's label value into its own voxels;
+  segment names/colors are then restored by matching the baked value back to
+  its source segment. This preserves every segment's voxels **and** custom
+  label values for every layer representation — shared, separate, or mixed —
+  never mutating the caller's node; `FOREIGN` raises `SlicerHelperError` and
+  writes nothing. The written file is then re-read and re-classified against
+  the reference — any mismatch (or read failure) deletes it and raises, so a
+  bad artifact never survives on disk. A second post-write check compares the
+  source's and the written file's per-segment voxel rosters (matched by name)
+  and deletes the file and raises if any segment is missing or under-counted
+  in the written file — a strict per-segment fail-closed guard.
 
 ```mermaid
 flowchart LR
@@ -443,7 +448,22 @@ this behavior fails loudly instead of silently:
   `conform_to` (`SAME`, layers/names/labels preserved, voxels physically
   coincident with the plain export), plus a `FOREIGN` reference that must raise
   and write nothing.
-- `tests/integration/test_slicer_helper.py:1264`
+- `tests/integration/test_slicer_helper.py:1172`
+  (`test_export_segmentation_conform_shared_layer_matrix`, issue #500) covers
+  the representation matrix the round-trip test above doesn't: a shared-layer
+  source with custom label values, a mixed shared+separate (overlapping)
+  source, an empty segment alongside non-empty ones, a fresh non-overlapping
+  two-segment paint (probed live: two separate layers, each carrying the
+  natural per-layer value 1), and a source whose every segment is voxel-less.
+  Each voxeled row asserts per-segment physical voxel coincidence between the
+  conformed file and the plain export, plus name→label-value equality and an
+  equal segment count — pinning the conformance invariant as "equal to the
+  plain export, modulo grid," not "equal to the in-scene source." The
+  voxel-less row instead pins that the export still lands on the reference
+  grid: with no layer to import, the temp node carries no labelmap geometry
+  and Slicer's writer emits a degenerate 1×1×1 file, so the re-grid
+  materializes the reference extent as an all-zero labelmap.
+- `tests/integration/test_slicer_helper.py:1443`
   (`test_fresh_seg_on_canonical_volume_exports_same_without_conform`) re-exercises
   the `SAME` half of P6 end-to-end through the real converter: a synthetic DICOM
   series → `Image.read_dicom_series` (the canonical converter, emitting

@@ -20,6 +20,7 @@ from clarinet.services.image.grid import Grid, RelationKind, grid_relation
 from clarinet.services.slicer.helper import (
     SlicerHelperError,
     _labelmap_array_or_raise,
+    _missing_voxel_segments,
     _segmentation_has_voxels,
 )
 
@@ -126,7 +127,7 @@ def test_labelmap_array_none_point_data_no_attributeerror(
 # here (bundle-absent guard, missing-reference-file raise, unchanged plain
 # export, the reference_volume= removal). The SAME/REARRANGED/FOREIGN
 # classification and the re-grid mechanics themselves touch the live Slicer
-# API (arrayFromSegmentBinaryLabelmap, addVolumeFromArray, ...) and are
+# API (ImportLabelmapToSegmentationNode, addVolumeFromArray, ...) and are
 # exercised end-to-end by the live-Slicer test in Task 6.
 #
 # The post-write-reread-raises fail-closed branch (review follow-up on Task 5)
@@ -214,6 +215,70 @@ def test_export_segmentation_conform_to_post_write_reread_raises_deletes_file(
     assert not os.path.isfile(output_path)
 
 
+def _conform_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[str, str]:
+    """Wire a conform_to export whose grid checks all pass, so only the roster guard bites.
+
+    Same shape as the post-write test above -- real Grid/grid_relation for a
+    genuine SAME verdict, faked disk IO and node inspection -- but the written
+    file re-reads as SAME too, leaving the per-segment voxel guard as the only
+    branch that can fail.
+    """
+    monkeypatch.setattr(helper_mod, "Grid", Grid, raising=False)
+    monkeypatch.setattr(helper_mod, "RelationKind", RelationKind, raising=False)
+    monkeypatch.setattr(helper_mod, "grid_relation", grid_relation, raising=False)
+
+    same_grid = Grid(shape=(2, 2, 2), affine=np.eye(4))
+    monkeypatch.setattr(helper_mod, "_node_binary_labelmap_grid", lambda node: same_grid)
+    monkeypatch.setattr(helper_mod, "_read_grid_on_disk", lambda path: same_grid)
+
+    fake_util = MagicMock()
+    fake_util.getNode.return_value = MagicMock()
+
+    def _fake_export(node: object, path: str) -> None:
+        with open(path, "w"):
+            pass
+
+    fake_util.exportNode.side_effect = _fake_export
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+
+    return str(tmp_path / "ref.nii.gz"), str(tmp_path / "out.seg.nrrd")
+
+
+def test_export_segmentation_per_segment_voxel_loss_deletes_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """One segment losing its voxels fails closed, names it, and deletes the artifact.
+
+    The pre-fix guard only fired when the whole export came back voxel-less, so a
+    mixed-representation source that lost just its shared-layer segments wrote a
+    silently incomplete file (issue #500).
+    """
+    ref_path, output_path = _conform_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(helper_mod, "_voxeled_segment_roster", lambda node: {"Alpha": 1, "Beta": 1})
+    monkeypatch.setattr(helper_mod, "_written_voxel_roster", lambda path: {"Alpha": 1})
+
+    with pytest.raises(SlicerHelperError, match=r"lost the voxels of segment.*Beta"):
+        helper_mod.export_segmentation("Segmentation", output_path, conform_to=ref_path)
+
+    assert not os.path.isfile(output_path)
+
+
+def test_export_segmentation_intact_roster_keeps_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every source segment present in the written file → no raise, artifact survives."""
+    ref_path, output_path = _conform_harness(monkeypatch, tmp_path)
+    roster = {"Alpha": 1, "Beta": 1}
+    monkeypatch.setattr(helper_mod, "_voxeled_segment_roster", lambda node: dict(roster))
+    monkeypatch.setattr(helper_mod, "_written_voxel_roster", lambda path: dict(roster))
+
+    assert (
+        helper_mod.export_segmentation("Segmentation", output_path, conform_to=ref_path)
+        == output_path
+    )
+    assert os.path.isfile(output_path)
+
+
 def test_export_segmentation_plain_export_unchanged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -242,3 +307,22 @@ def test_export_segmentation_reference_volume_kwarg_removed() -> None:
         helper_mod.export_segmentation(
             "Segmentation", "/tmp/out.seg.nrrd", reference_volume=object()
         )
+
+
+class TestMissingVoxelSegments:
+    def test_all_present(self) -> None:
+        assert _missing_voxel_segments({"A": 1, "B": 1}, {"A": 1, "B": 1}) == []
+
+    def test_partial_loss_detected(self) -> None:
+        assert _missing_voxel_segments({"A": 1, "B": 1}, {"A": 1}) == ["B"]
+
+    def test_duplicate_names_compared_by_count(self) -> None:
+        assert _missing_voxel_segments({"A": 2}, {"A": 1}) == ["A"]
+        assert _missing_voxel_segments({"A": 2}, {"A": 2}) == []
+
+    def test_empty_source_never_required(self) -> None:
+        # roster builders only include voxeled segments; empty source => empty roster
+        assert _missing_voxel_segments({}, {}) == []
+
+    def test_extra_written_segments_ignored(self) -> None:
+        assert _missing_voxel_segments({"A": 1}, {"A": 1, "B": 3}) == []

@@ -3,7 +3,7 @@ type: Subsystem
 title: Imaging stack
 description: How Clarinet talks to imaging systems — the async DICOM client against PACS, the DICOMweb proxy and its four-tier cache behind OHIF, and the HTTP integration with 3D Slicer.
 tags: [dicom, pacs, dicomweb, ohif, slicer, imaging]
-timestamp: 2026-07-24T11:33:48Z
+timestamp: 2026-07-24T18:17:36Z
 ---
 
 Three integrations, each pointing at a different consumer of the same images.
@@ -142,3 +142,11 @@ a component-correspondence engine). Call it from pipeline tasks inside
 [`docs/image-service.md`](../image-service.md). See also
 [`docs/grid-workflows.md`](../grid-workflows.md) for the voxel-grid model,
 grid-relation classification (SAME/REARRANGED/FOREIGN), and conform-on-export.
+
+Conform-on-export is the write boundary: a segmentation leaving Slicer is
+re-gridded onto the reference volume's on-disk grid, whatever labelmap-layer
+representation it happens to carry (segments sharing one layer, each on its
+own, or a mix), and the written file is verified before it is allowed to
+survive. Both halves are fail-closed — a grid that cannot be repaired, or an
+export that dropped any single segment's voxels, deletes the artifact and
+raises rather than shipping a silently wrong mask.
