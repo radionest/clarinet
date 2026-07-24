@@ -340,6 +340,23 @@ class TestGridRelation:
         assert grid_relation(singular, regular).kind is RelationKind.FOREIGN
         assert grid_relation(regular, singular).kind is RelationKind.FOREIGN
 
+    def test_perm_and_flips_invert_when_arguments_swap(self) -> None:
+        """kind is order-symmetric; perm/flips describe inverse mappings.
+        fwd.perm[i] = b-axis feeding a-axis i  =>  rev.perm[fwd.perm[i]] == i."""
+        rng = np.random.default_rng(_SEED)
+        a = _random_grid(rng, _BASE_SHAPE, _OBLIQUE_DIRECTION)
+        b = _related_grid(a, perm=(1, 0, 2), flips=(False, True, True))
+
+        fwd = grid_relation(a, b)
+        rev = grid_relation(b, a)
+
+        assert fwd.kind is rev.kind is RelationKind.REARRANGED
+        assert fwd.perm is not None and rev.perm is not None
+        assert fwd.flips is not None and rev.flips is not None
+        for i in range(3):
+            assert rev.perm[fwd.perm[i]] == i
+            assert rev.flips[fwd.perm[i]] == fwd.flips[i]
+
 
 # ---------------------------------------------------------------------------
 # read_grid / assert_same_grid_on_disk (clarinet-side disk IO)

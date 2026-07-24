@@ -743,7 +743,9 @@ def conform_seg_to_grid(
 
     seg_grid = read_grid(seg_path)
     ref_grid = read_grid(grid_path)
-    rel = grid_relation(seg_grid, ref_grid, atol=atol)
+    # Reference-first, matching the documented grid_relation convention (only
+    # .kind is consumed here, and kind is order-symmetric).
+    rel = grid_relation(ref_grid, seg_grid, atol=atol)
 
     if rel.kind is RelationKind.SAME:
         return False

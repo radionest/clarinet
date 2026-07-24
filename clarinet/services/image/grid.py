@@ -78,9 +78,7 @@ class GridRelation:
         return cls(kind=RelationKind.FOREIGN)
 
     @classmethod
-    def rearranged(
-        cls, perm: tuple[int, int, int], flips: tuple[bool, bool, bool]
-    ) -> GridRelation:
+    def rearranged(cls, perm: tuple[int, int, int], flips: tuple[bool, bool, bool]) -> GridRelation:
         return cls(kind=RelationKind.REARRANGED, perm=perm, flips=flips)
 
 
@@ -199,6 +197,14 @@ def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
     no framework exceptions to raise). A degenerate grid whose affine is
     singular (e.g. a zero-spacing axis) classifies as ``FOREIGN`` for the
     same reason.
+
+    Argument convention: pass the *reference/target* grid as ``a`` and the
+    *candidate/source* grid as ``b``. ``kind`` is order-symmetric, but
+    ``perm``/``flips`` are not — swapping the arguments inverts them
+    (``perm[i]`` is the ``b``-axis feeding ``a``-axis ``i``). Both runtimes
+    follow reference-first: the Slicer-side export guard passes
+    ``(reference grid, node grid)``; the server-side conform repair passes
+    ``(reference grid, segmentation grid)``.
 
     Composes ``M = inv(a.affine) @ b.affine`` — the transform from ``b``'s
     voxel-index space into ``a``'s. ``REARRANGED`` iff ``M``'s linear part is
