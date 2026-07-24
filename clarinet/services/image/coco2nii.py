@@ -120,10 +120,13 @@ def coco_to_segmentation(
         mask = _create_mask(annotation, image_meta)
         # frameNumber is 0-based slice index; imageId-1 as fallback
         slice_idx = annotation.frameNumber
-        output.img[mask > 0, slice_idx] = 1
+        # Internal in-plane axes are (x=Columns, y=Rows) since the conversion
+        # grid epoch — transpose the (row, col) mask onto them.
+        output.img[mask.T > 0, slice_idx] = 1
 
-    # Flip along Y axis to match NIfTI orientation convention
-    flipped = output.img[:, ::-1, :]
+    # Flip along the width (x) axis to match NIfTI orientation convention —
+    # the same physical axis the pre-epoch code flipped (then axis 1).
+    flipped = output.img[::-1, :, :]
     output.img = flipped
 
     logger.debug(

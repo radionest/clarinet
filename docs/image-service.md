@@ -298,8 +298,8 @@ COCODataset
 
 1. Parses COCO JSON into `COCODataset` (Pydantic validation)
 2. For each annotation: rasterizes polygon via `skimage.draw.polygon2mask` into a 2D mask
-3. Places mask at `output.img[mask > 0, frameNumber] = 1`
-4. **Flips Y axis** (`output.img[:, ::-1, :]`) to match NIfTI orientation convention
+3. Places mask at `output.img[mask.T > 0, frameNumber] = 1` — the rasterized `(row, col)` mask transposed onto the internal `(x=Columns, y=Rows)` in-plane axes
+4. **Flips the width (x) axis** (`output.img[::-1, :, :]`) to match NIfTI orientation convention — the same physical axis as before the conversion grid epoch
 5. If `separate_labels=True`, autolabel relabels connected components
 
 Annotations referencing unknown `imageId` are logged as warnings and skipped.

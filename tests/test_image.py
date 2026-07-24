@@ -1806,8 +1806,10 @@ class TestCOCO:
             "images": [
                 {
                     "id": 1,
-                    "width": 12,
-                    "height": 10,
+                    # nifti_path fixture data is (10, 12, 8) = (x=Columns, y=Rows, slices)
+                    # since the conversion grid epoch — width/height must match that order.
+                    "width": 10,
+                    "height": 12,
                     "numberOfFrames": 8,
                     "seriesInstanceUID": "1.2.3.4",
                     "sopInstanceUID": "1.2.3.4.1",
@@ -1841,6 +1843,54 @@ class TestCOCO:
 
         assert isinstance(seg, Segmentation)
         assert seg.shape == vol.shape
+
+    def test_coco_masks_on_non_square_epoch_volume(self, tmp_path: Path) -> None:
+        """Post-epoch volumes are (x=Columns, y=Rows, slices). A non-square
+        reference (width 6 != height 4) crashes the pre-fix overlay with
+        IndexError; a square one silently transposes every mask. Pin the exact
+        voxel set, hand-computed including the width-axis flip."""
+        width, height, slices = 6, 4, 3
+        vol = Image()
+        vol.img = np.zeros((width, height, slices), dtype=np.uint8)
+
+        coco_data = {
+            "info": {"mode": "seg", "studyInstanceUID": "1.2.3", "dateTime": "2026-07-23"},
+            "categories": [{"id": 1, "name": "lesion", "description": "d"}],
+            "images": [
+                {
+                    "id": 1,
+                    "width": width,
+                    "height": height,
+                    "numberOfFrames": slices,
+                    "seriesInstanceUID": "1.2.3.4",
+                    "sopInstanceUID": "1.2.3.4.5",
+                }
+            ],
+            "annotations": [
+                {
+                    "id": 1,
+                    "imageId": 1,
+                    "categoryId": 1,
+                    "area": 6.0,
+                    "bbox": (1, 1, 3, 2),
+                    "frameNumber": 0,
+                    # [x, y] corners; half-integer so polygon2mask is unambiguous:
+                    # covers pixel centers cols 1..3 (x), rows 1..2 (y).
+                    "segmentation": [[[0.5, 0.5], [3.5, 0.5], [3.5, 2.5], [0.5, 2.5]]],
+                }
+            ],
+        }
+        coco_json = tmp_path / "epoch_coco.json"
+        coco_json.write_text(json.dumps(coco_data))
+
+        seg = coco_to_segmentation(coco_json, vol, separate_labels=False)
+
+        assert seg.img.shape == (width, height, slices)
+        got = {tuple(int(i) for i in v) for v in np.argwhere(seg.img > 0)}
+        # mask covers (row r, col c) for r in {1,2}, c in {1,2,3}; placed at
+        # img[c, r, 0], then the width axis flips: x = width-1-c in {2,3,4}.
+        expected = {(x, y, 0) for x in (2, 3, 4) for y in (1, 2)}
+        assert got == expected
 
     def test_invalid_json_raises(self, nifti_path: Path, tmp_path: Path) -> None:
         bad_json = tmp_path / "bad.json"

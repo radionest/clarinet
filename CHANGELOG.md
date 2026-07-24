@@ -211,6 +211,10 @@
   legacy segmentations once against the new grid (`conform_seg_to_grid`,
   idempotent, exact for `REARRANGED` pairs) — see the conversion-orientation
   epoch section in `clarinet/docs/migration-orientation-0.10.17.md`.
+  `coco_to_segmentation` was updated in lockstep (mask transposed onto the
+  internal (x, y) axes; the NIfTI-convention flip moved to the width axis), so
+  its physical output for a given COCO file + reference volume is unchanged
+  across the epoch.
 
 ### Added
 
