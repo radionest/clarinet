@@ -54,11 +54,34 @@ class GridRelation:
     ``perm``/``flips`` are ``None`` for ``SAME``/``FOREIGN`` — only a
     ``REARRANGED`` verdict carries a well-defined axis correspondence to
     report (e.g. for a mismatch message or a re-indexing repair step).
+    Construction enforces that invariant; prefer the :meth:`same` /
+    :meth:`foreign` / :meth:`rearranged` constructors.
     """
 
     kind: RelationKind
     perm: tuple[int, int, int] | None = None  # source axis feeding each output axis
     flips: tuple[bool, bool, bool] | None = None  # whether that mapping is negated
+
+    def __post_init__(self) -> None:
+        if self.kind is RelationKind.REARRANGED:
+            if self.perm is None or self.flips is None:
+                raise ValueError("REARRANGED requires both perm and flips")
+        elif self.perm is not None or self.flips is not None:
+            raise ValueError(f"{self.kind.name} carries no perm/flips detail")
+
+    @classmethod
+    def same(cls) -> GridRelation:
+        return cls(kind=RelationKind.SAME)
+
+    @classmethod
+    def foreign(cls) -> GridRelation:
+        return cls(kind=RelationKind.FOREIGN)
+
+    @classmethod
+    def rearranged(
+        cls, perm: tuple[int, int, int], flips: tuple[bool, bool, bool]
+    ) -> GridRelation:
+        return cls(kind=RelationKind.REARRANGED, perm=perm, flips=flips)
 
 
 @dataclass(frozen=True, eq=False)
@@ -202,11 +225,11 @@ def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
         row = linear[i]
         hits = [j for j in range(3) if not np.isclose(row[j], 0.0, atol=atol)]
         if len(hits) != 1:
-            return GridRelation(kind=RelationKind.FOREIGN)
+            return GridRelation.foreign()
         j = hits[0]
         value = row[j]
         if not np.isclose(abs(value), 1.0, atol=atol) or j in used_cols:
-            return GridRelation(kind=RelationKind.FOREIGN)
+            return GridRelation.foreign()
         used_cols.add(j)
         perm[i] = j
         flips[i] = bool(value < 0)
@@ -214,13 +237,13 @@ def grid_relation(a: Grid, b: Grid, *, atol: float = 1e-4) -> GridRelation:
     for i in range(3):
         j = perm[i]
         if b.shape[j] != a.shape[i]:
-            return GridRelation(kind=RelationKind.FOREIGN)
+            return GridRelation.foreign()
         target = float(a.shape[i] - 1) if flips[i] else 0.0
         if abs(offset[i] - target) > _OFFSET_TOL_VOXELS:
-            return GridRelation(kind=RelationKind.FOREIGN)
+            return GridRelation.foreign()
 
     perm_t = (perm[0], perm[1], perm[2])
     flips_t = (flips[0], flips[1], flips[2])
     if perm_t == (0, 1, 2) and flips_t == (False, False, False):
-        return GridRelation(kind=RelationKind.SAME)
-    return GridRelation(kind=RelationKind.REARRANGED, perm=perm_t, flips=flips_t)
+        return GridRelation.same()
+    return GridRelation.rearranged(perm_t, flips_t)

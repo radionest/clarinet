@@ -297,6 +297,28 @@ class TestGridRelation:
         assert grid_relation(a, b, atol=1e-8).kind is RelationKind.FOREIGN
         assert grid_relation(a, b, atol=1e-3).kind is RelationKind.SAME
 
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"kind": RelationKind.SAME, "perm": (0, 1, 2)},
+            {"kind": RelationKind.FOREIGN, "flips": (False, False, True)},
+            {"kind": RelationKind.REARRANGED},
+            {"kind": RelationKind.REARRANGED, "perm": (0, 1, 2)},  # flips missing
+        ],
+    )
+    def test_invalid_kind_detail_combinations_raise(self, kwargs: dict) -> None:
+        """perm/flips travel only with REARRANGED — and then both are required."""
+        with pytest.raises(ValueError):
+            GridRelation(**kwargs)
+
+    def test_classmethod_constructors(self) -> None:
+        assert GridRelation.same() == GridRelation(kind=RelationKind.SAME)
+        assert GridRelation.foreign() == GridRelation(kind=RelationKind.FOREIGN)
+        rearranged = GridRelation.rearranged((1, 0, 2), (False, True, False))
+        assert rearranged.kind is RelationKind.REARRANGED
+        assert rearranged.perm == (1, 0, 2)
+        assert rearranged.flips == (False, True, False)
+
 
 # ---------------------------------------------------------------------------
 # read_grid / assert_same_grid_on_disk (clarinet-side disk IO)
