@@ -712,13 +712,16 @@ def conform_seg_to_grid(
 
     Args:
         seg_path: Segmentation file to repair.
-        grid_path: Reference image whose grid is the target (``volume.nii.gz`` / .nrrd).
+        grid_path: Reference file whose grid is the target — any format ``read_grid``
+            supports, including a 4-D layered ``.seg.nrrd``.
         out_path: Where to write the conformed segmentation. Defaults to *seg_path*
             (in-place overwrite).
         atol: Grid-equality tolerance passed to :func:`grid_relation`.
         allow_resample: When the grids are ``FOREIGN``, resample instead of raising.
             Off by default: a silent resample of an unrelated grid can mask a real
-            misalignment rather than surface it.
+            misalignment rather than surface it. Unlike the set operations'
+            ``resample=`` (which re-grids ``other`` for any relation), this gates
+            only the ``FOREIGN`` case — ``REARRANGED`` always repairs exactly.
 
     Returns:
         True if the file was (re)written, False if the grids already matched.
@@ -765,43 +768,55 @@ def conform_seg_to_grid(
         )
 
     if is_layered:
-        _conform_layered_seg(seg_path, grid_path, target, seg_grid=seg_grid)
+        _conform_layered_seg(seg_path, target, seg_grid=seg_grid, ref_grid=ref_grid)
     else:
         seg = Segmentation(autolabel=False)
         seg.read(seg_path)
-        reference = Image()
-        reference.read(grid_path)
-        conformed = seg.reindex_to(reference, order=0)
+        conformed = seg.reindex_to(_grid_template(ref_grid), order=0)
         conformed.save_as(target, filetype)
 
     logger.info(f"Conformed segmentation {seg_path.name} onto grid of {grid_path.name}")
     return True
 
 
-def _conform_layered_seg(seg_path: Path, grid_path: Path, target: Path, *, seg_grid: Grid) -> None:
+def _grid_template(grid: Grid) -> Image:
+    """Shape-bearing Image on *grid*, as a ``reindex_to`` target.
+
+    Built from an already-read :class:`Grid` instead of re-reading the
+    reference file, so any reference ``read_grid`` understands (a 3-D volume,
+    a 4-D layered ``.seg.nrrd``, a 4-D NIfTI) can serve as the target grid.
+    """
+    template = Image()
+    template.spacing = grid.spacing
+    template.origin = grid.origin
+    template.direction = grid.direction
+    template.img = np.zeros(grid.shape, dtype=np.uint8)
+    return template
+
+
+def _conform_layered_seg(seg_path: Path, target: Path, *, seg_grid: Grid, ref_grid: Grid) -> None:
     """4-D layer-preserving repair for :func:`conform_seg_to_grid` (see its docstring).
 
-    Rearranges each layer's voxels onto the reference grid via the same proven
-    :meth:`Segmentation.reindex_to` machinery the 3-D path uses — each layer wrapped
-    as its own :class:`Segmentation` on *seg_grid*, resampled with ``order=0`` — then
-    writes the original NRRD header back verbatim except the grid-bound fields. Never
+    Rearranges each layer's voxels onto *ref_grid* via the same proven
+    ``reindex_to`` machinery the 3-D path uses — each layer wrapped as an
+    :class:`Image` on *seg_grid* (an ``Image``, not a ``Segmentation``: the
+    latter's ``img`` setter forces uint8 and would silently truncate a wider
+    label dtype), resampled with ``order=0`` — then writes the original NRRD
+    header back verbatim except the grid-bound fields. Never
     :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation.from_layers`,
     which would collapse every layer to a single ``LabelValue=1`` segment.
     """
     data, header = nrrd.read(str(seg_path))  # (L, X, Y, Z)
 
-    ref_image = Image()
-    ref_image.read(grid_path, load_data=False)
-    ref_grid = ref_image.grid
-
-    rearranged = np.empty((data.shape[0], *ref_grid.shape), dtype=np.uint8)
+    ref_template = _grid_template(ref_grid)
+    rearranged = np.empty((data.shape[0], *ref_grid.shape), dtype=data.dtype)
     for layer_index in range(data.shape[0]):
-        layer_seg = Segmentation(autolabel=False)
-        layer_seg.direction = seg_grid.direction
-        layer_seg.origin = seg_grid.origin
-        layer_seg.spacing = seg_grid.spacing
-        layer_seg.img = data[layer_index]
-        rearranged[layer_index] = layer_seg.reindex_to(ref_image, order=0).img
+        layer_img = Image()
+        layer_img.direction = seg_grid.direction
+        layer_img.origin = seg_grid.origin
+        layer_img.spacing = seg_grid.spacing
+        layer_img.img = data[layer_index]
+        rearranged[layer_index] = layer_img.reindex_to(ref_template, order=0).img
 
     # Preserve the header verbatim except the grid-bound fields: every Segment{i}_Name /
     # LabelValue / Layer / Color, and the layer count, survive untouched. Dropping stale

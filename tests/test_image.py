@@ -2540,6 +2540,67 @@ class TestConformLayeredSegToGrid:
         out_data, _ = nrrd.read(str(seg_path))
         np.testing.assert_array_equal(out_data[0], np.flip(layer0, axis=2))
 
+    def test_conform_4d_layered_preserves_wide_dtype(self, tmp_path: Path) -> None:
+        """A uint16 layer with a label value > 255 must survive verbatim — the
+        repair path must not narrow to uint8 (300 would silently become 44)."""
+        shape = (5, 5, 5)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = Image()
+        vol.img = np.zeros(shape, dtype=np.uint8)
+        vol.save_as(vol_path, FileType.NIFTI)
+
+        layer = np.zeros(shape, dtype=np.uint16)
+        layer[1:3, 1:3, 1:3] = 300
+        space_dirs = np.vstack([np.full(3, np.nan), np.diag([1.0, 1.0, -1.0])])
+        seg_path = tmp_path / "wide.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            layer[np.newaxis, ...],
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": space_dirs,
+                "space origin": np.array([0.0, 0.0, float(shape[2] - 1)]),
+                "encoding": "raw",
+                "Segment0_Name": "wide",
+                "Segment0_LabelValue": "300",
+                "Segment0_Layer": "0",
+            },
+        )
+
+        assert conform_seg_to_grid(seg_path, vol_path) is True
+
+        out_data, _ = nrrd.read(str(seg_path))
+        assert out_data.dtype == np.uint16
+        assert {int(v) for v in np.unique(out_data)} == {0, 300}
+        np.testing.assert_array_equal(out_data[0], np.flip(layer, axis=2))
+
+    def test_conform_3d_seg_against_layered_reference(self, tmp_path: Path) -> None:
+        """The reference may be anything read_grid understands — including a 4-D
+        layered .seg.nrrd (pre-fix: ImageReadError from re-reading it as Image)."""
+        shape = (6, 5, 4)
+        ref = LayeredSegmentation.from_layers(
+            [("anchor", np.zeros(shape, dtype=np.uint8))],
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        ref_path = ref.save(tmp_path / "reference.seg.nrrd")
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[1:3, 1:3, 1:3] = 1
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(
+            shape=shape,
+            origin=(0.0, 0.0, float(shape[2] - 1)),
+            direction=np.diag([1.0, 1.0, -1.0]),
+            data=seg_data,
+        ).save_as(seg_path, FileType.NRRD)
+
+        assert conform_seg_to_grid(seg_path, ref_path) is True
+        relation = grid_relation(read_grid(ref_path), read_grid(seg_path))
+        assert relation.kind is RelationKind.SAME
+
 
 def _label_to_name(header: dict) -> dict[int, str]:
     """Map LabelValue -> Name from contiguous Segment{i}_* header blocks."""
