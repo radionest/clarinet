@@ -184,6 +184,18 @@ class TestGrid:
         with pytest.raises(ValueError, match="affine"):
             Grid(shape=(1, 2, 3), affine=np.eye(3))
 
+    def test_affine_is_defensively_copied(self) -> None:
+        """Mutating the constructor argument must not change the frozen Grid."""
+        arr = np.eye(4)
+        grid = Grid(shape=(2, 2, 2), affine=arr)
+        arr[0, 3] = 99.0
+        assert grid.origin == (0.0, 0.0, 0.0)
+
+    def test_affine_is_read_only(self) -> None:
+        grid = Grid(shape=(2, 2, 2), affine=np.eye(4))
+        with pytest.raises(ValueError, match="read-only"):
+            grid.affine[0, 0] = 5.0
+
 
 # ---------------------------------------------------------------------------
 # grid_relation

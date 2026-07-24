@@ -93,6 +93,9 @@ class Grid:
     compare the ``affine`` field with ``==``, and numpy raises on the
     resulting array's ambiguous truth value. Grids are compared via
     :func:`grid_relation`, never ``==``.
+
+    The affine is defensively copied and frozen read-only at construction —
+    a Grid never aliases caller-owned memory.
     """
 
     shape: tuple[int, int, int]
@@ -101,8 +104,12 @@ class Grid:
     def __post_init__(self) -> None:
         if len(self.shape) != 3:
             raise ValueError(f"shape must be a 3-tuple, got length {len(self.shape)}")
-        if self.affine.shape != (4, 4):
-            raise ValueError(f"affine must be a 4x4 matrix, got shape {self.affine.shape}")
+        affine = np.array(self.affine, dtype=float)  # always a fresh copy
+        if affine.shape != (4, 4):
+            raise ValueError(f"affine must be a 4x4 matrix, got shape {affine.shape}")
+        affine.setflags(write=False)
+        # Frozen dataclass: route the normalized copy through object.__setattr__.
+        object.__setattr__(self, "affine", affine)
 
     @staticmethod
     def assemble_affine(
