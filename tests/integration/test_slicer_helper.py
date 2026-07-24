@@ -1167,8 +1167,6 @@ __execResult = result
     assert result["foreign_no_file"] is True
 
 
-@pytest.mark.asyncio
-@pytest.mark.xdist_group("slicer")
 async def test_export_segmentation_conform_shared_layer_matrix(
     slicer_service: SlicerService,
     slicer_url: str,
@@ -1177,9 +1175,13 @@ async def test_export_segmentation_conform_shared_layer_matrix(
 
     Rows: (a) shared-layer source with custom values {3,7}; (b) mixed
     shared+separate (overlapping) source; (c) empty segment among non-empty;
-    (d) fresh two-segment non-overlapping paint (P-A: separate layers).
-    Every row asserts per-segment physical voxel coincidence between the
-    conformed file and the plain export, plus name->label equality (D5).
+    (d) fresh two-segment non-overlapping paint (probed live: separate
+    layers, both carrying the natural per-layer value 1). Rows (a)-(d) each
+    assert per-segment physical voxel coincidence between the conformed file
+    and the plain export, plus name->label equality (D5). Row (e) is the
+    voxel-less-source regression: with no layer to import, the temp node has
+    no labelmap geometry and Slicer's writer emits a degenerate 1x1x1 file,
+    so the re-grid materializes the reference extent instead.
     """
     context = {"working_folder": "/tmp"}
     script = """
@@ -1196,6 +1198,9 @@ vol_arr = np.zeros((nz, ny, nx), dtype=np.int16); vol_arr[1:4, 2:4, 1:3] = 100
 vimg = sitk.GetImageFromArray(vol_arr)
 vimg.SetDirection((1.0,0,0, 0,1.0,0, 0,0,-1.0))   # det<0 -> loaded node REARRANGED vs disk
 sitk.WriteImage(vimg, vol_path)
+# Built first: SlicerHelper.__init__ clears the scene, so constructing it after
+# the nodes below would detach every fixture the rows depend on.
+s = SlicerHelper(working_folder)
 loaded = slicer.util.loadVolume(vol_path)
 seg_logic = slicer.modules.segmentations.logic()
 
@@ -1236,6 +1241,16 @@ def _labels_of(path):
         slicer.mrmlScene.RemoveNode(node)
 
 
+def _segment_count(path):
+    # Dict comparisons collapse duplicate names; the raw count catches a baked
+    # segment the conform path invented or dropped.
+    node = slicer.util.loadSegmentation(path)
+    try:
+        return node.GetSegmentation().GetNumberOfSegments()
+    finally:
+        slicer.mrmlScene.RemoveNode(node)
+
+
 def _row(node_name, tag):
     plain = os.path.join(base, tag + '_plain.seg.nrrd')
     conf = os.path.join(base, tag + '_conf.seg.nrrd')
@@ -1248,8 +1263,9 @@ def _row(node_name, tag):
     return {
         'coincident': {n: (cc.get(n) == c) for n, c in pc.items()},
         'labels_equal': _labels_of(plain) == _labels_of(conf),
-        'conf_relation': grid_relation(_read_grid_on_disk(conf),
-                                       _read_grid_on_disk(vol_path)).kind.value,
+        'segment_counts': [_segment_count(plain), _segment_count(conf)],
+        'conf_relation': grid_relation(_read_grid_on_disk(vol_path),
+                                       _read_grid_on_disk(conf)).kind.value,
         'nonempty': all(len(c) > 0 for n, c in pc.items() if n not in ('Empty',)),
         'tmp_gone': (slicer.mrmlScene.GetFirstNodeByName('_conform_ref') is None
                      and slicer.mrmlScene.GetFirstNodeByName('_conform_seg') is None),
@@ -1307,15 +1323,13 @@ seg_logic.ImportLabelmapToSegmentationNode(lab_node, seg_c)
 seg_c.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
 seg_c.GetSegmentation().AddEmptySegment('emp', 'Empty', (0.5, 0.5, 0.5))
 try:
-    r = _row('EmptyC', 'c')
-    pl = os.path.join(base, 'c_plain.seg.nrrd'); cf = os.path.join(base, 'c_conf.seg.nrrd')
-    r['roster_equal'] = sorted(_labels_of(pl)) == sorted(_labels_of(cf))
-    result['c'] = r
+    result['c'] = _row('EmptyC', 'c')
 except SlicerHelperError as exc:
     result['c_error'] = str(exc)[:200]
 
-# Row (d): fresh two-segment non-overlapping paint (P-A said: shared layer)
-s = SlicerHelper(working_folder)
+# Row (d): fresh two-segment non-overlapping paint. Probed live on Slicer 5.10:
+# these land on two SEPARATE layers, each with the natural per-layer value 1 --
+# i.e. this row is also the duplicate-label-value-across-layers case.
 fd = s.create_segmentation('FreshD')
 fd.add_segment('A', (1.0, 0, 0)).add_segment('B', (0, 1.0, 0))
 fd.node.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
@@ -1329,6 +1343,34 @@ try:
 except SlicerHelperError as exc:
     result['d_error'] = str(exc)[:200]
 
+# Row (e): every segment voxel-less. No layer to import, so the temp node would
+# carry no labelmap geometry and Slicer's writer would emit a degenerate 1x1x1
+# file that fails the post-write grid re-check -- the re-grid materializes the
+# reference extent instead. Asserted separately: there are no voxels to compare.
+seg_e = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'AllEmptyE')
+seg_e.CreateDefaultDisplayNodes()
+ve = seg_e.GetSegmentation()
+ve.AddEmptySegment('e1', 'E1', (1.0, 0, 0))
+ve.AddEmptySegment('e2', 'E2', (0, 1.0, 0))
+seg_e.SetReferenceImageGeometryParameterFromVolumeNode(loaded)
+e_plain = os.path.join(base, 'e_plain.seg.nrrd')
+e_conf = os.path.join(base, 'e_conf.seg.nrrd')
+for p in (e_plain, e_conf):
+    if os.path.isfile(p):
+        os.remove(p)
+try:
+    export_segmentation('AllEmptyE', e_plain)
+    export_segmentation('AllEmptyE', e_conf, conform_to=vol_path)
+    result['e'] = {
+        'file': os.path.isfile(e_conf),
+        'relation': grid_relation(_read_grid_on_disk(vol_path),
+                                  _read_grid_on_disk(e_conf)).kind.value,
+        'labels_equal': _labels_of(e_plain) == _labels_of(e_conf),
+        'names': sorted(_labels_of(e_conf)),
+    }
+except SlicerHelperError as exc:
+    result['e_error'] = str(exc)[:200]
+
 __execResult = result
 """
     response = await slicer_service.execute(
@@ -1341,9 +1383,17 @@ __execResult = result
         assert data["labels_equal"], f"row {row}: labels diverged: {data}"
         assert data["nonempty"], f"row {row}: a voxeled segment came back empty: {data}"
         assert all(data["coincident"].values()), f"row {row}: {data['coincident']}"
+        plain_count, conf_count = data["segment_counts"]
+        assert plain_count == conf_count, f"row {row}: segment count diverged: {data}"
         assert data["tmp_gone"], f"row {row}: temp conform nodes leaked into the scene"
-    assert response["c"]["roster_equal"], f"row c roster: {response['c']}"
     assert response["a_source_intact"], "conform re-grid mutated the caller's node"
+
+    # Row (e): a voxel-less source must still conform-export onto the reference grid.
+    assert "e_error" not in response, f"row e: {response.get('e_error')}"
+    assert response["e"]["file"], "row e: voxel-less conform export left no file"
+    assert response["e"]["relation"] == "same", f"row e: {response['e']}"
+    assert response["e"]["labels_equal"], f"row e: labels diverged: {response['e']}"
+    assert response["e"]["names"] == ["E1", "E2"], f"row e: {response['e']}"
 
 
 async def test_merge_as_pool_guards_grid_mismatch(

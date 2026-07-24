@@ -378,7 +378,10 @@
   tightened: it now fails closed on any single segment's voxel loss (matched
   by name, duplicate names compared by count), not just total loss — a
   mixed-representation source that previously lost only its shared-layer
-  segments silently now raises instead.
+  segments silently now raises instead. A source whose segments are *all*
+  voxel-less has no layer to import, so the re-grid materializes the
+  reference extent as an all-zero labelmap; without it Slicer's writer emits
+  a degenerate 1×1×1 file and the post-write grid check deletes it.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

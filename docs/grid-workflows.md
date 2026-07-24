@@ -452,12 +452,17 @@ this behavior fails loudly instead of silently:
   (`test_export_segmentation_conform_shared_layer_matrix`, issue #500) covers
   the representation matrix the round-trip test above doesn't: a shared-layer
   source with custom label values, a mixed shared+separate (overlapping)
-  source, an empty segment alongside non-empty ones, and a fresh
-  non-overlapping two-segment paint (P-A: lands on separate layers). Every row
-  asserts per-segment physical voxel coincidence between the conformed file
-  and the plain export, plus name→label-value equality — pinning the
-  conformance invariant as "equal to the plain export, modulo grid," not
-  "equal to the in-scene source."
+  source, an empty segment alongside non-empty ones, a fresh non-overlapping
+  two-segment paint (probed live: two separate layers, each carrying the
+  natural per-layer value 1), and a source whose every segment is voxel-less.
+  Each voxeled row asserts per-segment physical voxel coincidence between the
+  conformed file and the plain export, plus name→label-value equality and an
+  equal segment count — pinning the conformance invariant as "equal to the
+  plain export, modulo grid," not "equal to the in-scene source." The
+  voxel-less row instead pins that the export still lands on the reference
+  grid: with no layer to import, the temp node carries no labelmap geometry
+  and Slicer's writer emits a degenerate 1×1×1 file, so the re-grid
+  materializes the reference extent as an all-zero labelmap.
 - `tests/integration/test_slicer_helper.py:1443`
   (`test_fresh_seg_on_canonical_volume_exports_same_without_conform`) re-exercises
   the `SAME` half of P6 end-to-end through the real converter: a synthetic DICOM

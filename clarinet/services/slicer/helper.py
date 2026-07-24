@@ -353,8 +353,11 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
     are matched back to their source segment by (layer, label value) and
     renamed/recolored; label values need no restore -- they arrive correct
     from the bake (D3). Segments with no voxels are re-added as named
-    empties via ``AddEmptySegment`` + ``SetLabelValue``. Any failure removes
-    both temp nodes before re-raising.
+    empties via ``AddEmptySegment`` + ``SetLabelValue``; when *every* source
+    segment is voxel-less they also get an all-zero labelmap on the reference
+    extent, without which the layerless temp node would export as a
+    degenerate 1x1x1 file and trip the post-write grid check. Any failure
+    removes both temp nodes before re-raising.
 
     *source_node* is only ever read -- never mutated.
 
@@ -446,8 +449,9 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
                 src_id = by_value.get(int(seg_obj.GetLabelValue()))
                 if src_id is None:
                     raise SlicerHelperError(
-                        "export_segmentation: re-grid produced a label value absent "
-                        "from the source layer"
+                        "export_segmentation: re-grid produced label value "
+                        f"{int(seg_obj.GetLabelValue())}, absent from the source layer "
+                        f"(source values on this layer: {sorted(by_value)})"
                     )
                 source_segment = src_seg.GetSegment(src_id)
                 seg_obj.SetName(source_segment.GetName())
@@ -462,6 +466,16 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
         for seg_id in empty_ids:
             segment = src_seg.GetSegment(seg_id)
             new_id = tmp_vtk_seg.AddEmptySegment(seg_id, segment.GetName(), segment.GetColor())
+            if not layers:
+                # Every source segment is voxel-less, so no layer was imported and the
+                # temp node carries no labelmap geometry at all -- Slicer's writer then
+                # emits a degenerate 1x1x1 file that fails the post-write grid re-check
+                # (verified live on 5.10). Materializing the reference extent as an
+                # all-zero labelmap keeps a voxel-less source exporting onto the
+                # reference grid, as it did before the per-layer bake.
+                slicer.util.updateSegmentBinaryLabelmapFromArray(
+                    placeholder, tmp_seg, new_id, hidden_ref
+                )
             tmp_vtk_seg.GetSegment(new_id).SetLabelValue(segment.GetLabelValue())
     except Exception:
         if tmp_seg is not None:
