@@ -33,7 +33,7 @@ _NRRD_SPACE_RAS = frozenset({"right-anterior-superior", "ras"})
 _NRRD_SPACE_LAS = frozenset({"left-anterior-superior", "las"})
 
 
-def _nrrd_space_transform(space: str | None) -> np.ndarray:
+def nrrd_space_transform(space: str | None) -> np.ndarray:
     """3x3 world-coordinate transform taking the header's ``space`` into LPS.
 
     Identity for LPS; the diagonal X/Y (RAS) or Y (LAS) sign flip otherwise.
@@ -89,7 +89,7 @@ def nrrd_space_to_lps(
     Raises:
         ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
     """
-    transform = _nrrd_space_transform(space)
+    transform = nrrd_space_transform(space)
     # Each space_directions row is a per-axis world vector [x, y, z]; post-multiplying
     # by the (diagonal) transform scales those world x/y/z *columns*, i.e. negates the
     # same components in every row. space_origin is a single such vector, pre-multiplied
@@ -556,7 +556,7 @@ class Image:
                 # directions branch); only a header with no `space` key keeps
                 # the raw origin — legacy leniency for spacings-only files.
                 if "space" in header:
-                    origin_arr = _nrrd_space_transform(header["space"]) @ origin_arr
+                    origin_arr = nrrd_space_transform(header["space"]) @ origin_arr
                 self._origin = (float(origin_arr[0]), float(origin_arr[1]), float(origin_arr[2]))
 
         self._shape = tuple(sizes)

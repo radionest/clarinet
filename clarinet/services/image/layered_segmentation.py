@@ -23,7 +23,7 @@ import numpy as np
 
 from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
 from clarinet.services.image.grid import Grid
-from clarinet.services.image.image import _nrrd_space_transform, nrrd_space_to_lps
+from clarinet.services.image.image import nrrd_space_to_lps, nrrd_space_transform
 from clarinet.utils.logger import logger
 
 
@@ -228,7 +228,7 @@ class LayeredSegmentation:
             if space_origin is not None:
                 origin_arr = np.asarray(space_origin[:3], dtype=float)
                 if "space" in header:
-                    origin_arr = _nrrd_space_transform(header["space"]) @ origin_arr
+                    origin_arr = nrrd_space_transform(header["space"]) @ origin_arr
                 self._origin = (float(origin_arr[0]), float(origin_arr[1]), float(origin_arr[2]))
 
     # -- voxel read --
