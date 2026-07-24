@@ -458,7 +458,7 @@ this behavior fails loudly instead of silently:
   and the plain export, plus name→label-value equality — pinning the
   conformance invariant as "equal to the plain export, modulo grid," not
   "equal to the in-scene source."
-- `tests/integration/test_slicer_helper.py:1264`
+- `tests/integration/test_slicer_helper.py:1443`
   (`test_fresh_seg_on_canonical_volume_exports_same_without_conform`) re-exercises
   the `SAME` half of P6 end-to-end through the real converter: a synthetic DICOM
   series → `Image.read_dicom_series` (the canonical converter, emitting

@@ -127,7 +127,7 @@ def test_labelmap_array_none_point_data_no_attributeerror(
 # here (bundle-absent guard, missing-reference-file raise, unchanged plain
 # export, the reference_volume= removal). The SAME/REARRANGED/FOREIGN
 # classification and the re-grid mechanics themselves touch the live Slicer
-# API (arrayFromSegmentBinaryLabelmap, addVolumeFromArray, ...) and are
+# API (ImportLabelmapToSegmentationNode, addVolumeFromArray, ...) and are
 # exercised end-to-end by the live-Slicer test in Task 6.
 #
 # The post-write-reread-raises fail-closed branch (review follow-up on Task 5)
