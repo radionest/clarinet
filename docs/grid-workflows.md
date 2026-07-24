@@ -154,7 +154,12 @@ explain actually happens:
   layers preserved — Probe P5), never mutating the caller's node; `FOREIGN` raises
   `SlicerHelperError` and writes nothing. The written file is then re-read and
   re-classified against the reference — any mismatch (or read failure) deletes it
-  and raises, so a bad artifact never survives on disk.
+  and raises, so a bad artifact never survives on disk. The `REARRANGED` re-grid
+  preserves segment ids, names, colors, and label values only for a source whose
+  segments live on separate labelmap layers; a source whose segments share one
+  labelmap layer (e.g. loaded from a `.seg.nrrd` with custom label values)
+  currently fails closed instead of silently writing a voxel-less file — known
+  limitation, tracked as issue #500.
 
 ```mermaid
 flowchart LR

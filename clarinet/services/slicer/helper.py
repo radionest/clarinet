@@ -349,6 +349,8 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
 
     *source_node* is only ever read -- never mutated.
 
+    Segment ids, names, colors, and label values are copied verbatim.
+
     Returns:
         ``(hidden_ref_node, tmp_segmentation_node)`` -- both scene-owned; the
         caller removes them (``slicer.mrmlScene.RemoveNode``) once done.
@@ -378,6 +380,10 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
             arr = slicer.util.arrayFromSegmentBinaryLabelmap(source_node, seg_id, hidden_ref)
             tmp_vtk_seg.AddEmptySegment(seg_id, segment.GetName(), segment.GetColor())
             slicer.util.updateSegmentBinaryLabelmapFromArray(arr, tmp_seg, seg_id, hidden_ref)
+            # updateSegmentBinaryLabelmapFromArray resets the segment to a fresh
+            # auto LabelValue; copy the source's afterwards so a loaded
+            # .seg.nrrd's custom values survive the re-grid.
+            tmp_vtk_seg.GetSegment(seg_id).SetLabelValue(segment.GetLabelValue())
     except Exception:
         if tmp_seg is not None:
             slicer.mrmlScene.RemoveNode(tmp_seg)
@@ -385,6 +391,26 @@ def _reindex_segmentation_to_grid(source_node: Any, ref_grid: Grid) -> tuple[Any
         raise
 
     return hidden_ref, tmp_seg
+
+
+def _written_segmentation_has_voxels(path: str) -> bool:
+    """True if a just-written segmentation file has any non-zero voxel.
+
+    Cheap post-write companion to ``_segmentation_has_voxels`` (which inspects
+    the in-scene source node). Loads the file back as a temporary segmentation
+    node -- the same path a real consumer re-opening this file would take --
+    and reuses the same per-segment voxel check, so "has voxels" means the
+    same thing on both sides of the comparison. A raw SimpleITK pixel read
+    was tried first but disagreed with Slicer's own reader on this exact file
+    (a live Slicer instance reported non-zero voxels where an external
+    SimpleITK install read all-zero) -- loading through Slicer's own
+    segmentation reader avoids that cross-library ambiguity entirely.
+    """
+    node = slicer.util.loadSegmentation(path)
+    try:
+        return _segmentation_has_voxels(node)
+    finally:
+        slicer.mrmlScene.RemoveNode(node)
 
 
 def export_segmentation(name: str, output_path: str, *, conform_to: str | None = None) -> str:
@@ -403,8 +429,13 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
             without writing. The written file is then re-read and
             re-classified against the reference grid -- a post-write mismatch
             deletes the file and raises (fail-closed: no bad artifact is left
-            behind). ``None`` skips all of this and exports the node as-is
-            (today's behavior).
+            behind). A second post-write check compares source vs. written
+            voxel presence: a non-empty source that wrote zero voxels also
+            deletes the file and raises -- this is the known failure mode for
+            a source whose segments share one labelmap layer (e.g. loaded
+            from a .seg.nrrd with custom label values); see issue #500.
+            ``None`` skips all of this and exports the node as-is (today's
+            behavior).
 
     Returns:
         The output_path on success.
@@ -415,8 +446,9 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
             correspondence bundle (same opt-in contract as
             ``detect_overlaps``/``subtract_segmentations``); ``conform_to``
             names a missing/unreadable file; the node's grid classifies as
-            FOREIGN against the reference; or the written file fails the
-            post-write SAME re-check.
+            FOREIGN against the reference; the written file fails the
+            post-write SAME re-check; or a non-empty source produced a
+            voxel-less conformed export (issue #500).
     """
     seg_node = slicer.util.getNode(name)
     if seg_node is None:
@@ -474,6 +506,16 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
             raise SlicerHelperError(
                 f"export_segmentation: post-write grid check failed for {output_path!r} "
                 f"against reference {conform_to!r} -- the written file was deleted."
+            )
+
+        if _segmentation_has_voxels(seg_node) and not _written_segmentation_has_voxels(output_path):
+            os.remove(output_path)
+            raise SlicerHelperError(
+                f"export_segmentation: '{name}' has voxels but the conformed export at "
+                f"{output_path!r} has none -- the written file was deleted. Known "
+                "limitation: a source whose segments share one labelmap layer (e.g. "
+                "loaded from a .seg.nrrd with custom label values) loses all voxels "
+                "through the REARRANGED re-grid; see issue #500."
             )
     finally:
         if tmp_seg is not None:

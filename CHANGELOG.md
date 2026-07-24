@@ -167,9 +167,14 @@
   reference volume file>` reads the reference's **on-disk** grid instead and
   classifies the segmentation node's current grid against it: `SAME` exports
   as-is, `REARRANGED` re-grids exactly onto the reference before exporting
-  (layer/label-preserving, caller's node untouched), `FOREIGN` raises without
+  (layer/label-preserving for a source whose segments live on separate
+  labelmap layers; caller's node untouched), `FOREIGN` raises without
   writing; the written file is then re-read and re-classified, deleting it on
-  any post-write mismatch. `assert_segmentation_matches_volume` is now private
+  any post-write mismatch — including when a non-empty source produced zero
+  written voxels, the current fail-closed behavior for a source whose
+  segments share one labelmap layer (e.g. loaded from a `.seg.nrrd` with
+  custom label values; issue #500 tracks the full fix).
+  `assert_segmentation_matches_volume` is now private
   (`_assert_segmentation_matches_volume`) and remains only as
   `load_segmentation`'s best-effort load-time check. **Downstream migration:**
   replace `export_segmentation(name, path, reference_volume=<node>)` with
