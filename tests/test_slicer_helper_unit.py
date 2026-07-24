@@ -20,6 +20,7 @@ from clarinet.services.image.grid import Grid, RelationKind, grid_relation
 from clarinet.services.slicer.helper import (
     SlicerHelperError,
     _labelmap_array_or_raise,
+    _missing_voxel_segments,
     _segmentation_has_voxels,
 )
 
@@ -242,3 +243,22 @@ def test_export_segmentation_reference_volume_kwarg_removed() -> None:
         helper_mod.export_segmentation(
             "Segmentation", "/tmp/out.seg.nrrd", reference_volume=object()
         )
+
+
+class TestMissingVoxelSegments:
+    def test_all_present(self) -> None:
+        assert _missing_voxel_segments({"A": 1, "B": 1}, {"A": 1, "B": 1}) == []
+
+    def test_partial_loss_detected(self) -> None:
+        assert _missing_voxel_segments({"A": 1, "B": 1}, {"A": 1}) == ["B"]
+
+    def test_duplicate_names_compared_by_count(self) -> None:
+        assert _missing_voxel_segments({"A": 2}, {"A": 1}) == ["A"]
+        assert _missing_voxel_segments({"A": 2}, {"A": 2}) == []
+
+    def test_empty_source_never_required(self) -> None:
+        # roster builders only include voxeled segments; empty source => empty roster
+        assert _missing_voxel_segments({}, {}) == []
+
+    def test_extra_written_segments_ignored(self) -> None:
+        assert _missing_voxel_segments({"A": 1}, {"A": 1, "B": 3}) == []
