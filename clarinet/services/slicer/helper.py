@@ -254,6 +254,12 @@ def _read_grid_on_disk(path: str) -> Grid:
     reads as a 3-D vector image, so its spatial grid comes straight off
     ``GetSize()``/``GetSpacing()``/etc. -- no 4-D special-casing.
 
+    (A 4-D NIfTI, by contrast, reads as a genuinely 4-D image and is refused
+    with a dimension error — only the layered NRRD collapses to a 3-D vector
+    image. The server-side ``read_grid`` instead truncates a 4-D NIfTI to its
+    spatial axes; use the 3-D series volume as the ``conform_to`` reference to
+    stay runtime-agnostic.)
+
     Raises:
         SlicerHelperError: The correspondence bundle (carrying ``Grid``) is not
             in this session's namespace -- call ``execute(...,

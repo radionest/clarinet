@@ -505,6 +505,17 @@ route through `_read_grid_on_disk` for every grid read.
   a documented DICOM or ITK contract — treat it as a debugging heuristic
   ("why doesn't this series ever flip anymore?"), not a guarantee that survives
   a future GDCM/SimpleITK version.
+- **A 4-D NIfTI as `conform_to` reference behaves differently per runtime.**
+  Server-side `read_grid` truncates it to the spatial 3-D grid; Slicer-side
+  `_read_grid_on_disk` refuses it (SimpleITK reports `dim=4` — only the 4-D
+  layered NRRD collapses to a 3-D vector image, probe P4). Use the 3-D series
+  volume as the reference.
+- **A legacy clarinet NRRD (`space directions`, no `space`) has a verdict in
+  one runtime only.** Server-side `read_grid`/`Image` raise `ImageReadError`
+  (see the one-time re-save in the migration guide); SimpleITK inside Slicer
+  still reads such a file under its own default, so `conform_to` classifies
+  there. Both behaviors are safe (loud vs. physically-correct LPS), but a
+  script comparing verdicts across runtimes must re-save the header first.
 
 ---
 
