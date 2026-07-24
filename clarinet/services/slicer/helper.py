@@ -493,7 +493,7 @@ def _written_voxel_roster(path: str) -> dict[str, int]:
 
     Loads the file back through Slicer's own reader (the same path a real
     consumer takes; raw SimpleITK reads disagreed with Slicer on this exact
-    file class — see git history of _written_segmentation_has_voxels).
+    file class — see git history for why).
     """
     node = slicer.util.loadSegmentation(path)
     try:

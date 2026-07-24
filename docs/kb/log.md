@@ -3,6 +3,7 @@
 ## 2026-07-24
 
 * **Update**: [Imaging stack](./imaging-stack.md) — the image-processing section now also points at [`docs/grid-workflows.md`](../grid-workflows.md), the behavioural reference for the voxel-grid model, grid-relation classification (SAME/REARRANGED/FOREIGN) and conform-on-export introduced by the canonical-segmentation-grids work.
+* **Update**: [Imaging stack](./imaging-stack.md) — `docs/grid-workflows.md`'s `conform_to` section now documents the per-layer conform re-grid: a shared-layer (or mixed) segmentation source conform-exports with every segment's voxels and custom label values preserved, and the post-write guard fails closed on any single segment's voxel loss, not just total loss (fixes #500).
 
 ## 2026-07-22
 
