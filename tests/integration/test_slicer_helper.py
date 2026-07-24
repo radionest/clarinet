@@ -1331,7 +1331,9 @@ except SlicerHelperError as exc:
 
 __execResult = result
 """
-    response = await slicer_service.execute(slicer_url, script, context=context, include_correspondence=True)
+    response = await slicer_service.execute(
+        slicer_url, script, context=context, include_correspondence=True
+    )
     for row in ("a", "b", "c", "d"):
         assert f"{row}_error" not in response, f"row {row}: {response.get(f'{row}_error')}"
         data = response[row]
