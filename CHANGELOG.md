@@ -220,6 +220,27 @@
   internal (x, y) axes; the NIfTI-convention flip moved to the width axis), so
   its physical output for a given COCO file + reference volume is unchanged
   across the epoch.
+- **`clarinet init` no longer accepts `--template` / `--list-templates`.** It
+  always scaffolds the full project skeleton — settings, `plan/`, dotfiles and
+  the framework agent docs. The payload now ships *inside* the package
+  (`clarinet/scaffold/`) rather than in the repository's `examples/` tree, which
+  is not part of the wheel: `clarinet init --template …` was unusable from any
+  pip install (#472). Existing files are never overwritten. The
+  `examples/project_template/` tree is gone; `examples/demo/` remains as
+  reading material.
+- **`config_tasks_path` now defaults to `./plan/` (was `./tasks/`).** A project
+  that omits the setting and keeps a `tasks/` directory must add
+  `config_tasks_path = "./tasks/"` to `settings.toml`, or rename the directory
+  to `plan/`. The scaffold, the demo and every doc already used `plan/`; the
+  default was the last holdout.
+- **A custom-code root that does not exist now aborts startup.** Previously
+  `load_python_config` logged a warning and returned zero record types — with
+  `config_delete_orphans=False` (the default) the app then started normally on
+  its previously reconciled DB rows and drifted from its configuration
+  undetected. It now raises `ConfigLoadError`, naming the unresolved path and,
+  when the value came from the default rather than the project's settings, the
+  change of default and the setting that restores the old layout. A root that
+  *exists* but holds no definitions keeps the previous lenient warning.
 
 ### Added
 
@@ -287,6 +308,17 @@
 
 ### Changed
 
+- **`overview.md` is delivered as a project-owned `.claude/CLAUDE.md` seed**
+  rather than a managed rule under `.claude/rules/clarinet/`. Its body always
+  told the user to replace it with their own study description, while the
+  managed header forbade editing and every `clarinet agent update` overwrote
+  it. It is now written once and never rewritten. Run `clarinet agent update`
+  once after upgrading: a managed `overview.md` left by an earlier version is
+  **migrated** to `.claude/CLAUDE.md` (header stripped, your edits kept) when
+  that path is free, not deleted.
+- **`clarinet agent update` now removes managed docs the installed version no
+  longer ships.** Only files carrying the managed header are pruned; anything
+  you added to the managed directory yourself is left alone.
 - Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
   `invalidate_records()`) now always fires `on_status("pending")` flows —
   even when the record was already `pending`. Previously an already-pending
