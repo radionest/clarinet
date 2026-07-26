@@ -114,6 +114,7 @@ exclude = [
 artifacts = [
     "clarinet/static/**/*",
     "clarinet/docs/**/*",
+    "clarinet/scaffold/**/*",
 ]
 
 [dependency-groups]
@@ -163,6 +164,13 @@ python_version = "3.12"
 strict = true
 exclude = ["tests", "clarinet/frontend/build"]
 plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
+
+# clarinet_plan is the in-memory anchor package assembled at runtime from the
+# project's plan/ directory — it has no on-disk source for mypy to resolve.
+# The scaffold payload imports through it, as every downstream project does.
+[[tool.mypy.overrides]]
+module = ["clarinet_plan.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [

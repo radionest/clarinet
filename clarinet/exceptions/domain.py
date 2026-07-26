@@ -418,6 +418,11 @@ class AgentScaffoldError(ClarinetError):
     package payload, init over an existing managed dir, update with none)."""
 
 
+class ProjectScaffoldError(ClarinetError):
+    """Raised when the packaged project-scaffold payload is missing or unusable
+    (e.g. a wheel built without ``clarinet/scaffold``)."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""
