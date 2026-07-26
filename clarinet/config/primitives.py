@@ -40,6 +40,15 @@ def _coerce_viewer_mode(value: Any) -> Any:
     return value
 
 
+# Sentinel marking "not passed" for optional constructor params below. Plain
+# None cannot serve this role because it is itself a valid, meaningful value
+# for some coerced fields (e.g. RecordDef.unique_by's "no uniqueness" case), so
+# it must be distinguished from omission — a param is forwarded to pydantic
+# only when the caller actually passed something, preserving pydantic's own
+# defaults/required-ness for the omitted case.
+_UNSET: Any = object()
+
+
 class FileDef(BaseModel):
     """Shared file definition (equivalent to file_registry entry).
 
@@ -56,6 +65,25 @@ class FileDef(BaseModel):
     level: DicomQueryLevel
     description: str | None = None
     name: str = ""
+
+    def __init__(
+        self,
+        *,
+        level: DicomQueryLevel | str = _UNSET,
+        **kwargs: Any,
+    ) -> None:
+        """Accept the string form of ``level`` that ``_coerce_level`` already coerces.
+
+        The field annotation stays ``DicomQueryLevel`` — pydantic reads it for
+        validation and serialization. Widening only the signature is what keeps
+        this change static-only. Mirrors ``FileRef.__init__``. ``level`` has no
+        pydantic default (it is required), so it is forwarded only when actually
+        passed — omitting it still raises pydantic's own "field required" error
+        instead of silently defaulting to a placeholder level.
+        """
+        if level is not _UNSET:
+            kwargs["level"] = level
+        super().__init__(**kwargs)
 
     @field_validator("level", mode="before")
     @classmethod
