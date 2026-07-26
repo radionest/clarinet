@@ -1,0 +1,53 @@
+# ruff configuration for a clarinet downstream project.
+# Mirrors the framework's own rule selection so suppressions written against
+# clarinet's source are valid here too.
+
+line-length = 100
+indent-width = 4
+target-version = "py312"
+
+exclude = [
+    ".venv",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "__pycache__",
+    "data",
+    # Vendored / frozen third-party code. Fixes go upstream and are re-vendored,
+    # so a local finding here is not actionable.
+    "plan/lib",
+]
+
+[lint]
+select = [
+    "E", "W", "F", "I", "B", "C4", "UP", "ARG", "SIM",
+    "TCH", "DTZ", "Q", "RUF", "ASYNC",
+]
+
+ignore = [
+    "E501",      # line too long — handled by the formatter
+    "B008",      # function calls in argument defaults
+    "B905",      # zip() without explicit strict=
+    "ASYNC210",  # these four assume trio/anyio, not pure asyncio
+    "ASYNC220",
+    "ASYNC230",
+    "ASYNC240",
+    "UP042",     # str+Enum -> StrEnum needs careful serialize-compat migration
+]
+
+fixable = ["ALL"]
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"tests/*" = ["ARG", "S101", "TCH"]
+# Slicer scripts run inside Slicer's embedded Python with injected globals.
+"plan/scripts/*" = ["F821"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"

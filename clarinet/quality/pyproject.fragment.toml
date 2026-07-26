@@ -1,0 +1,10 @@
+# Merge this into your pyproject.toml, then run `uv sync`.
+#
+# Both tools are pinned EXACTLY: their output shifts between versions, and a
+# gate whose findings change under you is a gate people stop trusting.
+[dependency-groups]
+dev = [
+    "ruff==0.15.8",
+    "mypy==1.20.0",
+    "pytest>=9",
+]
