@@ -182,6 +182,31 @@ def _models() -> list[type[BaseModel]]:
     return models
 
 
+def test_guard_discovery_still_finds_the_known_models() -> None:
+    """Floor for the two parametrized guards below.
+
+    ``@pytest.mark.parametrize("model", _models(), ...)`` with an empty list
+    collects as a single SKIPPED case (pytest's default
+    ``empty_parameter_set_mark``), not a failure — if ``_models()`` or
+    ``_coerced_fields()`` silently found nothing (e.g. primitives.py split
+    into a package, so the ``obj.__module__ == primitives.__name__`` filter in
+    ``_models()`` stops matching), every other test in this file would keep
+    passing and both guards would go green for having nothing left to check.
+    This is the one assertion that cannot itself go vacuous, so it is what
+    actually notices. It also means a newly added coerced field must be added
+    to the set below in the same edit — a deliberate, reviewed change, not
+    silent coverage growth.
+    """
+    assert {m.__name__ for m in _models()} == {"FileDef", "FileRef", "RecordDef"}
+    assert {(m.__name__, f) for m in _models() for f in _coerced_fields(m)} == {
+        ("FileDef", "level"),
+        ("FileRef", "role"),
+        ("RecordDef", "level"),
+        ("RecordDef", "viewer_mode"),
+        ("RecordDef", "unique_by"),
+    }
+
+
 @pytest.mark.parametrize("model", _models(), ids=lambda m: m.__name__)
 def test_every_coercion_validator_has_a_widened_constructor_param(
     model: type[BaseModel],
@@ -190,7 +215,10 @@ def test_every_coercion_validator_has_a_widened_constructor_param(
 
     ``**kwargs: Any`` deliberately does NOT count — it disables checking rather
     than expressing the accepted type, which is the RecordDef hole this guard
-    exists to keep from spreading.
+    exists to keep from spreading. Neither do an explicit ``Any``/``object``
+    annotation or a missing one: both type-check identically to ``**kwargs: Any``
+    (mypy treats a missing annotation as implicit ``Any``), so they must fail
+    the same way.
     """
     coerced = _coerced_fields(model)
     if not coerced:
@@ -207,10 +235,32 @@ def test_every_coercion_validator_has_a_widened_constructor_param(
         )
         declared = hints.get(field)
         field_type = model.model_fields[field].annotation
+        if field_type is str:
+            # A field whose own annotation is already `str` (e.g. a
+            # whitespace-stripping/lowercasing mode="before" validator that
+            # doesn't narrow the runtime type at all) has nothing narrower to
+            # widen FROM — the checks below would demand an impossible
+            # widening on otherwise-correct code. The explicit-param
+            # requirement above still applies to it.
+            continue
         assert declared != field_type, (
             f"{model.__name__}.__init__ declares {field} as {declared!r}, identical to "
             f"the field annotation. It must admit the looser input its validator "
             f"coerces (e.g. `| str`)."
+        )
+        # `!=` alone is satisfied by exactly the signatures this test exists to
+        # reject: `level: Any` or `level: object` (both equivalent to
+        # **kwargs: Any — they disable checking rather than express the
+        # accepted type) and a missing annotation (declared is None, and
+        # None != field_type). Require an actual, non-trivial union instead.
+        # This does NOT catch a union with a wrong extra member, e.g.
+        # `DicomQueryLevel | int` — narrower gap, left uncaught rather than
+        # chased.
+        assert typing.get_args(declared) and declared not in (typing.Any, object), (
+            f"{model.__name__}.__init__ declares {field} as {declared!r}, which does "
+            f"not express an accepted type. `Any`, `object`, and a missing annotation "
+            f"all disable checking exactly like **kwargs: Any does — none of them "
+            f"count as widening."
         )
         # Discovery-based equivalent of test_filedef_level_field_annotation_unchanged
         # (above) for every coerced field on every model, not just FileDef.level:
@@ -243,7 +293,10 @@ def _requiredness_mismatches(model: type[BaseModel]) -> list[str]:
     without inventing a fake default of its own, at the cost of mypy's "missing
     argument" check for it (accepted, see design decision D10 — the runtime
     ValidationError remains the real enforcement, exercised by
-    ``test_filedef_requires_level_when_omitted`` above). What must NOT happen:
+    ``test_filedef_requires_level_when_omitted`` above). Consequence: if such a
+    field's own requiredness later flips (required <-> optional) while its
+    param stays ``_UNSET``-defaulted, that is invisible to this guard — the
+    signature looks identical either way. What must NOT happen:
 
       - a required field getting some OTHER, non-sentinel default: that default
         would be forwarded unconditionally, silently supplying a value pydantic
