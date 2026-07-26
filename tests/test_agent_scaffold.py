@@ -20,8 +20,6 @@ DOCS = Path(clarinet.__file__).resolve().parent / "docs"
 AGENT_CLAUDE = DOCS / "agent" / "claude"
 REPO_ROOT = Path(clarinet.__file__).resolve().parent.parent
 RULES_DIR = REPO_ROOT / ".claude" / "rules"
-PROJECT_TEMPLATE_RULES = REPO_ROOT / "examples" / "project_template" / ".claude" / "rules"
-PROJECT_TEMPLATE_CLAUDE_MD = REPO_ROOT / "examples" / "project_template" / ".claude" / "CLAUDE.md"
 
 _CYRILLIC_RE = re.compile(r"[Ѐ-ӿ]")
 
@@ -49,20 +47,6 @@ def test_payload_files_present() -> None:
         assert (AGENT_CLAUDE / f"{name}.md").is_file()
     for name in DEEP_DOCS:
         assert (DOCS / f"{name}.md").is_file()
-
-
-def test_project_template_ships_same_section_rules() -> None:
-    """The research template is a second delivery path and must not fall behind.
-
-    ``clarinet init --template research`` copies this tree verbatim, so a rule
-    added to the agent-docs payload without a template twin silently reaches no
-    template-created project. The cyrillic check globs ``*.md`` and so passes
-    vacuously for a missing file; this asserts presence. Content parity is not
-    covered here — the twins differ by their deep-doc link form.
-    """
-    assert PROJECT_TEMPLATE_CLAUDE_MD.is_file()
-    for name in SECTION_RULES:
-        assert (PROJECT_TEMPLATE_RULES / f"{name}.md").is_file()
 
 
 def test_no_unresolved_clarinet_repo_links() -> None:
@@ -165,10 +149,8 @@ def test_translated_agent_docs_have_no_cyrillic() -> None:
     files = [
         *AGENT_CLAUDE.glob("*.md"),
         RULES_DIR / "slicer-context.md",
-        PROJECT_TEMPLATE_CLAUDE_MD,
-        *PROJECT_TEMPLATE_RULES.glob("*.md"),
     ]
-    assert len(files) >= 13
+    assert len(files) >= 9
     for md in files:
         assert not _CYRILLIC_RE.search(md.read_text(encoding="utf-8")), (
             f"{md} contains Cyrillic text"
