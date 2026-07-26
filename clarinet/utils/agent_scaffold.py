@@ -20,6 +20,14 @@ KNOWN_AGENTS: dict[str, str] = {"claude": "clarinet"}
 
 _DOCS_TOKEN = "{{CLARINET_DOCS}}"
 
+# Payload docs owned by the project, not the framework: written once to the
+# target below (relative to <project>/.claude/), never rewritten by `update`.
+# overview.md's own body tells the user to replace its contents, so it cannot
+# live in the managed dir where every update would clobber it.
+SEED_DOCS: dict[str, str] = {"overview.md": "CLAUDE.md"}
+
+_MANAGED_MARKER = "<!-- managed by clarinet"
+
 
 def _clarinet_version() -> str:
     try:
@@ -63,6 +71,27 @@ def _with_header(text: str, header: str) -> str:
     return header + text
 
 
+def _is_managed(text: str) -> bool:
+    """True when ``text`` carries the managed header where ``_with_header`` puts it.
+
+    Mirrors the writer: at the top for a plain document, or right after the
+    closing frontmatter delimiter for one with ``paths:`` frontmatter. A file
+    without it in either place is project-owned and must never be pruned.
+    """
+    if text.startswith(_MANAGED_MARKER):
+        return True
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            return text[end + len("\n---\n") :].startswith(_MANAGED_MARKER)
+    return False
+
+
+def _without_header(text: str) -> str:
+    """Inverse of ``_with_header`` — drop the managed header line, keep the rest."""
+    return "\n".join(line for line in text.split("\n") if not line.startswith(_MANAGED_MARKER))
+
+
 def scaffold_agent_docs(
     agent: str = "claude",
     *,
@@ -98,7 +127,52 @@ def scaffold_agent_docs(
 
     dest.mkdir(parents=True, exist_ok=True)
     for md in sorted(src.glob("*.md")):
+        if md.name in SEED_DOCS:
+            continue
         text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root.as_posix())
         (dest / md.name).write_text(_with_header(text, header), encoding="utf-8")
         logger.info(f"Wrote {dest / md.name}")
+
+    # Prune before seeding: a managed overview.md the user edited must be
+    # migrated to the seed target, and that only happens while the target is
+    # still free. Seeding first would occupy it and turn migration into deletion.
+    if mode == "update":
+        _prune_managed_dir(dest, src=src, project_dir=project_dir)
+
+    for payload_name, target_name in SEED_DOCS.items():
+        target = project_dir / ".claude" / target_name
+        if target.exists():
+            logger.info(f"Kept existing {target}")
+            continue
+        text = (src / payload_name).read_text(encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text.replace(_DOCS_TOKEN, docs_root.as_posix()), encoding="utf-8")
+        logger.info(f"Wrote {target}")
+
     return dest
+
+
+def _prune_managed_dir(dest: Path, *, src: Path, project_dir: Path) -> None:
+    """Drop managed docs the installed version no longer ships.
+
+    Files without the managed header are project-owned and left alone. A doc
+    that became a seed (``overview.md``) is *migrated* rather than deleted when
+    its target is still free — one-release courtesy for projects scaffolded
+    before the split, whose overview may carry the user's own study description.
+    """
+    payload_names = {p.name for p in src.glob("*.md")} - set(SEED_DOCS)
+    for stale in sorted(dest.glob("*.md")):
+        if stale.name in payload_names:
+            continue
+        text = stale.read_text(encoding="utf-8")
+        if not _is_managed(text):
+            continue
+        target_name = SEED_DOCS.get(stale.name)
+        target = project_dir / ".claude" / target_name if target_name else None
+        if target is not None and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(_without_header(text), encoding="utf-8")
+            logger.info(f"Migrated {stale} to {target}")
+        else:
+            logger.info(f"Removed stale managed doc {stale}")
+        stale.unlink()

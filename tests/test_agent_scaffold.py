@@ -13,6 +13,8 @@ from clarinet.utils import agent_scaffold
 from clarinet.utils.agent_scaffold import agent_source_dir, scaffold_agent_docs
 
 MANAGED = Path(".claude") / "rules" / "clarinet"
+# overview.md is delivered as a project-owned seed, not a managed rule
+SEED = Path(".claude") / "CLAUDE.md"
 
 DOCS = Path(clarinet.__file__).resolve().parent / "docs"
 AGENT_CLAUDE = DOCS / "agent" / "claude"
@@ -89,10 +91,9 @@ def test_agent_source_dir_unknown_agent() -> None:
 def test_init_writes_files_header_and_resolved_links(tmp_path: Path) -> None:
     dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
     assert dest == tmp_path / MANAGED
-    overview = (dest / "overview.md").read_text(encoding="utf-8")
-    # managed header on first line (overview has no frontmatter)
-    assert overview.startswith("<!-- managed by clarinet v")
-    # token fully substituted to an existing on-disk docs path
+    # the seed carries the token substitution but no managed header
+    overview = (tmp_path / SEED).read_text(encoding="utf-8")
+    assert not overview.startswith("<!-- managed by clarinet v")
     assert "{{CLARINET_DOCS}}" not in overview
     assert DOCS.as_posix() in overview
     assert (DOCS / "recordflow-dsl.md").is_file()
@@ -123,11 +124,11 @@ def test_update_requires_existing(tmp_path: Path) -> None:
 
 def test_update_overwrites_and_reresolves(tmp_path: Path) -> None:
     dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
-    (dest / "overview.md").write_text("STALE", encoding="utf-8")
+    (dest / "definitions.md").write_text("STALE", encoding="utf-8")
     scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
-    refreshed = (dest / "overview.md").read_text(encoding="utf-8")
+    refreshed = (dest / "definitions.md").read_text(encoding="utf-8")
     assert "STALE" not in refreshed
-    assert refreshed.startswith("<!-- managed by clarinet v")
+    assert "<!-- managed by clarinet v" in refreshed
 
 
 def test_cli_init_then_update(tmp_path: Path) -> None:
@@ -135,7 +136,8 @@ def test_cli_init_then_update(tmp_path: Path) -> None:
         command="agent", agent_command="init", path=str(tmp_path), agent="claude", force=False
     )
     handle_agent_command(args)
-    assert (tmp_path / MANAGED / "overview.md").is_file()
+    assert (tmp_path / MANAGED / "definitions.md").is_file()
+    assert (tmp_path / SEED).is_file()
 
     upd = argparse.Namespace(
         command="agent", agent_command="update", path=str(tmp_path), agent="claude"
@@ -184,14 +186,86 @@ def test_deep_docs_identical_to_rules_seeds() -> None:
 
 
 def test_written_deep_doc_links_resolve(tmp_path: Path) -> None:
-    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
-    overview = (dest / "overview.md").read_text(encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    overview = (tmp_path / SEED).read_text(encoding="utf-8")
     deep_link_re = re.compile(r"((?:[A-Za-z]:)?/[^\s`'\"]+/docs/[\w.-]+\.md)")
     matches = deep_link_re.findall(overview)
     deep_matches = [m for m in matches if any(m.endswith(f"{n}.md") for n in DEEP_DOCS)]
     assert deep_matches, "no substituted deep-doc link found in written overview.md"
     for link in deep_matches:
         assert Path(link).is_file(), f"written link does not resolve to a file: {link}"
+
+
+SEED_DOC = "overview"
+
+_LEGACY_HEADER = (
+    "<!-- managed by clarinet v0.10.20 — do not edit; run 'clarinet agent update' -->\n"
+)
+
+
+def test_seed_written_to_project_claude_md(tmp_path: Path) -> None:
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    seed = tmp_path / SEED
+    assert seed.is_file()
+    assert "managed by clarinet" not in seed.read_text(encoding="utf-8")
+    assert not (tmp_path / MANAGED / f"{SEED_DOC}.md").exists()
+
+
+def test_seed_not_overwritten_on_init(tmp_path: Path) -> None:
+    seed = tmp_path / SEED
+    seed.parent.mkdir(parents=True)
+    seed.write_text("my study", encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    assert seed.read_text(encoding="utf-8") == "my study"
+
+
+def test_seed_survives_update(tmp_path: Path) -> None:
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    seed = tmp_path / SEED
+    seed.write_text("my edited study", encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
+    assert seed.read_text(encoding="utf-8") == "my edited study"
+
+
+def test_update_prunes_dropped_managed_doc(tmp_path: Path) -> None:
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    stale = dest / "retired.md"
+    stale.write_text(f"{_LEGACY_HEADER}old\n", encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
+    assert not stale.exists()
+
+
+def test_update_keeps_unmanaged_file(tmp_path: Path) -> None:
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    mine = dest / "mine.md"
+    mine.write_text("hand-written\n", encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
+    assert mine.read_text(encoding="utf-8") == "hand-written\n"
+
+
+def test_update_migrates_legacy_managed_overview(tmp_path: Path) -> None:
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    legacy = dest / "overview.md"
+    legacy.write_text(
+        f"{_LEGACY_HEADER}# My Study\nedited by the user\n",
+        encoding="utf-8",
+    )
+    (tmp_path / SEED).unlink()
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
+    seed_text = (tmp_path / SEED).read_text(encoding="utf-8")
+    assert not legacy.exists()
+    assert "edited by the user" in seed_text
+    assert "managed by clarinet" not in seed_text
+
+
+def test_migration_does_not_clobber_existing_seed(tmp_path: Path) -> None:
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    (dest / "overview.md").write_text(f"{_LEGACY_HEADER}legacy\n", encoding="utf-8")
+    seed = tmp_path / SEED
+    seed.write_text("mine", encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
+    assert seed.read_text(encoding="utf-8") == "mine"
+    assert not (dest / "overview.md").exists()
 
 
 def test_written_links_use_forward_slashes_for_windows_paths(
@@ -203,7 +277,7 @@ def test_written_links_use_forward_slashes_for_windows_paths(
     monkeypatch.setattr(agent_scaffold, "agent_source_dir", lambda *_: real_src)
     monkeypatch.setattr(agent_scaffold, "_package_docs_dir", lambda: win_docs)
 
-    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
-    overview = (dest / "overview.md").read_text(encoding="utf-8")
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    overview = (tmp_path / SEED).read_text(encoding="utf-8")
     assert win_docs.as_posix() in overview  # "C:/pkg/clarinet/docs"
     assert str(win_docs) not in overview  # not the "C:\\pkg\\..." backslash form
