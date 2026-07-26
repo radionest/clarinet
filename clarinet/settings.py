@@ -387,7 +387,7 @@ class Settings(BaseSettings):
 
     # Config mode settings
     config_mode: Literal["toml", "python"] = "toml"
-    config_tasks_path: str = "./tasks/"
+    config_tasks_path: str = "./plan/"
     config_delete_orphans: bool = False
 
     # Config file locations (relative to config_tasks_path)

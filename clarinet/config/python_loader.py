@@ -314,6 +314,19 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     from clarinet.config.plan_package import import_plan_module, module_name_for
     from clarinet.settings import settings
 
+    if not folder.is_dir():
+        from clarinet.settings import Settings
+
+        default = Settings.model_fields["config_tasks_path"].default
+        hint = ""
+        if settings.config_tasks_path == default:
+            hint = (
+                " This path came from the default, which changed from './tasks/' to "
+                "'./plan/'. If your project uses the old layout, set "
+                'config_tasks_path = "./tasks/" in settings.toml.'
+            )
+        raise ConfigLoadError(f"config root '{folder}' does not exist.{hint}")
+
     record_types_file = folder / settings.config_record_types_file
     if not record_types_file.is_file():
         logger.warning(f"No {settings.config_record_types_file} found in {folder}")

@@ -427,3 +427,52 @@ class TestLoadPythonConfigFailFast:
         items = await load_python_config(tmp_path)
 
         assert [item.name for item in items] == ["rt-catalog-subdir"]
+
+
+class TestMissingConfigRoot:
+    """A custom-code root that does not exist must abort, not degrade silently.
+
+    Returning ``[]`` lets reconciliation run against an empty definition set: with
+    ``config_delete_orphans=False`` the app then starts normally on its previously
+    reconciled DB rows and drifts from its configuration undetected.
+    """
+
+    @pytest.mark.asyncio
+    async def test_missing_root_raises(self, tmp_path):
+        with pytest.raises(ConfigLoadError, match="does not exist"):
+            await load_python_config(tmp_path / "plan")
+
+    @pytest.mark.asyncio
+    async def test_existing_but_empty_root_still_warns(self, tmp_path):
+        (tmp_path / "plan").mkdir()
+
+        assert await load_python_config(tmp_path / "plan") == []
+
+    @pytest.mark.asyncio
+    async def test_message_names_the_flip_when_value_came_from_the_default(
+        self, tmp_path, monkeypatch
+    ):
+        from clarinet.settings import Settings, settings
+
+        monkeypatch.setattr(
+            settings, "config_tasks_path", Settings.model_fields["config_tasks_path"].default
+        )
+        with pytest.raises(ConfigLoadError, match="tasks/"):
+            await load_python_config(tmp_path / "plan")
+
+    @pytest.mark.asyncio
+    async def test_message_stays_quiet_about_the_flip_for_an_explicit_path(
+        self, tmp_path, monkeypatch
+    ):
+        from clarinet.settings import settings
+
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path / "custom"))
+        with pytest.raises(ConfigLoadError) as exc:
+            await load_python_config(tmp_path / "custom")
+
+        assert "./tasks/" not in str(exc.value)
+
+    def test_config_tasks_path_default_is_plan(self):
+        from clarinet.settings import Settings
+
+        assert Settings.model_fields["config_tasks_path"].default == "./plan/"
