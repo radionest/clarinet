@@ -5,6 +5,7 @@ define RecordTypes in a declarative, type-safe way.
 """
 
 import warnings
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -207,13 +208,28 @@ class RecordDef(BaseModel):
         *,
         role: str | None = None,
         unique_per_user: bool | None = None,
+        level: DicomQueryLevel | str = _UNSET,
+        viewer_mode: ViewerMode | str = _UNSET,
+        unique_by: Iterable[str] | bool | None = _UNSET,
         **kwargs: Any,
     ) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name`` and
         translate the deprecated ``unique_per_user`` flag into ``unique_by``.
+
+        ``level`` / ``viewer_mode`` / ``unique_by`` are declared explicitly so the
+        string and TOML forms their ``mode="before"`` validators coerce also
+        type-check; ``**kwargs: Any`` still covers the remaining fields. Each is
+        forwarded only when actually passed, so pydantic's declared defaults
+        apply for omitted ones.
         """
         if role is not None and "role_name" not in kwargs:
             kwargs["role_name"] = role
+        if level is not _UNSET:
+            kwargs["level"] = level
+        if viewer_mode is not _UNSET:
+            kwargs["viewer_mode"] = viewer_mode
+        if unique_by is not _UNSET:
+            kwargs["unique_by"] = unique_by
         if unique_per_user is not None:
             warnings.warn(
                 "unique_per_user is deprecated; use unique_by",

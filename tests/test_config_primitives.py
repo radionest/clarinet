@@ -5,7 +5,8 @@ from pydantic import ValidationError
 
 from clarinet.config.primitives import fileref_to_file_definition
 from clarinet.flow import FileDef, FileRef, RecordDef
-from clarinet.models.base import DicomQueryLevel
+from clarinet.models.base import DicomQueryLevel, ViewerMode
+from clarinet.models.uniqueness import DEFAULT_UNIQUE_BY, legacy_unique_per_user
 
 
 def test_unique_per_user_true_maps_to_user():
@@ -80,3 +81,39 @@ def test_filedef_requires_level_when_omitted() -> None:
     # some placeholder level.
     with pytest.raises(ValidationError):
         FileDef(pattern="p")
+
+
+def test_recorddef_omitted_fields_keep_pydantic_defaults() -> None:
+    # The sentinel must not leak: omitted params must not be forwarded at all.
+    r = RecordDef(name="first-check")
+    assert r.level is DicomQueryLevel.SERIES
+    assert r.viewer_mode is ViewerMode.SINGLE_SERIES
+    assert r.unique_by == frozenset(DEFAULT_UNIQUE_BY)
+
+
+def test_recorddef_unique_by_none_means_no_uniqueness() -> None:
+    # None is a MEANINGFUL value here, distinct from "not passed".
+    r = RecordDef(name="first-check", unique_by=None)
+    assert r.unique_by is None
+
+
+def test_recorddef_unique_by_false_is_toml_off() -> None:
+    r = RecordDef(name="first-check", unique_by=False)
+    assert r.unique_by is None
+
+
+def test_recorddef_string_viewer_mode() -> None:
+    r = RecordDef(name="first-check", viewer_mode="all_series")
+    assert r.viewer_mode is ViewerMode.ALL_SERIES
+
+
+def test_recorddef_unique_per_user_still_warns_and_maps() -> None:
+    with pytest.warns(DeprecationWarning):
+        r = RecordDef(name="first-check", unique_per_user=True)
+    assert r.unique_by == legacy_unique_per_user(True)
+
+
+def test_recorddef_explicit_unique_by_beats_unique_per_user() -> None:
+    with pytest.warns(DeprecationWarning):
+        r = RecordDef(name="first-check", unique_per_user=True, unique_by=["parent"])
+    assert r.unique_by == frozenset({"parent"})
