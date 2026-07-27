@@ -205,6 +205,23 @@ def test_mypy_config_is_not_strict() -> None:
     assert parser.getboolean("mypy", "strict", fallback=False) is False
 
 
+def test_mypy_config_enables_init_typed() -> None:
+    """Spec: the shipped mypy.ini turns on pydantic-mypy's init_typed.
+
+    This flag is what makes mypy check constructor-argument *types* (not just
+    field names) for every pydantic model in a downstream project that does
+    NOT hand-write its own ``__init__`` -- left at the default False, a call
+    like ``SomeModel(n="not an int")`` type-checks clean. It does NOT affect
+    FileDef/RecordDef (``clarinet/config/primitives.py``): both hand-write
+    ``__init__``, which the plugin never re-synthesizes over, so their
+    explicit signatures are authoritative regardless of this setting (see
+    mypy.ini's own comment above the ``[pydantic-mypy]`` section).
+    """
+    parser = configparser.ConfigParser()
+    assert parser.read(payload_dir() / "mypy.ini")
+    assert parser.getboolean("pydantic-mypy", "init_typed", fallback=False) is True
+
+
 def test_clarinet_plan_override_is_labelled() -> None:
     text = (payload_dir() / "mypy.ini").read_text(encoding="utf-8")
     assert "[mypy-clarinet_plan.*]" in text
