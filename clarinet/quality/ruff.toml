@@ -17,10 +17,10 @@ target-version = "py312"
 force-exclude = true
 
 # extend-exclude ADDS to ruff's built-in default exclude list (.venv, .git,
-# _build, dist, node_modules, __pycache__, etc. -- see ruff's docs for the
-# full set); plain `exclude` would REPLACE it instead, silently putting all of
-# those back in scope. Only the entries this project actually needs to add on
-# top go here.
+# _build, dist, node_modules, etc. -- see ruff's docs for the full set);
+# plain `exclude` would REPLACE it instead, silently putting all of those
+# back in scope. Only the entries this project actually needs to add on top
+# go here.
 extend-exclude = [
     "data",
     # Vendored / frozen third-party code. Fixes go upstream and are re-vendored,
