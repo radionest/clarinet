@@ -264,6 +264,34 @@ class TestResolveFileReferences:
         assert resolved[0].level == "PATIENT"
         assert resolved[1].level is None
 
+    def test_grid_conform_to_propagated_from_registry(self) -> None:
+        """Test that grid_conform_to/on_grid_mismatch from FileRegistryEntry
+        propagate to FileDefinitionRead."""
+        registry = {
+            "segmentation": FileRegistryEntry(
+                pattern="seg.nrrd",
+                description="Segmentation mask",
+                grid_conform_to="volume",
+                on_grid_mismatch="conform",
+            ),
+            "volume": FileRegistryEntry(
+                pattern="volume.nii.gz",
+                description="Source volume",
+            ),
+        }
+        files = [
+            {"name": "segmentation", "role": "output", "required": True},
+            {"name": "volume", "role": "input", "required": True},
+        ]
+
+        resolved = resolve_file_references(files, registry)
+
+        assert len(resolved) == 2
+        assert resolved[0].grid_conform_to == "volume"
+        assert resolved[0].on_grid_mismatch == "conform"
+        assert resolved[1].grid_conform_to is None
+        assert resolved[1].on_grid_mismatch is None
+
 
 class TestResolveTaskFiles:
     """Tests for resolve_task_files function."""
