@@ -62,6 +62,21 @@ def test_foreign_grid_is_a_mismatch(tmp_path):
     assert [e.error_type for e in result.errors] == ["grid_mismatch"]
 
 
+def test_unreadable_subject_is_a_mismatch_not_a_crash(tmp_path):
+    """A present-but-corrupt INPUT (e.g. a truncated write) must produce a
+    grid_mismatch validation error, not an unhandled exception — the
+    INPUT-side twin of
+    ``test_unreadable_output_is_a_conflict_not_a_500``
+    (``tests/integration/test_grid_conformance_submit.py``), which covers
+    the same ``except ImageError`` branch on the OUTPUT side.
+    """
+    _write(tmp_path / "volume.nii")
+    (tmp_path / "seg.nii").write_bytes(b"not a valid nifti file")
+    result = FileValidator(_defs(grid_conform_to="volume")).validate(_Rec(), tmp_path)
+    assert not result.valid
+    assert [e.error_type for e in result.errors] == ["grid_mismatch"]
+
+
 def test_missing_reference_is_a_mismatch(tmp_path):
     _write(tmp_path / "seg.nii")
     result = FileValidator(_defs(grid_conform_to="volume")).validate(_Rec(), tmp_path)

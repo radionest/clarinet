@@ -55,6 +55,10 @@ def record_submit_url(record_id: int) -> str:
     return f"{RECORDS_BASE}/{record_id}/submit"
 
 
+def record_data_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/data"
+
+
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"
 RECORD_TYPES_FIND = "/api/records/types/find"

@@ -313,10 +313,12 @@
   defaults to `status=finished` and is functionally a submission) — per
   `on_grid_mismatch`: `reject` (the default) 409s without touching the
   file, `conform` repairs an exactly-repairable `REARRANGED` pair via
-  `conform_seg_to_grid` and still 409s a `FOREIGN` one, `delete` removes
-  the file and 409s either verdict. **`delete` is irreversible and is
-  armed even on a metadata-only `PATCH /data`** — an accepted hazard, not
-  a bug; see the adoption order in `docs/grid-workflows.md`.
+  `conform_seg_to_grid` when the subject is already uint8 on disk (else
+  409s untouched — the repair forces a uint8 cast and would otherwise
+  silently quantize a wider format), still 409s a `FOREIGN` one, `delete`
+  removes the file and 409s either verdict. **`delete` is irreversible
+  and is armed even on a metadata-only `PATCH /data`** — an accepted
+  hazard, not a bug; see the adoption order in `docs/grid-workflows.md`.
   **Downstream migration:** generate an Alembic revision adding two
   nullable columns, `filedefinition.grid_conform_to` and
   `filedefinition.on_grid_mismatch` (both `str`, no backfill needed) — the

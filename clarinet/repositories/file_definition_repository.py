@@ -18,12 +18,14 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
     async def get_or_create(self, name: str, **kwargs: object) -> FileDefinition:
         """Get existing FileDefinition by name or create a new one.
 
-        If the definition exists, updates pattern/description/multiple if they
+        If the definition exists, updates whichever mutable fields (pattern,
+        description, multiple, level, grid_conform_to, on_grid_mismatch)
         differ from the provided kwargs.
 
         Args:
             name: Globally unique file definition name.
-            **kwargs: Fields for FileDefinition (pattern, description, multiple).
+            **kwargs: Fields for FileDefinition (pattern, description, multiple,
+                level, grid_conform_to, on_grid_mismatch).
 
         Returns:
             Existing or newly created FileDefinition.

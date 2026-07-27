@@ -37,7 +37,7 @@ from tests.integration.test_grid_conformance_input import (
 )
 from tests.utils.test_helpers import Z_FLIP as _Z_FLIP
 from tests.utils.test_helpers import write_grid_image as _write
-from tests.utils.urls import RECORDS_BASE, record_submit_url
+from tests.utils.urls import record_data_url, record_submit_url
 
 # (action, mismatch kind, expected status, file must survive, file must be repaired)
 _ACTION_MATRIX = [
@@ -379,7 +379,7 @@ async def test_patch_data_applies_delete_action(client, test_session, series_dir
     before_data = dict(record.data or {})
 
     response = await client.patch(
-        f"{RECORDS_BASE}/{record.id}/data", json={"note": "just editing metadata"}
+        record_data_url(record.id), json={"note": "just editing metadata"}
     )
 
     assert response.status_code == 409
@@ -402,7 +402,7 @@ async def test_post_data_status_failed_skips_the_guard(
     record = await make_record(on_grid_mismatch="reject")
 
     response = await client.post(
-        f"{RECORDS_BASE}/{record.id}/data?status=failed", json={"note": "task failed"}
+        f"{record_data_url(record.id)}?status=failed", json={"note": "task failed"}
     )
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
