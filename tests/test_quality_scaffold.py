@@ -481,6 +481,41 @@ def test_missing_payload_file_writes_nothing(
     assert not project_dir.exists()
 
 
+def test_write_failure_raises_domain_error(tmp_path: Path) -> None:
+    """Write-time failures must surface as ``QualityScaffoldError`` too.
+
+    The read phase is already guarded; the write loop was not, so a permission
+    error, a full disk or -- as staged here -- a destination that is
+    unexpectedly a directory escaped as a raw ``OSError``. A directory is
+    neither managed nor unmanaged (both tests require ``is_file()``), so it
+    clears every guard and only fails in the write loop.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "Makefile").mkdir()
+
+    with pytest.raises(QualityScaffoldError, match="failed writing quality config"):
+        scaffold_quality_config(project_dir=project_dir, mode="init")
+    # Earlier destinations stay on disk: project_dir is the operator's project
+    # root, so rolling back by deleting its contents is never safe.
+    assert (project_dir / "mypy.ini").is_file()
+
+
+def test_cli_init_write_failure_exits(tmp_path: Path) -> None:
+    """The operator gets exit 1, not an unhandled traceback.
+
+    ``cmd_quality_init`` only catches ``QualityScaffoldError`` -- a raw
+    ``OSError`` from the write loop would crash the CLI.
+    """
+    (tmp_path / "Makefile").mkdir()
+    args = argparse.Namespace(
+        command="quality", quality_command="init", path=str(tmp_path), force=False
+    )
+    with pytest.raises(SystemExit) as exc:
+        handle_quality_command(args)
+    assert exc.value.code == 1
+
+
 def test_cli_init_then_update(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     args = argparse.Namespace(
         command="quality", quality_command="init", path=str(tmp_path), force=False

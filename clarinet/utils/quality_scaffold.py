@@ -92,7 +92,9 @@ def scaffold_quality_config(
         QualityScaffoldError: Missing or incomplete payload; either mode
             colliding with an unmanaged file at one of the destination names
             without ``force``; ``init`` over an existing managed config
-            without ``force``; ``update`` with nothing managed yet.
+            without ``force``; ``update`` with nothing managed yet; a
+            write-time ``OSError`` (which may leave a partial config behind --
+            recoverable only with ``--force``, see the write loop).
     """
     src = payload_dir()
     # Read everything before writing anything, so a missing payload file cannot
@@ -157,7 +159,25 @@ def scaffold_quality_config(
     )
 
     project_dir.mkdir(parents=True, exist_ok=True)
-    for dest, text in contents.items():
-        (project_dir / dest).write_text(header + text, encoding="utf-8")
-        logger.info(f"Wrote {project_dir / dest}")
+    # Guarded like the read phase, for the mirror-image failure: a permission
+    # error, a full disk or a destination that is unexpectedly a directory
+    # would otherwise escape as a raw OSError, which the CLI's `except
+    # QualityScaffoldError` (cmd_quality_init/cmd_quality_update) doesn't
+    # catch -- an unhandled traceback instead of a clean message.
+    #
+    # No rollback: `project_dir` is the operator's project root, not a scratch
+    # dir, so deleting its contents to undo a partial write is never safe.
+    # Already-written destinations carry the managed header, which is what
+    # makes the state recoverable -- but only via `--force`, since a plain
+    # `init` re-run now sees `managed` and refuses, so the message says so.
+    try:
+        for dest, text in contents.items():
+            (project_dir / dest).write_text(header + text, encoding="utf-8")
+            logger.info(f"Wrote {project_dir / dest}")
+    except OSError as exc:
+        raise QualityScaffoldError(
+            f"failed writing quality config to {project_dir}: {exc}; some destinations "
+            f"may already be written -- fix the cause, then re-run "
+            f"'clarinet quality init --force'"
+        ) from exc
     return project_dir, fragment
