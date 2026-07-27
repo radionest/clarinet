@@ -293,6 +293,31 @@
   interpolating `{patient_id}` now returns 422 where it previously succeeded
   with a logged warning. No known deployment holds such a patient id; rename
   it if one does.
+- **Grid-conformance declarations on `FileDefinition` (`grid_conform_to` /
+  `on_grid_mismatch`).** A file may declare that its on-disk voxel grid must
+  match another file bound to the same RecordType, checked with the same
+  `grid_relation` three-way taxonomy (`SAME`/`REARRANGED`/`FOREIGN`) as the
+  rest of this changelog's grid work. Config load (Python/TOML, and
+  RecordType `POST`/`PATCH`) rejects an unresolvable declaration: a
+  reference not bound to the same RecordType, a reference whose effective
+  DICOM level is finer than the declaring file's, `multiple=True` on either
+  side, a self-reference, or a pattern `read_grid` cannot classify. At
+  runtime an INPUT mismatch always sends the record to `blocked` (an input
+  may be shared with sibling records, so it is never repaired or deleted);
+  an OUTPUT mismatch is enforced pre-commit, on all four submission
+  endpoints — `POST`/`PATCH /records/{id}/submit` and
+  `POST`/`PATCH /records/{id}/data` (the latter two because `POST /data`
+  defaults to `status=finished` and is functionally a submission) — per
+  `on_grid_mismatch`: `reject` (the default) 409s without touching the
+  file, `conform` repairs an exactly-repairable `REARRANGED` pair via
+  `conform_seg_to_grid` and still 409s a `FOREIGN` one, `delete` removes
+  the file and 409s either verdict. **`delete` is irreversible and is
+  armed even on a metadata-only `PATCH /data`** — an accepted hazard, not
+  a bug; see the adoption order in `docs/grid-workflows.md`.
+  **Downstream migration:** generate an Alembic revision adding two
+  nullable columns, `filedefinition.grid_conform_to` and
+  `filedefinition.on_grid_mismatch` (both `str`, no backfill needed) — the
+  framework ships no migrations of its own.
 
 ### Security
 

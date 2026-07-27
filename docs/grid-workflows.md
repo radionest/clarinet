@@ -200,6 +200,157 @@ correspondence-engine set-ops' own pre-regrid check
 
 ---
 
+## Runtime grid-conformance enforcement
+
+Everything above this line is a primitive some script or guard calls by hand.
+This section is different: a `FileDefinition` can declare, once, that its
+on-disk grid must always match another file's — and the framework enforces
+that declaration automatically at every seam that could let the pair drift,
+with no script author ever writing a `grid_relation` call.
+
+### Declaring a pair
+
+Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:51`)
+— a property of the *file*, not of a `RecordTypeFileLink` binding, so every
+RecordType binding that file inherits the declaration, and the reference must
+be bound to that same RecordType:
+
+- **`grid_conform_to: str | None`** — the name of another `FileDefinition`
+  bound to the same RecordType whose on-disk grid this file must match.
+  `None` (the default) disables the check entirely. Python config's `FileDef`
+  (`clarinet/config/primitives.py:65`) accepts either the referenced `FileDef`
+  object — preferred: a typo becomes a `NameError` at import time, and the
+  reference survives a variable rename — or its plain name string; the object
+  form is reduced to a name at config-resolution time
+  (`fileref_to_file_definition`, `clarinet/config/primitives.py:229`), since a
+  `FileDef`'s own name isn't assigned until after its module imports. TOML
+  supplies the name string directly. The DB column always stores the resolved
+  name.
+- **`on_grid_mismatch: str | None`** — `"conform"` / `"delete"` / `"reject"`,
+  the PEP 695 alias `GridMismatchAction` (`clarinet/models/file_schema.py:38`).
+  `None` (the default) means `"reject"` — declaring a reference must never
+  fail open.
+
+### Config-load fail-fast
+
+`validate_grid_conformance` (`clarinet/config/grid_conformance.py:34`) runs
+inside the same `RecordTypeCreate` model validator as
+`validate_output_path_uniqueness` — so Python config load, TOML load, and
+RecordType `POST`/`PATCH` all reject a broken declaration at the point of the
+mutation, never at first runtime use. Naming the RecordType and the declaring
+file, it rejects:
+
+1. a reference name not bound to *this* RecordType — an unknown name and a
+   name bound to some other RecordType raise the identical error, since
+   lookup is scoped to this RecordType's own registry and cannot tell the two
+   apart;
+2. a self-reference;
+3. a reference whose *effective* level (its own `level`, or the RecordType's
+   when unset) is finer than the declaring file's — resolved per RecordType,
+   since the same `FileDefinition` can be bound at different levels on
+   different types;
+4. `multiple=True` on either side — grid conformance is defined for singular
+   files only;
+5. either pattern extension `read_grid` cannot classify — anything other than
+   `.nii`, `.nii.gz`, `.nrrd` (`.seg.nrrd` is covered by the `.nrrd` check).
+
+### The two enforcement seams
+
+An INPUT file and an OUTPUT file are owned differently, so `grid_conform_to`
+is read at two structurally different points. A record does not own its
+inputs — they may be shared with sibling records — so an input mismatch can
+only ever block, never repair or delete. An OUTPUT is the record's own
+artifact, so `on_grid_mismatch` gets to decide its fate.
+
+**INPUT.** `FileValidator.validate`
+(`clarinet/services/file_validation.py:176`) classifies every declared pair
+with `read_grid` + `grid_relation` and, on anything but `SAME`, emits a
+`FileValidationError(error_type="grid_mismatch")` — the same error shape as a
+plain missing file. `on_grid_mismatch` is never consulted on this path.
+Because `validate_record_files` is the single entry point, every existing
+seam inherits the check automatically:
+
+- Record creation (`RecordService.create_record`) — an invalid pair sends the
+  new record straight to `blocked`.
+- `POST /records/{id}/check-files` (`RecordService.check_files`) — a blocked
+  record stays `blocked`; it only auto-unblocks to `pending` once the pair is
+  repaired.
+- `POST /records/{id}/validate-files` — the mismatch is reported in the
+  response; nothing is mutated.
+- The `preparing → pending` status transition
+  (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
+  of `pending`.
+
+**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:32`)
+runs pre-commit inside `_process_submission`, after any
+`slicer_result_validator` has written its output and before the record data
+is written — the last point in the submit flow that can still reject (the
+post-commit output-checksum sync never raises, so it cannot serve as a
+guard). For every declared OUTPUT pair it classifies the relation, then
+applies `on_grid_mismatch`:
+
+| `on_grid_mismatch` | `REARRANGED` | `FOREIGN` |
+|---|---|---|
+| `reject` (also the default when unset) | 409, file untouched | 409, file untouched |
+| `conform` | repaired exactly via `conform_seg_to_grid`, submission proceeds | 409, file untouched |
+| `delete` | file deleted, then 409 | file deleted, then 409 |
+
+Enforcement is conditional on the *declaring* OUTPUT file's own existence: if
+it isn't on disk yet, its declaration is skipped and the submission proceeds
+on its other merits. It is **not** conditional on the reference's existence —
+an OUTPUT present while its reference is missing is itself a 409 ("cannot
+verify the output's grid"). A `conform` repair is re-verified by re-reading
+both files from disk and re-classifying from scratch, never trusting
+`conform_seg_to_grid`'s return value; a `delete` unlinks (tolerating a
+concurrent delete that already won the race) before raising.
+
+**Scope: four submission endpoints, not two.** `enforce_output_grids` lives in
+`_process_submission`, which backs `POST`/`PATCH /records/{id}/submit`
+**and** `POST`/`PATCH /records/{id}/data`. This is deliberate: `POST /data`
+defaults to `status=finished` and is functionally a submission, so leaving it
+unguarded would be a fail-open hole. The guard is skipped only when
+`skip_validation` is true, reachable exclusively via
+`POST /data?status=failed` (marking a record failed, where output files may
+legitimately not exist yet).
+
+One consequence of that scope is worth stating plainly rather than
+discovering by accident: **`PATCH /records/{id}/data` is a metadata-only edit
+endpoint, and it still runs this guard.** A finished record whose declared
+OUTPUT has drifted to `REARRANGED`, on a file definition with
+`on_grid_mismatch="delete"`, has its output file deleted by a `PATCH` that
+changes nothing but JSON data. This is an accepted, deliberate hazard, not a
+bug to "fix" by exempting `PATCH /data` — doing so would reopen the exact
+fail-open hole the four-endpoint scope exists to close. See
+[Adoption order](#adoption-order) below before reaching for `delete`.
+
+### Adoption order
+
+`delete` is irreversible. Adopt in stages, not all at once:
+
+1. **Backfill out-of-band first.** Before declaring anything, bring existing
+   artifacts into conformance with `conform_seg_to_grid`
+   (`clarinet/services/image/segmentation.py:673`) run as a one-time repair
+   script. Declaring a reference does not retroactively fix files already on
+   disk — the first submit or check-files call after declaring is
+   enforcement, not migration.
+2. **Declare with `on_grid_mismatch="reject"` and watch.** This is also the
+   default when the field is left unset, so it is the safe starting point:
+   nothing is ever silently repaired or removed, and every mismatch surfaces
+   as a 409 (submit) or a `blocked` record (input) for a human to
+   investigate.
+3. **Escalate to `conform` only once `reject` has run clean for a while**,
+   and only if runtime self-healing is actually wanted. `conform` still
+   409s a `FOREIGN` pair untouched — it narrows the reject surface, it
+   doesn't remove it.
+4. **Reach for `delete` last, and rarely.** It removes the file outright on
+   *any* mismatch, including a `REARRANGED` pair that `conform` would have
+   repaired losslessly. Use it only when a mismatched output is genuinely
+   disposable (cheap to regenerate, e.g. by re-running the task), and only
+   after internalizing that it is armed on the metadata-only `PATCH /data`
+   endpoint above too.
+
+---
+
 ## Choosing the right primitive
 
 | API | Where | Use when | Notes |
@@ -213,6 +364,7 @@ correspondence-engine set-ops' own pre-regrid check
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
 | `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:416` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
+| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:38,82` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT always blocks on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
@@ -541,6 +693,12 @@ route through `_read_grid_on_disk` for every grid read.
   still reads such a file under its own default, so `conform_to` classifies
   there. Both behaviors are safe (loud vs. physically-correct LPS), but a
   script comparing verdicts across runtimes must re-save the header first.
+- **`on_grid_mismatch="delete"` destroys a `REARRANGED` file that `conform`
+  would have repaired losslessly — and it is armed on the metadata-only
+  `PATCH /records/{id}/data` endpoint, not only on a real re-submission.**
+  Treat `delete` as a last resort, never a first declaration; see
+  [Runtime grid-conformance enforcement § Adoption order](#adoption-order)
+  before using it.
 
 ---
 
@@ -557,3 +715,8 @@ route through `_read_grid_on_disk` for every grid read.
   full `SlicerHelper` API surface and VTK/Slicer pitfalls, including the
   `export_segmentation`/`conform_to` mechanics and pitfall 7 (`loadVolume`
   canonicalization).
+- [`.claude/rules/file-registry.md`](../.claude/rules/file-registry.md) — the
+  `FileDefinition` field table and the config-load rejection rules for
+  `grid_conform_to`/`on_grid_mismatch`, terser than this document's own
+  [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement)
+  section.

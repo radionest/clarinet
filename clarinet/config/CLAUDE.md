@@ -41,7 +41,7 @@ lesion_seg = RecordDef(
 )
 ```
 
-- `FileDef`: pattern, multiple, level (str or `DicomQueryLevel`, **required**), description, name (auto-derived)
+- `FileDef`: pattern, multiple, level (str or `DicomQueryLevel`, **required**), description, name (auto-derived), `grid_conform_to` (another `FileDef` — preferred, typo-proof, survives a rename — or its plain name; reduced to a name at config-resolution time since a referenced `FileDef`'s own name isn't assigned until after its module imports), `on_grid_mismatch` (`"conform" \| "delete" \| "reject"`, consulted only for OUTPUT files at submit time; unset = `reject`)
 - `FileRef(file, role, required, allow_path_collision)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum; `allow_path_collision` opts a binding out of the default path-collision guard (default False)
 - `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum; `unique_by`: uniqueness partition set, subset of `{"user", "parent"}`, scoped within the type's own DICOM level (default `{"user", "parent"}`; `None`/TOML `false` disables; an empty set is rejected — use `None` for off, or `max_records=1` for one-per-level); deprecated `unique_per_user=True/False` kwarg still works (translates to `{"user"}`/`None`, emits `DeprecationWarning`, ignored if `unique_by` is also given); `editable`: non-superusers may update a finished record (default True); `shared_editing`: any role-holder may edit any record of this type — each edit reassigns ownership to the editor (requires `'user' not in unique_by`, default False)
 
@@ -78,6 +78,25 @@ When searching for usages of `FileDef` or `RecordDef`, always search for both th
 name and the alias (e.g., `(FileDef|File)\(`) — tests and user configs may use either.
 
 **Single-file mode:** If no `files_catalog.py` exists, FileDef names are auto-derived from `record_types.py`.
+
+## Grid Conformance Validator (`grid_conformance.py`)
+
+```python
+def validate_grid_conformance(rt: RecordTypeCreate | Any) -> None
+```
+
+Fail-fast check run in the same `RecordTypeCreate` model validator as
+`validate_output_path_uniqueness` above — Python config load, TOML load, and
+RecordType `POST`/`PATCH`. For every file that sets `grid_conform_to`,
+rejects (naming the RecordType and the declaring file) when: the reference
+isn't bound to this RecordType (an unknown name and a name bound to a
+different RecordType raise the identical error); it's a self-reference; its
+effective level (own `level`, or the RecordType's when unset) is finer than
+the declaring file's; either side has `multiple=True`; or either pattern
+isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd`).
+
+Runtime enforcement, the OUTPUT decision table, and the adoption order:
+[`docs/grid-workflows.md`](../../docs/grid-workflows.md#runtime-grid-conformance-enforcement).
 
 ## Reconciler (`reconciler.py`)
 

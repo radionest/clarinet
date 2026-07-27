@@ -3,7 +3,7 @@ type: Subsystem
 title: Project configuration and the clarinet_plan package
 description: How a downstream project declares record types and custom Python code, how those files are imported through the single clarinet_plan anchor, and why loading fails fast.
 tags: [config, plan, importlib, reconciler, startup, vendoring]
-timestamp: 2026-07-27T05:48:17Z
+timestamp: 2026-07-27T06:49:41Z
 ---
 
 Clarinet is a framework: the interesting declarations live in the *project*, not
@@ -83,6 +83,33 @@ conjoined with `parent_required`, so a type that leaves `parent_required=False`
 while still receiving a `parent_record_id` is never forced to carry
 `{parent_id}` — two of its records under different parents can still collide on
 disk.
+
+### Grid-conformance declarations must be resolvable
+
+A `FileDef`/`FileDefinitionRead` may declare `grid_conform_to`: another
+bound file whose on-disk voxel grid this one must match, plus
+`on_grid_mismatch` (`"conform"`/`"delete"`/`"reject"`, default `"reject"`)
+saying what to do about an OUTPUT mismatch — an INPUT mismatch always blocks
+the record instead, since a record does not own its inputs. In Python
+config, `grid_conform_to` accepts the referenced `FileDef` object itself
+(preferred — typo-proof, and survives a variable rename) or its plain name
+string; the object form is reduced to a name at config-resolution time, once
+file names have been assigned from module variables. TOML supplies the name
+string directly.
+
+`validate_grid_conformance` (`clarinet/config/grid_conformance.py`) runs in
+the same `RecordTypeCreate` validator as `validate_output_path_uniqueness`
+above, and rejects, naming the RecordType and the declaring file: a
+reference not bound to the same RecordType, a self-reference, a reference
+whose effective level is finer than the declaring file's, `multiple=True` on
+either side, or a pattern that isn't a grid-readable format
+(`.nii`/`.nii.gz`/`.nrrd`).
+
+Full runtime behavior — the two enforcement seams, the OUTPUT decision
+table, the four-endpoint submission scope, and the recommended adoption
+order — lives in
+[`docs/grid-workflows.md`](../grid-workflows.md#runtime-grid-conformance-enforcement),
+the narrative home for the framework's voxel-grid model.
 
 `level` and `role` accept plain strings and are coerced to enums. `File` and
 `RecordTypeDef` are backward-compatible aliases for `FileDef` and `RecordDef` —
