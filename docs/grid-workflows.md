@@ -321,8 +321,17 @@ applies `on_grid_mismatch`:
 | `on_grid_mismatch` | `REARRANGED` | `FOREIGN` |
 |---|---|---|
 | `reject` (also the default when unset) | 409, file untouched | 409, file untouched |
-| `conform` | repaired exactly via `conform_seg_to_grid`, submission proceeds | 409, file untouched |
+| `conform` | repaired exactly via `conform_seg_to_grid`\* if the subject is already 8-bit on disk, else 409, file untouched | 409, file untouched |
 | `delete` | file deleted, then 409 | file deleted, then 409 |
+
+\* `conform_seg_to_grid`'s non-layered repair path reads the subject through
+`Segmentation`, which forces a uint8 cast — silently quantizing a wider
+format (an int16/float32 intensity volume, say) if the file isn't already an
+8-bit mask. A dtype guard refuses that repair up front (`ImageError`, mapped
+to the same 409 as any other unrepairable pair) rather than letting it
+through; the 4-D layered path is unaffected — it always preserves the
+source dtype (see "Why guarded repair" in the [design rationale](#design-rationale)
+below).
 
 Enforcement is conditional on the *declaring* OUTPUT file's own existence: if
 it isn't on disk yet, its declaration is skipped and the submission proceeds
@@ -508,6 +517,17 @@ count — deliberately *not* by round-tripping through
 `LayeredSegmentation.from_layers` (`layered_segmentation.py:92`), which forces one
 segment per layer at `LabelValue=1` (`layered_segmentation.py:131`) and would
 silently drop any other label value or multi-segment-per-layer structure.
+
+The same refuse-to-guess stance covers dtype, not just grid relation: the
+non-layered branch reads the subject through `Segmentation`, whose `img`
+setter forces a uint8 cast (`segmentation.py:101`) — harmless for an actual
+mask, silently lossy for anything else (a resampled CT, a float volume). A
+guard reads the on-disk dtype header-only (`Image.on_disk_dtype`) before that
+cast can happen and raises `ImageError` if it isn't already uint8, rather
+than quantizing first and letting the caller find out from corrupted voxel
+values. The 4-D layered path needs no such guard — it never routes through
+`Segmentation` and preserves whatever dtype it read (proven by
+`test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2543`).
 
 ### Why the canonical slice sense is the IOP-normal side, not a fixed dominant axis
 

@@ -28,14 +28,20 @@ def write_grid_image(
     direction: np.ndarray | None = None,
     origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
     shape: tuple[int, int, int] = (6, 6, 6),
+    dtype: Any = np.uint8,
 ) -> Path:
-    """Write a tiny NIfTI volume with a controllable grid; returns its path."""
+    """Write a tiny NIfTI volume with a controllable grid; returns its path.
+
+    ``dtype`` defaults to ``np.uint8`` (a plausible mask); pass e.g.
+    ``np.int16``/``np.float32`` to simulate a non-mask intensity volume
+    (grid-conformance dtype-guard tests).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     img = Image()
     img.spacing = (1.0, 1.0, 1.0)
     img.origin = origin
     img.direction = np.eye(3) if direction is None else direction
-    img.img = np.zeros(shape, dtype=np.uint8)
+    img.img = np.zeros(shape, dtype=dtype)
     return img.save_as(path, FileType.NIFTI)
 
 

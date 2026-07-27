@@ -52,7 +52,11 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
 
     for fd in declared:
         ref_def = by_name.get(fd.grid_conform_to or "")
-        if ref_def is None:  # unreachable: config load rejects this
+        if ref_def is None:
+            # Reachable: RecordTypeCreate.file_registry defaults to None and many
+            # call sites attach file links separately, so validate_grid_conformance
+            # is a documented no-op for those — a dangling grid_conform_to can and
+            # does reach runtime.
             raise CONFLICT.with_context(
                 f"Grid reference '{fd.grid_conform_to}' for '{fd.name}' is not "
                 f"bound to this record type"

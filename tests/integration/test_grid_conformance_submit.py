@@ -11,6 +11,7 @@ risk in the system — this module closes that gap for both ``POST`` and
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import pytest_asyncio
 
@@ -62,6 +63,10 @@ async def make_record(test_session, patient_with_anon, study_with_anon, series_w
     explicitly — see ``test_enforce_output_grids_skips_input_role``.
     ``status`` defaults to ``inwork`` (submit-seam cases); the ``/data``
     coverage passes ``finished`` directly since ``PATCH /data`` requires it.
+    ``extra_required_input``, when given a name, binds one more required
+    INPUT with no grid declaration of its own — for tests pinning the
+    INPUT-before-OUTPUT ordering (Finding 2), never written to disk so it is
+    always "missing".
     """
 
     async def _make(
@@ -69,6 +74,7 @@ async def make_record(test_session, patient_with_anon, study_with_anon, series_w
         on_grid_mismatch: str | None,
         seg_role: FileRole = FileRole.OUTPUT,
         status: RecordStatus = RecordStatus.inwork,
+        extra_required_input: str | None = None,
     ) -> Record:
         volume = FileDefinition(name="volume", pattern="volume.nii", level=DicomQueryLevel.SERIES)
         seg = FileDefinition(
@@ -78,28 +84,41 @@ async def make_record(test_session, patient_with_anon, study_with_anon, series_w
             grid_conform_to="volume",
             on_grid_mismatch=on_grid_mismatch,
         )
-        test_session.add_all([volume, seg])
+        defs = [volume, seg]
+        extra: FileDefinition | None = None
+        if extra_required_input:
+            extra = FileDefinition(name=extra_required_input, pattern=f"{extra_required_input}.txt")
+            defs.append(extra)
+        test_session.add_all(defs)
         await test_session.flush()
 
         rt = RecordType(name="grid-submit-task", level=DicomQueryLevel.SERIES)
         test_session.add(rt)
         await test_session.flush()
-        test_session.add_all(
-            [
+        links = [
+            RecordTypeFileLink(
+                record_type_name=rt.name,
+                file_definition_id=volume.id,
+                role=FileRole.INPUT,
+                required=True,
+            ),
+            RecordTypeFileLink(
+                record_type_name=rt.name,
+                file_definition_id=seg.id,
+                role=seg_role,
+                required=False,
+            ),
+        ]
+        if extra is not None:
+            links.append(
                 RecordTypeFileLink(
                     record_type_name=rt.name,
-                    file_definition_id=volume.id,
+                    file_definition_id=extra.id,
                     role=FileRole.INPUT,
                     required=True,
-                ),
-                RecordTypeFileLink(
-                    record_type_name=rt.name,
-                    file_definition_id=seg.id,
-                    role=seg_role,
-                    required=False,
-                ),
-            ]
-        )
+                )
+            )
+        test_session.add_all(links)
         await test_session.commit()
 
         record = Record(
@@ -227,18 +246,95 @@ async def test_conform_repair_checksum_matches_repaired_bytes(
     assert stored["seg"] == await Files.checksum(Path(seg_path))
 
 
-async def test_missing_grid_reference_is_a_conflict(client, test_session, series_dir, make_record):
-    """The reference itself missing is a distinct branch from a subject mismatch.
+async def test_conform_refuses_to_quantize_a_non_uint8_output(
+    client, test_session, series_dir, make_record
+):
+    """``conform`` must fail closed on a wider-than-uint8 OUTPUT (Finding 1).
 
-    ``seg.nii`` (the declared OUTPUT) is present, but ``volume.nii`` (its
-    ``grid_conform_to`` reference) is not on disk at all — grid_policy.py's
-    ``if not reference.is_file():`` branch, exercised nowhere else in this
-    module.
+    ``conform_seg_to_grid``'s non-layered repair path reads the subject
+    through ``Segmentation``, which forces a uint8 cast — silently wrapping
+    a resampled CT (int16 HU) or any float volume. A registered OUTPUT that
+    isn't already 8-bit on disk must be refused (409, file untouched) rather
+    than quantized and silently accepted.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(
+        series_dir / "seg.nii",
+        direction=_Z_FLIP,
+        origin=(0.0, 0.0, 5.0),
+        dtype=np.int16,
+    )
+    before = seg_path.read_bytes()
+    record = await make_record(on_grid_mismatch="conform")
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 409
+    assert seg_path.read_bytes() == before
+
+
+async def test_missing_required_input_takes_priority_over_output_delete(
+    client, test_session, series_dir, make_record
+):
+    """422 (missing input), not 409 (destructive OUTPUT delete) — Finding 2.
+
+    The destructive OUTPUT action must never run before the non-destructive
+    INPUT check: a submission invalid on both counts must surface the
+    diagnostic 422 and leave the mismatched OUTPUT alone, not delete it and
+    report a 409 that has nothing to do with the real problem.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    before = seg_path.read_bytes()
+    # "report.txt" is required but never written to disk.
+    record = await make_record(on_grid_mismatch="delete", extra_required_input="report")
+    before_status, before_data = record.status, dict(record.data or {})
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 422
+    assert seg_path.read_bytes() == before
+    refreshed = await RecordRepository(test_session).get_with_relations(record.id)
+    assert refreshed.status == before_status
+    assert (refreshed.data or {}) == before_data
+
+
+async def test_missing_grid_reference_is_shadowed_by_missing_required_input(
+    client, test_session, series_dir, make_record
+):
+    """On POST, a missing grid reference that is also a required INPUT
+    surfaces as 422 (missing input) per Finding 2's ordering — not
+    ``grid_policy.py``'s own "reference not on disk" 409.
+
+    ``volume`` plays both roles here (declared grid reference *and* required
+    INPUT), so once it's missing the INPUT check answers first and the OUTPUT
+    guard never runs. That branch is isolated from the INPUT check (and
+    still directly exercised) via PATCH below, where inputs are never
+    re-validated.
     """
     _write(series_dir / "seg.nii")  # no volume.nii at all
     record = await make_record(on_grid_mismatch="reject")
 
     response = await client.post(record_submit_url(record.id), json={})
+    assert response.status_code == 422
+
+
+async def test_patch_submit_reports_missing_grid_reference_as_a_conflict(
+    client, test_session, series_dir, make_record
+):
+    """``grid_policy.py``'s ``if not reference.is_file():`` branch, isolated
+    from the INPUT check via PATCH (which never re-validates inputs) — the
+    scenario ``test_missing_grid_reference_is_shadowed_by_missing_required_input``
+    can no longer isolate on POST now that inputs are checked first.
+    """
+    volume_path = _write(series_dir / "volume.nii")
+    _write(series_dir / "seg.nii")
+    record = await make_record(on_grid_mismatch="reject")
+    assert (await client.post(record_submit_url(record.id), json={})).status_code == 200
+
+    volume_path.unlink()  # the reference disappears after the record was submitted
+
+    response = await client.patch(record_submit_url(record.id), json={"note": "resubmit"})
     assert response.status_code == 409
     assert "not on disk" in response.text
 

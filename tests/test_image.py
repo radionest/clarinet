@@ -203,6 +203,40 @@ class TestImage:
         assert img.has_data is False
         assert img._nifti_image is None
 
+    def test_on_disk_dtype_reports_nifti_header_dtype(self, tmp_path: Path) -> None:
+        path = tmp_path / "vol.nii.gz"
+        img = Image()
+        img.img = np.zeros((4, 4, 4), dtype=np.int16)
+        img.save_as(path, FileType.NIFTI)
+
+        probe = Image()
+        probe.read(path, load_data=False)
+        assert probe.on_disk_dtype == np.dtype(np.int16)
+
+    def test_on_disk_dtype_recognizes_nrrd_uint8(self, tmp_path: Path) -> None:
+        path = tmp_path / "mask.nrrd"
+        img = Image()
+        img.img = np.zeros((4, 4, 4), dtype=np.uint8)
+        img.save_as(path, FileType.NRRD)
+
+        probe = Image()
+        probe.read(path, load_data=False)
+        assert probe.on_disk_dtype == np.dtype(np.uint8)
+
+    def test_on_disk_dtype_none_for_other_nrrd_types(self, tmp_path: Path) -> None:
+        path = tmp_path / "wide.nrrd"
+        img = Image()
+        img.img = np.zeros((4, 4, 4), dtype=np.int16)
+        img.save_as(path, FileType.NRRD)
+
+        probe = Image()
+        probe.read(path, load_data=False)
+        assert probe.on_disk_dtype is None
+
+    def test_on_disk_dtype_raises_before_any_read(self) -> None:
+        with pytest.raises(ImageError, match="no header read"):
+            _ = Image().on_disk_dtype
+
     def test_unsupported_extension(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "test.xyz"
         bad_file.write_text("not an image")
@@ -2251,6 +2285,34 @@ class TestConformSegToGrid:
         assert np.sum(fixed.img[3:6, 3:6, 0:3]) > 0
         assert np.sum(fixed.img[3:6, 3:6, 7:10]) == 0
         assert set(np.unique(fixed.img)) == {0, 4}  # labels preserved (NN)
+
+    def test_conform_refuses_a_non_uint8_subject(self, tmp_path: Path) -> None:
+        """A wider-than-uint8 subject must be refused, not silently quantized.
+
+        The non-layered repair path reads the subject through Segmentation,
+        which forces a uint8 cast — this guard must catch it before that read
+        happens, leaving the file byte-identical.
+        """
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.int16)
+        seg_data[3:6, 3:6, 7:10] = 4
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        seg_path = tmp_path / "seg.nii.gz"
+        wide = Image()
+        wide._direction = flipped
+        wide._origin = (0.0, 0.0, 9.0)
+        wide._spacing = (1.0, 1.0, 1.0)
+        wide.img = seg_data
+        wide.save_as(seg_path, FileType.NIFTI)
+        before = seg_path.read_bytes()
+
+        with pytest.raises(ImageError, match="not an 8-bit mask"):
+            conform_seg_to_grid(seg_path, vol_path)
+
+        assert seg_path.read_bytes() == before
 
     def test_conform_noop_when_same_grid(self, tmp_path: Path) -> None:
         shape = (8, 8, 8)

@@ -1,5 +1,6 @@
 """Grid-conformance declaration fields on FileDefinition / FileDefinitionRead."""
 
+from types import SimpleNamespace
 from typing import get_args
 
 import pytest
@@ -50,9 +51,26 @@ def test_read_dto_accepts_a_definition_object_as_the_reference():
     assert dto.grid_conform_to == "volume"
 
 
-def test_read_dto_rejects_an_unknown_action():
+def test_read_dto_rejects_a_reference_with_an_empty_name():
+    """A ``.name``-bearing reference must not fail open on an empty name.
+
+    ``FileDefinition`` itself cannot construct with an empty name
+    (``min_length=1`` + identifier regex), so this uses a bare duck-typed
+    stand-in to exercise the validator directly.
+    """
+    unnamed = SimpleNamespace(name="")
     with pytest.raises(ValidationError):
-        FileDefinitionRead(name="seg", pattern="seg.nrrd", on_grid_mismatch="explode")
+        FileDefinitionRead(name="seg", pattern="seg.nrrd", grid_conform_to=unnamed)
+
+
+def test_read_dto_coerces_an_unknown_action_to_reject(caplog):
+    """An out-of-vocabulary DB value fails closed to ``None`` (reject), not a
+    pydantic ``ValidationError`` that would break every read of the owning
+    RecordType."""
+    with caplog.at_level("WARNING"):
+        dto = FileDefinitionRead(name="seg", pattern="seg.nrrd", on_grid_mismatch="explode")
+    assert dto.on_grid_mismatch is None
+    assert "explode" in caplog.text
 
 
 def test_columns_are_nullable():

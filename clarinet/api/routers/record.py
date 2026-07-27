@@ -573,6 +573,21 @@ async def _process_submission(
             record, validated_data, exec_result
         )
 
+    # Inputs first, on the POST path only: validate_record_files never repairs
+    # or deletes anything, so running it ahead of the OUTPUT guard below cannot
+    # mangle anything — the risk there is one-directional. This also fixes the
+    # diagnosis when both are invalid: a missing required input answers with
+    # 422, not a destructive OUTPUT action followed by a 409 that doesn't name
+    # the actual problem. PATCH never re-validates inputs here (is_update
+    # skips this block), matching its pre-existing behavior.
+    file_result: FileValidationResult | None = None
+    if not is_update and not skip_validation:
+        file_result = await validate_record_files(
+            record_read,
+            raise_on_invalid=True,
+            parent=parent_read,
+        )
+
     # Output grids are enforced pre-commit: the post-commit output sync
     # never raises, so this is the only point that can still reject.
     if not skip_validation:
@@ -583,15 +598,8 @@ async def _process_submission(
             record_id, validated_data, acting_user=user, actor_id=actor_id
         )
     else:
-        if not skip_validation:
-            # Validate input files (raise on missing required files)
-            file_result = await validate_record_files(
-                record_read,
-                raise_on_invalid=True,
-                parent=parent_read,
-            )
-            if file_result and file_result.matched_files:
-                await repo.set_files(record, file_result.matched_files)
+        if file_result and file_result.matched_files:
+            await repo.set_files(record, file_result.matched_files)
 
         updated, _ = await service.submit_data(
             record_id,

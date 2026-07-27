@@ -727,8 +727,14 @@ def conform_seg_to_grid(
         True if the file was (re)written, False if the grids already matched.
 
     Raises:
-        ImageError: *out_path* has an unsupported extension, or a 4-D layered input
-            targets a non-NRRD extension (the layered format has no NIfTI equivalent).
+        ImageError: *out_path* has an unsupported extension, a 4-D layered input
+            targets a non-NRRD extension (the layered format has no NIfTI
+            equivalent), or a non-layered *seg_path* is not already 8-bit (uint8)
+            on disk — the forced-uint8 segmentation read this function's 3-D path
+            uses would otherwise silently quantize a wider format (e.g. an
+            int16/float32 intensity volume). The 4-D layered path is unaffected:
+            it never routes through :class:`Segmentation` and always preserves the
+            source dtype (see :func:`_conform_layered_seg`).
         GeometryMismatchError: the grids are ``FOREIGN`` and *allow_resample* is False.
     """
     seg_path = Path(seg_path)
@@ -770,6 +776,16 @@ def conform_seg_to_grid(
     if is_layered:
         _conform_layered_seg(seg_path, target, seg_grid=seg_grid, ref_grid=ref_grid)
     else:
+        probe = Image()
+        probe.read(seg_path, load_data=False)
+        if probe.on_disk_dtype != np.uint8:
+            raise ImageError(
+                f"{seg_path.name} is not an 8-bit mask on disk (dtype="
+                f"{probe.on_disk_dtype}); the segmentation read this function uses "
+                "forces uint8 and would silently quantize a wider format. Use "
+                "on_grid_mismatch='reject' and re-export this file already "
+                "conformed to its reference instead."
+            )
         seg = Segmentation(autolabel=False)
         seg.read(seg_path)
         conformed = seg.reindex_to(_grid_template(ref_grid), order=0)

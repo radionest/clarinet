@@ -12,13 +12,14 @@ FileDefinitionRead is a flat DTO merging identity + binding for API responses.
 
 import re
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
 
 from pydantic import StringConstraints, field_validator, model_validator
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 from clarinet.models.base import DicomQueryLevel
+from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models.record import Record
@@ -45,7 +46,11 @@ raises a 422 if a submission's own re-check catches it first.
 rejects a ``FOREIGN`` one; ``delete`` removes the offending file for either
 verdict; ``reject`` leaves it untouched. An unset action on a file that
 declares ``grid_conform_to`` means ``reject`` — declaring a reference must
-never fail open.
+never fail open. ``conform``'s repair additionally requires the file to
+already be 8-bit (uint8) on disk — the segmentation read it uses would
+otherwise silently quantize a wider format (e.g. an int16/float32 intensity
+volume) — and fails closed (409, file untouched) the same as a ``FOREIGN``
+pair when it isn't.
 """
 
 
@@ -233,9 +238,36 @@ class FileDefinitionRead(SQLModel):
         Runs eagerly because every construction site of this DTO builds it from
         an already-named source. ``FileDef`` in the config layer cannot do this
         (its names are assigned after module import) — see Task 2.
+
+        Raises rather than returning an empty name: declaring a reference must
+        never fail open, and an empty string is falsy — every downstream check
+        would silently read it as "no declaration".
         """
         name = getattr(v, "name", None)
-        return name if isinstance(name, str) else v
+        if not isinstance(name, str):
+            return v
+        if not name:
+            raise ValueError(
+                "grid_conform_to reference has an empty name — declaring a "
+                "reference must never fail open"
+            )
+        return name
+
+    @field_validator("on_grid_mismatch", mode="before")
+    @classmethod
+    def _coerce_unknown_mismatch_action(cls, v: Any) -> Any:
+        """Fail closed on an out-of-vocabulary value instead of raising.
+
+        ``FileDefinition.on_grid_mismatch`` is a plain ``str`` DB column (kept
+        additive for downstream migrations); an out-of-vocabulary value there
+        (direct SQL, a downstream backfill, version skew) would otherwise raise
+        a pydantic ``ValidationError`` for every read of the owning RecordType,
+        not just the grid check. ``None`` means ``reject``.
+        """
+        if v is None or v in get_args(GridMismatchAction.__value__):
+            return v
+        logger.warning(f"Unknown on_grid_mismatch value {v!r}; treating as reject (None)")
+        return None
 
 
 class RecordFileLinkRead(SQLModel):
