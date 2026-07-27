@@ -322,6 +322,8 @@ class RecordType(RecordTypeBase, table=True):
                         required=link.required,
                         level=link.file_definition.level,
                         allow_path_collision=link.allow_path_collision,
+                        grid_conform_to=link.file_definition.grid_conform_to,
+                        on_grid_mismatch=link.file_definition.on_grid_mismatch,
                     )
                 )
             except ValidationError as exc:

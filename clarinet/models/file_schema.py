@@ -12,7 +12,7 @@ FileDefinitionRead is a flat DTO merging identity + binding for API responses.
 
 import re
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import StringConstraints, field_validator, model_validator
 from sqlalchemy.sql import expression as sql_expression
@@ -33,6 +33,21 @@ class FileRole(str, Enum):
     INTERMEDIATE = "intermediate"
 
 
+# DB column stays a plain string (additive downstream migrations); config and
+# API payloads are constrained to these values.
+type GridMismatchAction = Literal["conform", "delete", "reject"]
+"""What to do with an OUTPUT file whose grid does not match its reference.
+
+Consulted only for OUTPUT files at submit time — an INPUT mismatch always
+blocks the record and never repairs or deletes a file the record does not own.
+``conform`` repairs an exactly-repairable (``REARRANGED``) pair and still
+rejects a ``FOREIGN`` one; ``delete`` removes the offending file for either
+verdict; ``reject`` leaves it untouched. An unset action on a file that
+declares ``grid_conform_to`` means ``reject`` — declaring a reference must
+never fail open.
+"""
+
+
 class FileDefinition(SQLModel, table=True):
     """Persistent file definition stored in DB.
 
@@ -45,6 +60,10 @@ class FileDefinition(SQLModel, table=True):
             https://github.com/radionest/clarinet/issues/552), {record_type.FIELD}
         description: Optional description of the file purpose.
         multiple: Whether this is a collection (glob) vs singular file.
+        grid_conform_to: Name of another FileDefinition whose on-disk voxel
+            grid this file must match. ``None`` disables the check.
+        on_grid_mismatch: What to do with a mismatched OUTPUT file —
+            ``conform`` / ``delete`` / ``reject``. ``None`` means ``reject``.
     """
 
     __tablename__ = "filedefinition"
@@ -61,6 +80,8 @@ class FileDefinition(SQLModel, table=True):
     description: str | None = None
     multiple: bool = Field(default=False)
     level: DicomQueryLevel | None = None
+    grid_conform_to: str | None = Field(default=None, max_length=100)
+    on_grid_mismatch: str | None = Field(default=None, max_length=20)
 
     record_type_links: list["RecordTypeFileLink"] = Relationship(
         back_populates="file_definition",
@@ -169,6 +190,8 @@ class FileDefinitionRead(SQLModel):
     role: FileRole = FileRole.OUTPUT
     level: DicomQueryLevel | None = None
     allow_path_collision: bool = False
+    grid_conform_to: str | None = None
+    on_grid_mismatch: GridMismatchAction | None = None
 
     @field_validator("name")
     @classmethod
@@ -200,6 +223,18 @@ class FileDefinitionRead(SQLModel):
 
         validate_file_pattern(self.pattern, is_collection=bool(self.multiple))
         return self
+
+    @field_validator("grid_conform_to", mode="before")
+    @classmethod
+    def _reference_to_name(cls, v: Any) -> Any:
+        """Accept a file definition object in place of its name.
+
+        Runs eagerly because every construction site of this DTO builds it from
+        an already-named source. ``FileDef`` in the config layer cannot do this
+        (its names are assigned after module import) — see Task 2.
+        """
+        name = getattr(v, "name", None)
+        return name if isinstance(name, str) else v
 
 
 class RecordFileLinkRead(SQLModel):
