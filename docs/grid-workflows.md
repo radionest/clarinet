@@ -383,10 +383,19 @@ endpoint over HTTP; `PATCH /records/bulk/status` calls
 `RecordService.bulk_update_status`, which reuses `update_status` only for
 records still `preparing` and otherwise updates status through the
 repository directly. None of these call `enforce_output_grids`.
-Machine-written outputs (pipeline tasks, RecordFlow) land the same way —
-they inherit only the report-level INPUT check `check_files` runs while
-auto-unblocking, because `check_files` has no transaction to reject. Treat
-this guard as covering human submission, not every write.
+
+`enforce_output_grids` itself takes no acting user, so this is not a
+human-vs-machine split. A pipeline task's auto-submit
+(`clarinet/services/pipeline/task.py:102`) calls
+`ClarinetClient.submit_record_data`, which issues `POST /records/{id}/data`
+(`client.py:874`); the DICOM anonymization orchestrator's re-submission of
+an already-finished record (`clarinet/services/dicom/orchestrator.py:239-243`)
+calls `update_record_data`, which issues `PATCH /records/{id}/data`
+(`client.py:743`). Both run through the same `_process_submission` →
+`enforce_output_grids` path a human submission would. What escapes the
+guard is any route — whoever or whatever triggers it — that reaches
+`update_status`/`bulk_update_status` directly instead of going through
+submission: the routes named above.
 
 ### Adoption order
 
