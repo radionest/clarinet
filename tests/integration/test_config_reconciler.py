@@ -1257,7 +1257,7 @@ async def test_toml_config_load_fails_fast_on_output_path_uniqueness(
 
     Mirrors the shared_editing guard above: ``RecordTypeCreate(**props)``
     inside the per-file loop runs ``validate_output_path_uniqueness`` (via the
-    model's ``_validate_output_paths`` model_validator), which raises
+    model's ``_validate_file_registry`` model_validator), which raises
     ``RecordConstraintViolationError`` for a default ``unique_by`` (the
     "user" partition) paired with an OUTPUT pattern missing ``{user_id}``.
     The loop must convert that into a fatal ``ConfigLoadError`` naming the
