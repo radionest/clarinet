@@ -220,28 +220,6 @@
   internal (x, y) axes; the NIfTI-convention flip moved to the width axis), so
   its physical output for a given COCO file + reference volume is unchanged
   across the epoch.
-- **`clarinet init` no longer accepts `--template` / `--list-templates`.** It
-  always scaffolds the full project skeleton — settings, `plan/`, dotfiles and
-  the framework agent docs. The payload now ships *inside* the package
-  (`clarinet/scaffold/`) rather than in the repository's `examples/` tree, which
-  is not part of the wheel: `clarinet init --template …` was unusable from any
-  pip install (#472). Project-owned files are never overwritten and the command
-  is safe to re-run — only the framework-managed agent docs are refreshed. The
-  `examples/project_template/` tree is gone; `examples/demo/` remains as
-  reading material.
-- **`config_tasks_path` now defaults to `./plan/` (was `./tasks/`).** A project
-  that omits the setting and keeps a `tasks/` directory must add
-  `config_tasks_path = "./tasks/"` to `settings.toml`, or rename the directory
-  to `plan/`. The scaffold, the demo and every doc already used `plan/`; the
-  default was the last holdout.
-- **A custom-code root that does not exist now aborts startup.** Previously
-  `load_python_config` logged a warning and returned zero record types — with
-  `config_delete_orphans=False` (the default) the app then started normally on
-  its previously reconciled DB rows and drifted from its configuration
-  undetected. It now raises `ConfigLoadError`, naming the unresolved path and,
-  when the value came from the default rather than the project's settings, the
-  change of default and the setting that restores the old layout. A root that
-  *exists* but holds no definitions keeps the previous lenient warning.
 
 ### Added
 
@@ -298,7 +276,7 @@
   `anon scrub-db` operator commands. `workflows.md` § Built-in tasks gains
   `anonymize_study_pipeline` and `prefetch_dicom_web`, and now spells out that task-name
   collisions are on the **bare function name** (`{namespace}:{function_name}`, not
-  module-qualified).
+  module-qualified). The `research` project template ships the same doc.
 
 ### Improved
 
@@ -309,30 +287,6 @@
 
 ### Changed
 
-- **`overview.md` is delivered as a project-owned `.claude/CLAUDE.md` seed**
-  rather than a managed rule under `.claude/rules/clarinet/`. Its body always
-  told the user to replace it with their own study description, while the
-  managed header forbade editing and every `clarinet agent update` overwrote
-  it. It is now written once and never rewritten. Run `clarinet agent update`
-  once after upgrading: a managed `overview.md` left by an earlier version is
-  **migrated** to `.claude/CLAUDE.md` (header stripped, your edits kept) when
-  that path is free, not deleted.
-- **`clarinet agent update` now removes managed docs the installed version no
-  longer ships.** Only files carrying the managed header are pruned; anything
-  you added to the managed directory yourself is left alone.
-- **The scaffold's `settings.custom.toml` now ships fully commented out.** It
-  previously carried `"${CLARINET_PORT}"`-style placeholders, but clarinet
-  performs no `${VAR}` substitution and pydantic-settings loads that file
-  automatically on top of `settings.toml` — so the literal strings reached
-  `int` fields and every command in the generated project failed to construct
-  `Settings`. Production values are set by uncommenting real ones; secrets
-  belong in `CLARINET_*` environment variables, which take priority over both
-  TOML files.
-- **Scaffold: `database_login` → `database_username`.** The old key named no
-  existing setting, and `extra="ignore"` dropped it silently, so a project
-  built from the template connected as the default postgres user. If you
-  scaffolded from the old template, rename the key in your `settings.custom.toml`
-  and `CLARINET_DATABASE_LOGIN` → `CLARINET_DATABASE_USERNAME` in your `.env`.
 - Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
   `invalidate_records()`) now always fires `on_status("pending")` flows —
   even when the record was already `pending`. Previously an already-pending

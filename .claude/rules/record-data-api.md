@@ -3,7 +3,6 @@ description: Record data API — submit/update/prefill flow and context_info mar
 paths:
   - "plan/workflows/**"
   - "examples/**/plan/workflows/**"
-  - "clarinet/scaffold/plan/workflows/**"
 ---
 # Record data API methods
 

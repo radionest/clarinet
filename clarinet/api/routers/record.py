@@ -159,7 +159,7 @@ async def add_record_type(
 
     # Export to TOML in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
-        folder = Path(getattr(request.app.state, "config_tasks_path", "./plan/"))
+        folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
         background_tasks.add_task(export_record_type_to_toml, result, folder)
         background_tasks.add_task(export_data_schema_sidecar, result, folder)
         background_tasks.add_task(export_ui_schema_sidecar, result, folder)
@@ -187,7 +187,7 @@ async def update_record_type(
 
     # Export to TOML in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
-        folder = Path(getattr(request.app.state, "config_tasks_path", "./plan/"))
+        folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
         background_tasks.add_task(export_record_type_to_toml, result, folder)
         background_tasks.add_task(export_data_schema_sidecar, result, folder)
         background_tasks.add_task(export_ui_schema_sidecar, result, folder)
@@ -227,7 +227,7 @@ async def delete_record_type(
 
     # Delete TOML files in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
-        folder = Path(getattr(request.app.state, "config_tasks_path", "./plan/"))
+        folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
         background_tasks.add_task(delete_record_type_files, name, folder)
 
 
