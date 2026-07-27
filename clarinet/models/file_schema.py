@@ -38,8 +38,9 @@ class FileRole(str, Enum):
 type GridMismatchAction = Literal["conform", "delete", "reject"]
 """What to do with an OUTPUT file whose grid does not match its reference.
 
-Consulted only for OUTPUT files at submit time — an INPUT mismatch always
-blocks the record and never repairs or deletes a file the record does not own.
+Consulted only for OUTPUT files at submit time — an INPUT mismatch never
+repairs or deletes a file the record does not own; it blocks the record, or
+raises a 422 if a submission's own re-check catches it first.
 ``conform`` repairs an exactly-repairable (``REARRANGED``) pair and still
 rejects a ``FOREIGN`` one; ``delete`` removes the offending file for either
 verdict; ``reject`` leaves it untouched. An unset action on a file that

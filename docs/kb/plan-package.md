@@ -97,10 +97,10 @@ bound file whose on-disk voxel grid this one must match, plus
 saying what to do about an OUTPUT mismatch — an INPUT mismatch instead never
 repairs or deletes the file, since a record does not own its inputs (it
 blocks the record, or raises a 422 if a submission's own re-check catches it
-first). In Python
-config, `grid_conform_to` accepts the referenced `FileDef` object itself
-(preferred — typo-proof, and survives a variable rename) or its plain name
-string; the object form is reduced to a name at config-resolution time, once
+first). In Python config, `grid_conform_to` accepts the referenced `FileDef`
+object itself (preferred — typo-proof, and survives a variable rename) or
+its plain name string; the object form is reduced to a name at
+config-resolution time, once
 file names have been assigned from module variables. TOML supplies the name
 string directly.
 

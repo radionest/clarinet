@@ -260,7 +260,7 @@ file, it rejects:
 An INPUT file and an OUTPUT file are owned differently, so `grid_conform_to`
 is read at two structurally different points. A record does not own its
 inputs — they may be shared with sibling records — so an input mismatch can
-only ever block, never repair or delete. An OUTPUT is the record's own
+only ever be reported, never repaired or deleted. An OUTPUT is the record's own
 artifact, so `on_grid_mismatch` gets to decide its fate. **INTERMEDIATE is
 neither**: config-load validation applies no role filter, so a
 `multiple=False`, grid-readable INTERMEDIATE file can declare
@@ -291,13 +291,14 @@ seam inherits the check automatically:
   (`_process_submission`, `record.py:555-561`) re-validate with
   `raise_on_invalid=True` immediately before the submission is persisted —
   the check that catches a reference drifting *after* the record already
-  passed creation or check-files while sitting `pending`. This is the one
-  seam that does **not** produce `blocked`: a mismatch here raises the
-  domain `ValidationError`, mapped to **422**
+  passed creation or check-files while sitting `pending`. Unlike every seam
+  above, this one raises instead of recording a verdict: a mismatch here
+  raises the domain `ValidationError`, mapped to **422**
   (`exception_handlers.py:163-167`), not the 409 the OUTPUT guard produces.
-  `PATCH /data` and `PATCH /submit` never reach this branch
-  (`is_update=True` skips it entirely) — they do not re-check INPUT files at
-  all.
+  Skipped, like the OUTPUT guard, whenever `skip_validation` is true
+  (`record.py:498`) — i.e. for `POST /data?status=failed`. `PATCH /data`
+  and `PATCH /submit` never reach this branch at all (`is_update=True`
+  skips it) — they never re-check INPUT files here.
 
 Like the OUTPUT existence rule below, the grid check itself runs only when
 the *subject* file matched on disk (`file_validation.py:209-216`) — a

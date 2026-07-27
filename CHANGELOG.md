@@ -302,12 +302,13 @@
   reference not bound to the same RecordType, a reference whose effective
   DICOM level is finer than the declaring file's, `multiple=True` on either
   side, a self-reference, or a pattern `read_grid` cannot classify. At
-  runtime an INPUT mismatch blocks the record (creation, check-files, or
-  the `preparing`→`pending` exit) or, when first caught by a submission's
-  own re-validation, raises a 422 — never repaired or deleted either way,
-  since a record does not own its inputs; an OUTPUT mismatch is enforced
-  pre-commit, on all four submission
-  endpoints — `POST`/`PATCH /records/{id}/submit` and
+  runtime an INPUT mismatch is never repaired or deleted, since a record
+  does not own its inputs — it blocks the record at creation or the
+  `preparing`→`pending` exit (check-files only withholds an existing
+  block's auto-unblock, never causes one), or raises a 422 if a
+  submission's own re-validation catches it first; an OUTPUT mismatch is
+  enforced pre-commit, on all four submission endpoints —
+  `POST`/`PATCH /records/{id}/submit` and
   `POST`/`PATCH /records/{id}/data` (the latter two because `POST /data`
   defaults to `status=finished` and is functionally a submission) — per
   `on_grid_mismatch`: `reject` (the default) 409s without touching the

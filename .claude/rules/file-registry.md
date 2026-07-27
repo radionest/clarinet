@@ -116,11 +116,12 @@ binding — every RecordType binding a file inherits it. Only INPUT and OUTPUT
 bindings are enforced at runtime; an INTERMEDIATE file may still declare
 `grid_conform_to` (config load applies no role filter) but nothing ever
 checks it — a silent no-op, not a rejection. INPUT mismatches are never
-auto-repaired or deleted (an input may be shared with sibling records), but
-land as `blocked` (creation, check-files, preparing-exit) or a 422 (a
-submission's own re-check catches a mismatch first); OUTPUT mismatches are
-enforced pre-commit on submit per `on_grid_mismatch`. Full runtime behavior,
-the decision table, and the adoption order:
+auto-repaired or deleted (an input may be shared with sibling records). They
+land the record in `blocked` at creation or the `preparing`→`pending` exit
+(check-files only withholds an existing block's auto-unblock, never causes
+one), or raise a 422 if a submission's own re-check catches one first;
+OUTPUT mismatches are enforced pre-commit on submit per `on_grid_mismatch`.
+Full runtime behavior, the decision table, and the adoption order:
 [`docs/grid-workflows.md`](../../docs/grid-workflows.md#runtime-grid-conformance-enforcement).
 
 ## ORM vs DTO: file_links vs file_registry
