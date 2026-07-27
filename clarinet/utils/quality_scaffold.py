@@ -89,10 +89,10 @@ def scaffold_quality_config(
     ``pyproject.toml``.
 
     Raises:
-        QualityScaffoldError: Missing or incomplete payload; ``init`` over an
-            existing managed config without ``force``; ``init`` colliding with
-            an unmanaged file at one of the destination names without
-            ``force``; ``update`` with nothing managed yet.
+        QualityScaffoldError: Missing or incomplete payload; either mode
+            colliding with an unmanaged file at one of the destination names
+            without ``force``; ``init`` over an existing managed config
+            without ``force``; ``update`` with nothing managed yet.
     """
     src = payload_dir()
     # Read everything before writing anything, so a missing payload file cannot
@@ -117,15 +117,23 @@ def scaffold_quality_config(
         if (project_dir / dest).is_file() and not _is_managed(project_dir / dest)
     ]
 
+    # Checked before "managed", on both modes: a mixed project -- one
+    # destination managed, another a foreign hand-written file -- must never
+    # let either command treat it as "just managed" and either steer towards,
+    # or directly perform, a refresh that clobbers the foreign file. `update`
+    # used to skip this check entirely and silently overwrite a customised
+    # file the moment any other destination still carried the header (the
+    # exact reported data-loss path: `init` refused pointing at `update`,
+    # and `update` obeyed with no `--force` and no warning).
+    if unmanaged and not force:
+        listed = ", ".join(unmanaged)
+        raise QualityScaffoldError(
+            f"{project_dir} has {listed} not written by clarinet; move it aside or pass --force"
+        )
     if mode == "init" and managed and not force:
         raise QualityScaffoldError(
             f"{project_dir} already has managed quality config; run "
             f"'clarinet quality update' (or pass --force)"
-        )
-    if mode == "init" and unmanaged and not force:
-        listed = ", ".join(unmanaged)
-        raise QualityScaffoldError(
-            f"{project_dir} has {listed} not written by clarinet; move it aside or pass --force"
         )
     if mode == "update" and not managed:
         raise QualityScaffoldError(

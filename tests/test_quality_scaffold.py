@@ -138,6 +138,29 @@ def test_init_refuses_unmanaged_foreign_file(tmp_path: Path) -> None:
     assert not (tmp_path / "mypy.ini").exists()
 
 
+def test_init_refuses_unmanaged_even_when_another_destination_is_managed(
+    tmp_path: Path,
+) -> None:
+    """The unmanaged check must run before the managed check, not after.
+
+    A project where mypy.ini/.ruff.toml are still clarinet-managed but
+    Makefile has been hand-customised (header stripped) must be refused for
+    the unmanaged file, not treated as "already managed" and redirected to
+    ``update`` -- obeying that redirect is exactly the reported data-loss
+    path, since ``update`` (pre-fix) never consulted ``unmanaged`` at all.
+    """
+    scaffold_quality_config(project_dir=tmp_path, mode="init")
+    customized = "build:\n\t@echo hand-tuned\n"
+    (tmp_path / "Makefile").write_text(customized, encoding="utf-8")
+    with pytest.raises(QualityScaffoldError, match="not written by clarinet") as exc_info:
+        scaffold_quality_config(project_dir=tmp_path, mode="init")
+    assert "quality update" not in str(exc_info.value), (
+        "must not steer the operator toward `update`, which would clobber the file"
+    )
+    assert "Makefile" in str(exc_info.value)
+    assert (tmp_path / "Makefile").read_text(encoding="utf-8") == customized
+
+
 def test_init_force_overwrites_unmanaged_foreign_file(tmp_path: Path) -> None:
     (tmp_path / "Makefile").write_text("build:\n\t@echo hand-written\n", encoding="utf-8")
     scaffold_quality_config(project_dir=tmp_path, mode="init", force=True)
@@ -163,21 +186,56 @@ def test_update_requires_existing(tmp_path: Path) -> None:
 
 def test_update_refuses_unmanaged_project_even_if_populated(tmp_path: Path) -> None:
     """A foreign file at a destination name must not count as populated and let
-    ``update`` treat the project as already managed -- it must still refuse
-    and point at ``init``.
+    ``update`` treat the project as already managed -- it must still refuse.
+    The unmanaged check now runs before the managed one (see the mixed-state
+    test below), so the refusal names the foreign file directly rather than
+    redirecting to ``init``.
     """
     original = "build:\n\t@echo hand-written\n"
     (tmp_path / "Makefile").write_text(original, encoding="utf-8")
-    with pytest.raises(QualityScaffoldError, match="quality init"):
+    with pytest.raises(QualityScaffoldError, match="not written by clarinet"):
         scaffold_quality_config(project_dir=tmp_path, mode="update")
     assert (tmp_path / "Makefile").read_text(encoding="utf-8") == original
 
 
-def test_update_refreshes(tmp_path: Path) -> None:
+def test_update_refuses_when_managed_and_unmanaged_are_mixed(tmp_path: Path) -> None:
+    """The exact reported data-loss path: mypy.ini/.ruff.toml are still
+    clarinet-managed, but Makefile has been hand-customised (its header is
+    gone). ``update`` must refuse and name Makefile, not treat the project as
+    "managed" (true of the other two destinations) and silently overwrite the
+    customisation -- no ``--force``, no warning. Mirrors the byte-identical
+    invariant in ``test_init_refuses_unmanaged_foreign_file`` above.
+    """
     scaffold_quality_config(project_dir=tmp_path, mode="init")
-    (tmp_path / "mypy.ini").write_text("stale", encoding="utf-8")
+    customized = "build:\n\t@echo hand-tuned -- do not overwrite\n"
+    (tmp_path / "Makefile").write_text(customized, encoding="utf-8")
+    with pytest.raises(QualityScaffoldError, match="not written by clarinet") as exc_info:
+        scaffold_quality_config(project_dir=tmp_path, mode="update")
+    assert "Makefile" in str(exc_info.value)
+    assert (tmp_path / "Makefile").read_text(encoding="utf-8") == customized
+
+
+def test_update_refreshes(tmp_path: Path) -> None:
+    """Spec scenario "Refresh after a clarinet upgrade" (project-quality-scaffold):
+    managed quality config from an OLDER clarinet version -- still carrying a
+    managed header, just a stale one -- is rewritten from the current payload
+    with an updated header.
+
+    This is deliberately NOT a headerless file: that state now trips the
+    unmanaged guard and `update` must refuse it (see the mixed-state tests
+    above) rather than silently overwrite it, so seeding a headerless
+    "stale" body here would exercise a state `update` no longer accepts.
+    """
+    scaffold_quality_config(project_dir=tmp_path, mode="init")
+    old_header = (
+        "# managed by clarinet v0.0.1 — do not edit; run 'clarinet quality update' to refresh\n"
+    )
+    (tmp_path / "mypy.ini").write_text(old_header + "stale", encoding="utf-8")
     scaffold_quality_config(project_dir=tmp_path, mode="update")
-    assert "[mypy]" in (tmp_path / "mypy.ini").read_text(encoding="utf-8")
+    refreshed = (tmp_path / "mypy.ini").read_text(encoding="utf-8")
+    assert "[mypy]" in refreshed
+    assert "stale" not in refreshed
+    assert "v0.0.1" not in refreshed
 
 
 def test_update_leaves_pyproject_byte_identical(tmp_path: Path) -> None:
