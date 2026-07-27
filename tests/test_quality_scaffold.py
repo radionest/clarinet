@@ -217,6 +217,102 @@ def test_both_configs_exclude_vendored_lib() -> None:
     assert "plan/lib" in (payload_dir() / "ruff.toml").read_text(encoding="utf-8")
 
 
+# Byte-identical between plan/lib and plan/workflows in the behaviour tests below
+# -- the same F401 (ruff) + [assignment] (mypy) violation planted in both
+# locations, so any difference in what gets reported is attributable only to
+# the exclusion path, never to the two files carrying different bugs.
+_BAD_CODE = 'import os\n\nbad: int = "not an int"\n'
+
+
+def test_ruff_config_excludes_vendored_but_checks_project_code(tmp_path: Path) -> None:
+    """Spec (project-quality-scaffold): "Vendored code is excluded from both
+    checkers" -- ruff half (mypy half in the test below; separate risks, since
+    the two tools use unrelated exclusion syntax).
+
+    ``test_both_configs_exclude_vendored_lib`` above only asserts the string
+    ``plan/lib`` appears in ruff.toml -- a spelling check, not a behaviour
+    check. This installs the real shipped config via ``scaffold_quality_config``
+    and runs the real ``ruff`` binary against it. Asserting the exit code and
+    that ``mine.py`` DOES appear in stdout -- not just that ``vendored.py``
+    doesn't -- guards against a no-op tool (wrong cwd, crashed, config not
+    picked up) trivially passing this test by reporting nothing at all.
+    """
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        warnings.warn("ruff not on PATH -- skipping ruff vendored-exclusion test", stacklevel=2)
+        pytest.skip("ruff not on PATH")
+
+    scaffold_quality_config(project_dir=tmp_path, mode="init")
+    (tmp_path / "plan" / "lib").mkdir(parents=True)
+    (tmp_path / "plan" / "lib" / "vendored.py").write_text(_BAD_CODE, encoding="utf-8")
+    (tmp_path / "plan" / "workflows").mkdir(parents=True)
+    (tmp_path / "plan" / "workflows" / "mine.py").write_text(_BAD_CODE, encoding="utf-8")
+
+    result = subprocess.run(
+        [ruff, "check", "--no-cache", "plan/"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, (
+        f"expected exactly the project violation (exit 1); got exit {result.returncode}\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "vendored.py" not in result.stdout, (
+        f"vendored code must be excluded from ruff -- it was reported:\n{result.stdout}"
+    )
+    assert "mine.py" in result.stdout, (
+        f"project code must still be checked by ruff -- it was not reported:\n{result.stdout}"
+    )
+
+
+def test_mypy_config_excludes_vendored_but_checks_project_code(tmp_path: Path) -> None:
+    """Spec (project-quality-scaffold): "Vendored code is excluded from both
+    checkers" -- mypy half. mypy's exclusion is a completely different
+    mechanism than ruff's (a verbose ``(?x)`` regex under ``[mypy] exclude``,
+    matched against the path relative to cwd, vs. ruff's gitignore-style
+    ``extend-exclude`` list) -- a genuinely separate risk, not a redundant
+    duplicate of the ruff test above.
+
+    Same construction as the ruff test: byte-identical bad content in both
+    locations, so the difference in outcome can only come from the exclusion.
+    "checked 1 source file" in mypy's own summary additionally confirms
+    plan/lib/vendored.py was excluded from the file walk entirely, not merely
+    suppressed after being checked.
+    """
+    mypy = shutil.which("mypy")
+    if mypy is None:
+        warnings.warn("mypy not on PATH -- skipping mypy vendored-exclusion test", stacklevel=2)
+        pytest.skip("mypy not on PATH")
+
+    scaffold_quality_config(project_dir=tmp_path, mode="init")
+    (tmp_path / "plan" / "lib").mkdir(parents=True)
+    (tmp_path / "plan" / "lib" / "vendored.py").write_text(_BAD_CODE, encoding="utf-8")
+    (tmp_path / "plan" / "workflows").mkdir(parents=True)
+    (tmp_path / "plan" / "workflows" / "mine.py").write_text(_BAD_CODE, encoding="utf-8")
+
+    result = subprocess.run(
+        [mypy, "--no-incremental", "plan/"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, (
+        f"expected exactly the project violation (exit 1); got exit {result.returncode}\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "vendored.py" not in result.stdout, (
+        f"vendored code must be excluded from mypy -- it was reported:\n{result.stdout}"
+    )
+    assert "mine.py" in result.stdout, (
+        f"project code must still be checked by mypy -- it was not reported:\n{result.stdout}"
+    )
+    assert "checked 1 source file" in result.stdout, (
+        "expected plan/lib to be excluded from mypy's file walk entirely (not just "
+        f"suppressed after checking); mypy reported:\n{result.stdout}"
+    )
+
+
 def test_missing_payload_file_writes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
