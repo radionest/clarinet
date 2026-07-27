@@ -18,8 +18,10 @@ from clarinet.exceptions.domain import RecordConstraintViolationError
 if TYPE_CHECKING:
     from clarinet.models.record import RecordTypeCreate
 
-# Coarser -> finer. A reference must never be finer than the file declaring it:
-# the declaring file's working directory would have no counterpart for it.
+# Coarser -> finer. Neither the declaring file nor its reference may be finer
+# than the RecordType's own level, and a reference may not be finer than the
+# file declaring it — any of those leaves a file with no working directory to
+# resolve against.
 _LEVEL_ORDER = {"PATIENT": 0, "STUDY": 1, "SERIES": 2}
 
 # Extensions ``read_grid`` can classify. ``.seg.nrrd`` is covered by ``.nrrd``.
@@ -36,8 +38,9 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
 
     For every file in the RecordType's registry that sets ``grid_conform_to``:
     the reference must be bound to the same RecordType, must not be the file
-    itself, must not be coarser-record-unresolvable (finer level), neither side
-    may be a collection, and both patterns must be grid-readable.
+    itself, neither side's effective level may be finer than the RecordType's
+    own level nor the reference's finer than the declaring file's, neither
+    side may be a collection, and both patterns must be grid-readable.
 
     Args:
         rt: A ``RecordTypeCreate``-shaped object exposing ``name``, ``level``
@@ -76,6 +79,19 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
 
         fd_level = (fd.level or rt.level).value
         ref_level = (ref.level or rt.level).value
+        rt_level = rt.level.value
+        if _LEVEL_ORDER[fd_level] > _LEVEL_ORDER[rt_level]:
+            raise RecordConstraintViolationError(
+                f"{prefix}='{ref_name}': '{fd.name}' has level ({fd_level}) finer "
+                f"than this RecordType's own level ({rt_level}); it cannot be "
+                f"resolved for a record at that level"
+            )
+        if _LEVEL_ORDER[ref_level] > _LEVEL_ORDER[rt_level]:
+            raise RecordConstraintViolationError(
+                f"{prefix}='{ref_name}' has level ({ref_level}) finer than this "
+                f"RecordType's own level ({rt_level}); it cannot be resolved for "
+                f"a record at that level"
+            )
         if _LEVEL_ORDER[ref_level] > _LEVEL_ORDER[fd_level]:
             raise RecordConstraintViolationError(
                 f"{prefix}='{ref_name}' has a finer level ({ref_level}) than the "

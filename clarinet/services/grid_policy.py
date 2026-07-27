@@ -8,8 +8,7 @@ serve as the guard.
 
 from pathlib import Path
 
-from clarinet.exceptions.domain import ImageError
-from clarinet.exceptions.http import CONFLICT
+from clarinet.exceptions.domain import BusinessRuleViolationError, ImageError
 from clarinet.files import Files
 from clarinet.models.file_schema import FileRole, GridMismatchAction
 from clarinet.models.record import RecordRead
@@ -39,8 +38,8 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
     is folded into the same 409 rather than surfacing as an unhandled 500.
 
     Raises:
-        HTTPException: 409 when any declared OUTPUT pair cannot be made to
-            conform, or cannot be read.
+        BusinessRuleViolationError: When any declared OUTPUT pair cannot be
+            made to conform, or cannot be read (→ 409).
     """
     registry = record.record_type.file_registry or []
     declared = [fd for fd in registry if fd.role == FileRole.OUTPUT and fd.grid_conform_to]
@@ -57,17 +56,17 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
             # call sites attach file links separately, so validate_grid_conformance
             # is a documented no-op for those — a dangling grid_conform_to can and
             # does reach runtime.
-            raise CONFLICT.with_context(
+            raise BusinessRuleViolationError(
                 f"Grid reference '{fd.grid_conform_to}' for '{fd.name}' is not "
                 f"bound to this record type"
             )
 
         subject = files.resolve(fd)
         reference = files.resolve(ref_def)
-        if not subject.is_file():
+        if not await Files.in_thread(subject.is_file):
             continue  # conformance is conditional on existence
-        if not reference.is_file():
-            raise CONFLICT.with_context(
+        if not await Files.in_thread(reference.is_file):
+            raise BusinessRuleViolationError(
                 f"Grid reference '{ref_def.name}' for output '{fd.name}' is not "
                 f"on disk — cannot verify the output's grid"
             )
@@ -77,7 +76,7 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
                 lambda s=subject, r=reference: grid_relation(read_grid(r), read_grid(s))
             )
         except ImageError as e:
-            raise CONFLICT.with_context(
+            raise BusinessRuleViolationError(
                 f"Cannot read the grid of output '{fd.name}' or its reference '{ref_def.name}': {e}"
             ) from e
         if relation.kind is RelationKind.SAME:
@@ -92,7 +91,7 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
                     lambda s=subject, r=reference: grid_relation(read_grid(r), read_grid(s))
                 )
             except ImageError as e:
-                raise CONFLICT.with_context(
+                raise BusinessRuleViolationError(
                     f"Failed to conform output '{fd.name}' onto '{ref_def.name}': {e}"
                 ) from e
             if recheck.kind is RelationKind.SAME:
@@ -101,7 +100,7 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
                     f"'{ref_def.name}' grid ({relation.kind.value})"
                 )
                 continue
-            raise CONFLICT.with_context(
+            raise BusinessRuleViolationError(
                 f"Output '{fd.name}' still does not match '{ref_def.name}' after "
                 f"conforming ({recheck.kind.value})"
             )
@@ -112,13 +111,13 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
                 f"Record {record.id}: deleted output '{fd.name}' — grid "
                 f"{relation.kind.value} vs '{ref_def.name}'"
             )
-            raise CONFLICT.with_context(
+            raise BusinessRuleViolationError(
                 f"Output '{fd.name}' did not match '{ref_def.name}'s grid "
                 f"({relation.kind.value}) and was deleted per on_grid_mismatch="
                 f"delete. Re-run the task to regenerate it."
             )
 
-        raise CONFLICT.with_context(
+        raise BusinessRuleViolationError(
             f"Output '{fd.name}' does not share '{ref_def.name}'s grid "
             f"({relation.kind.value}). Re-export it conformed to the reference."
         )

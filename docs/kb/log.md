@@ -3,6 +3,8 @@
 ## 2026-07-27
 
 * **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — added the vendored-code convention: third-party/generated code goes in `plan/lib/`, both configurations installed by `clarinet quality init` exclude it from checking, and fixes go upstream and are re-vendored rather than patched locally.
+* **Update**: [Domain model](./domain-model.md) — the `blocked` status table now names a declared INPUT grid mismatch as a second prerequisite failure, alongside missing required input files.
+* **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — added a "Grid-conformance declarations must be resolvable" section covering `grid_conform_to`/`on_grid_mismatch` in Python config and what `validate_grid_conformance` rejects at config-load time.
 
 ## 2026-07-24
 

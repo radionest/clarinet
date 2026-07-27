@@ -84,6 +84,23 @@ def test_finer_level_reference_rejected_via_level_inheritance():
         validate_grid_conformance(_rt(volume, seg, level="STUDY"))
 
 
+def test_finer_level_declaring_file_rejected():
+    # 'seg' and 'volume' agree with each other (both SERIES), so the
+    # reference-vs-declaring-file check alone would pass this -- only a
+    # comparison against the RecordType's own (coarser) level catches it.
+    # Files.resolve('seg') would otherwise KeyError: no SERIES working
+    # directory exists for a STUDY-level record.
+    volume = _fd(
+        "volume",
+        pattern="volume.nii.gz",
+        role=FileRole.INPUT,
+        level=DicomQueryLevel.SERIES,
+    )
+    seg = _fd("seg", grid_conform_to="volume", level=DicomQueryLevel.SERIES)
+    with pytest.raises(RecordConstraintViolationError, match="finer"):
+        validate_grid_conformance(_rt(volume, seg, level="STUDY"))
+
+
 def test_collection_subject_rejected():
     volume = _fd("volume", pattern="volume.nii.gz", role=FileRole.INPUT)
     seg = _fd("seg", grid_conform_to="volume", multiple=True)

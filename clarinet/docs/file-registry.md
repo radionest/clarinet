@@ -105,9 +105,10 @@ can actually resolve and check, or `RecordConstraintViolationError` is
 raised, naming the RecordType and the declaring file: the reference isn't
 bound to *this* RecordType (an unknown name and a name bound to a different
 RecordType raise the identical "unknown" error — lookup is scoped to this
-RecordType's own registry); it's a self-reference; its *effective* level
-(own `level`, or the RecordType's when unset) is finer than the declaring
-file's; either side has `multiple=True` (singular files only); or either
+RecordType's own registry); it's a self-reference; either side's *effective*
+level (own `level`, or the RecordType's when unset) is finer than the
+RecordType's own level, or the reference's finer than the declaring file's;
+either side has `multiple=True` (singular files only); or either
 pattern isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd` —
 `.seg.nrrd` is covered by the `.nrrd` check).
 

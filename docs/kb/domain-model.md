@@ -3,7 +3,7 @@ type: Concept
 title: Domain model
 description: The Patient/Study/Series/Record hierarchy, what a RecordType declares, the record status lifecycle, and how record data, files and audit events hang off a record.
 tags: [domain, records, dicom, lifecycle, rbac]
-timestamp: 2026-07-22T04:35:40Z
+timestamp: 2026-07-27T10:46:09Z
 ---
 
 Everything in Clarinet hangs off a four-level hierarchy borrowed from DICOM. A
@@ -91,7 +91,7 @@ Three statuses mean "not available for work", with distinct exit conditions:
 | Status | Why unavailable | Who releases it |
 |---|---|---|
 | `preparing` | the system is preparing the record (prefill, file/context generation) | flow or pipeline, via an explicit status update |
-| `blocked` | prerequisites not met — today that means required input files | automatically, via check-files |
+| `blocked` | prerequisites not met — required input files, or a declared INPUT file whose grid no longer matches its reference | automatically, via check-files |
 | `pause` | administrative decision | a human |
 
 Contract details that bite:
