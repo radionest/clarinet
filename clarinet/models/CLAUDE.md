@@ -145,8 +145,8 @@ Lifecycle: `preparing → (blocked if files missing) → pending → inwork → 
 `blocked` contract: "prerequisites not met". Today that means required input
 files, or a declared INPUT file whose grid no longer matches its reference
 (`grid_conform_to`); completed sibling record types may be added later.
-- Records with missing required input files get `blocked` status on creation (instead of raising)
-- `POST /records/{id}/check-files` auto-unblocks when files appear → transitions to `pending`
+- Records with missing required input files, or a grid-mismatched INPUT file, get `blocked` status on creation (instead of raising)
+- `POST /records/{id}/check-files` auto-unblocks when files are present and grid-matched → transitions to `pending`
 
 `preparing` contract: "the system is actively preparing the record".
 - Set via `RecordCreate(status="preparing")` or `update_status` / RecordFlow `update_record(status='preparing')`

@@ -234,7 +234,7 @@ be bound to that same RecordType:
 
 ### Config-load fail-fast
 
-`validate_grid_conformance` (`clarinet/config/grid_conformance.py:34`) runs
+`validate_grid_conformance` (`clarinet/config/grid_conformance.py:36`) runs
 inside the same `RecordTypeCreate` model validator as
 `validate_output_path_uniqueness` — so Python config load, TOML load, and
 RecordType `POST`/`PATCH` all reject a broken declaration at the point of the

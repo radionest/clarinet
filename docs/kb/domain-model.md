@@ -3,7 +3,7 @@ type: Concept
 title: Domain model
 description: The Patient/Study/Series/Record hierarchy, what a RecordType declares, the record status lifecycle, and how record data, files and audit events hang off a record.
 tags: [domain, records, dicom, lifecycle, rbac]
-timestamp: 2026-07-27T10:46:09Z
+timestamp: 2026-07-27T11:57:23Z
 ---
 
 Everything in Clarinet hangs off a four-level hierarchy borrowed from DICOM. A
@@ -72,10 +72,10 @@ The behavioural flags (`unique_by`, `shared_editing`, `editable`,
 stateDiagram-v2
     [*] --> preparing
     [*] --> pending
-    preparing --> blocked : files missing on exit
+    preparing --> blocked : files missing or grid mismatch on exit
     preparing --> pending : files valid
-    pending --> blocked : required inputs missing
-    blocked --> pending : check-files finds them
+    pending --> blocked : required inputs missing or grid mismatch
+    blocked --> pending : check-files finds files valid
     pending --> inwork
     inwork --> finished
     inwork --> failed

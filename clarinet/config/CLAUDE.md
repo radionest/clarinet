@@ -90,10 +90,11 @@ Fail-fast check run in the same `RecordTypeCreate` model validator as
 RecordType `POST`/`PATCH`. For every file that sets `grid_conform_to`,
 rejects (naming the RecordType and the declaring file) when: the reference
 isn't bound to this RecordType (an unknown name and a name bound to a
-different RecordType raise the identical error); it's a self-reference; its
-effective level (own `level`, or the RecordType's when unset) is finer than
-the declaring file's; either side has `multiple=True`; or either pattern
-isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd`).
+different RecordType raise the identical error); it's a self-reference;
+either side's effective level (own `level`, or the RecordType's when unset)
+is finer than the RecordType's own level, or the reference's finer than the
+declaring file's; either side has `multiple=True`; or either pattern isn't a
+grid-readable format (`.nii`, `.nii.gz`, `.nrrd`).
 
 Runtime enforcement, the OUTPUT decision table, and the adoption order:
 [`docs/grid-workflows.md`](../../docs/grid-workflows.md#runtime-grid-conformance-enforcement).
