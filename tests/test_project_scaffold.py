@@ -1,5 +1,6 @@
 """Unit tests for the packaged project scaffold payload."""
 
+import re
 from pathlib import Path
 
 import clarinet
@@ -48,3 +49,38 @@ def test_payload_carries_no_agent_docs() -> None:
 
 def test_dotfile_map_targets_are_dotted() -> None:
     assert SCAFFOLD_DOTFILES == {"gitignore": ".gitignore", "env.example": ".env.example"}
+
+
+def _ports_in(text: str) -> dict[str, str]:
+    """Extract `port` and the port inside `api_base_url`, commented or not.
+
+    Both payload TOMLs are read: ``settings.custom.toml`` loads after
+    ``settings.toml`` and wins, so a commented suggestion there is a value an
+    operator is invited to activate.
+    """
+    found: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.lstrip("# ").strip()
+        if match := re.fullmatch(r"port\s*=\s*(\d+)", line):
+            found["port"] = match.group(1)
+        elif match := re.match(r"api_base_url\s*=\s*\"[^\"]*?://[^/:\"]+:(\d+)", line):
+            found["api_base_url"] = match.group(1)
+    return found
+
+
+def test_payload_settings_agree_on_port() -> None:
+    """uvicorn binds `port`; the server-side ClarinetClient calls `api_base_url`
+    verbatim. A payload where the two disagree produces a project whose
+    RecordFlow, pipeline tasks and DICOM orchestration cannot reach their own
+    API — and the two payload files must not contradict each other either."""
+    src = scaffold_source_dir()
+    per_file = {
+        name: _ports_in((src / name).read_text(encoding="utf-8"))
+        for name in ("settings.toml", "settings.custom.toml")
+    }
+
+    ports = {
+        f"{name}:{key}": value for name, found in per_file.items() for key, value in found.items()
+    }
+    assert ports, "no port found in the payload — the extractor is broken, not the payload"
+    assert len(set(ports.values())) == 1, f"payload files disagree on the port: {ports}"

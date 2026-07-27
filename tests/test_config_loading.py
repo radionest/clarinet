@@ -444,6 +444,15 @@ class TestMissingConfigRoot:
             await load_python_config(tmp_path / "plan")
 
     @pytest.mark.asyncio
+    async def test_root_that_is_a_regular_file_says_so(self, tmp_path):
+        """A path that exists but is not a directory is a distinct misconfiguration —
+        reporting it as "does not exist" sends the operator looking for the wrong thing."""
+        (tmp_path / "plan").write_text("not a directory\n", encoding="utf-8")
+
+        with pytest.raises(ConfigLoadError, match="is not a directory"):
+            await load_python_config(tmp_path / "plan")
+
+    @pytest.mark.asyncio
     async def test_existing_but_empty_root_still_warns(self, tmp_path):
         (tmp_path / "plan").mkdir()
 

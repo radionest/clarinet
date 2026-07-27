@@ -284,6 +284,12 @@ def _ensure_record_types_imported(folder: Path | None = None) -> None:
             _set_file_names_from_module(rt)
 
 
+# Marks the ConfigLoadError raised below, so the startup banner can offer a
+# remediation for a bad root instead of guessing "fix the import error"
+# (the structural fix asked for in review of #352).
+CONFIG_ROOT_KIND = "config root"
+
+
 def ensure_config_root_exists(folder: Path) -> None:
     """Abort when the custom-code root does not exist.
 
@@ -313,7 +319,9 @@ def ensure_config_root_exists(folder: Path) -> None:
             'config_tasks_path = "./tasks/" in settings.toml.'
         )
     problem = "is not a directory" if folder.exists() else "does not exist"
-    raise ConfigLoadError(f"config root '{folder}' {problem}.{hint}", path=folder)
+    raise ConfigLoadError(
+        f"config root '{folder}' {problem}.{hint}", path=folder, kind=CONFIG_ROOT_KIND
+    )
 
 
 async def load_python_config(folder: Path) -> list[RecordTypeCreate]:

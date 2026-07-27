@@ -13,8 +13,8 @@ api_base_url = "http://127.0.0.1:8111/my_project/api"
 extra_roles = []
 
 # ── Server / Logging ─────────────────────────────────
-# Must agree with the port in api_base_url above — the server-side
-# ClarinetClient calls the API through it.
+# uvicorn binds this port; the server-side ClarinetClient calls
+# api_base_url verbatim, so the two must carry the same port.
 port = 8111
 host = "0.0.0.0"
 debug = true

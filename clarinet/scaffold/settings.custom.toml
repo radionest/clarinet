@@ -18,7 +18,11 @@
 # log_console_level = "INFO"
 
 # ── Server ───────────────────────────────────────────
-# port = 8000
+# port and api_base_url must carry the SAME port: uvicorn binds `port`,
+# while every server-side ClarinetClient calls `api_base_url` verbatim.
+# Uncomment both together or neither.
+# port = 8111
+# api_base_url = "http://127.0.0.1:8111/my_project/api"
 # host = "0.0.0.0"
 
 # ── Database (PostgreSQL) ────────────────────────────
