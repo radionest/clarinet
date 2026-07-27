@@ -46,13 +46,15 @@ def test_reference_not_bound_to_record_type_rejected():
     # 'volume' exists as a definition but this record type does not bind it.
     volume = _fd("volume", pattern="volume.nii.gz", role=FileRole.INPUT)
     seg = _fd("seg", grid_conform_to=volume.name)
-    with pytest.raises(RecordConstraintViolationError, match="unknown"):
+    with pytest.raises(RecordConstraintViolationError, match=r"unknown.*Bound files: \['seg'\]"):
         validate_grid_conformance(_rt(seg))  # volume deliberately NOT bound
 
 
 def test_self_reference_rejected():
     seg = _fd("seg", grid_conform_to="seg")
-    with pytest.raises(RecordConstraintViolationError, match="itself"):
+    with pytest.raises(
+        RecordConstraintViolationError, match=r"RecordType 'seg-task' file 'seg'.*itself"
+    ):
         validate_grid_conformance(_rt(seg))
 
 
@@ -66,6 +68,20 @@ def test_finer_level_reference_rejected():
     seg = _fd("seg", grid_conform_to="volume", level=DicomQueryLevel.STUDY)
     with pytest.raises(RecordConstraintViolationError, match="finer"):
         validate_grid_conformance(_rt(volume, seg, level="SERIES"))
+
+
+def test_finer_level_reference_rejected_via_level_inheritance():
+    # seg.level is None here, so it must inherit rt.level (STUDY) rather than
+    # some hardcoded constant -- only then is STUDY < SERIES actually "finer".
+    volume = _fd(
+        "volume",
+        pattern="volume.nii.gz",
+        role=FileRole.INPUT,
+        level=DicomQueryLevel.SERIES,
+    )
+    seg = _fd("seg", grid_conform_to="volume")
+    with pytest.raises(RecordConstraintViolationError, match="finer"):
+        validate_grid_conformance(_rt(volume, seg, level="STUDY"))
 
 
 def test_collection_subject_rejected():
