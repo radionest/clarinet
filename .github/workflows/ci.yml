@@ -70,10 +70,17 @@ jobs:
         run: uv sync
 
       - name: Run unit tests
+        # packaging (see tests/test_quality_scaffold.py) builds a real
+        # wheel; excluded here only. Not because of -x -- test-unit (above)
+        # runs with -x too, so that isn't what distinguishes the jobs. This
+        # job alone carries a 15-minute timeout-minutes cap, and the
+        # packaging test has nothing OS-specific to verify (already covered
+        # on Linux by test-unit and test-postgres) -- not worth risking a
+        # slow wheel build eating into that budget.
         run: >-
           uv run pytest tests/
           -n auto --dist loadgroup
-          -m "${{ env.PYTEST_UNIT_MARKERS }}"
+          -m "${{ env.PYTEST_UNIT_MARKERS }} and not packaging"
           -x --json-report-file=test-report.json
           -q
 

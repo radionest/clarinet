@@ -43,10 +43,13 @@ my_project/
     scripts/                 # 3D Slicer scripts
     workflows/
       pipeline_flow.py       # RecordFlow DSL
+    lib/                     # Vendored/third-party code (excluded by both shipped checkers)
 ```
 
 Every plan file imports as a `clarinet_plan.` submodule off this single root
-(no `sys.path`). See `.claude/rules/custom-code-loading.md`.
+(no `sys.path`). See `.claude/rules/custom-code-loading.md`. `plan/lib/` is
+the vendored/third-party location; both configs installed by `clarinet
+quality init` exclude it from linting and type-checking.
 
 ## Key Settings (`settings.toml`)
 

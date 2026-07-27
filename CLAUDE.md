@@ -43,7 +43,7 @@ make pre-commit                 # All pre-commit hooks
 # For long-running commands, redirect to file:
 # Use unique filenames when multiple worktrees may run in parallel:
 #   timeout 120 make test-unit > /tmp/test-{worktree}.txt 2>&1
-make test-fast                  # All tests in parallel, excludes schema (default)
+make test-fast                  # All tests in parallel, excludes schema + packaging (default)
 make test-unit                  # DB-only tests in parallel (no external services)
 make test                       # All tests sequential
 make test-cov                   # With coverage
@@ -91,6 +91,8 @@ uv run clarinet anon scrub-db --patients # Anonymize a restored DB copy into a t
 uv run clarinet quarto new NAME          # Scaffold a Quarto report (.qmd + reference.docx)
 uv run clarinet agent init [path]        # Install framework agent docs into a project's .claude/rules/clarinet/
 uv run clarinet agent update [path]      # Refresh those docs + re-resolve package links
+uv run clarinet quality init [path]      # Install mypy/ruff/Makefile config into a project
+uv run clarinet quality update [path]    # Refresh that managed config
 ```
 
 ## Anti-patterns

@@ -418,6 +418,12 @@ class AgentScaffoldError(ClarinetError):
     package payload, init over an existing managed dir, update with none)."""
 
 
+class QualityScaffoldError(ClarinetError):
+    """Raised when installing/refreshing downstream quality config fails (missing
+    package payload, init over an existing managed config, either mode colliding with
+    an unmanaged file at a destination name, update with none)."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

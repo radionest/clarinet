@@ -1,0 +1,101 @@
+# ruff configuration for a clarinet downstream project.
+# Mirrors the framework's own rule selection so suppressions written against
+# clarinet's source are valid here too.
+
+line-length = 100
+indent-width = 4
+# Bump alongside mypy.ini's python_version if your project targets a newer
+# Python.
+target-version = "py312"
+
+# Without this, extend-exclude below only applies while ruff is walking a
+# directory itself -- an explicitly-passed FILE path (e.g. from a `repo:
+# local` pre-commit hook, an editor action, or a CI script that lints only
+# the files a commit touches) would still be linted even though it's under
+# plan/lib. Directory-based invocations (this project's own Makefile) are
+# unaffected either way.
+force-exclude = true
+
+# extend-exclude ADDS to ruff's built-in default exclude list (.venv, .git,
+# _build, dist, node_modules, etc. -- see ruff's docs for the full set);
+# plain `exclude` would REPLACE it instead, silently putting all of those
+# back in scope. Only the entries this project actually needs to add on top
+# go here.
+extend-exclude = [
+    "data",
+    # Vendored / frozen third-party code. Fixes go upstream and are re-vendored,
+    # so a local finding here is not actionable.
+    "plan/lib",
+    # Despite _build/buck-out/dist being real ruff defaults, plain "build" is
+    # not (verified against 0.15.8) -- the common `python -m build` output dir
+    # would otherwise get linted.
+    "build",
+]
+
+[lint]
+select = [
+    "E", "W", "F", "I", "B", "C4", "UP", "ARG", "SIM",
+    "TCH", "DTZ", "Q", "RUF", "ASYNC",
+]
+
+ignore = [
+    "E501",      # line too long — handled by the formatter
+    "B008",      # function calls in argument defaults
+    "B905",      # zip() without explicit strict=
+    "ASYNC210",  # these four assume trio/anyio, not pure asyncio
+    "ASYNC220",
+    "ASYNC230",
+    "ASYNC240",
+    "UP042",     # str+Enum -> StrEnum needs careful serialize-compat migration
+]
+
+fixable = ["ALL"]
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"tests/*" = ["ARG", "S101", "TCH"]
+# Slicer scripts run inside Slicer's embedded Python with injected globals --
+# but NOT blanket-ignored here. Authors annotate each reference line with its
+# own `# noqa: F821` (see .claude/rules/clarinet/slicer.md, installed by
+# `clarinet agent init`); a per-file ignore would make every one of those
+# comments redundant, and since `make lint` runs `ruff check --fix`, RUF100
+# (unused noqa directive) is a SAFE fix that silently deletes them from the
+# user's source on first lint. Per-line noqas also stay precise: a genuine
+# typo'd/undefined name elsewhere in the same script still gets caught.
+# RecordFlow DSL condition syntax: `F.some_field == True` is not a redundant
+# bool comparison -- `F.some_field` is a lazy FlowResult proxy, and `== True`
+# is what invokes its overloaded __eq__ to build the FieldComparison object
+# `.if_record()` requires. Dropping `== True` does not simplify the code, it
+# breaks the DSL (see `.claude/rules/clarinet/workflows.md`, installed by
+# `clarinet agent init`).
+"plan/workflows/*" = ["E712"]
+
+[lint.isort]
+# clarinet_plan is an in-memory anchor package (clarinet.config.plan_package),
+# never installed or present on disk, so isort's own heuristic can't see it as
+# first-party and merges `from clarinet_plan... import` into the third-party
+# block next to `clarinet.*` (itself third-party here -- it's an installed
+# dependency, not project source) -- I001 then flags every plan/ file that
+# imports across its own modules, and the autofix reshuffles the import on
+# first `make check`.
+known-first-party = ["clarinet_plan"]
+# known-first-party alone is not enough: isort's default section-order still
+# places first-party AFTER third-party (plain PEP 8 order), so it would just
+# move the now-correctly-classified clarinet_plan block from beside
+# clarinet.* to after it -- still a reshuffle on every downstream plan/ file,
+# just a different target position (confirmed by diffing `ruff check --diff`
+# with only known-first-party set: it relocates, doesn't stop touching, the
+# import). Swapping first-party ahead of third-party matches how the
+# template itself is authored -- a project's own record/workflow
+# definitions read before the framework's plumbing -- and is what actually
+# makes `ruff check`/`--fix` a no-op on it.
+section-order = ["future", "standard-library", "first-party", "third-party", "local-folder"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"

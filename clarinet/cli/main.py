@@ -1249,6 +1249,62 @@ def handle_agent_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_quality_init(args: argparse.Namespace) -> None:
+    """Handle ``clarinet quality init`` — install lint/type config into a project."""
+    from clarinet.exceptions.domain import QualityScaffoldError
+    from clarinet.utils.quality_scaffold import scaffold_quality_config
+
+    try:
+        dest, fragment = scaffold_quality_config(
+            project_dir=Path(args.path), mode="init", force=args.force
+        )
+    except QualityScaffoldError as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    logger.info(f"Quality config installed in {dest}")
+    # enqueue=True on the console sink (clarinet/utils/logger.py) writes via a
+    # background thread -- without draining it here, the async success line
+    # can land after this function's synchronous stdout print below, breaking
+    # the "fragment is the final output" requirement on any merged stream
+    # (a real terminal, `2>&1`, `tee`, CI logs).
+    logger.complete()
+    _print_fragment(fragment)
+
+
+def cmd_quality_update(args: argparse.Namespace) -> None:
+    """Handle ``clarinet quality update`` — refresh managed lint/type config."""
+    from clarinet.exceptions.domain import QualityScaffoldError
+    from clarinet.utils.quality_scaffold import scaffold_quality_config
+
+    try:
+        dest, _ = scaffold_quality_config(project_dir=Path(args.path), mode="update")
+    except QualityScaffoldError as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    logger.info(f"Quality config refreshed in {dest}")
+
+
+def _print_fragment(fragment: str) -> None:
+    """Print the pyproject dependency fragment as the final, actionable output.
+
+    Uses ``print`` rather than ``logger`` on purpose: this is operator-facing
+    copy-paste output, not a log event, and it must survive log-level settings.
+    """
+    print("\nNEXT STEP — merge into your pyproject.toml, then run 'uv sync':\n")
+    print(fragment)
+
+
+def handle_quality_command(args: argparse.Namespace) -> None:
+    """Handle quality-config commands."""
+    if args.quality_command == "init":
+        cmd_quality_init(args)
+    elif args.quality_command == "update":
+        cmd_quality_update(args)
+    else:
+        logger.error(f"Unknown quality command: {args.quality_command}")
+        sys.exit(1)
+
+
 async def _rabbitmq_clean(dry_run: bool = False) -> None:
     """Delete orphaned test queues/exchanges from RabbitMQ."""
     from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
@@ -1617,6 +1673,29 @@ def main() -> None:
         "--agent", default="claude", choices=["claude"], help="Target agent (default: claude)"
     )
 
+    # quality command
+    quality_parser = subparsers.add_parser(
+        "quality", help="Manage lint/type configuration in a downstream project"
+    )
+    quality_subparsers = quality_parser.add_subparsers(dest="quality_command")
+
+    quality_init_parser = quality_subparsers.add_parser(
+        "init", help="Install mypy/ruff/Makefile config into a project"
+    )
+    quality_init_parser.add_argument(
+        "path", nargs="?", default=".", help="Project dir (default: .)"
+    )
+    quality_init_parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing managed config"
+    )
+
+    quality_update_parser = quality_subparsers.add_parser(
+        "update", help="Refresh managed lint/type config"
+    )
+    quality_update_parser.add_argument(
+        "path", nargs="?", default=".", help="Project dir (default: .)"
+    )
+
     # worker command
     worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")
     worker_parser.add_argument(
@@ -1940,6 +2019,11 @@ def main() -> None:
             agent_parser.print_help()
         else:
             handle_agent_command(args)
+    elif args.command == "quality":
+        if not args.quality_command:
+            quality_parser.print_help()
+        else:
+            handle_quality_command(args)
     elif args.command == "session":
         if not args.session_command:
             session_parser.print_help()

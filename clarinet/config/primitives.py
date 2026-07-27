@@ -5,6 +5,7 @@ define RecordTypes in a declarative, type-safe way.
 """
 
 import warnings
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -40,6 +41,15 @@ def _coerce_viewer_mode(value: Any) -> Any:
     return value
 
 
+# Sentinel marking "not passed" for optional constructor params below. Plain
+# None cannot serve this role because it is itself a valid, meaningful value
+# for some coerced fields (e.g. RecordDef.unique_by's "no uniqueness" case), so
+# it must be distinguished from omission — a param is forwarded to pydantic
+# only when the caller actually passed something, preserving pydantic's own
+# defaults/required-ness for the omitted case.
+_UNSET: Any = object()
+
+
 class FileDef(BaseModel):
     """Shared file definition (equivalent to file_registry entry).
 
@@ -56,6 +66,37 @@ class FileDef(BaseModel):
     level: DicomQueryLevel
     description: str | None = None
     name: str = ""
+
+    def __init__(
+        self,
+        *,
+        pattern: str = _UNSET,
+        multiple: bool = False,
+        level: DicomQueryLevel | str = _UNSET,
+        description: str | None = None,
+        name: str = "",
+        **kwargs: Any,
+    ) -> None:
+        """Give every field an explicit, correctly-typed constructor parameter.
+
+        Only ``level``'s parameter widens (``DicomQueryLevel | str``, to accept
+        the string form ``_coerce_level`` already coerces) — the field
+        annotation stays ``DicomQueryLevel``; widening only the signature is
+        what keeps this change static-only. Mirrors ``FileRef.__init__``.
+
+        ``pattern`` and ``level`` have no pydantic default (both are
+        required), so each is forwarded only when actually passed — omitting
+        either still raises pydantic's own "field required" error instead of
+        silently defaulting to a placeholder value. ``multiple``/``description``/
+        ``name`` mirror their own pydantic default directly: neither is
+        required nor coerced from a wider type, so there is nothing to guard
+        with the ``_UNSET`` sentinel.
+        """
+        if pattern is not _UNSET:
+            kwargs["pattern"] = pattern
+        if level is not _UNSET:
+            kwargs["level"] = level
+        super().__init__(multiple=multiple, description=description, name=name, **kwargs)
 
     @field_validator("level", mode="before")
     @classmethod
@@ -179,13 +220,28 @@ class RecordDef(BaseModel):
         *,
         role: str | None = None,
         unique_per_user: bool | None = None,
+        level: DicomQueryLevel | str = _UNSET,
+        viewer_mode: ViewerMode | str = _UNSET,
+        unique_by: Iterable[str] | bool | None = _UNSET,
         **kwargs: Any,
     ) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name`` and
         translate the deprecated ``unique_per_user`` flag into ``unique_by``.
+
+        ``level`` / ``viewer_mode`` / ``unique_by`` are declared explicitly so the
+        string and TOML forms their ``mode="before"`` validators coerce also
+        type-check; ``**kwargs: Any`` still covers the remaining fields. Each is
+        forwarded only when actually passed, so pydantic's declared defaults
+        apply for omitted ones.
         """
         if role is not None and "role_name" not in kwargs:
             kwargs["role_name"] = role
+        if level is not _UNSET:
+            kwargs["level"] = level
+        if viewer_mode is not _UNSET:
+            kwargs["viewer_mode"] = viewer_mode
+        if unique_by is not _UNSET:
+            kwargs["unique_by"] = unique_by
         if unique_per_user is not None:
             warnings.warn(
                 "unique_per_user is deprecated; use unique_by",
