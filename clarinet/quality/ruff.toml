@@ -55,8 +55,14 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
 "tests/*" = ["ARG", "S101", "TCH"]
-# Slicer scripts run inside Slicer's embedded Python with injected globals.
-"plan/scripts/*" = ["F821"]
+# Slicer scripts run inside Slicer's embedded Python with injected globals --
+# but NOT blanket-ignored here. Authors annotate each reference line with its
+# own `# noqa: F821` (see .claude/rules/clarinet/slicer.md, installed by
+# `clarinet agent init`); a per-file ignore would make every one of those
+# comments redundant, and since `make lint` runs `ruff check --fix`, RUF100
+# (unused noqa directive) is a SAFE fix that silently deletes them from the
+# user's source on first lint. Per-line noqas also stay precise: a genuine
+# typo'd/undefined name elsewhere in the same script still gets caught.
 # RecordFlow DSL condition syntax: `F.some_field == True` is not a redundant
 # bool comparison -- `F.some_field` is a lazy FlowResult proxy, and `== True`
 # is what invokes its overloaded __eq__ to build the FieldComparison object
@@ -64,6 +70,27 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # breaks the DSL (see `.claude/rules/clarinet/workflows.md`, installed by
 # `clarinet agent init`).
 "plan/workflows/*" = ["E712"]
+
+[lint.isort]
+# clarinet_plan is an in-memory anchor package (clarinet.config.plan_package),
+# never installed or present on disk, so isort's own heuristic can't see it as
+# first-party and merges `from clarinet_plan... import` into the third-party
+# block next to `clarinet.*` (itself third-party here -- it's an installed
+# dependency, not project source) -- I001 then flags every plan/ file that
+# imports across its own modules, and the autofix reshuffles the import on
+# first `make check`.
+known-first-party = ["clarinet_plan"]
+# known-first-party alone is not enough: isort's default section-order still
+# places first-party AFTER third-party (plain PEP 8 order), so it would just
+# move the now-correctly-classified clarinet_plan block from beside
+# clarinet.* to after it -- still a reshuffle on every downstream plan/ file,
+# just a different target position (confirmed by diffing `ruff check --diff`
+# with only known-first-party set: it relocates, doesn't stop touching, the
+# import). Swapping first-party ahead of third-party matches how the
+# template itself is authored -- a project's own record/workflow
+# definitions read before the framework's plumbing -- and is what actually
+# makes `ruff check`/`--fix` a no-op on it.
+section-order = ["future", "standard-library", "first-party", "third-party", "local-folder"]
 
 [format]
 quote-style = "double"
