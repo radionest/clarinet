@@ -211,7 +211,7 @@ seam that could let the pair drift, with no script author ever writing a
 
 ### Declaring a pair
 
-Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:51`)
+Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:83-84`)
 — a property of the *file*, not of a `RecordTypeFileLink` binding, so every
 RecordType binding that file inherits the declaration, and the reference must
 be bound to that same RecordType:
@@ -296,7 +296,7 @@ seam inherits the check automatically:
   passed creation or check-files while sitting `pending`. Unlike every seam
   above, this one raises instead of recording a verdict: a mismatch here
   raises the domain `ValidationError`, mapped to **422**
-  (`exception_handlers.py:163-167`), not the 409 the OUTPUT guard produces.
+  (`exception_handlers.py:163-172`), not the 409 the OUTPUT guard produces.
   Skipped, like the OUTPUT guard, whenever `skip_validation` is true
   (`record.py:498`) — i.e. for `POST /data?status=failed`. `PATCH /data`
   and `PATCH /submit` never reach this branch at all (`is_update=True`
@@ -393,7 +393,7 @@ fail-open hole the four-endpoint scope exists to close. See
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
 | `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:416` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
-| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:38,82-83` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
+| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:38,83-84` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see

@@ -603,6 +603,13 @@ async def test_grid_conform_to_change_triggers_update(
     """Changing on_grid_mismatch on a file that declares grid_conform_to must
     be detected as a diff by _file_links_differ.
     """
+    volume_def = {
+        "name": "volume",
+        "pattern": "volume.nii.gz",
+        "role": "input",
+        "required": True,
+        "multiple": False,
+    }
     file_def_v1 = {
         "name": "seg_file",
         "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness no-ops
@@ -612,7 +619,7 @@ async def test_grid_conform_to_change_triggers_update(
         "grid_conform_to": "volume",
         "on_grid_mismatch": "reject",
     }
-    config_v1 = [_make_config("grid-drift-test", file_registry=[file_def_v1])]
+    config_v1 = [_make_config("grid-drift-test", file_registry=[volume_def, file_def_v1])]
     result = await reconcile_record_types(config_v1, test_session)
     assert result.created == ["grid-drift-test"]
 
@@ -620,7 +627,7 @@ async def test_grid_conform_to_change_triggers_update(
 
     # Flip on_grid_mismatch reject -> conform -> must be detected as a change
     file_def_v2 = {**file_def_v1, "on_grid_mismatch": "conform"}
-    config_v2 = [_make_config("grid-drift-test", file_registry=[file_def_v2])]
+    config_v2 = [_make_config("grid-drift-test", file_registry=[volume_def, file_def_v2])]
     result = await reconcile_record_types(config_v2, test_session)
     assert result.updated == ["grid-drift-test"]
 
@@ -635,8 +642,9 @@ async def test_grid_conform_to_change_triggers_update(
         )
     )
     row = (await test_session.execute(stmt)).scalar_one()
-    assert row.file_registry[0].grid_conform_to == "volume"
-    assert row.file_registry[0].on_grid_mismatch == "conform"
+    seg_file = next(f for f in row.file_registry if f.name == "seg_file")
+    assert seg_file.grid_conform_to == "volume"
+    assert seg_file.on_grid_mismatch == "conform"
 
 
 @pytest.mark.asyncio
@@ -648,6 +656,13 @@ async def test_grid_conform_to_identical_second_pass_is_unchanged(
     symmetric — a naive change here could make an identical config look like
     drift on every restart (perpetual-update loop).
     """
+    volume_def = {
+        "name": "volume",
+        "pattern": "volume.nii.gz",
+        "role": "input",
+        "required": True,
+        "multiple": False,
+    }
     file_def = {
         "name": "seg_file",
         "pattern": "seg_{id}.nrrd",
@@ -657,7 +672,7 @@ async def test_grid_conform_to_identical_second_pass_is_unchanged(
         "grid_conform_to": "volume",
         "on_grid_mismatch": "conform",
     }
-    config = [_make_config("grid-stable-test", file_registry=[file_def])]
+    config = [_make_config("grid-stable-test", file_registry=[volume_def, file_def])]
     result = await reconcile_record_types(config, test_session)
     assert result.created == ["grid-stable-test"]
 
