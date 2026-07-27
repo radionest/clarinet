@@ -3,7 +3,7 @@ type: Subsystem
 title: Project configuration and the clarinet_plan package
 description: How a downstream project declares record types and custom Python code, how those files are imported through the single clarinet_plan anchor, and why loading fails fast.
 tags: [config, plan, importlib, reconciler, startup, vendoring]
-timestamp: 2026-07-27T10:46:09Z
+timestamp: 2026-07-27T12:43:29Z
 ---
 
 Clarinet is a framework: the interesting declarations live in the *project*, not
@@ -105,11 +105,10 @@ variables. TOML supplies the name string directly.
 
 `validate_grid_conformance` (`clarinet/config/grid_conformance.py`) runs in
 the same `RecordTypeCreate` validator as `validate_output_path_uniqueness`
-above, and rejects, naming the RecordType and the declaring file: a
-reference not bound to the same RecordType, a self-reference, either side's
-effective level finer than the RecordType's own level, the reference's
-finer than the declaring file's, `multiple=True` on either side, or a
-pattern that isn't a grid-readable format (`.nii`/`.nii.gz`/`.nrrd`).
+above and rejects any declaration the runtime could not resolve — unresolvable
+reference, self-reference, level inversion, a collection on either side, or
+a pattern that isn't grid-readable — naming the RecordType and the declaring
+file. The exact rule list lives with the rest of the behaviour:
 
 Full runtime behavior — the two enforcement seams, the OUTPUT decision
 table, the four-endpoint submission scope, and the recommended adoption

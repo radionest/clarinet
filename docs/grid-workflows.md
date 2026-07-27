@@ -205,9 +205,10 @@ correspondence-engine set-ops' own pre-regrid check
 Everything above this line is a primitive some script or guard calls by hand.
 This section is different: a `FileDefinition` can declare, once, that its
 on-disk grid must always match another file's — and, for INPUT and OUTPUT
-bindings, the framework enforces that declaration automatically at every
-seam that could let the pair drift, with no script author ever writing a
-`grid_relation` call.
+bindings, the framework enforces that declaration automatically at the
+seams that validate files today, with no script author ever writing a
+`grid_relation` call. Not every seam that could let the pair drift is
+covered yet — see [What is not guarded](#what-is-not-guarded) below.
 
 ### Declaring a pair
 
@@ -237,9 +238,14 @@ be bound to that same RecordType:
 `validate_grid_conformance` (`clarinet/config/grid_conformance.py:36`) runs
 inside the same `RecordTypeCreate` model validator as
 `validate_output_path_uniqueness` — so Python config load, TOML load, and
-RecordType `POST`/`PATCH` all reject a broken declaration at the point of the
-mutation, never at first runtime use. Naming the RecordType and the declaring
-file, it rejects:
+RecordType `POST`/`PATCH` reject a broken declaration at the point of the
+mutation, for every declaration that reaches the validator. Not all of them
+do: `RecordTypeCreate.file_registry` defaults to `None`, and some call sites
+attach file links separately, so a dangling `grid_conform_to` can still
+arrive at runtime, where both enforcement paths fail closed instead —
+`enforce_output_grids` with a 409 (`grid_policy.py:54-62`), `FileValidator`
+with a `grid_mismatch` error (`file_validation.py:130-138`). Naming the
+RecordType and the declaring file, it rejects:
 
 1. a reference name not bound to *this* RecordType — an unknown name and a
    name bound to some other RecordType raise the identical error, since
@@ -336,12 +342,15 @@ below).
 
 Enforcement is conditional on the *declaring* OUTPUT file's own existence: if
 it isn't on disk yet, its declaration is skipped and the submission proceeds
-on its other merits. It is **not** conditional on the reference's existence —
-an OUTPUT present while its reference is missing is itself a 409 ("cannot
-verify the output's grid"). A `conform` repair is re-verified by re-reading
-both files from disk and re-classifying from scratch, never trusting
-`conform_seg_to_grid`'s return value; a `delete` unlinks (tolerating a
-concurrent delete that already won the race) before raising.
+on its other merits. Nothing enforces that declaring file's *existence* in
+the first place, though: `required=True` on an OUTPUT binding is decorative
+today, so deleting the file outright is a clean way past this entire guard —
+deliberately out of scope here. It is **not** conditional on the reference's
+existence — an OUTPUT present while its reference is missing is itself a
+409 ("cannot verify the output's grid"). A `conform` repair is re-verified
+by re-reading both files from disk and re-classifying from scratch, never
+trusting `conform_seg_to_grid`'s return value; a `delete` unlinks (tolerating
+a concurrent delete that already won the race) before raising.
 
 **Scope: four submission endpoints, not two.** `enforce_output_grids` lives in
 `_process_submission`, which backs `POST`/`PATCH /records/{id}/submit`
@@ -361,6 +370,23 @@ changes nothing but JSON data. This is an accepted, deliberate hazard, not a
 bug to "fix" by exempting `PATCH /data` — doing so would reopen the exact
 fail-open hole the four-endpoint scope exists to close. See
 [Adoption order](#adoption-order) below before reaching for `delete`.
+
+### What is not guarded
+
+The four submission endpoints above are the only pre-commit enforcement
+points for OUTPUT grids — a record can still reach `finished` carrying a
+mismatched OUTPUT through a status-only route that never passes through
+`_process_submission`. `PATCH /records/{id}/status` and
+`PATCH /admin/records/{id}/status` call `RecordService.update_status`
+directly; RecordFlow's `update_record(status='finished')` reaches the same
+endpoint over HTTP; `PATCH /records/bulk/status` calls
+`RecordService.bulk_update_status`, which reuses `update_status` only for
+records still `preparing` and otherwise updates status through the
+repository directly. None of these call `enforce_output_grids`.
+Machine-written outputs (pipeline tasks, RecordFlow) land the same way —
+they inherit only the report-level INPUT check `check_files` runs while
+auto-unblocking, because `check_files` has no transaction to reject. Treat
+this guard as covering human submission, not every write.
 
 ### Adoption order
 

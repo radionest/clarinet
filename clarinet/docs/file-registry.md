@@ -23,7 +23,7 @@ File definitions are stored in a normalized schema with M2M relationship.
 | `multiple` | `bool` | `True` = glob collection, `False` = singular |
 | `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |
 | `grid_conform_to` | `str \| None` | Name of another bound `FileDefinition` whose on-disk voxel grid this file must match. `None` = no check (see below) |
-| `on_grid_mismatch` | `str \| None` | `GridMismatchAction`: `conform` \| `delete` \| `reject`. Consulted only for OUTPUT files at submit time; `None` = `reject` |
+| `on_grid_mismatch` | `str \| None` | `GridMismatchAction`: `conform` \| `delete` \| `reject`. Consulted only for OUTPUT files at submit time; `None` = `reject`. An out-of-vocabulary stored value is logged and read as `reject` by `FileDefinitionRead._coerce_unknown_mismatch_action` (`file_schema.py:232-246`) — read-DTO leniency only, since `FileDef`/`FileRegistryEntry` still reject such a value outright |
 
 **`RecordTypeFileLink`** (table) — M2M: RecordType ↔ FileDefinition:
 
