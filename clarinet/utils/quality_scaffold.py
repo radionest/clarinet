@@ -127,8 +127,19 @@ def scaffold_quality_config(
     # and `update` obeyed with no `--force` and no warning).
     if unmanaged and not force:
         listed = ", ".join(unmanaged)
+        # `--force` is only a flag `init` has (clarinet/cli/main.py's update
+        # subparser doesn't register it, and cmd_quality_update never passes
+        # force= at all) -- advising "pass --force" on the update path would
+        # be the exact failure shape this fix closes, just aimed at the
+        # message instead of the guard: an instruction the operator cannot
+        # follow from the command they just ran.
+        if mode == "init":
+            raise QualityScaffoldError(
+                f"{project_dir} has {listed} not written by clarinet; move it aside or pass --force"
+            )
         raise QualityScaffoldError(
-            f"{project_dir} has {listed} not written by clarinet; move it aside or pass --force"
+            f"{project_dir} has {listed} not written by clarinet; move it aside, "
+            f"or run 'clarinet quality init --force' to overwrite it"
         )
     if mode == "init" and managed and not force:
         raise QualityScaffoldError(

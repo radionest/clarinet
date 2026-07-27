@@ -133,6 +133,9 @@ def test_init_refuses_unmanaged_foreign_file(tmp_path: Path) -> None:
     assert "quality update" not in str(exc_info.value), (
         "must not steer the operator toward `update`, which would clobber the file"
     )
+    # Unlike update (see test_update_refuses_unmanaged_project_even_if_populated),
+    # init's own CLI subparser does register --force, so this advice is reachable.
+    assert "pass --force" in str(exc_info.value)
     assert "Makefile" in str(exc_info.value)
     assert (tmp_path / "Makefile").read_text(encoding="utf-8") == original
     assert not (tmp_path / "mypy.ini").exists()
@@ -190,11 +193,20 @@ def test_update_refuses_unmanaged_project_even_if_populated(tmp_path: Path) -> N
     The unmanaged check now runs before the managed one (see the mixed-state
     test below), so the refusal names the foreign file directly rather than
     redirecting to ``init``.
+
+    Critically, the advice must be reachable from ``update`` itself: its CLI
+    subparser has no ``--force`` flag at all (unlike ``init``'s), so a bare
+    "pass --force" would be a dead end. The message must instead point at
+    something the operator can actually run.
     """
     original = "build:\n\t@echo hand-written\n"
     (tmp_path / "Makefile").write_text(original, encoding="utf-8")
-    with pytest.raises(QualityScaffoldError, match="not written by clarinet"):
+    with pytest.raises(QualityScaffoldError, match="not written by clarinet") as exc_info:
         scaffold_quality_config(project_dir=tmp_path, mode="update")
+    assert "pass --force" not in str(exc_info.value), (
+        "update's CLI subparser has no --force flag; this advice would be a dead end"
+    )
+    assert "clarinet quality init --force" in str(exc_info.value)
     assert (tmp_path / "Makefile").read_text(encoding="utf-8") == original
 
 
