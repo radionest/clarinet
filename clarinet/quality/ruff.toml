@@ -8,6 +8,13 @@ indent-width = 4
 # Python.
 target-version = "py312"
 
+# Without this, extend-exclude below only applies while ruff is walking a
+# directory itself -- an explicitly-passed FILE path (e.g. pre-commit, which
+# invokes ruff on the exact files changed by a commit) would still be linted
+# even though it's under plan/lib. Directory-based invocations (this
+# project's own Makefile) are unaffected either way.
+force-exclude = true
+
 # extend-exclude ADDS to ruff's built-in default exclude list (.venv, .git,
 # _build, dist, node_modules, __pycache__, etc. -- see ruff's docs for the
 # full set); plain `exclude` would REPLACE it instead, silently putting all of

@@ -313,6 +313,66 @@ def test_mypy_config_excludes_vendored_but_checks_project_code(tmp_path: Path) -
     )
 
 
+def test_ruff_force_exclude_covers_explicitly_passed_vendored_path(tmp_path: Path) -> None:
+    """Spec (project-quality-scaffold): "Vendored code is excluded from both
+    checkers" -- explicit-file-path variant of the ruff test above.
+
+    ``extend-exclude`` only applies while ruff itself is walking a directory;
+    passing a file path explicitly on the command line bypasses it unless
+    ``force-exclude = true`` is also set (verified against ruff 0.15.8). This
+    matters in practice because a tool that lints exactly the files a commit
+    touches -- pre-commit, most notably -- invokes ruff with explicit file
+    paths, never a directory, so without ``force-exclude`` a pre-commit hook
+    would lint vendored code on every commit that touches it. The test above
+    only ever passes a directory (mirroring the shipped Makefile), so it
+    could not have caught this.
+
+    No mypy sibling: mypy's ``exclude`` is applied during its own file
+    discovery walk by design, with no "explicitly-passed path bypasses it"
+    mode to guard against.
+    """
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        warnings.warn("ruff not on PATH -- skipping ruff force-exclude test", stacklevel=2)
+        pytest.skip("ruff not on PATH")
+
+    scaffold_quality_config(project_dir=tmp_path, mode="init")
+    (tmp_path / "plan" / "lib").mkdir(parents=True)
+    (tmp_path / "plan" / "lib" / "vendored.py").write_text(_BAD_CODE, encoding="utf-8")
+    (tmp_path / "plan" / "workflows").mkdir(parents=True)
+    (tmp_path / "plan" / "workflows" / "mine.py").write_text(_BAD_CODE, encoding="utf-8")
+
+    vendored_result = subprocess.run(
+        [ruff, "check", "--no-cache", "plan/lib/vendored.py"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert vendored_result.returncode == 0, (
+        "an explicitly-passed path under plan/lib must still be excluded (this is what "
+        f"force-exclude = true is for); ruff exited {vendored_result.returncode}\n"
+        f"stdout:\n{vendored_result.stdout}\nstderr:\n{vendored_result.stderr}"
+    )
+    assert "vendored.py" not in vendored_result.stdout, (
+        "vendored code passed explicitly on the command line (e.g. as pre-commit would) "
+        f"must still be excluded -- it was reported:\n{vendored_result.stdout}"
+    )
+
+    mine_result = subprocess.run(
+        [ruff, "check", "--no-cache", "plan/workflows/mine.py"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert mine_result.returncode == 1, (
+        f"expected the project violation to still be reported (exit 1); got exit "
+        f"{mine_result.returncode}\nstdout:\n{mine_result.stdout}\nstderr:\n{mine_result.stderr}"
+    )
+    assert "mine.py" in mine_result.stdout, (
+        f"an explicitly-passed project-code path must still be checked:\n{mine_result.stdout}"
+    )
+
+
 def test_missing_payload_file_writes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
