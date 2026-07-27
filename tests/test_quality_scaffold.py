@@ -320,12 +320,12 @@ def test_ruff_force_exclude_covers_explicitly_passed_vendored_path(tmp_path: Pat
     ``extend-exclude`` only applies while ruff itself is walking a directory;
     passing a file path explicitly on the command line bypasses it unless
     ``force-exclude = true`` is also set (verified against ruff 0.15.8). This
-    matters in practice because a tool that lints exactly the files a commit
-    touches -- pre-commit, most notably -- invokes ruff with explicit file
-    paths, never a directory, so without ``force-exclude`` a pre-commit hook
-    would lint vendored code on every commit that touches it. The test above
-    only ever passes a directory (mirroring the shipped Makefile), so it
-    could not have caught this.
+    matters in practice for any wrapper that passes changed files explicitly
+    rather than a directory -- a ``repo: local`` pre-commit hook, an editor
+    action, a CI script that lints only the files a commit touches -- which
+    would otherwise lint vendored code on every commit that touches it. The
+    test above only ever passes a directory (mirroring the shipped
+    Makefile), so it could not have caught this.
 
     No mypy sibling: mypy's ``exclude`` is applied during its own file
     discovery walk by design, with no "explicitly-passed path bypasses it"
