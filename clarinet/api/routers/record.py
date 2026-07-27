@@ -81,6 +81,7 @@ from clarinet.models import (
 )
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import FileValidationResult, validate_record_files
+from clarinet.services.grid_policy import enforce_output_grids
 from clarinet.services.record_service import ensure_record_editable
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
@@ -572,6 +573,11 @@ async def _process_submission(
             record, validated_data, exec_result
         )
 
+    # Output grids are enforced pre-commit: the post-commit output sync
+    # never raises, so this is the only point that can still reject.
+    if not skip_validation:
+        await enforce_output_grids(record_read, parent=parent_read)
+
     if is_update:
         updated, _ = await service.update_data(
             record_id, validated_data, acting_user=user, actor_id=actor_id
@@ -751,7 +757,11 @@ async def prefill_record_data_patch(
     return await _do_prefill(record_id, authorized_record, merged, user, service, rt_service)
 
 
-@router.post("/{record_id}/submit", response_model=RecordRead)
+@router.post(
+    "/{record_id}/submit",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def submit_record_with_validation(
     record_id: int,
     authorized_record: MutableRecordDep,
@@ -811,7 +821,11 @@ async def submit_record_with_validation(
     )
 
 
-@router.patch("/{record_id}/submit", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/submit",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def resubmit_record_with_validation(
     record_id: int,
     authorized_record: MutableRecordDep,

@@ -1,25 +1,12 @@
 """Grid-conformance checking inside FileValidator.validate."""
 
-from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
-import numpy as np
-
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.services.file_validation import FileValidator
-from clarinet.services.image.image import FileType, Image
-
-_Z_FLIP = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
-
-
-def _write(path: Path, *, direction=None, shape=(6, 6, 6), origin=(0.0, 0.0, 0.0)):
-    img = Image()
-    img.spacing = (1.0, 1.0, 1.0)
-    img.origin = origin
-    img.direction = np.eye(3) if direction is None else direction
-    img.img = np.zeros(shape, dtype=np.uint8)
-    return img.save_as(path, FileType.NIFTI)
+from tests.utils.test_helpers import Z_FLIP as _Z_FLIP
+from tests.utils.test_helpers import write_grid_image as _write
 
 
 class _Rec:

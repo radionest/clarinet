@@ -1,15 +1,42 @@
 """Helper utilities for tests."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 from sqlmodel import Session
 
 from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordRead, RecordStatus, RecordType
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User, UserRole
+from clarinet.services.image.image import FileType, Image
 from clarinet.utils.auth import get_password_hash
+
+# Z-axis mirror direction cosine matrix — shared by every grid-conformance test
+# (input-seam, submit-seam, and the FileValidator unit tests). Pair with
+# ``write_grid_image(..., origin=(0, 0, shape[2] - 1))`` to produce a genuine
+# ``RelationKind.REARRANGED`` grid (an exact mirror); other origins classify
+# as ``FOREIGN`` instead. Single source so the three call sites never drift.
+Z_FLIP = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+
+
+def write_grid_image(
+    path: Path,
+    *,
+    direction: np.ndarray | None = None,
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    shape: tuple[int, int, int] = (6, 6, 6),
+) -> Path:
+    """Write a tiny NIfTI volume with a controllable grid; returns its path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image()
+    img.spacing = (1.0, 1.0, 1.0)
+    img.origin = origin
+    img.direction = np.eye(3) if direction is None else direction
+    img.img = np.zeros(shape, dtype=np.uint8)
+    return img.save_as(path, FileType.NIFTI)
 
 
 class UserFactory:

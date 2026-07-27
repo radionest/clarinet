@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import pytest_asyncio
 
 from clarinet.files import Files
@@ -25,23 +24,11 @@ from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordType
 from clarinet.models.study import Series, Study
 from clarinet.repositories.record_repository import RecordRepository
-from clarinet.services.image.image import FileType, Image
 from clarinet.services.record_service import RecordService
 from clarinet.settings import settings
+from tests.utils.test_helpers import Z_FLIP as _Z_FLIP
+from tests.utils.test_helpers import write_grid_image as _write
 from tests.utils.urls import record_validate_files_url
-
-_Z_FLIP = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
-
-
-def _write(path: Path, *, direction=None, origin=(0.0, 0.0, 0.0), shape=(6, 6, 6)):
-    """Write a tiny NIfTI volume with a controllable grid; returns its path."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    img = Image()
-    img.spacing = (1.0, 1.0, 1.0)
-    img.origin = origin
-    img.direction = np.eye(3) if direction is None else direction
-    img.img = np.zeros(shape, dtype=np.uint8)
-    return img.save_as(path, FileType.NIFTI)
 
 
 def _record(record_type_name: str, series: SimpleNamespace, **kwargs) -> Record:

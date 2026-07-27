@@ -51,6 +51,10 @@ def record_validate_files_url(record_id: int) -> str:
     return f"{RECORDS_BASE}/{record_id}/validate-files"
 
 
+def record_submit_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/submit"
+
+
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"
 RECORD_TYPES_FIND = "/api/records/types/find"
