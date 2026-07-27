@@ -87,6 +87,25 @@ def test_filedef_requires_level_when_omitted() -> None:
         FileDef(pattern="p")
 
 
+def test_filedef_requires_pattern_when_omitted() -> None:
+    # pattern has no explicit __init__ param (it falls through **kwargs: Any,
+    # the accepted blind spot design decision D8 describes) and no pydantic
+    # default either -- omitting it while still passing a widened param like
+    # level must raise pydantic's own "field required" error, not silently
+    # construct a half-initialized FileDef.
+    with pytest.raises(ValidationError):
+        FileDef(level="SERIES")
+
+
+def test_recorddef_requires_name_when_omitted() -> None:
+    # Same shape as test_filedef_requires_pattern_when_omitted above: name has
+    # no explicit __init__ param and no pydantic default, so omitting it must
+    # raise pydantic's own "field required" error rather than silently
+    # constructing a nameless RecordDef.
+    with pytest.raises(ValidationError):
+        RecordDef()
+
+
 def test_recorddef_omitted_fields_keep_pydantic_defaults() -> None:
     # The sentinel must not leak: omitted params must not be forwarded at all.
     r = RecordDef(name="first-check")
