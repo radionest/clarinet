@@ -34,8 +34,9 @@ exclude = [
 # clarinet/quality/ is shipped, non-Python payload data (for downstream
 # projects) with its own nested ruff.toml -- not source for this repo to
 # lint. Left in scope, ruff discovers that nested config as a project root
-# and writes its own .ruff_cache/ there, which then ships inside the wheel
-# (Task 7's hatch `artifacts` force-include overrides VCS exclusions).
+# and writes its own .ruff_cache/ there, inside the shipped payload
+# directory -- which then trips the tests asserting that directory contains
+# exactly its managed files (both the source-tree copy and the built wheel).
 extend-exclude = ["clarinet/quality"]
 
 # Same as Black.

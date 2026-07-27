@@ -130,9 +130,9 @@ test-cov: ## Run tests with coverage
 test-all: test frontend-test ## Run all tests (backend + frontend)
 
 .PHONY: test-fast
-test-fast: ## Run all tests in parallel (excludes schema tests)
+test-fast: ## Run all tests in parallel (excludes schema + packaging tests)
 	@echo "Running all tests in parallel..."
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema and not packaging" -q
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services)
@@ -181,7 +181,7 @@ slicer-demo-all: ## Run all Slicer demos sequentially
 	@uv run pytest tests/demos/ -v -s --timeout=120 -n0
 
 # Marker expression for tests that don't require external services
-PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
+PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema and not packaging
 
 # Max xdist workers (override: PYTEST_WORKERS=4 make test-fast)
 PYTEST_WORKERS ?= 10

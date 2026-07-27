@@ -2,7 +2,10 @@
 
 import argparse
 import configparser
+import shutil
+import subprocess
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -261,3 +264,49 @@ def test_cli_init_existing_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         handle_quality_command(args)
     assert exc.value.code == 1
+
+
+@pytest.mark.packaging
+@pytest.mark.timeout(300)
+def test_wheel_contains_exactly_the_quality_payload(tmp_path: Path) -> None:
+    """Wheel-side twin of ``test_payload_files_present`` above.
+
+    That test can only ever see the source tree -- it cannot catch a payload
+    dropped at the packaging boundary, which is exactly the shape of #472 (a
+    payload present in the source tree and absent from the built wheel). This
+    builds a real wheel and inspects it directly.
+
+    Slow (spawns ``uv build``), so it carries the ``packaging`` marker and is
+    excluded from ``test-fast``/``test-unit`` (see Makefile). It still runs
+    under ``make test-all-stages``, which already builds a wheel for the VM
+    deploy step, so the marginal cost there is negligible.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv not on PATH -- cannot build a wheel")
+
+    repo_root = Path(__file__).resolve().parent.parent
+    out_dir = tmp_path / "dist"
+    result = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(out_dir), str(repo_root)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"wheel build backend unavailable: {result.stderr[-2000:]}")
+
+    wheels = sorted(out_dir.glob("*.whl"))
+    assert wheels, "uv build reported success but produced no wheel"
+
+    prefix = "clarinet/quality/"
+    names = zipfile.ZipFile(wheels[-1]).namelist()
+    # Recursive: a stray nested dir (e.g. a `.ruff_cache/` dropped by a local
+    # run) shows up as an unexpected key here too, not just an extra
+    # top-level entry.
+    under_quality = {
+        n[len(prefix) :] for n in names if n.startswith(prefix) and not n.endswith("/")
+    }
+    expected = {*PAYLOAD, FRAGMENT_NAME}
+    assert under_quality == expected, (
+        f"clarinet/quality/ in the wheel has {under_quality}, expected {expected}"
+    )
