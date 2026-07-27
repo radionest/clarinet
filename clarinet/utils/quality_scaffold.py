@@ -65,8 +65,10 @@ def payload_dir() -> Path:
     """Absolute path of the shipped ``clarinet/quality`` payload dir.
 
     Raises:
-        QualityScaffoldError: The payload is missing (e.g. a wheel built without
-            the ``clarinet/quality/**/*`` artifacts entry).
+        QualityScaffoldError: The payload directory is missing. Not expected in
+            a normal install -- it ships inside the package from both a git
+            checkout and a VCS-less sdist build -- so this signals a broken or
+            non-standard installation rather than a packaging gap to work around.
     """
     src = Path(clarinet.__file__).resolve().parent / "quality"
     if not src.is_dir():
