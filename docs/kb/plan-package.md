@@ -2,8 +2,8 @@
 type: Subsystem
 title: Project configuration and the clarinet_plan package
 description: How a downstream project declares record types and custom Python code, how those files are imported through the single clarinet_plan anchor, and why loading fails fast.
-tags: [config, plan, importlib, reconciler, startup]
-timestamp: 2026-07-21T19:46:32Z
+tags: [config, plan, importlib, reconciler, startup, vendoring]
+timestamp: 2026-07-27T05:48:17Z
 ---
 
 Clarinet is a framework: the interesting declarations live in the *project*, not
@@ -136,6 +136,25 @@ Anchor machinery (`clarinet/config/plan_package.py`):
 These mutate global import state — call them from startup or test setup only,
 never from a request handler or background task. Running a plan file directly
 (`python plan/validators.py`) is unsupported: that process has no anchor.
+
+## Vendored code lives under `plan/lib/`
+
+Third-party or generated code a project depends on but doesn't own — a
+vendored library, a frozen research script — goes in `plan/lib/`, not
+scattered among `definitions/`/`workflows/`. The anchor above treats it no
+differently: a file under `plan/lib/` still imports as an ordinary
+`clarinet_plan.lib.*` submodule, same as anything else in the tree. What
+singles the directory out is tooling policy, not the loader: both
+configurations installed by `clarinet quality init` (`clarinet/quality/`)
+exclude everything under `plan/lib/` from checking.
+
+The exclusion exists because vendored code is frozen by policy — a lint or
+type finding in it is not actionable where it's found, and its volume would
+otherwise swamp a project's own findings on the very first run, which is
+exactly the kind of unactionable noise that gets a checker disabled rather
+than fixed. Fixes go upstream, and the vendored copy is refreshed wholesale
+from there; it is never patched locally, which would fork it silently from
+the upstream it's meant to track.
 
 ## Custom code registries
 

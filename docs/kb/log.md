@@ -1,5 +1,9 @@
 # Update Log
 
+## 2026-07-27
+
+* **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — added the vendored-code convention: third-party/generated code goes in `plan/lib/`, both configurations installed by `clarinet quality init` exclude it from checking, and fixes go upstream and are re-vendored rather than patched locally.
+
 ## 2026-07-24
 
 * **Update**: [Imaging stack](./imaging-stack.md) — the image-processing section now also points at [`docs/grid-workflows.md`](../grid-workflows.md), the behavioural reference for the voxel-grid model, grid-relation classification (SAME/REARRANGED/FOREIGN) and conform-on-export introduced by the canonical-segmentation-grids work.
