@@ -42,7 +42,8 @@ def init_project(path: str) -> None:
 
     skipped: list[str] = []
     for item in sorted(src.rglob("*")):
-        if item.is_dir():
+        # A pip install byte-compiles the payload; those caches are not content.
+        if item.is_dir() or "__pycache__" in item.parts:
             continue
         rel = item.relative_to(src)
         # Only top-level payload files are dotted; nested paths never match.
@@ -1410,7 +1411,8 @@ def main() -> None:
 
     # agent command
     agent_parser = subparsers.add_parser(
-        "agent", help="Manage framework agent docs in a project's .claude/rules/clarinet/"
+        "agent",
+        help="Manage framework agent docs (.claude/rules/clarinet/) and the .claude/CLAUDE.md seed",
     )
     agent_subparsers = agent_parser.add_subparsers(dest="agent_command")
 

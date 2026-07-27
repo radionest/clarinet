@@ -47,6 +47,42 @@ def test_templates_module_is_gone() -> None:
         __import__("clarinet.cli.templates")
 
 
+def test_scaffolded_project_settings_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scaffolded project must actually be runnable.
+
+    ``Settings`` is constructed at import time, and pydantic-settings merges
+    ``settings.toml`` with ``settings.custom.toml`` (last file wins). An
+    unparseable value in either payload file therefore makes *every* clarinet
+    command — including ``--help`` — exit 1 in a freshly created project.
+    """
+    from clarinet.settings import Settings
+
+    init_project(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings()
+
+    assert isinstance(settings.port, int)
+    assert isinstance(settings.database_port, int)
+    assert isinstance(settings.pacs_port, int)
+
+
+def test_payload_toml_has_no_unexpanded_placeholders() -> None:
+    """Clarinet performs no ``${VAR}`` substitution — such a value would be read
+    literally and fail validation. Secrets belong in ``CLARINET_*`` env vars."""
+    from clarinet.utils.project_scaffold import scaffold_source_dir
+
+    src = scaffold_source_dir()
+    for name in ("settings.toml", "settings.custom.toml"):
+        for lineno, line in enumerate(
+            (src / name).read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue  # commented template lines are documentation
+            assert "${" not in stripped, f"{name}:{lineno} has an unexpanded placeholder: {line}"
+
+
 def test_init_is_rerunnable(tmp_path: Path) -> None:
     """A second init must not abort on the managed docs the first one wrote.
 

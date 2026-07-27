@@ -48,11 +48,11 @@ def example_post_segment(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
 # ---------------------------------------------------------------------------
 # TODO: replace the example flows with your real workflow.
 
-# 1. Когда в проект приходит исследование — создаём первичный осмотр.
+# 1. A study arriving in the project creates the initial review record.
 (study().on_creation().create_record("first-check"))
 
-# 2. Если first-check одобрил study — создаём example-segment.
+# 2. A first-check that approved the study creates an example-segment.
 (record("first-check").on_finished().if_record(F.is_good == True).create_record("example-segment"))
 
-# 3. После завершения сегментации — запускаем post-processing pipeline task.
+# 3. A finished segmentation triggers the post-processing pipeline task.
 (record("example-segment").on_finished().do_task(example_post_segment))

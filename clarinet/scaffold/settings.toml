@@ -20,7 +20,8 @@ log_console_level = "INFO"
 
 # ── Database ─────────────────────────────────────────
 database_driver = "postgresql+asyncpg"
-# database_name, database_host, ... — see settings.custom.toml (env vars)
+# database_name, database_host, credentials — set CLARINET_DATABASE_* env vars
+# (see .env.example); settings.custom.toml holds commented production overrides.
 
 # ── Storage ──────────────────────────────────────────
 anon_id_prefix = "MY_PROJECT"

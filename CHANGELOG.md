@@ -320,6 +320,19 @@
 - **`clarinet agent update` now removes managed docs the installed version no
   longer ships.** Only files carrying the managed header are pruned; anything
   you added to the managed directory yourself is left alone.
+- **The scaffold's `settings.custom.toml` now ships fully commented out.** It
+  previously carried `"${CLARINET_PORT}"`-style placeholders, but clarinet
+  performs no `${VAR}` substitution and pydantic-settings loads that file
+  automatically on top of `settings.toml` — so the literal strings reached
+  `int` fields and every command in the generated project failed to construct
+  `Settings`. Production values are set by uncommenting real ones; secrets
+  belong in `CLARINET_*` environment variables, which take priority over both
+  TOML files.
+- **Scaffold: `database_login` → `database_username`.** The old key named no
+  existing setting, and `extra="ignore"` dropped it silently, so a project
+  built from the template connected as the default postgres user. If you
+  scaffolded from the old template, rename the key in your `settings.custom.toml`
+  and `CLARINET_DATABASE_LOGIN` → `CLARINET_DATABASE_USERNAME` in your `.env`.
 - Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
   `invalidate_records()`) now always fires `on_status("pending")` flows —
   even when the record was already `pending`. Previously an already-pending

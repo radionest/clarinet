@@ -1,54 +1,63 @@
-# Clarinet research project — production settings (env-var driven).
-# Copy `.env.example` to `.env` and fill in the values.
+# Clarinet research project — production overrides.
+#
+# This file is loaded automatically whenever it exists, AFTER settings.toml,
+# and its values win. It ships fully commented out so a freshly scaffolded
+# project runs on the SQLite dev defaults in settings.toml; uncomment what you
+# need when you deploy.
+#
+# Secrets do NOT belong here. Clarinet performs no ${VAR} substitution — a
+# literal "${CLARINET_PORT}" would be read as that string and fail validation.
+# Set secrets as CLARINET_-prefixed environment variables instead (see
+# .env.example); env vars take priority over both TOML files.
 
-project_name = "TODO: Project Name"
-project_description = "TODO: short description of the research"
-extra_roles = []
-debug = false
-log_level = "INFO"
-log_console_level = "INFO"
+# project_name = "TODO: Project Name"
+# project_description = "TODO: short description of the research"
+# extra_roles = []
+# debug = false
+# log_level = "INFO"
+# log_console_level = "INFO"
 
 # ── Server ───────────────────────────────────────────
-port = "${CLARINET_PORT}"
-host = "0.0.0.0"
+# port = 8000
+# host = "0.0.0.0"
 
 # ── Database (PostgreSQL) ────────────────────────────
-database_driver = "postgresql+asyncpg"
-database_name = "${CLARINET_DATABASE_NAME}"
-database_host = "${CLARINET_DATABASE_HOST}"
-database_port = "${CLARINET_DATABASE_PORT}"
-database_username = "${CLARINET_DATABASE_USERNAME}"
-database_password = "${CLARINET_DATABASE_PASSWORD}"
+# Credentials belong in the environment: CLARINET_DATABASE_USERNAME,
+# CLARINET_DATABASE_PASSWORD.
+# database_driver = "postgresql+asyncpg"
+# database_name = "my_project"
+# database_host = "localhost"
+# database_port = 5432
 
 # ── Storage / Security ───────────────────────────────
-storage_path = "${CLARINET_STORAGE_PATH}"
-anon_id_prefix = "MY_PROJECT"
-secret_key = "${CLARINET_SECRET_KEY}"
-admin_password = "${CLARINET_ADMIN_PASSWORD}"
+# secret_key and admin_password belong in the environment:
+# CLARINET_SECRET_KEY, CLARINET_ADMIN_PASSWORD.
+# storage_path = "/srv/clarinet/my_project"
+# anon_id_prefix = "MY_PROJECT"
 
 # ── Features ─────────────────────────────────────────
-recordflow_enabled = true
-pipeline_enabled = true
-frontend_enabled = true
+# recordflow_enabled = true
+# pipeline_enabled = true
+# frontend_enabled = true
 
 # ── RabbitMQ (pipeline) ──────────────────────────────
-rabbitmq_host = "${CLARINET_RABBITMQ_HOST}"
-rabbitmq_login = "${CLARINET_RABBITMQ_LOGIN}"
-rabbitmq_password = "${CLARINET_RABBITMQ_PASSWORD}"
+# Credentials belong in the environment: CLARINET_RABBITMQ_LOGIN,
+# CLARINET_RABBITMQ_PASSWORD.
+# rabbitmq_host = "localhost"
 
 # ── Python config mode ───────────────────────────────
-config_mode = "python"
-config_tasks_path = "./plan/"
-config_record_types_file = "definitions/record_types.py"
-# config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
-recordflow_paths = ["./plan/workflows"]
+# Already set in settings.toml; repeat here only if production differs.
+# config_mode = "python"
+# config_tasks_path = "./plan/"
+# config_record_types_file = "definitions/record_types.py"
+# recordflow_paths = ["./plan/workflows"]
 
 # ── DICOM ────────────────────────────────────────────
-dicom_aet = "${CLARINET_DICOM_AET}"
-dicom_port = 11112
-anon_send_to_pacs = false
+# dicom_aet = "CLARINET"
+# dicom_port = 11112
+# anon_send_to_pacs = false
 
 # ── PACS ─────────────────────────────────────────────
-pacs_aet = "${CLARINET_PACS_AET}"
-pacs_host = "${CLARINET_PACS_HOST}"
-pacs_port = "${CLARINET_PACS_PORT}"
+# pacs_aet = "ORTHANC"
+# pacs_host = "localhost"
+# pacs_port = 4242

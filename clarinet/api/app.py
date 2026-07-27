@@ -131,10 +131,15 @@ def _config_startup_error(e: ConfigLoadError) -> StartupError:
     folder name.
     """
     target = e.path or "the project's custom Python files"
+    if e.path is not None and not Path(e.path).exists():
+        # A root that does not exist is not an import error — say what to do.
+        hint = f"Create {e.path}, or point config_tasks_path at the right directory, then restart"
+    else:
+        hint = f"Fix the import error in {target}, then restart"
     return StartupError(
         component="Config",
         reason=str(e),
-        hint=f"Fix the import error in {target}, then restart",
+        hint=hint,
         disableable=False,
     )
 

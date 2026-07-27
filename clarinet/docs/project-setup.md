@@ -16,8 +16,9 @@ clarinet init my_project      # Full research scaffold (settings, plan/, agent d
 
 `clarinet init` writes the project skeleton from the payload shipped inside the
 clarinet package, then installs the framework agent docs — the same set
-`clarinet agent init` delivers, into `.claude/rules/clarinet/`. Existing files
-are never overwritten, so it is safe to run over a partially set-up directory.
+`clarinet agent init` delivers, into `.claude/rules/clarinet/`. Your own files are
+never overwritten, so it is safe to re-run over a partially set-up directory; the
+framework-managed docs under `.claude/rules/clarinet/` are refreshed each time.
 
 `.claude/CLAUDE.md` is written once as a **seed you own**: replace its contents
 with your own study description. Unlike the managed rules it is never rewritten,
@@ -33,8 +34,8 @@ material, not a scaffold.
 
 ```
 my_project/
-  settings.toml              # Dev config (SQLite, debug=true)
-  settings.custom.toml       # Prod template (env var references)
+  settings.toml              # Active config (debug=true); secrets via CLARINET_* env vars
+  settings.custom.toml       # Production overrides — ships fully commented out
   .env.example               # Copy to .env for secrets
   .gitignore
   .claude/

@@ -28,7 +28,9 @@ my_project/
 
 Scaffold one with `clarinet init <name>`. For an
 existing project, `clarinet agent init` installs the framework's agent docs into
-`.claude/rules/clarinet/`.
+`.claude/rules/clarinet/` and writes a project-owned `.claude/CLAUDE.md` seed;
+`clarinet agent update` refreshes the managed docs and prunes any the installed
+version no longer ships.
 
 ## Two config modes
 
