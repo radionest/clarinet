@@ -100,9 +100,8 @@ blocks the record, or raises a 422 if a submission's own re-check catches it
 first). In Python config, `grid_conform_to` accepts the referenced `FileDef`
 object itself (preferred — typo-proof, and survives a variable rename) or
 its plain name string; the object form is reduced to a name at
-config-resolution time, once
-file names have been assigned from module variables. TOML supplies the name
-string directly.
+config-resolution time, once file names have been assigned from module
+variables. TOML supplies the name string directly.
 
 `validate_grid_conformance` (`clarinet/config/grid_conformance.py`) runs in
 the same `RecordTypeCreate` validator as `validate_output_path_uniqueness`

@@ -203,10 +203,10 @@ correspondence-engine set-ops' own pre-regrid check
 ## Runtime grid-conformance enforcement
 
 Everything above this line is a primitive some script or guard calls by hand.
-This section is different: a `FileDefinition` bound as INPUT or OUTPUT can
-declare, once, that its on-disk grid must always match another file's — and
-the framework enforces that declaration automatically at every seam that
-could let the pair drift, with no script author ever writing a
+This section is different: a `FileDefinition` can declare, once, that its
+on-disk grid must always match another file's — and, for INPUT and OUTPUT
+bindings, the framework enforces that declaration automatically at every
+seam that could let the pair drift, with no script author ever writing a
 `grid_relation` call.
 
 ### Declaring a pair
@@ -278,7 +278,9 @@ Because `validate_record_files` is the single entry point, every existing
 seam inherits the check automatically:
 
 - Record creation (`RecordService.create_record`) — an invalid pair sends the
-  new record straight to `blocked`.
+  new record straight to `blocked`, unless the record is created already
+  `preparing` — that case is caught only at its `preparing → pending` exit
+  instead (below).
 - `POST /records/{id}/check-files` (`RecordService.check_files`) — a blocked
   record stays `blocked`; it only auto-unblocks to `pending` once the pair is
   repaired.
@@ -363,8 +365,8 @@ fail-open hole the four-endpoint scope exists to close. See
 2. **Declare with `on_grid_mismatch="reject"` and watch.** This is also the
    default when the field is left unset, so it is the safe starting point:
    nothing is ever silently repaired or removed, and every mismatch surfaces
-   as a 409 (submit) or a `blocked` record (input) for a human to
-   investigate.
+   as a 409 or 422 (submit) or a `blocked` record (creation / preparing
+   exit) for a human to investigate.
 3. **Escalate to `conform` only once `reject` has run clean for a while**,
    and only if runtime self-healing is actually wanted. `conform` still
    409s a `FOREIGN` pair untouched — it narrows the reject surface, it
