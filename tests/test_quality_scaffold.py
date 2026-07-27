@@ -457,9 +457,12 @@ def test_wheel_contains_exactly_the_quality_payload(tmp_path: Path) -> None:
     ``test-postgres`` in ``.github/workflows/ci.yml``, both Linux -- because
     this is the actual #472 acceptance gate and needs a continuous execution
     path, not just an opt-in a human has to remember to run. Excluded from
-    ``test-windows`` specifically: that job runs with ``-x`` (fail-fast), and
-    a wheel-build hiccup there would abort unrelated Windows coverage for a
-    check that has nothing OS-specific to verify. Also runs under
+    ``test-windows`` specifically: not because of ``-x`` -- ``test-unit``
+    above also runs with ``-x``, so that isn't what distinguishes the jobs.
+    ``test-windows`` alone carries a 15-minute ``timeout-minutes`` cap, and
+    this check has nothing OS-specific to verify (already covered on Linux
+    by test-unit and test-postgres above) -- not worth risking a slow wheel
+    build eating into that budget. Also runs under
     ``make test-all-stages``, which already builds a wheel for the VM deploy
     step (negligible marginal cost there).
     """

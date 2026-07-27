@@ -14,11 +14,15 @@ QUALITY_PATHS := $(wildcard plan tests scripts)
 # dropped unconditionally here, mirroring mypy.ini's own exclusion. Of what's
 # left, keep only directories that actually contain a .py file: an existing
 # but non-Python directory (e.g. a scripts/ holding only shell scripts) hits
-# that identical hard error. The typecheck recipe below guards this list for
-# emptiness so `make check` still exits 0 when nothing is left to
-# type-check, instead of invoking `mypy` with zero arguments ("Missing
-# target module, package, files, or command.").
-MYPY_PATHS := $(foreach d,$(filter-out tests,$(QUALITY_PATHS)),$(if $(shell find $(d) -name '*.py' -print -quit 2>/dev/null),$(d)))
+# that identical hard error. $(strip ...) is required, not cosmetic:
+# $(foreach) joins per-element results with spaces, so when two or more
+# candidates both fail the content check the unstripped value is " " (one
+# space), not "" -- which slips right past a plain -z emptiness check. The
+# typecheck recipe below guards this (stripped) list for emptiness so
+# `make check` still exits 0 when nothing is left to type-check, instead of
+# invoking `mypy` with zero arguments ("Missing target module, package,
+# files, or command.").
+MYPY_PATHS := $(strip $(foreach d,$(filter-out tests,$(QUALITY_PATHS)),$(if $(shell find $(d) -name '*.py' -print -quit 2>/dev/null),$(d))))
 
 .PHONY: help format lint typecheck check test _require-tools _require-paths
 
