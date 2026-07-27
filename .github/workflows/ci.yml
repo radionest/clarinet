@@ -70,10 +70,14 @@ jobs:
         run: uv sync
 
       - name: Run unit tests
+        # packaging (see tests/test_quality_scaffold.py) builds a real wheel;
+        # excluded here only -- unlike test-unit -- because this job runs
+        # with -x and a build hiccup on Windows would abort unrelated
+        # coverage for a check with nothing OS-specific to verify.
         run: >-
           uv run pytest tests/
           -n auto --dist loadgroup
-          -m "${{ env.PYTEST_UNIT_MARKERS }}"
+          -m "${{ env.PYTEST_UNIT_MARKERS }} and not packaging"
           -x --json-report-file=test-report.json
           -q
 

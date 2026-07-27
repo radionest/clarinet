@@ -35,8 +35,8 @@ exclude = [
 # projects) with its own nested ruff.toml -- not source for this repo to
 # lint. Left in scope, ruff discovers that nested config as a project root
 # and writes its own .ruff_cache/ there, inside the shipped payload
-# directory -- which then trips the tests asserting that directory contains
-# exactly its managed files (both the source-tree copy and the built wheel).
+# directory -- which then trips the test asserting that directory contains
+# exactly its managed files.
 extend-exclude = ["clarinet/quality"]
 
 # Same as Black.

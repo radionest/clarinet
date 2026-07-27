@@ -5,6 +5,7 @@ import configparser
 import shutil
 import subprocess
 import tomllib
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -26,9 +27,10 @@ def test_payload_files_present() -> None:
     expected = {*PAYLOAD, FRAGMENT_NAME}
     for name in expected:
         assert (src / name).is_file(), f"missing payload file {name}"
-    # Exactly these files -- a stray extra (e.g. a `.ruff_cache/` dropped by a
-    # local run) would otherwise ship silently: Task 7's wheel packaging
-    # force-includes clarinet/quality/**/*, which overrides VCS exclusions.
+    # Exactly these files -- a stray extra (e.g. a `.ruff_cache/` dropped by
+    # a local run, since this directory's own `ruff.toml` is itself a valid
+    # nested config) must not silently accumulate here: this pins the exact
+    # set of files clarinet hands to downstream projects.
     actual = {p.name for p in src.iterdir()}
     assert actual == expected, f"payload dir has unexpected entries: {actual - expected}"
 
@@ -277,9 +279,16 @@ def test_wheel_contains_exactly_the_quality_payload(tmp_path: Path) -> None:
     builds a real wheel and inspects it directly.
 
     Slow (spawns ``uv build``), so it carries the ``packaging`` marker and is
-    excluded from ``test-fast``/``test-unit`` (see Makefile). It still runs
-    under ``make test-all-stages``, which already builds a wheel for the VM
-    deploy step, so the marginal cost there is negligible.
+    excluded from the fast, everyday-loop targets: ``test-fast``/``test-unit``
+    (see Makefile). It DOES run automatically in CI -- ``test-unit`` and
+    ``test-postgres`` in ``.github/workflows/ci.yml``, both Linux -- because
+    this is the actual #472 acceptance gate and needs a continuous execution
+    path, not just an opt-in a human has to remember to run. Excluded from
+    ``test-windows`` specifically: that job runs with ``-x`` (fail-fast), and
+    a wheel-build hiccup there would abort unrelated Windows coverage for a
+    check that has nothing OS-specific to verify. Also runs under
+    ``make test-all-stages``, which already builds a wheel for the VM deploy
+    step (negligible marginal cost there).
     """
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH -- cannot build a wheel")
@@ -293,20 +302,34 @@ def test_wheel_contains_exactly_the_quality_payload(tmp_path: Path) -> None:
         timeout=300,
     )
     if result.returncode != 0:
-        pytest.skip(f"wheel build backend unavailable: {result.stderr[-2000:]}")
+        # Any non-zero exit lands here, including a genuine packaging
+        # regression, not just a truly unavailable/broken backend -- warn
+        # loudly rather than skip in silence, so a real regression hiding
+        # behind this skip stays visible in the run's warnings summary.
+        warnings.warn(
+            f"uv build failed (exit {result.returncode}); skipping rather than "
+            "failing on the assumption this is an environment issue -- if it "
+            f"isn't, this may be masking a real packaging regression.\n"
+            f"stderr:\n{result.stderr[-2000:]}",
+            stacklevel=2,
+        )
+        pytest.skip("uv build failed -- see the warnings summary for stderr")
 
     wheels = sorted(out_dir.glob("*.whl"))
     assert wheels, "uv build reported success but produced no wheel"
+    wheel = wheels[-1]
 
     prefix = "clarinet/quality/"
-    names = zipfile.ZipFile(wheels[-1]).namelist()
-    # Recursive: a stray nested dir (e.g. a `.ruff_cache/` dropped by a local
-    # run) shows up as an unexpected key here too, not just an extra
-    # top-level entry.
+    with zipfile.ZipFile(wheel) as zf:
+        names = zf.namelist()
+    # Recursive: a stray nested dir (e.g. a `backup/` directory someone drops
+    # in the payload folder) shows up as an unexpected key here too, not just
+    # an extra top-level entry.
     under_quality = {
         n[len(prefix) :] for n in names if n.startswith(prefix) and not n.endswith("/")
     }
     expected = {*PAYLOAD, FRAGMENT_NAME}
     assert under_quality == expected, (
-        f"clarinet/quality/ in the wheel has {under_quality}, expected {expected}"
+        f"{wheel.name}: clarinet/quality/ has {under_quality}, expected "
+        f"{expected} (diff: {under_quality ^ expected})"
     )
