@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from clarinet.models.base import DicomQueryLevel, ViewerMode
-from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.models.file_schema import FileDefinitionRead, FileRole, GridMismatchAction
 from clarinet.models.uniqueness import (
     DEFAULT_UNIQUE_BY,
     canonical_unique_by,
@@ -59,6 +59,12 @@ class FileDef(BaseModel):
         level: Informational DICOM level (PATIENT/STUDY/SERIES).
         description: Optional description of the file purpose.
         name: Derived from variable name in files_catalog module.
+        grid_conform_to: Another FileDef (preferred) or its name — this file's
+            on-disk voxel grid must match that file's. Passing the object is
+            typo-proof; the name is resolved later, once the loader has
+            assigned names from module variables.
+        on_grid_mismatch: What to do with a mismatched OUTPUT file —
+            ``conform`` / ``delete`` / ``reject``. Omitted means ``reject``.
     """
 
     pattern: str
@@ -66,6 +72,8 @@ class FileDef(BaseModel):
     level: DicomQueryLevel
     description: str | None = None
     name: str = ""
+    grid_conform_to: "FileDef | str | None" = None
+    on_grid_mismatch: GridMismatchAction | None = None
 
     def __init__(
         self,
@@ -103,6 +111,9 @@ class FileDef(BaseModel):
     def _coerce_level(cls, v: Any) -> Any:
         """Accept string literals like ``"PATIENT"`` for level."""
         return _coerce_dicom_level(v)
+
+
+FileDef.model_rebuild()
 
 
 class FileRef(BaseModel, frozen=True):
@@ -274,12 +285,33 @@ class RecordDef(BaseModel):
 def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
     """Convert a FileRef to a FileDefinitionRead for config processing.
 
+    ``grid_conform_to`` is reduced to a plain name here rather than in a field
+    validator: ``_set_file_names_from_module`` assigns ``FileDef.name`` only
+    after the config module is imported, so at construction time a referenced
+    FileDef's name is still empty.
+
     Args:
         ref: FileRef binding a FileDef to a role.
 
     Returns:
         FileDefinitionRead ready for reconciler consumption.
+
+    Raises:
+        ValueError: A FileDef reference that never received a name — it was
+            not a module-level variable in the config module.
     """
+    grid_ref = ref.file.grid_conform_to
+    if isinstance(grid_ref, FileDef):
+        if not grid_ref.name:
+            raise ValueError(
+                f"grid_conform_to on file '{ref.file.name}' references a FileDef "
+                f"with no name (pattern {grid_ref.pattern!r}) — it is not a "
+                f"module-level variable in the config module, so its name was "
+                f"never assigned. Assign it to a module-level variable, or pass "
+                f"the name as a string."
+            )
+        grid_ref = grid_ref.name
+
     return FileDefinitionRead(
         name=ref.file.name,
         pattern=ref.file.pattern,
@@ -289,6 +321,8 @@ def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
         role=ref.role,
         level=ref.file.level,
         allow_path_collision=ref.allow_path_collision,
+        grid_conform_to=grid_ref,
+        on_grid_mismatch=ref.file.on_grid_mismatch,
     )
 
 

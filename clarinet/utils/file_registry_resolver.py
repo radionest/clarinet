@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlmodel import SQLModel
 
 from clarinet.exceptions.domain import ValidationError
-from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.models.file_schema import FileDefinitionRead, FileRole, GridMismatchAction
 from clarinet.utils.logger import logger
 
 
@@ -26,12 +26,18 @@ class FileRegistryEntry(BaseModel):
         pattern: File pattern with placeholders.
         description: Optional description of the file purpose.
         multiple: Whether this is a collection (glob) vs singular file.
+        grid_conform_to: Name of another file registry entry whose on-disk
+            voxel grid this file must match. ``None`` disables the check.
+        on_grid_mismatch: What to do with a mismatched OUTPUT file —
+            ``conform`` / ``delete`` / ``reject``. ``None`` means ``reject``.
     """
 
     pattern: str
     description: str | None = None
     multiple: bool = False
     level: str | None = None
+    grid_conform_to: str | None = None
+    on_grid_mismatch: GridMismatchAction | None = None
 
 
 class FileReference(SQLModel):
@@ -122,6 +128,8 @@ def resolve_file_references(
                 multiple=entry.multiple,
                 role=ref.role,
                 level=entry.level,
+                grid_conform_to=entry.grid_conform_to,
+                on_grid_mismatch=entry.on_grid_mismatch,
             )
         )
     return resolved

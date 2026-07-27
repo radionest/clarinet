@@ -597,6 +597,79 @@ async def test_allow_path_collision_flip_triggers_update(
 
 
 @pytest.mark.asyncio
+async def test_grid_conform_to_change_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Changing on_grid_mismatch on a file that declares grid_conform_to must
+    be detected as a diff by _file_links_differ.
+    """
+    file_def_v1 = {
+        "name": "seg_file",
+        "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness no-ops
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "grid_conform_to": "volume",
+        "on_grid_mismatch": "reject",
+    }
+    config_v1 = [_make_config("grid-drift-test", file_registry=[file_def_v1])]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.created == ["grid-drift-test"]
+
+    test_session.expire_all()
+
+    # Flip on_grid_mismatch reject -> conform -> must be detected as a change
+    file_def_v2 = {**file_def_v1, "on_grid_mismatch": "conform"}
+    config_v2 = [_make_config("grid-drift-test", file_registry=[file_def_v2])]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.updated == ["grid-drift-test"]
+
+    test_session.expire_all()
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "grid-drift-test")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    row = (await test_session.execute(stmt)).scalar_one()
+    assert row.file_registry[0].grid_conform_to == "volume"
+    assert row.file_registry[0].on_grid_mismatch == "conform"
+
+
+@pytest.mark.asyncio
+async def test_grid_conform_to_identical_second_pass_is_unchanged(
+    test_session: AsyncSession,
+) -> None:
+    """An identical second reconcile pass over a grid_conform_to declaration
+    is a no-op. Proves the widened comparable tuple in _file_links_differ is
+    symmetric — a naive change here could make an identical config look like
+    drift on every restart (perpetual-update loop).
+    """
+    file_def = {
+        "name": "seg_file",
+        "pattern": "seg_{id}.nrrd",
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "grid_conform_to": "volume",
+        "on_grid_mismatch": "conform",
+    }
+    config = [_make_config("grid-stable-test", file_registry=[file_def])]
+    result = await reconcile_record_types(config, test_session)
+    assert result.created == ["grid-stable-test"]
+
+    test_session.expire_all()
+
+    # Re-reconcile with an identical config -> no-op
+    result = await reconcile_record_types(config, test_session)
+    assert result.unchanged == ["grid-stable-test"]
+    assert result.updated == []
+
+
+@pytest.mark.asyncio
 async def test_empty_collection_matches_factory_default(
     test_session: AsyncSession,
     seed_record_type: RecordType,
