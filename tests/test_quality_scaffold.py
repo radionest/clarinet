@@ -239,8 +239,15 @@ def test_cli_init_then_update(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     )
     handle_quality_command(args)
     assert (tmp_path / "mypy.ini").is_file()
-    # The fragment must reach stdout -- it is the required next step.
-    assert "dependency-groups" in capsys.readouterr().out
+    # The fragment must reach stdout -- it is the required next step. Ordering
+    # relative to the logger's success line can't be asserted here: loguru's
+    # enqueue=True console sink holds the real sys.stderr captured at add()
+    # time, bypassing capsys entirely -- this only pins the fragment's own
+    # shape (exact pins present) and internal order (banner before content).
+    out = capsys.readouterr().out
+    assert "NEXT STEP" in out
+    assert "ruff==" in out and "mypy==" in out
+    assert out.index("NEXT STEP") < out.index("[dependency-groups]")
 
     upd = argparse.Namespace(command="quality", quality_command="update", path=str(tmp_path))
     handle_quality_command(upd)  # must not raise now that the dir is populated

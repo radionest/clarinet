@@ -1259,9 +1259,15 @@ def cmd_quality_init(args: argparse.Namespace) -> None:
             project_dir=Path(args.path), mode="init", force=args.force
         )
     except QualityScaffoldError as exc:
-        logger.error(str(exc))
+        logger.error(f"{exc}")
         sys.exit(1)
     logger.info(f"Quality config installed in {dest}")
+    # enqueue=True on the console sink (clarinet/utils/logger.py) writes via a
+    # background thread -- without draining it here, the async success line
+    # can land after this function's synchronous stdout print below, breaking
+    # the "fragment is the final output" requirement on any merged stream
+    # (a real terminal, `2>&1`, `tee`, CI logs).
+    logger.complete()
     _print_fragment(fragment)
 
 
@@ -1273,7 +1279,7 @@ def cmd_quality_update(args: argparse.Namespace) -> None:
     try:
         dest, _ = scaffold_quality_config(project_dir=Path(args.path), mode="update")
     except QualityScaffoldError as exc:
-        logger.error(str(exc))
+        logger.error(f"{exc}")
         sys.exit(1)
     logger.info(f"Quality config refreshed in {dest}")
 
