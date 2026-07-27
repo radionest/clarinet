@@ -1,6 +1,6 @@
 # Clarinet Research Project
 
-This is a research project template built on the [clarinet](https://github.com/radionest/clarinet) framework. This document is always loaded into the agent's context and gives a project overview; details for each section are in `.claude/rules/clarinet/*.md` (auto-loaded when editing files in the corresponding folders).
+This is a research project template built on the [clarinet](https://github.com/...) framework. This document is always loaded into the agent's context and gives a project overview; details for each section are in `.claude/rules/*.md` (auto-loaded when editing files in the corresponding folders).
 
 > Replace this file's contents with your own study (name, description, specifics). The structure and API references below stay accurate.
 
@@ -36,11 +36,7 @@ plan/
 
 All files under `plan/` are imported as submodules of the `clarinet_plan` package (single root — `config_tasks_path`); `sys.path` is not used.
 
-Operational one-shot scripts (backfills, repairs) live outside `plan/` in the
-project-root `scripts/` directory and use the `clarinet.scripting` frame — see
-`scripting.md`.
-
-Each subfolder has a corresponding rule file in `.claude/rules/clarinet/` with detailed conventions.
+Each subfolder has a corresponding rule file in `.claude/rules/` with detailed conventions.
 
 ## clarinet API — what to import from where
 
@@ -110,20 +106,19 @@ Full list — `uv run clarinet --help` and `make help` in the framework reposito
 
 This project's rules (auto-loaded via the `paths` frontmatter):
 
-- `.claude/rules/clarinet/definitions.md` — `FileDef`, `RecordDef`, path patterns, links between sections
-- `.claude/rules/clarinet/workflows.md` — `@pipeline_task`, `TaskContext`, RecordFlow DSL
-- `.claude/rules/clarinet/anonymization.md` — the `anonymize-study` record, built-in task, `anon_*` settings, operator CLI
-- `.claude/rules/clarinet/slicer.md` — hydrators + Slicer scripts + validators (all linked via injection vars)
-- `.claude/rules/clarinet/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
-- `.claude/rules/clarinet/utils.md` — helper modules, the `.seg.nrrd` format
-- `.claude/rules/clarinet/scripting.md` — the `clarinet.scripting` frame for operational scripts in root `scripts/`
+- `.claude/rules/definitions.md` — `FileDef`, `RecordDef`, path patterns, links between sections
+- `.claude/rules/workflows.md` — `@pipeline_task`, `TaskContext`, RecordFlow DSL
+- `.claude/rules/anonymization.md` — the `anonymize-study` record, built-in task, `anon_*` settings, operator CLI
+- `.claude/rules/slicer.md` — hydrators + Slicer scripts + validators (all linked via injection vars)
+- `.claude/rules/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
+- `.claude/rules/utils.md` — helper modules, the `.seg.nrrd` format
 
-Framework rules (full reference docs, installed alongside the clarinet package — the paths below point at the installed package):
+Framework rules (full reference docs, living in the clarinet repository itself — useful as a reference):
 
-- `{{CLARINET_DOCS}}/recordflow-dsl.md` — full DSL API with pattern matching
-- `{{CLARINET_DOCS}}/slicer-helper-api.md` — all `SlicerHelper` methods + VTK pitfalls
-- `{{CLARINET_DOCS}}/pipeline-ops.md` — pipeline settings, testing, queues
-- `{{CLARINET_DOCS}}/file-registry.md` — file pattern-resolution details
-- `{{CLARINET_DOCS}}/project-setup.md` — template overview, `clarinet init` options
+- `<clarinet>/clarinet/.claude/rules/recordflow-dsl.md` — full DSL API with pattern matching
+- `<clarinet>/clarinet/.claude/rules/slicer-helper-api.md` — all `SlicerHelper` methods + VTK pitfalls
+- `<clarinet>/clarinet/.claude/rules/pipeline-ops.md` — pipeline settings, testing, queues
+- `<clarinet>/clarinet/.claude/rules/file-registry.md` — file pattern-resolution details
+- `<clarinet>/clarinet/.claude/rules/project-setup.md` — template overview, `clarinet init` options
 
 Production example: the `clarinet_nir_liver` repository (if available) — the most complete real-world use of this template.

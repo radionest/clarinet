@@ -2,7 +2,6 @@
 paths:
   - "clarinet/services/recordflow/**"
   - "tasks/**/*_flow.py"
-  - "plan/**/*_flow.py"
 ---
 
 # RecordFlow DSL — Full API Reference

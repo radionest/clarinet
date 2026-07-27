@@ -114,12 +114,6 @@ A broken plan file must crash startup, never degrade silently:
 
 - loaders raise `ConfigLoadError` (`clarinet/exceptions/domain.py`, subclass of
   `ConfigurationError`; original error in `__cause__`)
-- a config root that does not exist raises before any loading —
-  `ensure_config_root_exists(folder)` in `python_loader.py`, called from
-  `reconcile_config` for both TOML and Python mode. Silently reconciling zero
-  record types would leave the app running on stale DB rows
-  (`config_delete_orphans=False` by default). An *existing* but empty root keeps
-  the lenient warning
 - multi-file loaders (`load_and_register_flows`, `worker.load_task_modules`)
   attempt every file/path, then raise one `ConfigLoadError.aggregate(...)`
   (individual errors kept on `.failures`)

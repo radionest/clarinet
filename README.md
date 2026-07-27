@@ -136,7 +136,7 @@ A real-world example in `examples/demo/` — a multi-modality study with 20+ rec
 6. Discrepancies trigger a second review for the specific inspector
 7. The MRB (Material Review Board) classifies defects → 3D repair modeling → repair planning → metallography
 
-This entire pipeline is described in the project's workflow and record type definitions (`examples/demo/plan/workflows/pipeline_flow.py`, `examples/demo/plan/definitions/record_types.py`).
+This entire pipeline is described in the project's workflow and record type definitions (`examples/demo/tasks/workflows/pipeline_flow.py`, `examples/demo/tasks/definitions/record_types.py`).
 
 ## Requirements
 

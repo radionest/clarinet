@@ -81,10 +81,6 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "tests/*" = ["ARG", "S101", "TCH"]
 "clarinet/**" = ["TCH"]
 "examples/*" = ["E402", "SIM105", "F841", "TCH", "RUF002", "RUF003", "E712"]
-# Scaffold payload: project-side example code shipped as package data, not
-# framework source. Same exemptions examples/ gets — E712 in particular is the
-# RecordFlow DSL (`F.is_good == True` builds an expression, it is not a truthiness test).
-"clarinet/scaffold/**" = ["E402", "SIM105", "F841", "TCH", "RUF002", "RUF003", "E712"]
 
 [format]
 # Like Black, use double quotes for strings.
