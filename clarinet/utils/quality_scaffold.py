@@ -45,11 +45,20 @@ def _clarinet_version() -> str:
 
 
 def _is_managed(path: Path) -> bool:
-    """True if ``path`` exists and its first line carries clarinet's managed marker."""
+    """True if ``path`` exists and its first line carries clarinet's managed marker.
+
+    An unreadable or undecodable destination (permission error, or a
+    hand-written file that isn't UTF-8) is not clarinet's -- treated as
+    "not managed" rather than letting the error escape uncaught.
+    """
     if not path.is_file():
         return False
-    with path.open(encoding="utf-8") as f:
-        return f.readline().startswith(_MANAGED_MARKER)
+    try:
+        with path.open(encoding="utf-8") as f:
+            first_line = f.readline()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return first_line.startswith(_MANAGED_MARKER)
 
 
 def payload_dir() -> Path:

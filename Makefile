@@ -452,6 +452,7 @@ clean: frontend-clean ## Clean all build artifacts
 	@rm -rf .pytest_cache
 	@rm -rf .mypy_cache
 	@rm -rf .ruff_cache
+	@rm -rf clarinet/quality/.ruff_cache
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete
 	@echo "Clean complete!"

@@ -37,14 +37,21 @@ def test_payload_dir_is_inside_the_package() -> None:
 
 def test_init_writes_destinations_with_header(tmp_path: Path) -> None:
     _, fragment = scaffold_quality_config(project_dir=tmp_path, mode="init")
-    for dest in PAYLOAD.values():
+    src = payload_dir()
+    for name, dest in PAYLOAD.items():
         written = tmp_path / dest
         assert written.is_file()
+        written_text = written.read_text(encoding="utf-8")
         # Strong form: the header is the FIRST line and names the clarinet
         # version (spec: "a managed header naming the clarinet version") --
         # a bare substring match would also pass if the header landed mid-file
         # (e.g. inside a Makefile recipe) or dropped the version.
-        assert written.read_text(encoding="utf-8").startswith("# managed by clarinet v")
+        assert written_text.startswith("# managed by clarinet v")
+        # Exact equality of everything after the header's own line, not just
+        # "still parses" -- every payload file's first line is itself a `#`
+        # comment, so dropping the header's trailing newline would merge the
+        # two lines and still parse cleanly, passing a weaker check silently.
+        assert written_text.split("\n", 1)[1] == (src / name).read_text(encoding="utf-8")
     assert "dependency-groups" in fragment
 
 
@@ -128,6 +135,18 @@ def test_init_force_overwrites_unmanaged_foreign_file(tmp_path: Path) -> None:
     (tmp_path / "Makefile").write_text("build:\n\t@echo hand-written\n", encoding="utf-8")
     scaffold_quality_config(project_dir=tmp_path, mode="init", force=True)
     assert "hand-written" not in (tmp_path / "Makefile").read_text(encoding="utf-8")
+
+
+def test_init_treats_undecodable_destination_as_unmanaged(tmp_path: Path) -> None:
+    """A destination file that ``_is_managed`` can't even decode must not crash.
+
+    A hand-written file in a legacy encoding (e.g. cp1251 Russian text, not
+    exotic) isn't clarinet's -- treated as unmanaged, not left to raise
+    ``UnicodeDecodeError`` past ``scaffold_quality_config``.
+    """
+    (tmp_path / "Makefile").write_bytes("# Комментарий\n".encode("cp1251"))
+    with pytest.raises(QualityScaffoldError, match="not written by clarinet"):
+        scaffold_quality_config(project_dir=tmp_path, mode="init")
 
 
 def test_update_requires_existing(tmp_path: Path) -> None:
