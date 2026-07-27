@@ -43,7 +43,7 @@ make pre-commit                 # All pre-commit hooks
 # For long-running commands, redirect to file:
 # Use unique filenames when multiple worktrees may run in parallel:
 #   timeout 120 make test-unit > /tmp/test-{worktree}.txt 2>&1
-make test-fast                  # All tests in parallel, excludes schema (default)
+make test-fast                  # All tests in parallel, excludes schema + packaging (default)
 make test-unit                  # DB-only tests in parallel (no external services)
 make test                       # All tests sequential
 make test-cov                   # With coverage

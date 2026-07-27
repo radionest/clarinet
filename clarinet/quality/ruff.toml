@@ -61,7 +61,8 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # bool comparison -- `F.some_field` is a lazy FlowResult proxy, and `== True`
 # is what invokes its overloaded __eq__ to build the FieldComparison object
 # `.if_record()` requires. Dropping `== True` does not simplify the code, it
-# breaks the DSL (see `.claude/rules/recordflow-dsl.md`).
+# breaks the DSL (see `.claude/rules/clarinet/workflows.md`, installed by
+# `clarinet agent init`).
 "plan/workflows/*" = ["E712"]
 
 [format]
