@@ -140,7 +140,7 @@ Three "record not available for work" statuses with distinct exit conditions:
 | `blocked` | prerequisites not met (required input files, or a declared INPUT grid mismatch) | automatic, via check-files |
 | `pause` | administrative decision | human |
 
-Lifecycle: `preparing → (blocked if files missing) → pending → inwork → finished/failed`.
+Lifecycle: `preparing → (blocked if inputs invalid) → pending → inwork → finished/failed`.
 
 `blocked` contract: "prerequisites not met". Today that means required input
 files, or a declared INPUT file whose grid no longer matches its reference

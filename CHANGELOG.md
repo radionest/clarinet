@@ -300,8 +300,9 @@
   rest of this changelog's grid work. Config load (Python/TOML, and
   RecordType `POST`/`PATCH`) rejects an unresolvable declaration: a
   reference not bound to the same RecordType, a reference whose effective
-  DICOM level is finer than the declaring file's, `multiple=True` on either
-  side, a self-reference, or a pattern `read_grid` cannot classify. At
+  DICOM level is finer than the declaring file's, the declaring file's
+  effective DICOM level finer than the RecordType's own, `multiple=True` on
+  either side, a self-reference, or a pattern `read_grid` cannot classify. At
   runtime an INPUT mismatch is never repaired or deleted, since a record
   does not own its inputs — it blocks the record at creation or the
   `preparing`→`pending` exit (check-files only withholds an existing

@@ -645,7 +645,9 @@ async def submit_record_data(
         )
 
     if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+        raise CONFLICT.with_context(
+            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
+        )
 
     if record.status == RecordStatus.preparing:
         raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
@@ -812,7 +814,9 @@ async def submit_record_with_validation(
     record = authorized_record
 
     if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+        raise CONFLICT.with_context(
+            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
+        )
 
     if record.status == RecordStatus.preparing:
         raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
