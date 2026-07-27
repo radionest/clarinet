@@ -607,7 +607,11 @@ async def _process_submission(
 _SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 
 
-@router.post("/{record_id}/data", response_model=RecordRead)
+@router.post(
+    "/{record_id}/data",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def submit_record_data(
     record_id: int,
     authorized_record: MutableRecordDep,
@@ -655,7 +659,11 @@ async def submit_record_data(
     )
 
 
-@router.patch("/{record_id}/data", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/data",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def update_record_data(
     record_id: int,
     authorized_record: MutableRecordDep,

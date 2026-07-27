@@ -36,7 +36,7 @@ from tests.integration.test_grid_conformance_input import (
 )
 from tests.utils.test_helpers import Z_FLIP as _Z_FLIP
 from tests.utils.test_helpers import write_grid_image as _write
-from tests.utils.urls import record_submit_url
+from tests.utils.urls import RECORDS_BASE, record_submit_url
 
 # (action, mismatch kind, expected status, file must survive, file must be repaired)
 _ACTION_MATRIX = [
@@ -55,15 +55,20 @@ _ACTION_MATRIX = [
 async def make_record(test_session, patient_with_anon, study_with_anon, series_with_anon):
     """Factory: a record type (``volume`` INPUT + ``seg`` OUTPUT, ``seg`` conforming
     to ``volume``) built with the given ``on_grid_mismatch`` action, then a
-    persisted ``inwork`` record bound to the shared patient/study/series.
+    persisted record bound to the shared patient/study/series.
 
     ``seg_role`` defaults to ``OUTPUT`` (what every decision-table case
     exercises); the one caller needing an ``INPUT`` binding passes it
     explicitly — see ``test_enforce_output_grids_skips_input_role``.
+    ``status`` defaults to ``inwork`` (submit-seam cases); the ``/data``
+    coverage passes ``finished`` directly since ``PATCH /data`` requires it.
     """
 
     async def _make(
-        *, on_grid_mismatch: str | None, seg_role: FileRole = FileRole.OUTPUT
+        *,
+        on_grid_mismatch: str | None,
+        seg_role: FileRole = FileRole.OUTPUT,
+        status: RecordStatus = RecordStatus.inwork,
     ) -> Record:
         volume = FileDefinition(name="volume", pattern="volume.nii", level=DicomQueryLevel.SERIES)
         seg = FileDefinition(
@@ -102,7 +107,7 @@ async def make_record(test_session, patient_with_anon, study_with_anon, series_w
             patient_id=patient_with_anon.id,
             study_uid=study_with_anon.study_uid,
             series_uid=series_with_anon.series_uid,
-            status=RecordStatus.inwork,
+            status=status,
         )
         test_session.add(record)
         await test_session.commit()
@@ -134,6 +139,7 @@ async def test_output_action_matrix(
         seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
     else:  # foreign — different shape is unrepairable
         seg_path = _write(series_dir / "seg.nii", shape=(8, 8, 8))
+    before = seg_path.read_bytes()
 
     record = await make_record(on_grid_mismatch=action)
     response = await client.post(record_submit_url(record.id), json={})
@@ -143,6 +149,10 @@ async def test_output_action_matrix(
     if repaired:
         relation = grid_relation(read_grid(volume_path), read_grid(seg_path))
         assert relation.kind is RelationKind.SAME
+    elif survives:
+        # "untouched", not just "still exists" — a silent rewrite would pass
+        # the exists() check above but must not pass this one.
+        assert seg_path.read_bytes() == before
 
 
 # ===========================================================================
@@ -198,6 +208,7 @@ async def test_patch_submit_is_guarded(client, test_session, series_dir, make_re
     response = await client.patch(record_submit_url(record.id), json={"note": "reworked"})
     assert response.status_code == 409
     refreshed = await RecordRepository(test_session).get_with_relations(record.id)
+    assert refreshed.status == original.status
     assert (refreshed.data or {}) == original_data
 
 
@@ -214,6 +225,91 @@ async def test_conform_repair_checksum_matches_repaired_bytes(
     refreshed = await RecordRepository(test_session).get_with_relations(record.id)
     stored = {link.file_definition.name: link.checksum for link in refreshed.file_links}
     assert stored["seg"] == await Files.checksum(Path(seg_path))
+
+
+async def test_missing_grid_reference_is_a_conflict(client, test_session, series_dir, make_record):
+    """The reference itself missing is a distinct branch from a subject mismatch.
+
+    ``seg.nii`` (the declared OUTPUT) is present, but ``volume.nii`` (its
+    ``grid_conform_to`` reference) is not on disk at all — grid_policy.py's
+    ``if not reference.is_file():`` branch, exercised nowhere else in this
+    module.
+    """
+    _write(series_dir / "seg.nii")  # no volume.nii at all
+    record = await make_record(on_grid_mismatch="reject")
+
+    response = await client.post(record_submit_url(record.id), json={})
+    assert response.status_code == 409
+    assert "not on disk" in response.text
+
+
+async def test_unreadable_output_is_a_conflict_not_a_500(
+    client, test_session, series_dir, make_record
+):
+    """A present-but-corrupt OUTPUT (e.g. a truncated Slicer write) must map to
+    409, not an unhandled 500. ``ImageError`` is not registered in
+    ``exception_handlers.py``, so ``enforce_output_grids`` has to contain it.
+    """
+    _write(series_dir / "volume.nii")
+    (series_dir / "seg.nii").write_bytes(b"not a valid nifti file")
+    record = await make_record(on_grid_mismatch="reject")
+
+    response = await client.post(record_submit_url(record.id), json={})
+    assert response.status_code == 409
+
+
+# ===========================================================================
+# The same seam, reached through POST/PATCH /data instead of /submit
+# ===========================================================================
+#
+# _process_submission backs four routes, not two: POST/PATCH /data default
+# to status=finished, so a plain "save my data" call is functionally a
+# submission too, and the guard is deliberately not gated off of it — a
+# fail-open metadata route would be the same hole this change closes.
+
+
+async def test_patch_data_applies_delete_action(client, test_session, series_dir, make_record):
+    """``PATCH /data`` is guarded identically to ``/submit`` — including
+    ``delete``. Accepted hazard, not a bug: this is a metadata-only edit
+    from the caller's point of view, but the design applies the declared
+    action uniformly across every ``_process_submission`` caller, so a
+    ``REARRANGED`` OUTPUT under ``on_grid_mismatch="delete"`` is destroyed
+    here exactly like it would be on ``/submit``. Documented so nobody
+    "fixes" this by accident later.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    record = await make_record(on_grid_mismatch="delete", status=RecordStatus.finished)
+    before_data = dict(record.data or {})
+
+    response = await client.patch(
+        f"{RECORDS_BASE}/{record.id}/data", json={"note": "just editing metadata"}
+    )
+
+    assert response.status_code == 409
+    assert not seg_path.exists()
+    refreshed = await RecordRepository(test_session).get_with_relations(record.id)
+    assert (refreshed.data or {}) == before_data
+
+
+async def test_post_data_status_failed_skips_the_guard(
+    client, test_session, series_dir, make_record
+):
+    """``POST /data?status=failed`` is the one caller that can set
+    ``skip_validation=True`` (``not is_update and new_status != finished``) —
+    ``POST /submit`` has no ``status`` query param and always submits
+    finished, so this branch is reachable only here. A mismatched, undeclared-
+    action OUTPUT must not block a failure report.
+    """
+    _write(series_dir / "volume.nii")
+    _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    record = await make_record(on_grid_mismatch="reject")
+
+    response = await client.post(
+        f"{RECORDS_BASE}/{record.id}/data?status=failed", json={"note": "task failed"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
 
 
 # ===========================================================================

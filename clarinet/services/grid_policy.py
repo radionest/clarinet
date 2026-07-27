@@ -8,11 +8,12 @@ serve as the guard.
 
 from pathlib import Path
 
+from clarinet.exceptions.domain import ImageError
 from clarinet.exceptions.http import CONFLICT
 from clarinet.files import Files
 from clarinet.models.file_schema import FileRole, GridMismatchAction
 from clarinet.models.record import RecordRead
-from clarinet.services.image.grid import RelationKind, grid_relation
+from clarinet.services.image.grid import GridRelation, RelationKind, grid_relation
 from clarinet.services.image.grid_io import read_grid
 from clarinet.services.image.segmentation import conform_seg_to_grid
 from clarinet.utils.logger import logger
@@ -23,17 +24,23 @@ def _repair(subject: Path, reference: Path) -> None:
     conform_seg_to_grid(subject, reference, out_path=subject)
 
 
+def _delete(subject: Path) -> None:
+    """Remove *subject*; tolerate a concurrent delete already having won the race."""
+    subject.unlink(missing_ok=True)
+
+
 async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None = None) -> None:
     """Enforce every declared OUTPUT grid pair, applying each file's action.
 
     ``conform`` repairs an exactly-repairable pair and lets the submission
     proceed; ``delete`` removes the file; both still reject anything that is
     not repairable. An unset action is ``reject`` — declaring a reference must
-    never fail open.
+    never fail open. A present-but-unreadable file (e.g. a truncated write)
+    is folded into the same 409 rather than surfacing as an unhandled 500.
 
     Raises:
         HTTPException: 409 when any declared OUTPUT pair cannot be made to
-            conform.
+            conform, or cannot be read.
     """
     registry = record.record_type.file_registry or []
     declared = [fd for fd in registry if fd.role == FileRole.OUTPUT and fd.grid_conform_to]
@@ -61,19 +68,29 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
                 f"on disk — cannot verify the output's grid"
             )
 
-        relation = await Files.in_thread(
-            lambda s=subject, r=reference: grid_relation(read_grid(r), read_grid(s))
-        )
+        try:
+            relation: GridRelation = await Files.in_thread(
+                lambda s=subject, r=reference: grid_relation(read_grid(r), read_grid(s))
+            )
+        except ImageError as e:
+            raise CONFLICT.with_context(
+                f"Cannot read the grid of output '{fd.name}' or its reference '{ref_def.name}': {e}"
+            ) from e
         if relation.kind is RelationKind.SAME:
             continue
 
         action: GridMismatchAction = fd.on_grid_mismatch or "reject"
 
         if action == "conform" and relation.kind is RelationKind.REARRANGED:
-            await Files.in_thread(_repair, subject, reference)
-            recheck = await Files.in_thread(
-                lambda s=subject, r=reference: grid_relation(read_grid(r), read_grid(s))
-            )
+            try:
+                await Files.in_thread(_repair, subject, reference)
+                recheck: GridRelation = await Files.in_thread(
+                    lambda s=subject, r=reference: grid_relation(read_grid(r), read_grid(s))
+                )
+            except ImageError as e:
+                raise CONFLICT.with_context(
+                    f"Failed to conform output '{fd.name}' onto '{ref_def.name}': {e}"
+                ) from e
             if recheck.kind is RelationKind.SAME:
                 logger.info(
                     f"Record {record.id}: conformed output '{fd.name}' onto "
@@ -86,7 +103,7 @@ async def enforce_output_grids(record: RecordRead, *, parent: RecordRead | None 
             )
 
         if action == "delete":
-            await Files.in_thread(subject.unlink)
+            await Files.in_thread(_delete, subject)
             logger.warning(
                 f"Record {record.id}: deleted output '{fd.name}' — grid "
                 f"{relation.kind.value} vs '{ref_def.name}'"
