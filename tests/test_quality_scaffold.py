@@ -1,11 +1,13 @@
 """Unit tests for clarinet.utils.quality_scaffold and the shipped clarinet/quality payload."""
 
+import argparse
 import configparser
 import tomllib
 from pathlib import Path
 
 import pytest
 
+from clarinet.cli.main import handle_quality_command
 from clarinet.exceptions.domain import QualityScaffoldError
 from clarinet.utils import quality_scaffold
 from clarinet.utils.quality_scaffold import (
@@ -229,3 +231,26 @@ def test_missing_payload_file_writes_nothing(
     with pytest.raises(QualityScaffoldError, match=r"ruff\.toml"):
         scaffold_quality_config(project_dir=project_dir, mode="init")
     assert not project_dir.exists()
+
+
+def test_cli_init_then_update(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    args = argparse.Namespace(
+        command="quality", quality_command="init", path=str(tmp_path), force=False
+    )
+    handle_quality_command(args)
+    assert (tmp_path / "mypy.ini").is_file()
+    # The fragment must reach stdout -- it is the required next step.
+    assert "dependency-groups" in capsys.readouterr().out
+
+    upd = argparse.Namespace(command="quality", quality_command="update", path=str(tmp_path))
+    handle_quality_command(upd)  # must not raise now that the dir is populated
+
+
+def test_cli_init_existing_exits(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        command="quality", quality_command="init", path=str(tmp_path), force=False
+    )
+    handle_quality_command(args)
+    with pytest.raises(SystemExit) as exc:
+        handle_quality_command(args)
+    assert exc.value.code == 1
