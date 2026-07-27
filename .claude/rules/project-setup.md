@@ -4,6 +4,7 @@ paths:
   - "settings.custom.toml"
   - "plan/**"
   - "examples/**"
+  - "clarinet/scaffold/**"
 ---
 
 # Clarinet Project Setup
@@ -11,29 +12,36 @@ paths:
 ## Creating a Project
 
 ```bash
-clarinet init my_project --template research    # Research scaffold with .claude/ docs for agents (Python config, plan/)
-clarinet init my_project --template demo        # NDT comparative-study demo (Python config, workflows, pipeline)
-clarinet init my_project                        # Bare skeleton
-clarinet init --list-templates                  # Show available templates
+clarinet init my_project      # Full research scaffold (settings, plan/, agent docs)
 ```
 
-Templates are copied from `examples/` in the Clarinet package. The `research`
-template ships a `.claude/CLAUDE.md` and `.claude/rules/*.md` covering
-definitions / workflows / slicer / schemas / utils — agents working in a
-generated project get section-specific guidance auto-loaded.
+`clarinet init` writes the project skeleton from the payload shipped inside the
+clarinet package, then installs the framework agent docs — the same set
+`clarinet agent init` delivers, into `.claude/rules/clarinet/`. Your own files are
+never overwritten, so it is safe to re-run over a partially set-up directory; the
+framework-managed docs under `.claude/rules/clarinet/` are refreshed each time.
 
-For an existing project (or one not made from the `research` template), run
-`clarinet agent init` to install framework agent docs into `.claude/rules/clarinet/`
-(re-run `clarinet agent update` after upgrading clarinet to refresh them).
+`.claude/CLAUDE.md` is written once as a **seed you own**: replace its contents
+with your own study description. Unlike the managed rules it is never rewritten,
+so `clarinet agent update` leaves your edits intact.
+
+For an existing project, run `clarinet agent init` to install the agent docs on
+their own (re-run `clarinet agent update` after upgrading clarinet to refresh
+them — that also removes managed docs the new version no longer ships). A full
+worked example lives at `examples/demo/` in the clarinet repository — reading
+material, not a scaffold.
 
 ## Project Structure
 
 ```
 my_project/
-  settings.toml              # Dev config (SQLite, debug=true)
-  settings.custom.toml       # Prod template (env var references)
+  settings.toml              # Active config (debug=true); secrets via CLARINET_* env vars
+  settings.custom.toml       # Production overrides — ships fully commented out
   .env.example               # Copy to .env for secrets
   .gitignore
+  .claude/
+    CLAUDE.md                # Project overview seed — yours to rewrite
+    rules/clarinet/          # Framework agent docs (managed; refreshed by `agent update`)
   plan/                      # Python config mode dir (= clarinet_plan package root)
     definitions/
       record_types.py        # RecordDef instances
@@ -53,11 +61,12 @@ Every plan file imports as a `clarinet_plan.` submodule off this single root
 ```toml
 project_name = "My Study"
 root_url = "/my_study"                          # Sub-path prefix
-api_base_url = "http://127.0.0.1:8111/my_study/api"
+port = 8111                                     # uvicorn binds this; keep it equal to
+api_base_url = "http://127.0.0.1:8111/my_study/api"   # the port used here
 extra_roles = ["inspector", "technician"]       # Custom roles beyond admin/user
 
 config_mode = "python"                          # "toml" (default) or "python"
-config_tasks_path = "./plan/"                   # Root for config files
+config_tasks_path = "./plan/"                   # Root for config files (this is the default)
 config_record_types_file = "definitions/record_types.py"
 # config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
 recordflow_paths = ["./plan/workflows"]         # RecordFlow DSL dirs (inside config_tasks_path)
@@ -65,6 +74,13 @@ recordflow_enabled = true
 pipeline_enabled = true                         # Requires RabbitMQ
 frontend_enabled = true
 ```
+
+`config_tasks_path` defaults to `./plan/` (it was `./tasks/` in earlier
+releases). A project that kept the old layout and never set the option must add
+`config_tasks_path = "./tasks/"`, or rename the directory to `plan/`. A root
+that does not exist aborts startup rather than starting with zero record types
+— the error names the unresolved path and, when the value came from the
+default, the setting that restores the previous layout.
 
 Config modes (TOML vs Python): see `clarinet/config/CLAUDE.md`.
 

@@ -12,6 +12,7 @@ import textwrap
 import pytest
 
 import clarinet.config.custom_registry as custom_registry_module
+import clarinet.settings as settings_module
 from clarinet.config.custom_registry import CustomCodeRegistry
 from clarinet.config.python_loader import load_python_config
 from clarinet.exceptions.domain import ConfigLoadError
@@ -427,3 +428,85 @@ class TestLoadPythonConfigFailFast:
         items = await load_python_config(tmp_path)
 
         assert [item.name for item in items] == ["rt-catalog-subdir"]
+
+
+class TestMissingConfigRoot:
+    """A custom-code root that does not exist must abort, not degrade silently.
+
+    Returning ``[]`` lets reconciliation run against an empty definition set: with
+    ``config_delete_orphans=False`` the app then starts normally on its previously
+    reconciled DB rows and drifts from its configuration undetected.
+    """
+
+    @pytest.mark.asyncio
+    async def test_missing_root_raises(self, tmp_path):
+        with pytest.raises(ConfigLoadError, match="does not exist"):
+            await load_python_config(tmp_path / "plan")
+
+    @pytest.mark.asyncio
+    async def test_root_that_is_a_regular_file_says_so(self, tmp_path):
+        """A path that exists but is not a directory is a distinct misconfiguration —
+        reporting it as "does not exist" sends the operator looking for the wrong thing."""
+        (tmp_path / "plan").write_text("not a directory\n", encoding="utf-8")
+
+        with pytest.raises(ConfigLoadError, match="is not a directory"):
+            await load_python_config(tmp_path / "plan")
+
+    @pytest.mark.asyncio
+    async def test_existing_but_empty_root_still_warns(self, tmp_path):
+        (tmp_path / "plan").mkdir()
+
+        assert await load_python_config(tmp_path / "plan") == []
+
+    @staticmethod
+    def _set_provenance(monkeypatch, *, explicit: bool):
+        """Mark ``config_tasks_path`` as project-set or defaulted.
+
+        Provenance is ``model_fields_set`` membership, not the value: the shipped
+        scaffold writes ``config_tasks_path = "./plan/"`` explicitly, so a value
+        check would tell every scaffolded project to restore a ``tasks/`` layout
+        it never had.
+        """
+        from clarinet.settings import settings
+
+        current = settings.model_fields_set
+        updated = current | {"config_tasks_path"} if explicit else current - {"config_tasks_path"}
+        monkeypatch.setattr(settings, "__pydantic_fields_set__", updated)
+
+    @pytest.mark.asyncio
+    async def test_message_names_the_flip_when_value_came_from_the_default(
+        self, tmp_path, monkeypatch
+    ):
+        self._set_provenance(monkeypatch, explicit=False)
+
+        with pytest.raises(ConfigLoadError, match="tasks/"):
+            await load_python_config(tmp_path / "plan")
+
+    @pytest.mark.asyncio
+    async def test_message_stays_quiet_about_the_flip_when_project_set_the_path(
+        self, tmp_path, monkeypatch
+    ):
+        """A scaffolded project sets ./plan/ explicitly — same value, different provenance."""
+        from clarinet.settings import settings
+
+        monkeypatch.setattr(settings, "config_tasks_path", "./plan/")
+        self._set_provenance(monkeypatch, explicit=True)
+
+        with pytest.raises(ConfigLoadError) as exc:
+            await load_python_config(tmp_path / "plan")
+
+        assert "./tasks/" not in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_toml_mode_aborts_too(self, tmp_path, monkeypatch):
+        """config_mode defaults to "toml" — that branch degraded silently as well."""
+        from clarinet.utils.bootstrap import reconcile_config
+
+        monkeypatch.setattr(settings_module.settings, "config_mode", "toml")
+        with pytest.raises(ConfigLoadError, match="does not exist"):
+            await reconcile_config(folder=str(tmp_path / "missing"))
+
+    def test_config_tasks_path_default_is_plan(self):
+        from clarinet.settings import Settings
+
+        assert Settings.model_fields["config_tasks_path"].default == "./plan/"

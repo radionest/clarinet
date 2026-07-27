@@ -151,10 +151,29 @@ def _disable_toml_export():
     """Prevent API endpoints from writing .toml config files during tests.
 
     Without this, record type create/update endpoints export .toml files
-    to ``./tasks/``, leaving garbage files (especially from schemathesis fuzz).
+    to ``./plan/``, leaving garbage files (especially from schemathesis fuzz).
     """
     app.state.config_mode = "test"
     yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _existing_config_root(tmp_path_factory):
+    """Give the app lifespan a custom-code root that exists.
+
+    ``reconcile_config`` aborts when the root is missing — reconciling an empty
+    definition set against live DB rows is the silent drift that guard exists to
+    stop. Pointing every test at a dedicated empty tmp dir keeps app-booting
+    tests off the repo's own ``plan/`` (whose tracked scratch TOMLs would
+    otherwise reconcile into the test DB). Tests that exercise config behaviour
+    override this per-function.
+    """
+    from clarinet.settings import settings
+
+    original = settings.config_tasks_path
+    settings.config_tasks_path = str(tmp_path_factory.mktemp("plan"))
+    yield
+    settings.config_tasks_path = original
 
 
 @pytest.fixture(autouse=True, scope="session")

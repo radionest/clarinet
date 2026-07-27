@@ -79,11 +79,11 @@ When the diff touches these paths, open the corresponding rule file before finis
 - `clarinet/api/routers/**`, `clarinet/api/dependencies.py` → `.claude/rules/api-deps.md`, `.claude/rules/api-urls.md`
 - `clarinet/repositories/record_repository.py`, `clarinet/repositories/record_type_repository.py` → `.claude/rules/record-repo.md`
 - `clarinet/services/pipeline/**`, `tests/**/*pipeline*` → `.claude/rules/pipeline-ops.md`
-- `clarinet/services/slicer/context*.py`, `tasks/**/slicer_hydrators.py` → `.claude/rules/slicer-context.md`
+- `clarinet/services/slicer/context*.py`, `plan/**/slicer_hydrators.py` → `.claude/rules/slicer-context.md`
 - `clarinet/services/slicer/helper.py` → `.claude/rules/slicer-helper-api.md`
-- `clarinet/services/recordflow/**`, `tasks/**/*_flow.py` → `.claude/rules/recordflow-dsl.md`
+- `clarinet/services/recordflow/**`, `plan/**/*_flow.py` → `.claude/rules/recordflow-dsl.md`
 - `clarinet/models/file_schema.py`, `clarinet/repositories/file_definition_repository.py` → `.claude/rules/file-registry.md`
 - `tests/schema/**`, `schemathesis.toml` → `.claude/rules/schemathesis.md`
 - `tests/**`, `scripts/run_tests.sh` → `.claude/rules/test-debugging.md`
 - `deploy/test/e2e/**` → `.claude/rules/e2e-tests.md`
-- `settings.toml`, `plan/**`, `examples/**` → `.claude/rules/project-setup.md`
+- `settings.toml`, `plan/**`, `examples/**`, `clarinet/scaffold/**` → `.claude/rules/project-setup.md`

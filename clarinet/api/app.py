@@ -130,11 +130,19 @@ def _config_startup_error(e: ConfigLoadError) -> StartupError:
     the hint points at the failing file when known instead of hardcoding a
     folder name.
     """
+    from clarinet.config.python_loader import CONFIG_ROOT_KIND
+
     target = e.path or "the project's custom Python files"
+    if e.kind == CONFIG_ROOT_KIND:
+        # Keyed off kind, not path existence: the root may be missing OR be a
+        # regular file, and neither is an import error.
+        hint = f"Point config_tasks_path at an existing directory ({e.path}), then restart"
+    else:
+        hint = f"Fix the import error in {target}, then restart"
     return StartupError(
         component="Config",
         reason=str(e),
-        hint=f"Fix the import error in {target}, then restart",
+        hint=hint,
         disableable=False,
     )
 
