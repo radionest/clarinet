@@ -420,7 +420,8 @@ class AgentScaffoldError(ClarinetError):
 
 class QualityScaffoldError(ClarinetError):
     """Raised when installing/refreshing downstream quality config fails (missing
-    package payload, init over an existing managed config, update with none)."""
+    package payload, init over an existing managed config, init colliding with an
+    unmanaged file at a destination name, update with none)."""
 
 
 # Configuration errors

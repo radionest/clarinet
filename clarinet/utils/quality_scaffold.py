@@ -134,7 +134,7 @@ def scaffold_quality_config(
 
     header = (
         f"{_HEADER_PREFIX} managed by clarinet v{_clarinet_version()} — "
-        f"run 'clarinet quality update' to refresh\n"
+        f"do not edit; run 'clarinet quality update' to refresh\n"
     )
 
     project_dir.mkdir(parents=True, exist_ok=True)
