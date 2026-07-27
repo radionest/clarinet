@@ -69,7 +69,7 @@ TASKIQ_*.md
 REFACTOR.md
 
 # Test RecordType configs (scratch/development)
-/tasks/
+/plan/
 
 # Dev notes (centralized storage via symlink)
 dev-notes

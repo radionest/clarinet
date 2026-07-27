@@ -2,8 +2,8 @@
 #
 # This file is loaded automatically whenever it exists, AFTER settings.toml,
 # and its values win. It ships fully commented out so a freshly scaffolded
-# project runs on the SQLite dev defaults in settings.toml; uncomment what you
-# need when you deploy.
+# project runs on the defaults in settings.toml; uncomment what you need when
+# you deploy.
 #
 # Secrets do NOT belong here. Clarinet performs no ${VAR} substitution — a
 # literal "${CLARINET_PORT}" would be read as that string and fail validation.

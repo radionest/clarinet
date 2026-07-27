@@ -4,6 +4,7 @@ paths:
   - "settings.custom.toml"
   - "plan/**"
   - "examples/**"
+  - "clarinet/scaffold/**"
 ---
 
 # Clarinet Project Setup

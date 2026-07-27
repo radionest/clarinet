@@ -163,9 +163,10 @@ def _existing_config_root(tmp_path_factory):
 
     ``reconcile_config`` aborts when the root is missing — reconciling an empty
     definition set against live DB rows is the silent drift that guard exists to
-    stop. The default ``./plan/`` does not exist in the repo checkout, so tests
-    that boot the app without caring about config would trip it. Tests that do
-    exercise config behaviour override this per-function.
+    stop. Pointing every test at a dedicated empty tmp dir keeps app-booting
+    tests off the repo's own ``plan/`` (whose tracked scratch TOMLs would
+    otherwise reconcile into the test DB). Tests that exercise config behaviour
+    override this per-function.
     """
     from clarinet.settings import settings
 

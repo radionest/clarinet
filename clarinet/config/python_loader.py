@@ -312,7 +312,8 @@ def ensure_config_root_exists(folder: Path) -> None:
             "'./plan/'. If your project uses the old layout, set "
             'config_tasks_path = "./tasks/" in settings.toml.'
         )
-    raise ConfigLoadError(f"config root '{folder}' does not exist.{hint}", path=folder)
+    problem = "is not a directory" if folder.exists() else "does not exist"
+    raise ConfigLoadError(f"config root '{folder}' {problem}.{hint}", path=folder)
 
 
 async def load_python_config(folder: Path) -> list[RecordTypeCreate]:

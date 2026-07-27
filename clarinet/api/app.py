@@ -132,8 +132,9 @@ def _config_startup_error(e: ConfigLoadError) -> StartupError:
     """
     target = e.path or "the project's custom Python files"
     if e.path is not None and not Path(e.path).exists():
-        # A root that does not exist is not an import error — say what to do.
-        hint = f"Create {e.path}, or point config_tasks_path at the right directory, then restart"
+        # A missing path is not an import error. Stays generic: this also covers a
+        # schema $ref target, where naming config_tasks_path would be wrong.
+        hint = f"Create {e.path}, or correct the setting that points at it, then restart"
     else:
         hint = f"Fix the import error in {target}, then restart"
     return StartupError(

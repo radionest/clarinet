@@ -13,6 +13,9 @@ api_base_url = "http://127.0.0.1:8111/my_project/api"
 extra_roles = []
 
 # ── Server / Logging ─────────────────────────────────
+# Must agree with the port in api_base_url above — the server-side
+# ClarinetClient calls the API through it.
+port = 8111
 host = "0.0.0.0"
 debug = true
 log_level = "INFO"
