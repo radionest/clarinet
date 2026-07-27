@@ -4,18 +4,24 @@
 
 line-length = 100
 indent-width = 4
+# Bump alongside mypy.ini's python_version if your project targets a newer
+# Python.
 target-version = "py312"
 
-exclude = [
-    ".venv",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".pytest_cache",
-    "__pycache__",
+# extend-exclude ADDS to ruff's built-in default exclude list (.venv, .git,
+# _build, dist, node_modules, __pycache__, etc. -- see ruff's docs for the
+# full set); plain `exclude` would REPLACE it instead, silently putting all of
+# those back in scope. Only the entries this project actually needs to add on
+# top go here.
+extend-exclude = [
     "data",
     # Vendored / frozen third-party code. Fixes go upstream and are re-vendored,
     # so a local finding here is not actionable.
     "plan/lib",
+    # Despite _build/buck-out/dist being real ruff defaults, plain "build" is
+    # not (verified against 0.15.8) -- the common `python -m build` output dir
+    # would otherwise get linted.
+    "build",
 ]
 
 [lint]
@@ -43,6 +49,12 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "tests/*" = ["ARG", "S101", "TCH"]
 # Slicer scripts run inside Slicer's embedded Python with injected globals.
 "plan/scripts/*" = ["F821"]
+# RecordFlow DSL condition syntax: `F.some_field == True` is not a redundant
+# bool comparison -- `F.some_field` is a lazy FlowResult proxy, and `== True`
+# is what invokes its overloaded __eq__ to build the FieldComparison object
+# `.if_record()` requires. Dropping `== True` does not simplify the code, it
+# breaks the DSL (see `.claude/rules/recordflow-dsl.md`).
+"plan/workflows/*" = ["E712"]
 
 [format]
 quote-style = "double"
