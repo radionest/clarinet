@@ -61,6 +61,10 @@ def test_mirrored_grid_is_a_mismatch(tmp_path):
     result = FileValidator(_defs(grid_conform_to="volume")).validate(_Rec(), tmp_path)
     assert not result.valid
     assert [e.error_type for e in result.errors] == ["grid_mismatch"]
+    # Pin the classification, not just "some mismatch": a regression that
+    # misclassifies this exact mirror as FOREIGN would still pass a looser
+    # assertion here.
+    assert "rearranged" in result.errors[0].message
 
 
 def test_foreign_grid_is_a_mismatch(tmp_path):
@@ -122,3 +126,37 @@ def test_input_reference_bound_as_output_resolves(tmp_path):
     )
     result = FileValidator([seg], registry=[seg, volume_as_output]).validate(_Rec(), tmp_path)
     assert result.valid, result.errors
+
+
+def test_unresolvable_reference_is_a_mismatch(tmp_path):
+    """The other half of the registry ruling: a reference genuinely absent
+    from the registry (not merely bound under a different role) resolves to
+    grid_mismatch rather than a crash or a silent pass.
+    """
+    _write(tmp_path / "seg.nii")
+    seg = FileDefinitionRead(
+        name="seg",
+        pattern="seg.nii",
+        role=FileRole.INPUT,
+        required=True,
+        grid_conform_to="volume",
+    )
+    result = FileValidator([seg], registry=[seg]).validate(_Rec(), tmp_path)
+    assert not result.valid
+    assert [e.error_type for e in result.errors] == ["grid_mismatch"]
+    assert "not bound to this record type" in result.errors[0].message
+
+
+def test_matched_files_keeps_full_rendered_path(tmp_path):
+    """matched_files must carry the full rendered pattern, not just its
+    basename: the value flows into RecordFileLink.filename and is later
+    re-joined to a working dir elsewhere (record_repository.py,
+    pipeline/context.py). Collapsing it to Path.name would silently corrupt
+    that round-trip for any subdirectory-bearing pattern.
+    """
+    (tmp_path / "sub").mkdir()
+    _write(tmp_path / "sub" / "seg.nii")
+    seg = FileDefinitionRead(name="seg", pattern="sub/seg.nii", role=FileRole.INPUT, required=True)
+    result = FileValidator([seg]).validate(_Rec(), tmp_path)
+    assert result.valid, result.errors
+    assert result.matched_files["seg"] == "sub/seg.nii"

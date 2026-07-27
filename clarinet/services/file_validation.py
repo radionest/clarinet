@@ -84,7 +84,9 @@ class FileValidator:
     ):
         self._file_definitions = file_definitions
         # Reference lookup spans every role — the validated set stays as passed.
-        self._by_name = {fd.name: fd for fd in (registry or file_definitions)}
+        self._by_name = {
+            fd.name: fd for fd in (registry if registry is not None else file_definitions)
+        }
 
     def _target_path(
         self,
@@ -93,8 +95,16 @@ class FileValidator:
         directory: Path,
         working_dirs: dict[DicomQueryLevel, Path] | None,
         parent: RecordBase | None,
-    ) -> Path:
-        """Resolve one file definition to an absolute path for *record*.
+    ) -> tuple[str, Path]:
+        """Resolve one file definition to its rendered filename and absolute path.
+
+        Returns both halves — not just the path — because the rendered
+        filename (as opposed to ``path.name``) is what ``matched_files``
+        must carry: a pattern is free to render a subdirectory-bearing
+        string (nothing constrains it to a bare basename), and that value
+        round-trips through ``RecordFileLink.filename`` into a later
+        ``working_dir / filename`` join elsewhere. Reducing it to ``.name``
+        here would silently drop the subdirectory for such a pattern.
 
         join_within raises UnsafePathError uncaught rather than being folded
         into the caller's ``errors``. It enforces containment only, and both
@@ -116,8 +126,8 @@ class FileValidator:
         """
         resolved = Files.render_for(record, file_def.pattern, parent=parent)
         if file_def.level and working_dirs and file_def.level in working_dirs:
-            return join_within(working_dirs[file_def.level], resolved)
-        return join_within(directory, resolved)
+            return resolved, join_within(working_dirs[file_def.level], resolved)
+        return resolved, join_within(directory, resolved)
 
     def _grid_error(
         self,
@@ -146,7 +156,7 @@ class FileValidator:
                 ),
             )
 
-        reference = self._target_path(ref_def, record, directory, working_dirs, parent)
+        _, reference = self._target_path(ref_def, record, directory, working_dirs, parent)
         if not reference.is_file():
             return FileValidationError(
                 file_name=file_def.name,
@@ -244,8 +254,10 @@ class FileValidator:
                     )
                 continue
 
-            target_path = self._target_path(file_def, record, directory, working_dirs, parent)
-            filename = target_path.name if target_path.is_file() else None
+            resolved, target_path = self._target_path(
+                file_def, record, directory, working_dirs, parent
+            )
+            filename = resolved if target_path.is_file() else None
 
             if filename:
                 matched[file_def.name] = filename
@@ -261,7 +273,7 @@ class FileValidator:
                         file_name=file_def.name,
                         error_type="missing",
                         message=f"Required file '{file_def.name}' not found "
-                        f"(expected: {target_path.name}, pattern: {file_def.pattern})",
+                        f"(expected: {resolved}, pattern: {file_def.pattern})",
                     )
                 )
 
