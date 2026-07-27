@@ -102,21 +102,25 @@ Fail-fast, config-load-time check (Python/TOML load and RecordType
 `POST`/PATCH — same `RecordTypeCreate` validator as Output-Path Uniqueness
 above): a file that sets `grid_conform_to` must name a reference the runtime
 can actually resolve and check, or `RecordConstraintViolationError` is
-raised, naming the RecordType and the declaring file. Six rejection rules:
-the reference isn't bound to *this* RecordType (an unknown name and a name
-bound to a different RecordType raise the identical "unknown" error — lookup
-is scoped to this RecordType's own registry); it's a self-reference; its
-*effective* level (own `level`, or the RecordType's when unset) is finer
-than the declaring file's; either side has `multiple=True` (singular files
-only); or either pattern isn't a grid-readable format (`.nii`, `.nii.gz`,
-`.nrrd` — `.seg.nrrd` is covered by the `.nrrd` check).
+raised, naming the RecordType and the declaring file: the reference isn't
+bound to *this* RecordType (an unknown name and a name bound to a different
+RecordType raise the identical "unknown" error — lookup is scoped to this
+RecordType's own registry); it's a self-reference; its *effective* level
+(own `level`, or the RecordType's when unset) is finer than the declaring
+file's; either side has `multiple=True` (singular files only); or either
+pattern isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd` —
+`.seg.nrrd` is covered by the `.nrrd` check).
 
 The declaration is a property of the *file*, not of a `RecordTypeFileLink`
-binding — every RecordType binding a file inherits it. INPUT mismatches
-always `blocked` the record (an input may be shared with sibling records, so
-it is never auto-repaired or deleted); OUTPUT mismatches are enforced
-pre-commit on submit per `on_grid_mismatch`. Full runtime behavior, the
-decision table, and the adoption order:
+binding — every RecordType binding a file inherits it. Only INPUT and OUTPUT
+bindings are enforced at runtime; an INTERMEDIATE file may still declare
+`grid_conform_to` (config load applies no role filter) but nothing ever
+checks it — a silent no-op, not a rejection. INPUT mismatches are never
+auto-repaired or deleted (an input may be shared with sibling records), but
+land as `blocked` (creation, check-files, preparing-exit) or a 422 (a
+submission's own re-check catches a mismatch first); OUTPUT mismatches are
+enforced pre-commit on submit per `on_grid_mismatch`. Full runtime behavior,
+the decision table, and the adoption order:
 [`docs/grid-workflows.md`](../../docs/grid-workflows.md#runtime-grid-conformance-enforcement).
 
 ## ORM vs DTO: file_links vs file_registry

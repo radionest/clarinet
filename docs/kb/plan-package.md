@@ -84,13 +84,20 @@ while still receiving a `parent_record_id` is never forced to carry
 `{parent_id}` — two of its records under different parents can still collide on
 disk.
 
+`level` and `role` accept plain strings and are coerced to enums. `File` and
+`RecordTypeDef` are backward-compatible aliases for `FileDef` and `RecordDef` —
+when grepping for usages, search for both spellings. If no `files_catalog.py`
+exists, FileDef names are derived from the variable names in `record_types.py`.
+
 ### Grid-conformance declarations must be resolvable
 
 A `FileDef`/`FileDefinitionRead` may declare `grid_conform_to`: another
 bound file whose on-disk voxel grid this one must match, plus
 `on_grid_mismatch` (`"conform"`/`"delete"`/`"reject"`, default `"reject"`)
-saying what to do about an OUTPUT mismatch — an INPUT mismatch always blocks
-the record instead, since a record does not own its inputs. In Python
+saying what to do about an OUTPUT mismatch — an INPUT mismatch instead never
+repairs or deletes the file, since a record does not own its inputs (it
+blocks the record, or raises a 422 if a submission's own re-check catches it
+first). In Python
 config, `grid_conform_to` accepts the referenced `FileDef` object itself
 (preferred — typo-proof, and survives a variable rename) or its plain name
 string; the object form is reduced to a name at config-resolution time, once
@@ -110,11 +117,6 @@ table, the four-endpoint submission scope, and the recommended adoption
 order — lives in
 [`docs/grid-workflows.md`](../grid-workflows.md#runtime-grid-conformance-enforcement),
 the narrative home for the framework's voxel-grid model.
-
-`level` and `role` accept plain strings and are coerced to enums. `File` and
-`RecordTypeDef` are backward-compatible aliases for `FileDef` and `RecordDef` —
-when grepping for usages, search for both spellings. If no `files_catalog.py`
-exists, FileDef names are derived from the variable names in `record_types.py`.
 
 ## Reconciliation
 

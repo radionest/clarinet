@@ -203,10 +203,11 @@ correspondence-engine set-ops' own pre-regrid check
 ## Runtime grid-conformance enforcement
 
 Everything above this line is a primitive some script or guard calls by hand.
-This section is different: a `FileDefinition` can declare, once, that its
-on-disk grid must always match another file's — and the framework enforces
-that declaration automatically at every seam that could let the pair drift,
-with no script author ever writing a `grid_relation` call.
+This section is different: a `FileDefinition` bound as INPUT or OUTPUT can
+declare, once, that its on-disk grid must always match another file's — and
+the framework enforces that declaration automatically at every seam that
+could let the pair drift, with no script author ever writing a
+`grid_relation` call.
 
 ### Declaring a pair
 
@@ -246,9 +247,9 @@ file, it rejects:
    apart;
 2. a self-reference;
 3. a reference whose *effective* level (its own `level`, or the RecordType's
-   when unset) is finer than the declaring file's — resolved per RecordType,
-   since the same `FileDefinition` can be bound at different levels on
-   different types;
+   when unset) is finer than the declaring file's — resolved per RecordType
+   because a file that leaves `level` unset inherits the RecordType's own
+   level, so its *effective* level differs between types;
 4. `multiple=True` on either side — grid conformance is defined for singular
    files only;
 5. either pattern extension `read_grid` cannot classify — anything other than
@@ -260,7 +261,13 @@ An INPUT file and an OUTPUT file are owned differently, so `grid_conform_to`
 is read at two structurally different points. A record does not own its
 inputs — they may be shared with sibling records — so an input mismatch can
 only ever block, never repair or delete. An OUTPUT is the record's own
-artifact, so `on_grid_mismatch` gets to decide its fate.
+artifact, so `on_grid_mismatch` gets to decide its fate. **INTERMEDIATE is
+neither**: config-load validation applies no role filter, so a
+`multiple=False`, grid-readable INTERMEDIATE file can declare
+`grid_conform_to` and pass — but no runtime path enforces it
+(`enforce_output_grids` filters to `FileRole.OUTPUT`, `validate_record_files`
+filters to `FileRole.INPUT`). It is a silent no-op, not a rejected
+declaration.
 
 **INPUT.** `FileValidator.validate`
 (`clarinet/services/file_validation.py:176`) classifies every declared pair
@@ -280,6 +287,25 @@ seam inherits the check automatically:
 - The `preparing → pending` status transition
   (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
   of `pending`.
+- `POST /records/{id}/data` and `POST /records/{id}/submit`
+  (`_process_submission`, `record.py:555-561`) re-validate with
+  `raise_on_invalid=True` immediately before the submission is persisted —
+  the check that catches a reference drifting *after* the record already
+  passed creation or check-files while sitting `pending`. This is the one
+  seam that does **not** produce `blocked`: a mismatch here raises the
+  domain `ValidationError`, mapped to **422**
+  (`exception_handlers.py:163-167`), not the 409 the OUTPUT guard produces.
+  `PATCH /data` and `PATCH /submit` never reach this branch
+  (`is_update=True` skips it entirely) — they do not re-check INPUT files at
+  all.
+
+Like the OUTPUT existence rule below, the grid check itself runs only when
+the *subject* file matched on disk (`file_validation.py:209-216`) — a
+missing subject falls through to the ordinary missing-file handling
+instead, never a grid check. It is **not** conditional on the reference's
+existence: a subject present while its reference is missing is itself a
+`grid_mismatch` error, not a skip (`file_validation.py:141-150`) — the same
+asymmetry as OUTPUT, just landing on `blocked`/422 instead of a 409.
 
 **OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:32`)
 runs pre-commit inside `_process_submission`, after any
@@ -364,7 +390,7 @@ fail-open hole the four-endpoint scope exists to close. See
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
 | `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:416` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
-| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:38,82` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT always blocks on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
+| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:38,82-83` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
