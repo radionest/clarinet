@@ -1,6 +1,8 @@
 """Validator — check repair model: required structural segments must be present."""
 
 node = slicer.util.getNode("RepairModel")  # type: ignore[name-defined]  # noqa: F821
+if node is None:
+    raise ValueError("Segmentation node 'RepairModel' not found in scene")
 seg = node.GetSegmentation()
 
 names = set()

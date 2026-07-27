@@ -4,6 +4,8 @@ import os
 import re
 
 node = slicer.util.getNode("MasterModel")  # type: ignore[name-defined]  # noqa: F821
+if node is None:
+    raise ValueError("Segmentation node 'MasterModel' not found in scene")
 seg = node.GetSegmentation()
 
 # ---------------------------------------------------------------------------
@@ -38,6 +40,8 @@ for i in range(seg.GetNumberOfSegments()):
 # Immutability: if file already exists, all previous names must be preserved
 if os.path.isfile(output_file):  # type: ignore[name-defined]  # noqa: F821
     prev_node = slicer.util.loadSegmentation(output_file)  # type: ignore[name-defined]  # noqa: F821
+    if prev_node is None:
+        raise ValueError(f"Failed to load previous segmentation from '{output_file}'")
     prev_seg = prev_node.GetSegmentation()
     prev_names = set()
     for i in range(prev_seg.GetNumberOfSegments()):

@@ -1,9 +1,13 @@
 """Validator — check segment names and export the Segmentation node."""
 
+from utils.seg_utils import SEG_LABELS
+
 node = slicer.util.getNode("Segmentation")  # type: ignore[name-defined]  # noqa: F821
+if node is None:
+    raise ValueError("Segmentation node 'Segmentation' not found in scene")
 seg = node.GetSegmentation()
 
-expected = {"defect", "indeterminate", "cosmetic"}
+expected = set(SEG_LABELS.keys())
 current = set()
 for i in range(seg.GetNumberOfSegments()):
     sid = seg.GetNthSegmentID(i)

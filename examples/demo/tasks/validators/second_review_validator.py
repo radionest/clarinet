@@ -1,9 +1,12 @@
 """Validator — check classification: _pool empty, segment names intact."""
 
 import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
+from utils.seg_utils import REVIEW_LABELS
 from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
 
 node = slicer.util.getNode("Classification")  # type: ignore[name-defined]  # noqa: F821
+if node is None:
+    raise ValueError("Segmentation node 'Classification' not found in scene")
 seg = node.GetSegmentation()
 
 # Find _pool segment by name (_find_segment_id is provided by helper.py)
@@ -27,7 +30,7 @@ if pool_seg_id is not None:
     seg.RemoveSegment(pool_seg_id)
 
 # Validate segment names
-expected = {"defect", "indeterminate", "cosmetic", "invisible"}
+expected = set(REVIEW_LABELS.keys())
 current = set()
 for i in range(seg.GetNumberOfSegments()):
     sid = seg.GetNthSegmentID(i)
