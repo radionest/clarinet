@@ -5,6 +5,13 @@ Copies framework-authored Claude guidance shipped in the package
 substituting the ``{{CLARINET_DOCS}}`` token with the resolved on-disk path of
 ``clarinet/docs`` so links to the deep reference docs are valid in the running
 environment. Pure file/CLI logic — no DB, no app state (mirror of quarto_scaffold).
+
+The payload is split in two. Most documents are *managed*: rewritten on every
+run and stamped with a header saying so. The documents in ``SEED_DOCS`` are
+*project-owned* — written once to ``<project>/.claude/`` and never rewritten,
+because their body asks the user to replace it. Each run also prunes managed
+documents the installed version no longer ships, migrating a formerly-managed
+seed rather than deleting it.
 """
 
 from importlib.metadata import PackageNotFoundError, version
@@ -101,10 +108,12 @@ def scaffold_agent_docs(
 ) -> Path:
     """Install (``mode="init"``) or refresh (``mode="update"``) the managed agent docs.
 
-    Writes every ``*.md`` from the package payload into
+    Writes every managed ``*.md`` from the package payload into
     ``project_dir/.claude/rules/<namespace>/``, substituting ``{{CLARINET_DOCS}}``
     with the resolved package docs path and prepending a managed-header comment.
-    Returns the managed dir.
+    Then prunes managed docs no longer in the payload and writes any missing
+    ``SEED_DOCS`` target under ``project_dir/.claude/`` (never overwriting one
+    that exists). Returns the managed dir — the seed lives outside it.
 
     Raises:
         AgentScaffoldError: unknown agent / missing payload; ``init`` over an
@@ -136,8 +145,10 @@ def scaffold_agent_docs(
     # Prune before seeding: a managed overview.md the user edited must be
     # migrated to the seed target, and that only happens while the target is
     # still free. Seeding first would occupy it and turn migration into deletion.
-    if mode == "update":
-        _prune_managed_dir(dest, src=src, project_dir=project_dir)
+    # Runs in every mode — `init --force` over a project scaffolded by an older
+    # version reaches the same legacy layout that `update` does, and skipping the
+    # migration there would strand the legacy doc for a later `update` to delete.
+    _prune_managed_dir(dest, src=src, project_dir=project_dir)
 
     for payload_name, target_name in SEED_DOCS.items():
         target = project_dir / ".claude" / target_name
@@ -159,6 +170,8 @@ def _prune_managed_dir(dest: Path, *, src: Path, project_dir: Path) -> None:
     that became a seed (``overview.md``) is *migrated* rather than deleted when
     its target is still free — one-release courtesy for projects scaffolded
     before the split, whose overview may carry the user's own study description.
+
+    A no-op on a freshly created managed dir, so it is safe to call in every mode.
     """
     payload_names = {p.name for p in src.glob("*.md")} - set(SEED_DOCS)
     for stale in sorted(dest.glob("*.md")):

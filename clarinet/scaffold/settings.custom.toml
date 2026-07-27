@@ -17,7 +17,7 @@ database_driver = "postgresql+asyncpg"
 database_name = "${CLARINET_DATABASE_NAME}"
 database_host = "${CLARINET_DATABASE_HOST}"
 database_port = "${CLARINET_DATABASE_PORT}"
-database_login = "${CLARINET_DATABASE_LOGIN}"
+database_username = "${CLARINET_DATABASE_USERNAME}"
 database_password = "${CLARINET_DATABASE_PASSWORD}"
 
 # ── Storage / Security ───────────────────────────────

@@ -3,6 +3,8 @@
 Uses real DB sessions and RecordType objects — no mocks.
 """
 
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 from pydantic import ValidationError
@@ -15,6 +17,11 @@ from clarinet.exceptions.domain import ConfigurationError
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
+
+# reconcile_config aborts when the custom-code root does not exist, so these
+# tests — which mock the loader and assert only registry-reference validation —
+# point at a directory that is guaranteed to be there.
+EXISTING_CONFIG_DIR = str(Path(__file__).parent)
 
 
 def _make_config(
@@ -692,7 +699,7 @@ async def test_reconcile_config_validates_missing_roles(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "python"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
 
         ctx = AsyncMock()
@@ -701,7 +708,7 @@ async def test_reconcile_config_validates_missing_roles(
         mock_ctx.return_value = ctx
 
         with pytest.raises(ConfigurationError, match="nonexistent-role"):
-            await reconcile_config(folder="/fake/path")
+            await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
 
 @pytest.mark.asyncio
@@ -734,7 +741,7 @@ async def test_reconcile_config_passes_with_valid_roles(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "python"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
 
         ctx = AsyncMock()
@@ -742,7 +749,7 @@ async def test_reconcile_config_passes_with_valid_roles(
         ctx.__aexit__ = AsyncMock(return_value=False)
         mock_ctx.return_value = ctx
 
-        result = await reconcile_config(folder="/fake/path")
+        result = await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
     assert result.errors == []
     assert "role-ok-type" in result.created
@@ -776,7 +783,7 @@ async def _reconcile_with_mocked_env(
         patch("clarinet.settings.settings", spec_set=True) as mock_settings,
     ):
         mock_settings.config_mode = "python"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_validators_file = "validators.py"
         mock_settings.config_context_hydrators_file = "context_hydrators.py"
         mock_settings.config_schema_hydrators_file = "schema_hydrators.py"
@@ -787,7 +794,7 @@ async def _reconcile_with_mocked_env(
         ctx.__aexit__ = AsyncMock(return_value=False)
         mock_ctx.return_value = ctx
 
-        return await reconcile_config(folder="/fake/path")
+        return await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
 
 @pytest.mark.asyncio
@@ -1033,7 +1040,7 @@ async def test_error_message_lists_all_db_roles(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "python"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
 
         ctx = AsyncMock()
@@ -1042,7 +1049,7 @@ async def test_error_message_lists_all_db_roles(
         mock_ctx.return_value = ctx
 
         with pytest.raises(ConfigurationError, match="alpha-role") as exc_info:
-            await reconcile_config(folder="/fake/path")
+            await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
     # Both unreferenced roles should appear in the message
     msg = str(exc_info.value)
@@ -1080,7 +1087,7 @@ async def test_reconcile_config_validates_allowed_viewers_configured(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "python"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
         mock_settings.viewers = {"ohif": {}, "radiant": {}}
 
@@ -1090,7 +1097,7 @@ async def test_reconcile_config_validates_allowed_viewers_configured(
         mock_ctx.return_value = ctx
 
         with pytest.raises(ConfigurationError, match="ohiff") as exc_info:
-            await reconcile_config(folder="/fake/path")
+            await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
     msg = str(exc_info.value)
     assert "rt-bad-viewer" in msg
@@ -1168,11 +1175,11 @@ async def test_toml_config_load_fails_fast_on_shared_editing_invariant(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "toml"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
 
         with pytest.raises(ConfigurationError, match="Invalid record type config"):
-            await reconcile_config(folder="/fake/path")
+            await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
 
 @pytest.mark.asyncio
@@ -1235,11 +1242,11 @@ async def test_toml_config_load_fails_fast_on_output_path_uniqueness(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "toml"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
 
         with pytest.raises(ConfigLoadError, match="bad-output-path") as exc_info:
-            await reconcile_config(folder="/fake/path")
+            await reconcile_config(folder=EXISTING_CONFIG_DIR)
 
     assert exc_info.value.path == "bad-output-path.toml"
     assert exc_info.value.kind == "record type config"
@@ -1266,7 +1273,7 @@ async def test_reconcile_config_allows_shared_editing_without_unique_per_user(
         patch("clarinet.settings.settings") as mock_settings,
     ):
         mock_settings.config_mode = "python"
-        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_tasks_path = EXISTING_CONFIG_DIR
         mock_settings.config_delete_orphans = False
 
         ctx = AsyncMock()
@@ -1274,5 +1281,5 @@ async def test_reconcile_config_allows_shared_editing_without_unique_per_user(
         ctx.__aexit__ = AsyncMock(return_value=False)
         mock_ctx.return_value = ctx
 
-        result = await reconcile_config(folder="/fake/path")
+        result = await reconcile_config(folder=EXISTING_CONFIG_DIR)
         assert "shared-ok" in result.created

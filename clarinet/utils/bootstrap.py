@@ -364,10 +364,15 @@ async def reconcile_config(
     Returns:
         ReconcileResult with counts per category.
     """
+    from clarinet.config.python_loader import ensure_config_root_exists
     from clarinet.settings import settings
 
     folder = folder or settings.config_tasks_path
     all_items: list[RecordTypeCreate] = []
+
+    # Both modes: a root that does not exist aborts rather than reconciling an
+    # empty definition set against the existing DB rows.
+    ensure_config_root_exists(Path(folder))
 
     if settings.config_mode == "python":
         from clarinet.config.python_loader import load_python_config

@@ -26,7 +26,7 @@ my_project/
       pipeline_flow.py       # RecordFlow DSL
 ```
 
-Scaffold one with `clarinet init <name> --template research|demo`. For an
+Scaffold one with `clarinet init <name>`. For an
 existing project, `clarinet agent init` installs the framework's agent docs into
 `.claude/rules/clarinet/`.
 
@@ -164,6 +164,8 @@ A broken plan file must crash startup, never degrade silently.
 
 - Loaders raise `ConfigLoadError` (a `ConfigurationError` subclass; the original
   error stays on `__cause__`).
+- A config root that does not exist raises before any loading, in both config
+  modes (`ensure_config_root_exists`). An existing but empty root only warns.
 - Multi-file loaders attempt every file, then raise one
   `ConfigLoadError.aggregate(...)` with the individual errors on `.failures`.
 - A file that imports cleanly but registers nothing logs a WARNING.

@@ -284,6 +284,37 @@ def _ensure_record_types_imported(folder: Path | None = None) -> None:
             _set_file_names_from_module(rt)
 
 
+def ensure_config_root_exists(folder: Path) -> None:
+    """Abort when the custom-code root does not exist.
+
+    Carrying on with an empty definition set lets reconciliation run against
+    nothing: with ``config_delete_orphans=False`` (the default) the app then
+    starts on its previously reconciled DB rows and drifts from its
+    configuration undetected. Mode-independent — TOML and Python projects are
+    equally exposed.
+
+    The upgrade hint keys off ``model_fields_set``, not off the value: a project
+    that explicitly sets ``config_tasks_path = "./plan/"`` (as the shipped
+    scaffold does) never used the old layout and must not be told to restore it.
+
+    Raises:
+        ConfigLoadError: ``folder`` is not an existing directory.
+    """
+    from clarinet.settings import settings
+
+    if folder.is_dir():
+        return
+
+    hint = ""
+    if "config_tasks_path" not in settings.model_fields_set:
+        hint = (
+            " This path came from the default, which changed from './tasks/' to "
+            "'./plan/'. If your project uses the old layout, set "
+            'config_tasks_path = "./tasks/" in settings.toml.'
+        )
+    raise ConfigLoadError(f"config root '{folder}' does not exist.{hint}")
+
+
 async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     """Load RecordType definitions from Python files in *folder*.
 
@@ -307,25 +338,15 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
         List of RecordTypeCreate objects ready for reconciliation.
 
     Raises:
-        ConfigLoadError: If ``record_types.py`` or ``files_catalog.py``
-            fails to import — a broken Python config must crash startup,
-            not silently reconcile zero record types.
+        ConfigLoadError: If ``folder`` does not exist, or if
+            ``record_types.py`` / ``files_catalog.py`` fails to import — a
+            broken or absent Python config must crash startup, not silently
+            reconcile zero record types.
     """
     from clarinet.config.plan_package import import_plan_module, module_name_for
     from clarinet.settings import settings
 
-    if not folder.is_dir():
-        from clarinet.settings import Settings
-
-        default = Settings.model_fields["config_tasks_path"].default
-        hint = ""
-        if settings.config_tasks_path == default:
-            hint = (
-                " This path came from the default, which changed from './tasks/' to "
-                "'./plan/'. If your project uses the old layout, set "
-                'config_tasks_path = "./tasks/" in settings.toml.'
-            )
-        raise ConfigLoadError(f"config root '{folder}' does not exist.{hint}")
+    ensure_config_root_exists(folder)
 
     record_types_file = folder / settings.config_record_types_file
     if not record_types_file.is_file():

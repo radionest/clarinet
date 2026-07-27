@@ -5,7 +5,7 @@ Two halves in this file:
 1. Pipeline tasks — async/sync functions decorated with ``@pipeline_task``.
 2. RecordFlow DSL — declarative event → action rules.
 
-See `.claude/rules/workflows.md` for the full reference.
+See `.claude/rules/clarinet/workflows.md` for the full reference.
 """
 
 from __future__ import annotations

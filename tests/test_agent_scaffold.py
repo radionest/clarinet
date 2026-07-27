@@ -240,6 +240,27 @@ def test_update_migrates_legacy_managed_overview(tmp_path: Path) -> None:
     assert "managed by clarinet" not in seed_text
 
 
+def test_forced_init_migrates_legacy_overview_instead_of_stranding_it(tmp_path: Path) -> None:
+    """`init --force` reaches the same legacy layout `update` does.
+
+    If it wrote the seed without pruning, the legacy managed overview.md would
+    survive with the user's edits and the *next* update would find the seed
+    target occupied and delete it.
+    """
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    (dest / "overview.md").write_text(
+        f"{_LEGACY_HEADER}# My Study\nedited by the user\n", encoding="utf-8"
+    )
+    (tmp_path / SEED).unlink()
+
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init", force=True)
+
+    assert not (dest / "overview.md").exists()
+    seed_text = (tmp_path / SEED).read_text(encoding="utf-8")
+    assert "edited by the user" in seed_text
+    assert "managed by clarinet" not in seed_text
+
+
 def test_migration_does_not_clobber_existing_seed(tmp_path: Path) -> None:
     dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
     (dest / "overview.md").write_text(f"{_LEGACY_HEADER}legacy\n", encoding="utf-8")

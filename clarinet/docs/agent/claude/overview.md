@@ -124,6 +124,6 @@ Framework rules (full reference docs, installed alongside the clarinet package �
 - `{{CLARINET_DOCS}}/slicer-helper-api.md` — all `SlicerHelper` methods + VTK pitfalls
 - `{{CLARINET_DOCS}}/pipeline-ops.md` — pipeline settings, testing, queues
 - `{{CLARINET_DOCS}}/file-registry.md` — file pattern-resolution details
-- `{{CLARINET_DOCS}}/project-setup.md` — template overview, `clarinet init` options
+- `{{CLARINET_DOCS}}/project-setup.md` — project layout, `clarinet init`, key settings
 
-Production example: the `clarinet_nir_liver` repository (if available) — the most complete real-world use of this template.
+Production example: the `clarinet_nir_liver` repository (if available) — the most complete real-world use of this framework.

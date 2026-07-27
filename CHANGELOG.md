@@ -225,7 +225,8 @@
   the framework agent docs. The payload now ships *inside* the package
   (`clarinet/scaffold/`) rather than in the repository's `examples/` tree, which
   is not part of the wheel: `clarinet init --template …` was unusable from any
-  pip install (#472). Existing files are never overwritten. The
+  pip install (#472). Project-owned files are never overwritten and the command
+  is safe to re-run — only the framework-managed agent docs are refreshed. The
   `examples/project_template/` tree is gone; `examples/demo/` remains as
   reading material.
 - **`config_tasks_path` now defaults to `./plan/` (was `./tasks/`).** A project
@@ -297,7 +298,7 @@
   `anon scrub-db` operator commands. `workflows.md` § Built-in tasks gains
   `anonymize_study_pipeline` and `prefetch_dicom_web`, and now spells out that task-name
   collisions are on the **bare function name** (`{namespace}:{function_name}`, not
-  module-qualified). The `research` project template ships the same doc.
+  module-qualified).
 
 ### Improved
 

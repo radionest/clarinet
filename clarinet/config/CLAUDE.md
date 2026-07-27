@@ -128,6 +128,10 @@ plan/
   (full contract: `.claude/rules/custom-code-loading.md`)
 - Fail-fast: a broken `record_types.py`/`files_catalog.py` raises `ConfigLoadError`
   (→ `StartupError` in lifespan) instead of silently reconciling zero record types
+- A config root that does not **exist** also raises (`ensure_config_root_exists`,
+  called from `reconcile_config` for *both* modes) — returning an empty set would
+  let the app start on its previously reconciled DB rows. A root that exists but
+  holds no definitions still only warns
 - `files_catalog.py` imports as a `clarinet_plan.` submodule, cached so
   `record_types.py` can import it (e.g. `from clarinet_plan.files_catalog import seg`)
 - File names auto-derived from variable names (in `files_catalog.py` or `record_types.py`)

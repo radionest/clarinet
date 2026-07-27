@@ -29,6 +29,10 @@ def init_project(path: str) -> None:
     Copies the packaged scaffold payload (never overwriting an existing file),
     materializes the undotted payload dotfiles, then installs the framework
     agent docs through the same mechanism ``clarinet agent init`` uses.
+
+    Safe to re-run over a partially set-up directory: project-owned files are
+    kept, and the framework-managed agent docs are refreshed rather than
+    treated as a collision (``force=True``), so a second run does not abort.
     """
     from clarinet.utils.agent_scaffold import scaffold_agent_docs
     from clarinet.utils.project_scaffold import SCAFFOLD_DOTFILES, scaffold_source_dir
@@ -50,7 +54,7 @@ def init_project(path: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(item, target)
 
-    scaffold_agent_docs("claude", project_dir=project_path, mode="init")
+    scaffold_agent_docs("claude", project_dir=project_path, mode="init", force=True)
 
     if skipped:
         logger.info(f"Kept existing files: {', '.join(skipped)}")

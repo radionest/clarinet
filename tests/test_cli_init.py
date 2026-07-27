@@ -45,3 +45,26 @@ def test_init_signature_has_no_template_param() -> None:
 def test_templates_module_is_gone() -> None:
     with pytest.raises(ModuleNotFoundError):
         __import__("clarinet.cli.templates")
+
+
+def test_init_is_rerunnable(tmp_path: Path) -> None:
+    """A second init must not abort on the managed docs the first one wrote.
+
+    The payload loop writes before agent docs are installed, so an exception
+    there leaves a half-scaffolded directory behind.
+    """
+    init_project(str(tmp_path))
+    init_project(str(tmp_path))
+
+    assert (tmp_path / ".claude" / "rules" / "clarinet" / "definitions.md").is_file()
+    assert (tmp_path / "plan" / "definitions" / "record_types.py").is_file()
+
+
+def test_rerun_keeps_the_edited_seed(tmp_path: Path) -> None:
+    init_project(str(tmp_path))
+    seed = tmp_path / ".claude" / "CLAUDE.md"
+    seed.write_text("my study", encoding="utf-8")
+
+    init_project(str(tmp_path))
+
+    assert seed.read_text(encoding="utf-8") == "my study"
