@@ -8,6 +8,18 @@
 # that has nothing to do with code quality.
 QUALITY_PATHS := $(wildcard plan tests scripts)
 
+# mypy's own candidate list, derived separately from QUALITY_PATHS: tests/ is
+# excluded outright in mypy.ini, so passing it explicitly is a hard error
+# ("There are no .py[i] files in directory 'tests'"), not a silent no-op --
+# dropped unconditionally here, mirroring mypy.ini's own exclusion. Of what's
+# left, keep only directories that actually contain a .py file: an existing
+# but non-Python directory (e.g. a scripts/ holding only shell scripts) hits
+# that identical hard error. The typecheck recipe below guards this list for
+# emptiness so `make check` still exits 0 when nothing is left to
+# type-check, instead of invoking `mypy` with zero arguments ("Missing
+# target module, package, files, or command.").
+MYPY_PATHS := $(foreach d,$(filter-out tests,$(QUALITY_PATHS)),$(if $(shell find $(d) -name '*.py' -print -quit 2>/dev/null),$(d)))
+
 .PHONY: help format lint typecheck check test _require-tools _require-paths
 
 help: ## Show available targets
@@ -36,12 +48,12 @@ format: _require-tools _require-paths ## Format with ruff
 lint: _require-tools _require-paths ## Lint with ruff (autofix)
 	@uv run ruff check $(QUALITY_PATHS) --fix
 
-# tests/ is excluded outright in mypy.ini; passing an explicitly-named
-# directory that mypy's exclude wholly covers is a hard error ("There are no
-# .py[i] files in directory 'tests'"), not a silent no-op -- so it is
-# filtered back out of the shared path list here specifically.
 typecheck: _require-tools _require-paths ## Type-check with mypy
-	@uv run mypy $(filter-out tests,$(QUALITY_PATHS))
+	@if [ -z "$(MYPY_PATHS)" ]; then \
+	  echo "No Python sources to type-check."; \
+	else \
+	  uv run mypy $(MYPY_PATHS); \
+	fi
 
 check: format lint typecheck ## Format + lint + typecheck in one pass
 
