@@ -88,11 +88,10 @@ def test_filedef_requires_level_when_omitted() -> None:
 
 
 def test_filedef_requires_pattern_when_omitted() -> None:
-    # pattern has no explicit __init__ param (it falls through **kwargs: Any,
-    # the accepted blind spot design decision D8 describes) and no pydantic
-    # default either -- omitting it while still passing a widened param like
-    # level must raise pydantic's own "field required" error, not silently
-    # construct a half-initialized FileDef.
+    # pattern is an explicit, _UNSET-defaulted __init__ param (mirrors level)
+    # and has no pydantic default either -- omitting it while still passing a
+    # widened param like level must raise pydantic's own "field required"
+    # error, not silently construct a half-initialized FileDef.
     with pytest.raises(ValidationError):
         FileDef(level="SERIES")
 
@@ -300,11 +299,14 @@ def _requiredness_mismatches(model: type[BaseModel]) -> list[str]:
 
     Scope is deliberately narrow: only fields that ARE an explicit, named
     ``__init__`` param are checked. Fields with no explicit param (e.g.
-    ``FileDef.pattern``, ``RecordDef.name``) fall through ``**kwargs: Any`` —
-    that is the pre-existing, accepted blind spot (design decision D8), not
-    this guard's job. Params that are not fields at all (``RecordDef``'s
-    ``role``/``unique_per_user`` aliases) are never visited, because this
-    walks ``model_fields``, not the signature.
+    ``RecordDef.name``, ``RecordDef.description``) fall through
+    ``**kwargs: Any`` — that is the accepted blind spot (design decision D8),
+    not this guard's job. FileDef has no such fields anymore: ``level`` widens,
+    ``pattern`` is ``_UNSET``-defaulted like ``level`` (both required, no
+    pydantic default), and ``multiple``/``description``/``name`` mirror their
+    own pydantic default directly — see ``FileDef.__init__``. Params that are
+    not fields at all (``RecordDef``'s ``role``/``unique_per_user`` aliases)
+    are never visited, because this walks ``model_fields``, not the signature.
 
     A param defaulting to the module's ``_UNSET`` sentinel is exempt in BOTH
     directions. That default means "forward only if the caller actually passed

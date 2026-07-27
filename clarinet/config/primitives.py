@@ -70,21 +70,33 @@ class FileDef(BaseModel):
     def __init__(
         self,
         *,
+        pattern: str = _UNSET,
+        multiple: bool = False,
         level: DicomQueryLevel | str = _UNSET,
+        description: str | None = None,
+        name: str = "",
         **kwargs: Any,
     ) -> None:
-        """Accept the string form of ``level`` that ``_coerce_level`` already coerces.
+        """Give every field an explicit, correctly-typed constructor parameter.
 
-        The field annotation stays ``DicomQueryLevel`` — pydantic reads it for
-        validation and serialization. Widening only the signature is what keeps
-        this change static-only. Mirrors ``FileRef.__init__``. ``level`` has no
-        pydantic default (it is required), so it is forwarded only when actually
-        passed — omitting it still raises pydantic's own "field required" error
-        instead of silently defaulting to a placeholder level.
+        Only ``level``'s parameter widens (``DicomQueryLevel | str``, to accept
+        the string form ``_coerce_level`` already coerces) — the field
+        annotation stays ``DicomQueryLevel``; widening only the signature is
+        what keeps this change static-only. Mirrors ``FileRef.__init__``.
+
+        ``pattern`` and ``level`` have no pydantic default (both are
+        required), so each is forwarded only when actually passed — omitting
+        either still raises pydantic's own "field required" error instead of
+        silently defaulting to a placeholder value. ``multiple``/``description``/
+        ``name`` mirror their own pydantic default directly: neither is
+        required nor coerced from a wider type, so there is nothing to guard
+        with the ``_UNSET`` sentinel.
         """
+        if pattern is not _UNSET:
+            kwargs["pattern"] = pattern
         if level is not _UNSET:
             kwargs["level"] = level
-        super().__init__(**kwargs)
+        super().__init__(multiple=multiple, description=description, name=name, **kwargs)
 
     @field_validator("level", mode="before")
     @classmethod
