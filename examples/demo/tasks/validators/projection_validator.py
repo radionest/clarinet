@@ -3,6 +3,8 @@
 import os
 
 node = slicer.util.getNode("Projection")  # type: ignore[name-defined]  # noqa: F821
+if node is None:
+    raise ValueError("Segmentation node 'Projection' not found in scene")
 seg = node.GetSegmentation()
 
 current_names = set()
@@ -12,6 +14,8 @@ for i in range(seg.GetNumberOfSegments()):
 
 if os.path.isfile(master_model):  # type: ignore[name-defined]  # noqa: F821
     mm_node = slicer.util.loadSegmentation(master_model)  # type: ignore[name-defined]  # noqa: F821
+    if mm_node is None:
+        raise ValueError(f"Failed to load master model segmentation from '{master_model}'")
     mm_seg = mm_node.GetSegmentation()
     mm_names = set()
     for i in range(mm_seg.GetNumberOfSegments()):
