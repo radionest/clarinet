@@ -10,6 +10,7 @@ Slicer-gated integration tests in tests/integration/test_slicer_helper.py.
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -22,6 +23,7 @@ from clarinet.services.slicer.helper import (
     _labelmap_array_or_raise,
     _missing_voxel_segments,
     _segmentation_has_voxels,
+    _SegmentEditMixin,
 )
 
 
@@ -119,6 +121,76 @@ def test_labelmap_array_none_point_data_no_attributeerror(
     image.GetPointData.return_value = None
     # Genuinely empty → tolerated (None), and crucially NOT an AttributeError.
     assert _labelmap_array_or_raise(node, MagicMock(), what="seg") is None
+
+
+# --- _export_segments_labelmap: resample= gate (issue #415) ------------------
+#
+# The resample= parameter on the set-op choke point gates the pre-regrid
+# ``_assert_segmentation_matches_volume`` check. ``test_labelmap_array_*`` above
+# covers the post-export empty/foreign-grid discrimination; these cover the
+# other half of #415 — that ``resample=True`` opts out of the geometry guard
+# (legacy re-grid path) while ``resample=False`` (default) invokes it. The full
+# happy-path export touches too much of Slicer's VTK bindings to mock here; we
+# stub everything past the gate so only the gate's own branching is exercised.
+
+
+def _wire_labelmap_export_gate(
+    monkeypatch: pytest.MonkeyPatch, *, has_voxels: bool
+) -> tuple[Any, MagicMock]:
+    """Build a minimal ``_SegmentEditMixin`` + mocks around the resample gate.
+
+    Returns ``(helper, assert_grid_mock)`` so the test asserts the geometry
+    guard's call count via the returned mock. Everything the gated block runs
+    after the check -- ``_apply_reference_geometry``, ``slicer.modules`` /
+    ``slicer.mrmlScene`` access, ``_labelmap_array_or_raise`` -- is stubbed so
+    only the gate's branching is observable.
+    """
+    helper = object.__new__(_SegmentEditMixin)  # skip __init__ (Slicer scene clear)
+    helper._image_node = MagicMock(name="volume_node")
+
+    monkeypatch.setattr(helper_mod, "_segmentation_has_voxels", lambda node: has_voxels)
+    assert_grid = MagicMock(name="_assert_segmentation_matches_volume")
+    monkeypatch.setattr(helper_mod, "_assert_segmentation_matches_volume", assert_grid)
+    monkeypatch.setattr(helper, "_apply_reference_geometry", MagicMock())
+
+    fake_seg_logic = MagicMock()
+    fake_modules = MagicMock()
+    fake_modules.segmentations.logic.return_value = fake_seg_logic
+    fake_scene = MagicMock()
+    fake_scene.AddNewNodeByClass.return_value = MagicMock(name="labelmap_node")
+    monkeypatch.setattr(helper_mod.slicer, "modules", fake_modules)
+    monkeypatch.setattr(helper_mod.slicer, "mrmlScene", fake_scene)
+    # Short-circuit the empty/foreign classification -- covered above.
+    monkeypatch.setattr(helper_mod, "_labelmap_array_or_raise", lambda lm, node, what="": object())
+
+    return helper, assert_grid
+
+
+def test_export_segments_labelmap_resample_false_invokes_geometry_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default resample=False + source carries voxels → geometry guard runs."""
+    helper, assert_grid = _wire_labelmap_export_gate(monkeypatch, has_voxels=True)
+    helper._export_segments_labelmap(MagicMock(), "_t", what="seg", resample=False)
+    assert_grid.assert_called_once()
+
+
+def test_export_segments_labelmap_resample_true_skips_geometry_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resample=True opts out of the geometry guard (legacy re-grid path)."""
+    helper, assert_grid = _wire_labelmap_export_gate(monkeypatch, has_voxels=True)
+    helper._export_segments_labelmap(MagicMock(), "_t", what="seg", resample=True)
+    assert_grid.assert_not_called()
+
+
+def test_export_segments_labelmap_empty_source_skips_geometry_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Genuinely-empty source never triggers the geometry guard regardless of resample."""
+    helper, assert_grid = _wire_labelmap_export_gate(monkeypatch, has_voxels=False)
+    helper._export_segments_labelmap(MagicMock(), "_t", what="seg", resample=False)
+    assert_grid.assert_not_called()
 
 
 # --- export_segmentation: conform_to guard/gate/fail-closed contract ---------
