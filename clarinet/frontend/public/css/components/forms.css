@@ -396,8 +396,14 @@ formosh-form::part(readonly-td) {
     color: var(--ink);
 }
 
-/* Array (list) fields */
-.array-item {
+/* Array (list) fields.
+
+   These were plain class selectors until formosh 0.8.7, which meant they had
+   matched nothing since 0.6.0 moved rendering into Shadow DOM — only ::part()
+   crosses that boundary. The row control buttons (remove, move up/down) carry
+   no `part` attribute upstream, so they are unreachable from here and keep
+   browser defaults; the header below only lays them out. */
+formosh-form::part(array-item) {
     border: 1px solid var(--hairline);
     border-radius: var(--radius-md);
     padding: 0.75rem 1rem;
@@ -405,32 +411,23 @@ formosh-form::part(readonly-td) {
     background: var(--surface-sunken);
 }
 
-/* Since formosh 0.7.3 the header holds only the remove button (rendered in
-   editable mode only), so the flex container just right-aligns it. */
-.array-item-header {
+/* Holds move up/down followed by remove, right-aligned. The separator between
+   controls and fields lives on array-item-fields, not here: a collapsed row
+   drops the fields entirely, and a border on the header would be left dangling
+   over nothing. */
+formosh-form::part(array-item-header) {
     display: flex;
     justify-content: flex-end;
-    margin-bottom: 0.5rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--hairline);
+    gap: 0.375rem;
 }
 
-.remove-array-item {
-    color: var(--red);
-    background: none;
-    border: 1px solid var(--red);
-    border-radius: var(--radius-md);
-    padding: 0.25rem 0.5rem;
-    cursor: pointer;
-    font-size: 0.8125rem;
-
-    &:hover {
-        background: var(--red);
-        color: #ffffff;
-    }
+formosh-form::part(array-item-fields) {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--hairline);
 }
 
-.add-array-item {
+formosh-form::part(array-add) {
     margin-top: 0.5rem;
     padding: 0.375rem 0.75rem;
     border: 1px dashed var(--hairline-strong);
@@ -438,9 +435,59 @@ formosh-form::part(readonly-td) {
     background: none;
     cursor: pointer;
     color: var(--ink-soft);
+}
 
-    &:hover {
-        border-color: var(--teal);
-        color: var(--teal);
-    }
+formosh-form::part(array-add):hover {
+    border-color: var(--teal);
+    color: var(--teal);
+}
+
+/* Collapse controls (formosh 0.8.7, opt-in via ui:options.collapseCompleted).
+   The header renders whenever collapsing is available — including while the
+   user has it switched off, since it holds the only control that switches it
+   back on. */
+formosh-form::part(array-collapse-header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    color: var(--ink-soft);
+    font-size: 0.8125rem;
+}
+
+formosh-form::part(array-toggle) {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    cursor: pointer;
+}
+
+formosh-form::part(array-progress) {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
+}
+
+/* One-line summary of a completed row — a real button, present in both the
+   collapsed and expanded state, so it stays the way back into the fields. */
+formosh-form::part(array-item-summary) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    width: 100%;
+    padding: 0.25rem 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--ink);
+    font-size: 0.875rem;
+}
+
+formosh-form::part(array-item-summary):hover {
+    color: var(--teal);
+}
+
+formosh-form::part(array-item-summary-sep) {
+    color: var(--ink-soft);
 }
