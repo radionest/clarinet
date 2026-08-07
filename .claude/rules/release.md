@@ -64,13 +64,17 @@ Two consequences, both of which have bitten this repo (v0.10.21, v0.10.22):
 
 - **`main`'s `pyproject.toml` version lags the published release.** It stays at
   the last version tagged *from main*, so the next release cut from main must
-  pick a number above the highest published tag — check `git tag --sort=-v:refname`,
-  not `pyproject.toml`.
+  pick a number above the highest published tag — check
+  `git fetch --tags origin && git tag --sort=-v:refname`, not `pyproject.toml`.
+  The fetch matters here: these releases live off-main, so a main checkout is
+  exactly the case where the newest tag may not be local yet.
 - **The change is not on `main`.** Back-port it in its own PR, in the same
   session — otherwise the next release cut from main silently reverts it. Link
   the two with `git cherry-pick -x <sha>` so `git log` on main records which
   release-line commit it came from, instead of two unrelated identical commits.
 
 Prefer this flow only while main is genuinely not releasable. Two consecutive
-narrow releases off the tag line (0.8.6 in #540, 0.8.7 in #549 — both formosh
-bumps back-ported by hand) is the signal to release main instead.
+narrow releases off the tag line (v0.10.21 and v0.10.22, both formosh bumps,
+back-ported to main by hand in #540 and #549) is the signal to release main
+instead. The tag-line releases carry no PR of their own — only the back-port
+does.
