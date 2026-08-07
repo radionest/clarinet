@@ -49,3 +49,28 @@ git worktree add -b fix/<slug>-X.Y.Z <path> vX.Y.(Z-1)   # branch from last tag 
 
 A fix landed on a hotfix branch is **not** in `main` — cherry-pick it to main
 separately, or main keeps the bug.
+
+## Release off the previous tag while main runs ahead
+
+Used when main carries unreleased feature work but a narrow change (a dependency
+bump, a small fix) should ship on its own. Branch from the **last tag**, not main:
+
+```bash
+git worktree add -b release/X.Y.Z <path> vX.Y.(Z-1)
+# apply the narrow change + bump pyproject to X.Y.Z, commit, then tag + push
+```
+
+Two consequences, both of which have bitten this repo (v0.10.21, v0.10.22):
+
+- **`main`'s `pyproject.toml` version lags the published release.** It stays at
+  the last version tagged *from main*, so the next release cut from main must
+  pick a number above the highest published tag — check `git tag --sort=-v:refname`,
+  not `pyproject.toml`.
+- **The change is not on `main`.** Back-port it in its own PR, in the same
+  session — otherwise the next release cut from main silently reverts it. Link
+  the two with `git cherry-pick -x <sha>` so `git log` on main records which
+  release-line commit it came from, instead of two unrelated identical commits.
+
+Prefer this flow only while main is genuinely not releasable. Two consecutive
+narrow releases off the tag line (0.8.6 in #540, 0.8.7 in #549 — both formosh
+bumps back-ported by hand) is the signal to release main instead.
