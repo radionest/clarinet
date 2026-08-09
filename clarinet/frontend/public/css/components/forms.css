@@ -396,7 +396,16 @@ formosh-form::part(readonly-td) {
     color: var(--ink);
 }
 
-/* Array (list) fields */
+/* Array (list) fields.
+
+   Styled by class, not ::part(): Lustre clones the host stylesheet into the
+   component's shadow root, so these match formosh's internal classes with
+   ordinary selector semantics — which the `:not(:last-child)` divider rule
+   below relies on, and which ::part() does not reliably give. Several row
+   controls (remove, move up/down) also expose no `part` at all, so class is
+   the only surface that reaches them. Reach for ::part() to outrank an adopted
+   rule (the outer context wins for normal declarations regardless of
+   specificity) or where upstream sets a part but no class. */
 .array-item {
     border: 1px solid var(--hairline);
     border-radius: var(--radius-md);
@@ -405,11 +414,19 @@ formosh-form::part(readonly-td) {
     background: var(--surface-sunken);
 }
 
-/* Since formosh 0.7.3 the header holds only the remove button (rendered in
-   editable mode only), so the flex container just right-aligns it. */
+/* Move up/down followed by remove, right-aligned.
+
+   `:not(:last-child)` is what keeps the divider honest. Since formosh 0.8.7 a
+   collapsed row renders summary + header and drops its fields, which would
+   leave the border hanging under the buttons over nothing; when the header is
+   last, there is nothing to divide. */
 .array-item-header {
     display: flex;
     justify-content: flex-end;
+    gap: 0.375rem;
+}
+
+.array-item-header:not(:last-child) {
     margin-bottom: 0.5rem;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--hairline);
@@ -438,9 +455,79 @@ formosh-form::part(readonly-td) {
     background: none;
     cursor: pointer;
     color: var(--ink-soft);
+    font-family: var(--font-sans);
 
     &:hover {
         border-color: var(--teal);
         color: var(--teal);
     }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+    }
+}
+
+/* Collapse controls (formosh 0.8.7, opt-in via ui:options.collapseCompleted).
+   The header renders whenever collapsing is available — including while the
+   user has it switched off, since it holds the only control that switches it
+   back on. */
+.array-collapse-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    color: var(--ink-soft);
+    font-size: 0.8125rem;
+}
+
+/* The toggle, the progress count and the summary separator carry a `part` but
+   no class upstream, so ::part() is the only surface that reaches them. */
+formosh-form::part(array-toggle) {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    cursor: pointer;
+}
+
+formosh-form::part(array-progress) {
+    font-variant-numeric: tabular-nums;
+}
+
+formosh-form::part(array-item-summary-sep) {
+    color: var(--ink-soft);
+}
+
+/* One-line summary of a completed row — a real button, present in both the
+   collapsed and expanded state, so it stays the way back into the fields.
+   `column-gap` replaces the literal spaces around formosh's " · " separator,
+   which flex would otherwise trim. */
+.array-item-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.35rem;
+    width: 100%;
+    padding: 0.25rem 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+
+    &:hover {
+        color: var(--teal);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+    }
+}
+
+formosh-form::part(array-item-summary-sep) {
+    color: var(--ink-soft);
 }
