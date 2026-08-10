@@ -274,6 +274,16 @@ class RecordType(RecordTypeBase, table=True):
         RecordFileLink rows), access ``file_links`` directly instead.
 
         Raises ``RuntimeError`` if ``file_links`` is not eagerly loaded.
+
+        A stored ``FileDefinition.pattern`` predating ``FileDefinitionRead``'s
+        path-safety validator (``table=True`` rows are never Pydantic-validated,
+        so a pre-existing bad pattern can sit in the DB indefinitely) fails
+        conversion here. That one definition is skipped — logged as a WARNING
+        naming the record type and definition — rather than raised: one legacy
+        row must not blank out the *entire* registry for every caller of this
+        property. (``RecordTypeRead.populate_file_registry`` also wraps this
+        call in a broad ``except Exception``, but that one is a backstop for a
+        different failure — ``file_links`` not eagerly loaded — not for this.)
         """
         try:
             links = self.file_links
@@ -283,19 +293,33 @@ class RecordType(RecordTypeBase, table=True):
                 f"Use selectinload(RecordType.file_links)"
                 f".selectinload(RecordTypeFileLink.file_definition)"
             ) from exc
-        return [
-            FileDefinitionRead(
-                name=link.file_definition.name,
-                pattern=link.file_definition.pattern,
-                description=link.file_definition.description,
-                multiple=link.file_definition.multiple,
-                role=link.role,
-                required=link.required,
-                level=link.file_definition.level,
-                allow_path_collision=link.allow_path_collision,
-            )
-            for link in (links or [])
-        ]
+        from pydantic import ValidationError
+
+        registry: list[FileDefinitionRead] = []
+        for link in links or []:
+            try:
+                registry.append(
+                    FileDefinitionRead(
+                        name=link.file_definition.name,
+                        pattern=link.file_definition.pattern,
+                        description=link.file_definition.description,
+                        multiple=link.file_definition.multiple,
+                        role=link.role,
+                        required=link.required,
+                        level=link.file_definition.level,
+                        allow_path_collision=link.allow_path_collision,
+                    )
+                )
+            except ValidationError as exc:
+                from clarinet.utils.logger import logger
+
+                logger.warning(
+                    f"RecordType('{self.name}'): file definition "
+                    f"'{link.file_definition.name}' (pattern="
+                    f"{link.file_definition.pattern!r}) failed validation and "
+                    f"was skipped from file_registry: {exc}"
+                )
+        return registry
 
     def __hash__(self) -> int:
         """Hash the RecordType by its name."""
