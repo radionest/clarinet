@@ -222,7 +222,17 @@ def test_template_leaf_import_is_light():
 
 
 class TestPathSafety:
-    def test_resolve_rejects_absolute_value(self, monkeypatch):
+    def test_resolve_rejects_absolute_value_via_join_within(self, monkeypatch):
+        # Pins join_within's escape rule, not the value guard
+        # (assert_path_safe_value): pathlib's `/` join drops working_dir
+        # entirely when the RHS is absolute, so the rendered
+        # "/etc/passwd.nrrd" lands outside working_dir regardless of the
+        # value guard, and join_within's containment check is what raises.
+        # "/etc/passwd" is also not a regex-legal patient_id
+        # (PATIENT_ID_REGEX, clarinet/models/patient.py) -- unreachable
+        # through this field in practice. See
+        # test_resolve_rejects_bare_dotdot_patient_id below for the test
+        # that pins the value guard itself.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
@@ -235,7 +245,15 @@ class TestPathSafety:
         with pytest.raises(UnsafePathError):
             Files(record).resolve("mask")
 
-    def test_resolve_rejects_traversal_value(self, monkeypatch):
+    def test_resolve_rejects_traversal_value_via_join_within(self, monkeypatch):
+        # Pins join_within's escape rule, not the value guard: the bare
+        # "{patient_id}.nrrd" pattern renders "../../etc.nrrd", and
+        # os.path.normpath walks it two levels above working_dir before
+        # join_within's containment check rejects it -- independent of
+        # assert_path_safe_value. "../../etc" is also not a regex-legal
+        # patient_id (PATIENT_ID_REGEX) -- unreachable through this field
+        # in practice. See test_resolve_rejects_bare_dotdot_patient_id
+        # below for the test that pins the value guard itself.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
@@ -287,8 +305,12 @@ class TestPathSafety:
         # constant and never carries record data, so it is not a PHI leak.
         assert exc_info.value.value == ".."
 
-    def test_exists_inherits_the_guard(self, monkeypatch):
-        # exists() delegates to resolve(); this pins that it has no separate path.
+    def test_exists_inherits_join_within(self, monkeypatch):
+        # exists() delegates to resolve(); this pins that it has no separate
+        # path. The traversal value here is caught by join_within (see
+        # test_resolve_rejects_traversal_value_via_join_within), not by the
+        # value guard -- so this test says nothing about whether exists()
+        # would still be safe if assert_path_safe_value were removed.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
@@ -342,6 +364,34 @@ class TestPathSafety:
         assert "mask" in str(exc_info.value)
         assert "../../etc" not in str(exc_info.value)
         assert exc_info.value.value == "../../etc"
+
+    @pytest.mark.asyncio
+    async def test_checksums_rejects_bare_dotdot_patient_id(self, monkeypatch):
+        # Direct pin for the path_safe=True site in checksums()'s singular
+        # branch (facade.py). Prefixed pattern, same technique as
+        # test_resolve_rejects_bare_dotdot_patient_id: a bare
+        # "{patient_id}.nrrd" would render ".." into "...nrrd", which
+        # join_within's dot-leading-basename rule also rejects -- masking
+        # whether the value guard ran at all. The "mask_" prefix keeps the
+        # rendered basename clear of every join_within rule, so the value
+        # guard is the only thing standing in the way here.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "mask_{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = ".."
+        with pytest.raises(UnsafePathError) as exc_info:
+            await Files(record).checksums()
+        # PHI contract: not asserting ".." not in str(exc) -- the guard's
+        # own message is the fixed phrase "('.' or '..')" describing the
+        # rule, which would make that assertion false-by-boilerplate (see
+        # test_resolve_rejects_bare_dotdot_patient_id).
+        assert exc_info.value.value == ".."
 
     def test_render_is_path_safe(self, monkeypatch):
         from clarinet.exceptions.domain import UnsafePathError
