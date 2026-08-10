@@ -288,10 +288,12 @@ def render_template(
             ``None`` values, empty collections, and dict values substitute
             ``missing``.
 
-    Safety checks (``/``, ``\\``, ``..``, leading ``.``) are applied to each
-    substituted value only when ``path_safe=True``. Callers that render a
-    filesystem path pass it; callers that render a free-form string (Slicer
-    script arguments, which may legitimately be absolute paths) do not.
+    Safety checks (``/``, ``\\``, NUL, and a value that is exactly ``.`` or
+    ``..``) are applied to each substituted value only when ``path_safe=True``.
+    Containment and leading-dot checks on the *assembled* path remain in
+    ``join_within``. Callers that render a filesystem path pass it; callers
+    that render a free-form string (Slicer script arguments, which may
+    legitimately be absolute paths) do not.
     """
 
     def _replace(m: re.Match[str]) -> str:

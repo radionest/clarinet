@@ -31,6 +31,13 @@ class TestUnsafePathErrorTaxonomy:
         # degrade into any of those.
         assert not issubclass(UnsafePathError, AnonPathError)
 
+    def test_is_not_a_value_error(self):
+        # render_template's _replace swallows ValueError in LENIENT mode. If a
+        # future refactor moved the path_safe guard inside that try/except, this
+        # is the second line of defence — and the NOTE comment above the guard
+        # call in _replace claims it exists.
+        assert not issubclass(UnsafePathError, ValueError)
+
 
 class TestAssertPathSafeValue:
     @pytest.mark.parametrize(
