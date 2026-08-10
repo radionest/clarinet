@@ -225,7 +225,7 @@ class TestPathSafety:
     """resolve()/exists()/checksums() are guarded by two independent layers.
 
     - The value guard, assert_path_safe_value (_template.py), runs during
-      rendering on each RAW substituted value: rejects "/", "\\", NUL
+      rendering on each COERCED substituted value: rejects "/", "\\", NUL
       (_UNSAFE_IN_VALUE), or a value that is exactly "." or "..".
     - join_within (_template.py), a purely lexical containment check on the
       FULLY RENDERED path, runs after rendering completes.
@@ -239,12 +239,12 @@ class TestPathSafety:
     UnsafePathError.value payloads (the bare value vs. the rendered
     filename).
 
-    A bare "." or ".." contains no "/", so it reaches the value guard's
-    second rule -- but only through a PREFIXED pattern
-    ("seg_{patient_id}.nrrd"): a BARE pattern renders ".." into "...nrrd",
-    whose leading dot join_within rejects on its own, again masking
-    whether the value guard ran. The prefix keeps the rendered basename
-    clear of every join_within rule, so
+    A bare "." or ".." contains no "/", so it trips the value guard's
+    second rule under any pattern -- but only a PREFIXED pattern
+    ("seg_{patient_id}.nrrd") isolates it: with the guard removed, a BARE
+    pattern renders ".." into "...nrrd", whose leading dot join_within
+    rejects on its own, again masking whether the value guard ran. The
+    prefix keeps the rendered basename clear of every join_within rule, so
     test_resolve_rejects_bare_dotdot_patient_id and
     test_checksums_rejects_bare_dotdot_patient_id are the tests that pin
     the value guard alone.
