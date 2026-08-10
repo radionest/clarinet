@@ -226,7 +226,9 @@
   `{parent_id}` or `{user_id}`, or declare one `FileDefinition` per variant. If
   files already exist on disk under the old name, rename them to match the new
   pattern — the resolved filename changes with the pattern. This restriction is
-  temporary and tracked by #552.
+  temporary and tracked by #552. **This rejection aborts startup** — the
+  process does not come up — unlike the stored-row case below, which the
+  running app tolerates by skipping just that one definition.
 - **Setting `Record.clarinet_storage_path` on record creation is now
   admin-only.** A non-admin supplying a non-`None` value is rejected (403) at
   the `POST /api/records` route; a second, defensive check in the demo-records

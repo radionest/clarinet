@@ -252,13 +252,22 @@ round trip.
   `AnonPathError` above.
 
 **Never log the value.** `assert_path_safe_value`'s two raise sites name the
-offending placeholder key in the message. `join_within`'s five raise sites
-name the working directory (`base`) instead — which, under `Files.for_reader`
-/ `fallback=True`, can itself be a path built from the record's **raw**,
-not-yet-anonymized patient id, and that message does reach a WARNING log at
-one call site (`record_service.py`'s `_sync_output_files`) — not
-every raise site is logged at all; `FileValidator.validate`
-(`services/file_validation.py`) lets `join_within` propagate uncaught. What
+offending placeholder key in the message. Three of `join_within`'s five
+raise sites name the working directory (`base`) instead (the other two — the
+`..`-component and dot-leading-basename checks — name neither) — which,
+under `Files.for_reader` / `fallback=True`, can itself be a path built from
+the record's **raw**, not-yet-anonymized patient id. That message is logged
+either way it propagates: at WARNING when a caller catches it explicitly
+(`record_service.py`'s `_sync_output_files`), and at **ERROR with a full
+traceback** when it doesn't — `FileValidator.validate`
+(`services/file_validation.py`) lets `join_within` propagate uncaught, and
+every current caller of it resolves back to an API router (directly, or via
+`RecordService`, which FastAPI constructs only per-request), so the generic
+`ConfigurationError` handler catches it:
+`logger.opt(exception=exc).error("Configuration error")`
+(`exception_handlers.py:376-379`) renders the full traceback, whose terminal
+line is the exception's own `str()` — `base` again. Propagating uncaught is
+not quieter; it is logged harder. What
 never happens, anywhere: the *substituted value itself* lands in a message
 or a log — it travels only on `exc.value` (and `exc.metadata()`), which the
 record-submit 422 body above deliberately surfaces to the submitter but
