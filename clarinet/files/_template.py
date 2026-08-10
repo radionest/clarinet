@@ -340,9 +340,15 @@ def _reject_data_placeholders(pattern: str) -> None:
     ``validate_file_pattern``. The literal-text rules in that function are
     permanent and stay.
     """
-    offenders = sorted(
-        name for name in extract_placeholders(pattern) if name == "data" or name.startswith("data.")
-    )
+    # extract_placeholders (Formatter().parse()) and _PLACEHOLDER_RE disagree on
+    # escaped braces: `{{data.side}}` is a literal to Formatter (no field name),
+    # but the regex has no concept of `{{` escaping and matches the inner
+    # `{data.side}` anyway — and render_template substitutes with that same
+    # regex, so it really does interpolate record data there. Union both
+    # parsers' view so the ban covers everything the renderer can reach, not
+    # just what Formatter considers a "real" field.
+    names = extract_placeholders(pattern) | set(_PLACEHOLDER_RE.findall(pattern))
+    offenders = sorted(name for name in names if name == "data" or name.startswith("data."))
     if offenders:
         raise ValueError(
             f"file pattern may not interpolate record data: {', '.join(offenders)}. "

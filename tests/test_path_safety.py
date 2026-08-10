@@ -175,6 +175,7 @@ BANNED_DATA_PATTERNS = [
     "{data.side}_mask.nrrd",
     "{data}",
     "seg_{id}_{data.lesion}.nrrd",
+    "{{data.side}}_mask.nrrd",  # escaped braces: Formatter hides it, the renderer sees it
 ]
 
 UNSAFE_LITERAL_PATTERNS = [
