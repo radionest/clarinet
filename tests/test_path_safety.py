@@ -3,6 +3,11 @@
 Pure unit tests, stdlib-only inputs, mirroring the style of
 ``tests/test_path_template_renderer.py``. These cover the value guard, the
 lexical containment check, and the config-time pattern validator.
+
+The final class steps up one layer, to ``clarinet.models.file_schema``, to pin
+where ``validate_file_pattern`` is actually wired in (``FileDefinitionRead``)
+and where it deliberately is not (``FileDefinition``, a ``table=True`` model
+SQLModel skips Pydantic validation on).
 """
 
 from __future__ import annotations
@@ -227,3 +232,23 @@ class TestValidateFilePattern:
         # A placeholder NAME containing a dot must not trip the dot-leading
         # basename rule, and a placeholder standing alone as the basename is fine.
         assert validate_file_pattern("{record_type.name}.nrrd") == "{record_type.name}.nrrd"
+
+
+class TestFileDefinitionReadPatternValidation:
+    """Pins where ``validate_file_pattern`` is wired into the model layer."""
+
+    def test_file_definition_read_rejects_banned_pattern(self):
+        from pydantic import ValidationError
+
+        from clarinet.models.file_schema import FileDefinitionRead
+
+        with pytest.raises(ValidationError):
+            FileDefinitionRead(name="birads_file", pattern="birads_{data.BIRADS_R}.txt")
+
+    def test_table_model_is_intentionally_unvalidated(self):
+        # Pins the reason there is no validator on FileDefinition: SQLModel skips
+        # validation on table=True models, so one there would be dead code. If this
+        # ever starts raising, add the validator and delete this test.
+        from clarinet.models.file_schema import FileDefinition
+
+        assert FileDefinition(name="1bad", pattern="birads_{data.X}.txt").name == "1bad"

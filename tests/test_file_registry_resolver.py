@@ -199,6 +199,28 @@ class TestResolveFileReferences:
         assert "File reference 'unknown_file' not found" in str(exc_info.value)
         assert "Available: ct_scan, segmentation, report" in str(exc_info.value)
 
+    def test_resolve_rejects_data_placeholder_pattern(self) -> None:
+        # FileRegistryEntry.pattern isn't itself validated (plain, unvalidated
+        # container, like FileDef) — resolve_file_references is the real entry
+        # point, constructing FileDefinitionRead. {data.*} is temporarily
+        # banned; see #552.
+        from pydantic import ValidationError as PydanticValidationError
+
+        registry = {"rep": FileRegistryEntry(pattern="report_{data.timepoint}.pdf")}
+        files = [{"name": "rep", "role": "output"}]
+
+        with pytest.raises(PydanticValidationError, match=r"data\.timepoint"):
+            resolve_file_references(files, registry)
+
+    def test_resolve_rejects_absolute_pattern(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        registry = {"rep": FileRegistryEntry(pattern="/abs/report.pdf")}
+        files = [{"name": "rep", "role": "output"}]
+
+        with pytest.raises(PydanticValidationError):
+            resolve_file_references(files, registry)
+
     def test_resolve_with_defaults(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test resolving references with default values."""
         files = [{"name": "ct_scan"}]

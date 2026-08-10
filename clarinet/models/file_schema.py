@@ -41,7 +41,8 @@ class FileDefinition(SQLModel, table=True):
         name: Globally unique identifier (valid Python identifier).
         pattern: Pattern with placeholders {field} for file name matching/generation.
             Supports placeholders: {id}, {user_id}, {patient_id}, {study_uid},
-            {series_uid}, {data.FIELD}, {record_type.FIELD}
+            {series_uid}, {data.FIELD} (temporarily rejected — see
+            https://github.com/radionest/clarinet/issues/552), {record_type.FIELD}
         description: Optional description of the file purpose.
         multiple: Whether this is a collection (glob) vs singular file.
     """
@@ -176,6 +177,23 @@ class FileDefinitionRead(SQLModel):
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v):
             raise ValueError(f"File definition name must be a valid Python identifier, got: {v!r}")
         return v
+
+    @field_validator("pattern")
+    @classmethod
+    def validate_pattern_is_path_safe(cls, v: str) -> str:
+        """Reject patterns that could resolve outside the working directory.
+
+        Attached here and NOT to ``FileDefinition``: that model is
+        ``table=True``, so SQLModel skips Pydantic validation on it and a
+        validator there would never fire. Every real entry point —
+        ``config/primitives.py`` (``FileDef``, via ``fileref_to_file_definition``),
+        ``utils/file_registry_resolver.py`` (``FileRegistryEntry``, via
+        ``resolve_file_references``) and the API POST/PATCH paths — constructs
+        ``FileDefinitionRead``.
+        """
+        from clarinet.files import validate_file_pattern
+
+        return validate_file_pattern(v)
 
 
 class RecordFileLinkRead(SQLModel):

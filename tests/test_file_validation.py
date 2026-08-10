@@ -288,20 +288,20 @@ class TestFileValidatorEdgeCases:
         input_defs = [
             FileDefinitionRead(
                 name="birads_file",
-                pattern="birads_{data.BIRADS_R}.txt",
+                pattern="birads_{id}.txt",  # was {data.BIRADS_R}; see #552
                 required=True,
                 role=FileRole.INPUT,
             ),
         ]
 
         # Create file with resolved name
-        (tmp_path / "birads_4.txt").touch()
+        (tmp_path / "birads_42.txt").touch()
 
         validator = FileValidator(input_defs)
         result = validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
-        assert result.matched_files["birads_file"] == "birads_4.txt"
+        assert result.matched_files["birads_file"] == "birads_42.txt"
 
 
 class TestFileValidatorCrossLevel:
