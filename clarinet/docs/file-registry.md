@@ -18,7 +18,7 @@ File definitions are stored in a normalized schema with M2M relationship.
 | Field | Type | Notes |
 |-------|------|-------|
 | `name` | `str` | Unique, valid Python identifier |
-| `pattern` | `str` | Placeholders: `{id}`, `{patient_id}`, `{parent_id}`, `{data.FIELD}`, etc. |
+| `pattern` | `str` | Placeholders: `{id}`, `{patient_id}`, `{parent_id}`, `{data.FIELD}` (temporarily rejected — see [#552](https://github.com/radionest/clarinet/issues/552)), etc. |
 | `description` | `str \| None` | Purpose description |
 | `multiple` | `bool` | `True` = glob collection, `False` = singular |
 | `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |

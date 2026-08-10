@@ -132,8 +132,15 @@ single = await Files.checksum(path)
 
 Nothing in `clarinet/api/` catches `AnonPathError` — leniency is a call-site
 decision made in the service layer (`fallback=True` / `Files.for_reader`)
-before a router ever sees a path. The implementation is private behind
-`clarinet/files/_*`; never import those leaves directly.
+before a router ever sees a path.
+
+`clarinet.files`'s public surface is six names, not just `Files` and
+`AnonPathError`: also `PLACEHOLDER_REGEX` and three path-safety primitives —
+`validate_file_pattern`, `assert_path_safe_value`, `join_within` — meant to
+be imported the same way (`from clarinet.files import join_within`). See
+[Files and the anonymized-path contract — Path-safety guards](../docs/kb/files-and-anonymization.md#path-safety-guards)
+for what each one guards. Everything else under `clarinet/files/_*` is a
+private implementation leaf; never import those directly.
 
 ## Service Layer Overview
 

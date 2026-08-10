@@ -220,6 +220,41 @@
   internal (x, y) axes; the NIfTI-convention flip moved to the width axis), so
   its physical output for a given COCO file + reference volume is unchanged
   across the epoch.
+- **File patterns may no longer interpolate record data.** A
+  `FileDefinition.pattern` containing `{data.FIELD}` (or bare `{data}`) is now
+  rejected when the configuration loads. Migration: replace it with `{id}`,
+  `{parent_id}` or `{user_id}`, or declare one `FileDefinition` per variant. If
+  files already exist on disk under the old name, rename them to match the new
+  pattern — the resolved filename changes with the pattern. This restriction is
+  temporary and tracked by #552.
+- **Setting `Record.clarinet_storage_path` on record creation is now
+  admin-only.** A non-admin supplying a non-`None` value is rejected (403) at
+  both record-creation routes. Creating a record without the field is
+  unaffected.
+
+### Security
+
+- Rendered file paths are now confined to the record's working directory. A
+  substituted value containing `/`, `\`, or NUL is rejected, and a value that
+  is exactly `.` or `..` is rejected separately; the joined path is then
+  checked for containment. Closes #521.
+- A `RecordFileLink.filename` row persisted with a traversal before this release
+  is now refused at read time instead of being followed. No migration is needed —
+  the guard is the remediation.
+- A legacy `FileDefinition.pattern` that fails the path-safety validator is now
+  skipped from `RecordType.file_registry` (logged as a WARNING) instead of
+  nulling the entire registry for that record type. Residual: if the skipped
+  definition was `required=True` with `role=INPUT`, its "required file
+  missing" check is no longer enforced — file validation only inspects
+  definitions present in `file_registry`, so a record can no longer be marked
+  `blocked` for that file until the row's pattern is fixed.
+- A `clarinet_storage_path` that is not absolute or not normalized is now
+  refused at path-resolution time. This is deliberately narrower than full
+  containment: the field is *by design* a root disjoint from
+  `settings.storage_path` (an admin-only per-record storage-root override, not
+  a subdirectory selector), so no containment check applies — a well-formed
+  absolute path set by an admin, or already present in the database, is still
+  honoured. This residual is accepted, not an oversight.
 
 ### Added
 

@@ -126,8 +126,10 @@ if parents:
 (sync) — it's a wrapper around the `Files(record)` constructor **without**
 `parent`. The framework itself builds `ctx.files` as
 `Files(record, parent=parent)`, so placeholders that fall back to the parent
-(`{user_id}`, `{origin_type}`, merged `{data.FIELD}`) may resolve differently
-via `ctx.files_for` — if you need parent-fallback, build the facade yourself:
+(`{user_id}`, `{origin_type}`, merged `{data.FIELD}` — temporarily rejected,
+see [#552](https://github.com/radionest/clarinet/issues/552)) may resolve
+differently via `ctx.files_for` — if you need parent-fallback, build the
+facade yourself:
 `Files(record, parent=parent_record)`. The same facade is also available
 outside a task (standalone scripts without `ctx`):
 

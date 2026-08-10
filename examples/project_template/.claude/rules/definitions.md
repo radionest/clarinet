@@ -39,7 +39,7 @@ master_model = FileDef(
 | `{user_id}` | ID of the user who created the record (for "per-inspector" files) |
 | `{origin_type}` | `record.record_type_name` — lets you name files after the originating record type |
 | `{parent_id}` | `record.parent_record_id` (FK value) — the exact per-parent discriminator, resolved without loading the parent |
-| `{data.FIELD}` | A field from `record.data` |
+| `{data.FIELD}` | A field from `record.data` — temporarily rejected, see [#552](https://github.com/radionest/clarinet/issues/552) |
 
 Pattern-resolution details are in `<clarinet>/clarinet/.claude/rules/file-registry.md`.
 
@@ -63,7 +63,7 @@ FileRef(segmentation, role="input") # named
 | `file` | `FileDef` | Reference to a `FileDef` object declared earlier in the same file |
 | `role` | `"input"` / `"output"` / `"intermediate"` | Semantics: input (required before execution) / output (created) / intermediate |
 | `required` | `bool` (default `True`) | Whether the file must exist by the time the record is finalized |
-| `allow_path_collision` | `bool` (default `False`) | Opts this one binding out of output-path uniqueness validation (the author guarantees uniqueness, e.g. via `{data.FIELD}`) |
+| `allow_path_collision` | `bool` (default `False`) | Opts this one binding out of output-path uniqueness validation (the author guarantees uniqueness some other way, e.g. one FileDefinition per variant) |
 
 `output_file` in a Slicer script is the path to the **first** `FileRef` with `role="output"` from `RecordDef.files`.
 

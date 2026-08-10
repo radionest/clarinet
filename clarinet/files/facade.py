@@ -187,7 +187,8 @@ class Files:
 
     # Deliberately NOT path-safe: this renders Slicer script arguments
     # (services/slicer/context.py), which may legitimately be absolute paths.
-    # It never feeds a working-directory join. See design.md D3.
+    # It never feeds a working-directory join. See "Path-safety guards" in
+    # ../../docs/kb/files-and-anonymization.md.
     @staticmethod
     def render_template(pattern: str, fields: dict[str, Any], *, strict: bool = False) -> str:
         mode = _template.RenderMode.STRICT if strict else _template.RenderMode.LENIENT

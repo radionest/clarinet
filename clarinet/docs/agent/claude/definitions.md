@@ -38,7 +38,7 @@ master_model = FileDef(
 | `{patient_id}`, `{study_uid}`, `{series_uid}` | Identifiers from the DICOM hierarchy (anonymized) |
 | `{user_id}` | ID of the user who created the record (for "per-inspector" files) |
 | `{origin_type}` | `record.record_type_name` — lets you name files after the originating record type |
-| `{data.FIELD}` | A field from `record.data` |
+| `{data.FIELD}` | A field from `record.data` — temporarily rejected, see [#552](https://github.com/radionest/clarinet/issues/552) |
 
 Pattern-resolution details are in `{{CLARINET_DOCS}}/file-registry.md`.
 
