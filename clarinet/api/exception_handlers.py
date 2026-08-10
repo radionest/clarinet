@@ -82,6 +82,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         ReportQueryError,
         SlicerConnectionError,
         SlicerError,
+        UnsafePathError,
         ValidationError,
         WorkflowDigestAlreadyUsedError,
         WorkflowPlanDigestMismatchError,
@@ -373,10 +374,40 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Quarto CLI not installed"},
         )
 
+    # NOTE: ``UnsafePathError`` is registered immediately below. Starlette
+    # dispatches handlers by walking the exception's own MRO (see the
+    # identical note above ``handle_validation_error``), so that handler
+    # shadows this generic one whenever the exception is an
+    # ``UnsafePathError`` instance, regardless of registration order.
     @app.exception_handler(ConfigurationError)
     async def handle_configuration_error(_: Request, exc: ConfigurationError) -> JSONResponse:
         """Convert ConfigurationError to 500 response."""
         logger.opt(exception=exc).error("Configuration error")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Server configuration error"},
+        )
+
+    @app.exception_handler(UnsafePathError)
+    async def handle_unsafe_path_error(_: Request, exc: UnsafePathError) -> JSONResponse:
+        """Convert UnsafePathError to 500 — same response shape as
+        ``handle_configuration_error`` above, but logged without a traceback.
+
+        Subclass of ``ConfigurationError`` — see the note above
+        ``handle_configuration_error`` for the MRO ordering rationale.
+        Without this explicit registration, ``UnsafePathError`` falls through
+        to that generic handler, whose ``logger.opt(exception=exc)`` attaches
+        a traceback; the console/file sinks configured with ``diagnose=True``
+        (``utils/logger.py``) render **frame locals** into that traceback,
+        printing ``exc.value`` — and therefore potentially PHI — to stderr on
+        every deployment. Logging ``str(exc)`` directly (no
+        ``.opt(exception=...)``, so no traceback is ever rendered) keeps the
+        message without ever touching ``exc.value`` / ``exc.metadata()``.
+        """
+        # Does NOT close: the working-dir `base` some messages still embed
+        # (join_within), or pipeline/worker paths, which never reach
+        # FastAPI's exception handlers at all.
+        logger.error(f"Unsafe path rejected: {exc}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Server configuration error"},
