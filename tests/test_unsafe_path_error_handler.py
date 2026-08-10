@@ -1,14 +1,9 @@
 """Regression tests for the dedicated ``UnsafePathError`` exception handler.
 
-``UnsafePathError`` deliberately keeps the offending substituted value out of
-``str(exc)`` -- it travels only via ``exc.value`` / ``exc.metadata()`` (see the
-class's PII-guard docstring in ``clarinet/exceptions/domain.py``). Without an
-explicit handler, ``UnsafePathError`` (a ``ConfigurationError`` subclass) fell
-through to ``handle_configuration_error``, which calls
-``logger.opt(exception=exc).error(...)``. That attaches a traceback, and the
-console/file sinks configured with ``diagnose=True`` (``clarinet/utils/logger.py``)
-render **frame locals** into that traceback -- including ``exc.value`` -- so the
-guarded value reached stderr on every deployment regardless of the PII guard.
+Why the handler exists and how it avoids the leak: see
+``handle_unsafe_path_error``'s docstring in
+``clarinet/api/exception_handlers.py`` (authoritative) and the PII-guard note
+on ``UnsafePathError`` in ``clarinet/exceptions/domain.py``.
 
 These tests capture loguru's fully *rendered* text (not just the structured
 record dict used by ``test_exception_handler_logging.py``) because the leak
@@ -117,6 +112,22 @@ async def test_unsafe_path_error_does_not_attach_a_traceback(
     matches = [r for r in captured_records if MESSAGE in r["message"]]
     assert len(matches) == 1, f"expected one ERROR log for UnsafePathError, got {len(matches)}"
     assert matches[0]["exception"] is None
+
+
+@pytest.mark.asyncio
+async def test_unsafe_path_error_log_includes_request_method_and_path(
+    client: AsyncClient, captured_records: list[dict]
+) -> None:
+    """The ERROR line must be locatable -- with the traceback deliberately
+    gone, method + path are the only way to tell which endpoint (and which
+    of the nine ``UnsafePathError`` raise sites) produced it. Mirrors
+    ``handle_invalid_patient_identifier``'s PHI-safe logging pattern."""
+    response = await client.get("/trigger/unsafe-path")
+    assert response.status_code == 500
+
+    matches = [r for r in captured_records if MESSAGE in r["message"]]
+    assert len(matches) == 1
+    assert "GET /trigger/unsafe-path" in matches[0]["message"]
 
 
 @pytest.mark.asyncio

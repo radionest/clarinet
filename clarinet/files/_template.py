@@ -188,9 +188,10 @@ def assert_path_safe_value(key: str, value: str) -> None:
     Runs on the *coerced* value, so a collection flattening to ``"a/b"`` is
     caught. Raises ``UnsafePathError`` naming *key* in the message; the
     offending *value* is passed only as the exception's ``value`` attribute,
-    never interpolated into the message — ``ConfigurationError``'s handler
-    logs the message on every raise, and record data may carry PHI that log
-    scrubbing does not redact (see ``UnsafePathError``'s "PII guard" note).
+    never interpolated into the message — ``UnsafePathError``'s dedicated
+    handler logs the message on every raise, and record data may carry PHI
+    that log scrubbing does not redact (see ``UnsafePathError``'s "PII guard"
+    note).
     """
     for bad in _UNSAFE_IN_VALUE:
         if bad in value:

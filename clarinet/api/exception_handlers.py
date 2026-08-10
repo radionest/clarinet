@@ -374,11 +374,10 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Quarto CLI not installed"},
         )
 
-    # NOTE: ``UnsafePathError`` is registered immediately below. Starlette
-    # dispatches handlers by walking the exception's own MRO (see the
-    # identical note above ``handle_validation_error``), so that handler
-    # shadows this generic one whenever the exception is an
-    # ``UnsafePathError`` instance, regardless of registration order.
+    # NOTE: ``UnsafePathError`` has its own handler registered immediately
+    # below — MRO ordering mirrors the identical note above
+    # ``handle_validation_error``; see that handler's docstring for why a
+    # dedicated registration exists at all.
     @app.exception_handler(ConfigurationError)
     async def handle_configuration_error(_: Request, exc: ConfigurationError) -> JSONResponse:
         """Convert ConfigurationError to 500 response."""
@@ -389,7 +388,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(UnsafePathError)
-    async def handle_unsafe_path_error(_: Request, exc: UnsafePathError) -> JSONResponse:
+    async def handle_unsafe_path_error(request: Request, exc: UnsafePathError) -> JSONResponse:
         """Convert UnsafePathError to 500 — same response shape as
         ``handle_configuration_error`` above, but logged without a traceback.
 
@@ -400,14 +399,22 @@ def setup_exception_handlers(app: FastAPI) -> None:
         a traceback; the console/file sinks configured with ``diagnose=True``
         (``utils/logger.py``) render **frame locals** into that traceback,
         printing ``exc.value`` — and therefore potentially PHI — to stderr on
-        every deployment. Logging ``str(exc)`` directly (no
-        ``.opt(exception=...)``, so no traceback is ever rendered) keeps the
-        message without ever touching ``exc.value`` / ``exc.metadata()``.
+        every deployment. Logging ``str(exc)`` plus the request method/path
+        (no ``.opt(exception=...)``, so no traceback is ever rendered) keeps
+        the message and the endpoint locatable, without ever touching
+        ``exc.value`` / ``exc.metadata()``. This is the authoritative
+        explanation of why this handler exists — ``UnsafePathError``'s
+        PII-guard docstring (``exceptions/domain.py``) and this handler's
+        test module point back here instead of repeating it.
         """
-        # Does NOT close: the working-dir `base` some messages still embed
-        # (join_within), or pipeline/worker paths, which never reach
-        # FastAPI's exception handlers at all.
-        logger.error(f"Unsafe path rejected: {exc}")
+        # Does NOT close: (1) the working-dir `base` some messages still
+        # embed (join_within); (2) pipeline/worker paths, which never reach
+        # FastAPI's exception handlers; (3) unverified — anything that
+        # escapes Starlette's ExceptionMiddleware entirely (fire-and-forget
+        # RecordFlowEngine.fire, ASGI middleware, background tasks) logs via
+        # stdlib -> InterceptHandler with exc_info, which may re-render
+        # frame locals on the diagnose sinks.
+        logger.error(f"Unsafe path rejected on {request.method} {request.url.path}: {exc}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Server configuration error"},

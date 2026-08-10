@@ -491,13 +491,11 @@ class UnsafePathError(ConfigurationError):
     caught, the fallback would silently retry the poisoned path and the rest
     would record it as routine. A traversal must always propagate.
 
-    PII guard: ``str(exc)`` intentionally omits the offending value. The
-    ``ConfigurationError`` handler in ``api/exception_handlers.py`` logs
-    every instance's traceback (JSON file sink and Loki sink, see
-    ``utils/logger.py``), and ``scrub_sensitive`` there only redacts
-    credential-shaped text (passwords, tokens, DB URLs) — not PHI. The raw
-    value travels only via ``metadata()``, mirroring
-    :class:`InvalidPatientIdentifierError`.
+    PII guard: ``str(exc)`` intentionally omits the offending value.
+    ``api/exception_handlers.py``'s dedicated ``handle_unsafe_path_error``
+    (see its docstring for the full rationale) logs only ``str(exc)`` — no
+    traceback, so no sink ever renders ``exc.value``. The raw value travels
+    only via ``metadata()``, mirroring :class:`InvalidPatientIdentifierError`.
     """
 
     def __init__(self, message: str, *, value: str | None = None) -> None:
