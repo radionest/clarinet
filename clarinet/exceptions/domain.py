@@ -480,6 +480,19 @@ class AnonPathError(ConfigurationError):
     """
 
 
+class UnsafePathError(ConfigurationError):
+    """Raised when a rendered file path would escape its working directory.
+
+    A deliberate *sibling* of ``AnonPathError``, not a subclass. Four sites
+    catch ``AnonPathError`` and degrade — ``Files.for_reader`` retries with a
+    raw-UID fallback, ``services/dicomweb/cache.py`` and
+    ``services/pipeline/tasks/cache_dicomweb.py`` log and skip, and
+    ``cli/anon.py`` counts a failure. If a traversal raised something those
+    caught, the fallback would silently retry the poisoned path and the rest
+    would record it as routine. A traversal must always propagate.
+    """
+
+
 # Database errors
 class DatabaseError(ClarinetError):
     """Raised when there's a database operation error."""
