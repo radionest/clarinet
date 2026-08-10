@@ -17,6 +17,7 @@ from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundEr
 from clarinet.exceptions.http import CustomHTTPException
 from clarinet.files import Files
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.events.capture import emit_record_events, mark_pending_audit
@@ -568,10 +569,21 @@ class RecordService:
         currently stored, not the data being submitted: ``{data.*}``
         placeholders are banned from patterns (issue #552), so the submitted
         data cannot itself affect whether an OUTPUT pattern resolves safely.
+
+        Must render exactly the definitions ``Files.checksums()`` would render
+        for the same scan (``facade.py``'s ``checksums()``), never more: a
+        ``multiple=True`` (collection) definition is globbed there, wildcards
+        replacing placeholders, so its pattern's *values* are never rendered;
+        a definition whose ``level`` has no working directory for this record
+        is skipped there outright. Pre-rejecting either would 422 a record
+        whose real checksum scan — and thus real submission — would have
+        succeeded.
         """
         record = await self.repo.get_with_relations(record_id)
         output_defs = [
-            fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+            fd
+            for fd in (record.record_type.file_registry or [])
+            if fd.role == FileRole.OUTPUT and not fd.multiple
         ]
         if not output_defs:
             return
@@ -580,7 +592,11 @@ class RecordService:
         if record.parent_record_id is not None:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
+        working_dirs = Files.for_reader(record_read, parent=parent_read).dirs()
+        default_level = DicomQueryLevel(record_read.record_type.level)
         for fd in output_defs:
+            if working_dirs.get(fd.level or default_level) is None:
+                continue
             _render_output_path(record_read, fd, parent_read)
 
     async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:

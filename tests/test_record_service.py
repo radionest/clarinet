@@ -1,5 +1,6 @@
 """Unit tests for RecordService and StudyService RecordFlow triggers."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 
 from clarinet.exceptions.domain import BusinessRuleViolationError, UnsafePathError
 from clarinet.models import RecordStatus
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.services.record_service import (
     RecordService,
@@ -199,9 +201,13 @@ class TestRecordServiceTriggers:
         repo_mock.update_data.return_value = (record, RecordStatus.pending)
         service = RecordService(repo_mock)
 
+        reader_stub = MagicMock()
+        reader_stub.dirs.return_value = {DicomQueryLevel.SERIES: Path("/data")}
+
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
             patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch("clarinet.services.record_service.Files.for_reader", return_value=reader_stub),
         ):
             patched.model_validate.side_effect = lambda r: r
             with pytest.raises(HTTPException) as exc_info:
@@ -211,6 +217,50 @@ class TestRecordServiceTriggers:
         # Nothing was persisted, and we never even reached the post-commit sync.
         repo_mock.update_data.assert_not_awaited()
         sync_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_submit_data_allows_collection_output_pattern_with_unsafe_identity_value(
+        self,
+    ) -> None:
+        """Regression for the pre-check over-catching relative to the guard it
+        fronts: Files.checksums() globs a multiple=True definition (wildcards
+        replace placeholders, facade.py:203-205) -- it never renders the
+        pattern's values at all, so a stored identity value that would fail
+        the value guard IF rendered (patient_id="..", legal per
+        PATIENT_ID_REGEX but rejected by assert_path_safe_value) must not
+        block a submission whose real downstream checksum scan would have
+        succeeded. A sibling non-collection OUTPUT def is included and must
+        still be checked -- this is not a blanket skip of validation."""
+        safe_fd = FileDefinitionRead(name="report", pattern="report.pdf", role=FileRole.OUTPUT)
+        collection_fd = FileDefinitionRead(
+            name="masks", pattern="mask_{patient_id}.nrrd", role=FileRole.OUTPUT, multiple=True
+        )
+        record = _record_read_stub(
+            [safe_fd, collection_fd],
+            [],
+            id=7,
+            patient_id="..",
+            status=RecordStatus.pending,
+        )
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = record
+        repo_mock.update_data.return_value = (record, RecordStatus.pending)
+        service = RecordService(repo_mock)
+
+        reader_stub = MagicMock()
+        reader_stub.dirs.return_value = {DicomQueryLevel.SERIES: Path("/data")}
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch("clarinet.services.record_service.Files.for_reader", return_value=reader_stub),
+        ):
+            patched.model_validate.side_effect = lambda r: r
+            await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
+
+        repo_mock.update_data.assert_awaited_once()
+        sync_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_sync_output_files_does_not_swallow_unsafe_path(self) -> None:
@@ -245,6 +295,46 @@ class TestRecordServiceTriggers:
         assert exc_info.value.status_code == 422
         assert "../../etc" in exc_info.value.detail
         repo_mock.update_checksums.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_sync_output_files_warning_omits_the_value(self, captured_records) -> None:
+        """The backstop's WARNING (_sync_output_files's new except clause) must
+        log only str(exc), never exc.value -- the same PHI contract pinned for
+        _render_output_path's WARNING by test_unsafe_placeholder_value_warning_
+        omits_the_value. Without this pin, a future edit turning `{exc}` into
+        `{exc.value}` at that log line would pass the rest of the suite."""
+        record_mock = MagicMock()
+        record_mock.id = 7
+        record_mock.parent_record_id = None
+        record_mock.record_type.file_registry = [
+            FileDefinitionRead(name="seg", pattern="seg.nrrd", role=FileRole.OUTPUT)
+        ]
+
+        reader_mock = MagicMock()
+        reader_mock.checksums = AsyncMock(
+            side_effect=UnsafePathError(
+                "placeholder {patient_id} resolved to a bare directory reference ('.' or '..')",
+                value="SECRET_MRN_VALUE_2",
+            )
+        )
+
+        repo_mock = AsyncMock()
+        service = RecordService(repo_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch("clarinet.services.record_service.Files") as files_patched,
+        ):
+            patched.model_validate.return_value = record_mock
+            files_patched.for_reader.return_value = reader_mock
+            with pytest.raises(HTTPException):
+                await service._sync_output_files(record_mock)
+
+        warnings = [r for r in captured_records if r["level"].name == "WARNING"]
+        assert len(warnings) == 1
+        message = warnings[0]["message"]
+        assert "SECRET_MRN_VALUE_2" not in message
+        assert "record 7" in message
 
     @pytest.mark.asyncio
     async def test_update_data_fires_data_update_trigger(self) -> None:
@@ -1181,6 +1271,8 @@ class TestStudyServiceEntityTriggers:
 def _record_read_stub(
     file_registry: list[FileDefinitionRead],
     file_links: list[RecordFileLinkRead],
+    *,
+    level: str = "SERIES",
     **fields: object,
 ) -> SimpleNamespace:
     """Duck-typed RecordRead stub for _missing_output_links / _stored_checksums tests.
@@ -1188,9 +1280,12 @@ def _record_read_stub(
     Provides the minimal duck-typed interface that ``Files.render_for`` (and the
     underlying ``_patterns.fields_from``) requires: ``record_type.name``,
     ``record_type.file_registry``, and all scalar pattern fields.
+    ``record_type.level`` (default ``"SERIES"``) is read by
+    ``RecordService._validate_output_paths`` to resolve a definition's default
+    working-dir level; unused by ``_missing_output_links``/``_stored_checksums``.
     """
     return SimpleNamespace(
-        record_type=SimpleNamespace(name="test_type", file_registry=file_registry),
+        record_type=SimpleNamespace(name="test_type", file_registry=file_registry, level=level),
         file_links=file_links,
         # fields_from accesses record.id / record.parent_record_id directly; callers override
         **{"id": None, "parent_record_id": None, **fields},
