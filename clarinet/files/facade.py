@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.exceptions.domain import AnonPathError
+from clarinet.exceptions.domain import AnonPathError, UnsafePathError
 from clarinet.files import _checksums, _fs, _patterns, _resolver, _storage, _template
 from clarinet.models.base import DicomQueryLevel
 from clarinet.settings import settings
@@ -196,7 +196,13 @@ class Files:
     async def checksums(self, defs: list[FileDefinitionRead] | None = None) -> dict[str, str]:
         """SHA256 of registered files, keyed by name (singular) / ``name:filename``
         (collections). Resolves each def at its own ``level``; missing files are
-        omitted. Replaces both ``snapshot_checksums`` and ``compute_checksums``."""
+        omitted. Replaces both ``snapshot_checksums`` and ``compute_checksums``.
+
+        Raises ``UnsafePathError`` (naming the failing ``fd.name``, never the
+        offending value — see the class's PII guard) if any definition's
+        pattern cannot be safely rendered or contained, aborting the whole
+        scan rather than silently omitting that one entry.
+        """
         targets = defs if defs is not None else list(self._registry.values())
         out: dict[str, str] = {}
         for fd in targets:
@@ -209,15 +215,19 @@ class Files:
                     if c is not None:
                         out[f"{fd.name}:{p.name}"] = c
             else:
-                filename = _template.render_template(
-                    fd.pattern,
-                    self._fields,
-                    mode=_template.RenderMode.LENIENT,
-                    path_safe=True,
-                )
-                c = await _checksums.compute_file_checksum(
-                    _template.join_within(working_dir, filename)
-                )
+                try:
+                    filename = _template.render_template(
+                        fd.pattern,
+                        self._fields,
+                        mode=_template.RenderMode.LENIENT,
+                        path_safe=True,
+                    )
+                    path = _template.join_within(working_dir, filename)
+                except UnsafePathError as exc:
+                    raise UnsafePathError(
+                        f"{exc} (file definition {fd.name!r})", value=exc.value
+                    ) from exc
+                c = await _checksums.compute_file_checksum(path)
                 if c is not None:
                     out[fd.name] = c
         return out

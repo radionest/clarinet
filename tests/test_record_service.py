@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from clarinet.exceptions.domain import BusinessRuleViolationError
+from clarinet.exceptions.domain import BusinessRuleViolationError, UnsafePathError
 from clarinet.models import RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.services.record_service import (
@@ -178,6 +178,73 @@ class TestRecordServiceTriggers:
             sync_mock.assert_awaited_once_with(record_mock)
             assert result == record_mock
             assert result_old_status == old_status
+
+    @pytest.mark.asyncio
+    async def test_submit_data_with_unsafe_output_pattern_returns_422_before_persisting(
+        self,
+    ) -> None:
+        """The real caller: submit_data must reject a poisoned OUTPUT pattern
+        with 422 BEFORE update_data persists anything, not silently swallow the
+        violation into a 200 after the data is already committed."""
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+            id=7,
+            patient_id="SECRET_MRN_VALUE/../escape",
+            status=RecordStatus.pending,
+        )
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = record
+        repo_mock.update_data.return_value = (record, RecordStatus.pending)
+        service = RecordService(repo_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+        ):
+            patched.model_validate.side_effect = lambda r: r
+            with pytest.raises(HTTPException) as exc_info:
+                await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
+
+        assert exc_info.value.status_code == 422
+        # Nothing was persisted, and we never even reached the post-commit sync.
+        repo_mock.update_data.assert_not_awaited()
+        sync_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_sync_output_files_does_not_swallow_unsafe_path(self) -> None:
+        """_sync_output_files's checksums() scan is the backstop for a violation
+        the pre-submit render-only check cannot see (e.g. a literal pattern that
+        only the join/containment check catches). It must surface as 422, not
+        get caught by the broad `except Exception` meant for routine I/O
+        failures -- that broad except is exactly what let a rejected submission
+        through as a silent 200 before this fix."""
+        record_mock = MagicMock()
+        record_mock.id = 7
+        record_mock.parent_record_id = None
+        record_mock.record_type.file_registry = [
+            FileDefinitionRead(name="seg", pattern="seg.nrrd", role=FileRole.OUTPUT)
+        ]
+
+        reader_mock = MagicMock()
+        reader_mock.checksums = AsyncMock(side_effect=UnsafePathError("boom", value="../../etc"))
+
+        repo_mock = AsyncMock()
+        service = RecordService(repo_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch("clarinet.services.record_service.Files") as files_patched,
+        ):
+            patched.model_validate.return_value = record_mock
+            files_patched.for_reader.return_value = reader_mock
+            with pytest.raises(HTTPException) as exc_info:
+                await service._sync_output_files(record_mock)
+
+        assert exc_info.value.status_code == 422
+        assert "../../etc" in exc_info.value.detail
+        repo_mock.update_checksums.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_update_data_fires_data_update_trigger(self) -> None:

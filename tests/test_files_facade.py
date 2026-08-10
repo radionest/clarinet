@@ -279,6 +279,31 @@ class TestPathSafety:
         with pytest.raises(UnsafePathError):
             await Files(record).checksums()
 
+    @pytest.mark.asyncio
+    async def test_checksums_names_the_file_definition(self, monkeypatch):
+        # checksums() loops internally, so a caller catching UnsafePathError
+        # here has no `fd` of its own in scope (unlike render_for's callers) --
+        # record_service.py's _sync_output_files relies on this message to
+        # name the file definition in its WARNING (spec.md: the WARNING must
+        # name "the record, the file definition, the placeholder key and the
+        # reason"). The value itself must still travel only on .value, never
+        # the message.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError) as exc_info:
+            await Files(record).checksums()
+        assert "mask" in str(exc_info.value)
+        assert "../../etc" not in str(exc_info.value)
+        assert exc_info.value.value == "../../etc"
+
     def test_render_is_path_safe(self, monkeypatch):
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files

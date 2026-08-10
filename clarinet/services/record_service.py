@@ -6,13 +6,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from fastapi import status
+
 from clarinet.exceptions.domain import (
     BusinessRuleViolationError,
     RecordEditLockedError,
     UnsafePathError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
-from clarinet.exceptions.http import UNPROCESSABLE_ENTITY
+from clarinet.exceptions.http import CustomHTTPException
 from clarinet.files import Files
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -68,6 +70,37 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
 
 
+def _render_output_path(
+    record: RecordRead, fd: FileDefinitionRead, parent: RecordRead | None
+) -> str:
+    """Render ``fd.pattern`` for ``record``, translating ``UnsafePathError`` into a 422.
+
+    Shared by the pre-submit validation pass (``RecordService._validate_output_paths``,
+    run before the submission is persisted) and the post-scan reconciliation
+    (``_missing_output_links``, run after) — both need the identical PHI-safe
+    shape: the WARNING logs ``str(exc)`` (placeholder key + reason, never the
+    value); the raw value reaches only the submitter, via ``exc.value`` in the
+    422 body. Raises a *fresh* ``CustomHTTPException`` rather than the shared
+    ``UNPROCESSABLE_ENTITY`` singleton — that singleton's ``.with_context()``
+    mutates a module-level instance, and this is the one call path that puts
+    PHI through it.
+    """
+    try:
+        return Files.render_for(record, fd.pattern, parent=parent)
+    except UnsafePathError as exc:
+        logger.warning(
+            f"unsafe output path rejected for record {record.id}, "
+            f"file definition '{fd.name}': {exc}"
+        )
+        raise CustomHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"File '{fd.name}' cannot be resolved from the submitted data: "
+                f"{exc} (offending value: {exc.value!r})"
+            ),
+        ) from exc
+
+
 def _missing_output_links(
     record: RecordRead,
     checksums: dict[str, str],
@@ -85,6 +118,14 @@ def _missing_output_links(
     collections the lexicographically first file is stored, matching the
     download endpoint's pick. ``parent`` must mirror the fallback passed to
     ``Files`` so the stored filename matches the scanned path.
+
+    In practice ``Files(...).checksums()`` (called by both of this function's
+    callers to build *checksums*) already applies the same value guard to the
+    same pattern before this function ever sees the key, so the
+    ``_render_output_path`` call below cannot raise for any key that made it
+    into *checksums* today. Kept as defence in depth — a future caller that
+    doesn't pre-validate its checksums dict this way must not silently accept
+    an unsafe path.
     """
     output_defs = {
         fd.name: fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
@@ -96,21 +137,7 @@ def _missing_output_links(
         fd = output_defs.get(name)
         if fd is None or name in linked or name in missing:
             continue
-        if collection_file:
-            missing[name] = collection_file
-            continue
-        try:
-            rendered = Files.render_for(record, fd.pattern, parent=parent)
-        except UnsafePathError as exc:
-            logger.warning(
-                f"unsafe output path rejected for record {record.id}, "
-                f"file definition '{fd.name}': {exc}"
-            )
-            raise UNPROCESSABLE_ENTITY.with_context(
-                f"File '{fd.name}' cannot be resolved from the submitted data: "
-                f"{exc} (offending value: {exc.value!r})"
-            ) from exc
-        missing[name] = rendered
+        missing[name] = collection_file or _render_output_path(record, fd, parent)
     return missing
 
 
@@ -472,7 +499,12 @@ class RecordService:
 
         Raises:
             RecordConstraintViolationError: If unique_by is violated on auto-assign.
+            CustomHTTPException: 422 if an OUTPUT pattern cannot be safely resolved
+                (see ``_validate_output_paths``) — raised before anything is persisted.
         """
+        if new_status == RecordStatus.finished:
+            await self._validate_output_paths(record_id)
+
         transfer_to: UUID | None = None
         if user_id is not None:
             record_check = await self.repo.get_with_record_type(record_id)
@@ -520,6 +552,36 @@ class RecordService:
             await self._sync_output_files(record)
 
         return record, old_status
+
+    async def _validate_output_paths(self, record_id: int) -> None:
+        """Reject an unsafe OUTPUT pattern before ``submit_data`` persists anything.
+
+        ``submit_data`` commits the new data/status via ``update_data`` before
+        ``_sync_output_files`` ever runs a path-safety check — without this,
+        a rejected submission would already be durably stored by the time the
+        rejection happens (see ``_sync_output_files``'s docstring). Pure
+        rendering only (``Files.render_for``, no filesystem I/O — unlike
+        ``_sync_output_files``'s ``checksums()`` scan), so it is cheap to run
+        up front, before the record's current state changes.
+
+        Checked against the record's identity fields (``patient_id`` etc.) as
+        currently stored, not the data being submitted: ``{data.*}``
+        placeholders are banned from patterns (issue #552), so the submitted
+        data cannot itself affect whether an OUTPUT pattern resolves safely.
+        """
+        record = await self.repo.get_with_relations(record_id)
+        output_defs = [
+            fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+        ]
+        if not output_defs:
+            return
+        record_read = RecordRead.model_validate(record)
+        parent_read: RecordRead | None = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+        for fd in output_defs:
+            _render_output_path(record_read, fd, parent_read)
 
     async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Write prefill data without firing RecordFlow triggers or audit events.
@@ -1226,9 +1288,12 @@ class RecordService:
     ) -> None:
         """Create links for OUTPUT files discovered by a checksum scan.
 
-        Never raises: link registration is bookkeeping on top of the caller's
-        main flow (submit / check-files) and must not fail it after the data
-        is already committed.
+        Propagates whatever ``_missing_output_links`` raises for an unsafe
+        pattern (see its docstring) — a path violation must never be silently
+        dropped. Past that point, link registration IS best-effort: it is
+        bookkeeping on top of the caller's main flow (submit / check-files),
+        and a DB write failure there must not fail that flow after the
+        record's own data is already committed.
         """
         record_id = record.id
         new_links = _missing_output_links(record_read, checksums, parent)
@@ -1258,6 +1323,16 @@ class RecordService:
 
         Args:
             record: Record with relations loaded (must have record_type, patient).
+
+        Raises:
+            CustomHTTPException: 422 if an OUTPUT pattern cannot be safely
+                resolved. ``submit_data`` runs ``_validate_output_paths``
+                before persisting, so this should already be unreachable in
+                practice — kept as a backstop (e.g. a literal pattern that
+                only the join/containment check catches, which the pure-render
+                pre-check does not exercise) rather than silently degrading
+                into a routine-looking warning (see ``UnsafePathError``'s
+                "must never degrade into a fallback" contract).
         """
         record_read = RecordRead.model_validate(record)
         output_defs = [
@@ -1277,6 +1352,15 @@ class RecordService:
             new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
                 output_defs
             )
+        except UnsafePathError as exc:
+            logger.warning(f"unsafe output path rejected for record {record.id}: {exc}")
+            raise CustomHTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"Output files cannot be resolved from the submitted data: "
+                    f"{exc} (offending value: {exc.value!r})"
+                ),
+            ) from exc
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
             return
