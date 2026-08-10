@@ -284,18 +284,17 @@ This closes it for an `UnsafePathError` that reaches FastAPI's exception
 handlers **uncaught** — not simply "any request on a FastAPI route": a
 broad `except Exception:` sitting between the raise and the router can
 still swallow it and log a traceback of its own before either handler
-ever runs. Three in-framework sites do exactly that, all on genuine
+ever runs. Two in-framework sites do exactly that, both on genuine
 request paths: `services/slicer/context_hydration.py:120-121` — directly
 on `POST /slicer/records/{id}/open`, the very endpoint the "Slicer context
-builder" mention above names as an `UnsafePathError` source —
-`services/schema_hydration.py:227-228`, and `api/routers/dicom.py:316`.
-Each catches broadly and logs with `logger.exception(...)`, which renders
-a traceback the same way the old generic handler did. Reaching any of
-them with an `UnsafePathError` needs project-authored callback code (a
-registered hydrator, or whatever the `dicom.py` in-process fallback
-wraps) that itself touches `Files`/`join_within` — no such code exists in
-this framework repo today, the same evidentiary status as the `.call()`
-residual below, not a confirmed leak either.
+builder" mention above names as an `UnsafePathError` source — and
+`services/schema_hydration.py:227-228`. Each catches broadly and logs with
+`logger.exception(...)`, which renders a traceback the same way the old
+generic handler did. Reaching either with an `UnsafePathError` needs
+project-authored callback code — a registered hydrator — that itself
+touches `Files`/`join_within`: no such code exists in this framework repo
+today, the same evidentiary status as the `.call()` residual below, not a
+confirmed leak either.
 
 Where nothing intercepts it first, the substituted value itself never
 lands in a message or a log: it travels only on `exc.value` (and
@@ -304,10 +303,12 @@ surfaces to the submitter but which no log statement reads. Two more
 paths stay open:
 
 - **Pipeline and worker code — confirmed, not hypothetical.** The
-  persisted-filename replay in `services/pipeline/context.py:146` calls
-  `join_within` inside the TaskIQ worker process, entirely outside any
-  ASGI request, so neither exception handler above ever runs.
-  `services/pipeline/task.py:118-120` logs, then re-raises; TaskIQ's own
+  built-in `convert_series_to_nifti` task calls
+  `ctx.files.resolve(VOLUME_NIFTI)`
+  (`services/pipeline/tasks/convert_series.py:60`), reaching `join_within`
+  inside the TaskIQ worker process with no project code involved, entirely
+  outside any ASGI request — so neither exception handler above ever
+  runs. `services/pipeline/task.py:118-120` logs, then re-raises; TaskIQ's own
   executor — an installed dependency, not clarinet code — catches
   `BaseException` and logs it with `exc_info=True` through the **stdlib**
   `logging` module (`taskiq/receiver/receiver.py:26,282-286`). Clarinet's
