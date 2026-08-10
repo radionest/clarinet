@@ -118,9 +118,9 @@ class FileValidator:
             # guards the *value* half (path_safe=True), so anything this
             # join rejects is a pattern-literal problem — an administrator
             # misconfiguration or a legacy row predating the config-load
-            # guard (D7), never data the current caller submitted. Per
-            # spec.md "Violations surface according to who caused them",
-            # that makes it a server-side failure, not a per-record 422.
+            # guard (D7), never data the current caller submitted. On the
+            # principle that a violation surfaces according to who caused
+            # it, that makes it a server-side failure, not a per-record 422.
             filename = resolved if join_within(target_dir, resolved).is_file() else None
 
             if filename:

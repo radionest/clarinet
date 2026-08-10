@@ -362,8 +362,12 @@ def validate_file_pattern(pattern: str) -> str:
     """Validate a ``FileDefinition.pattern`` at configuration-load time.
 
     Raises ``ValueError`` (not ``UnsafePathError``) to match
-    ``validate_name_is_identifier`` on the same models: Pydantic turns it into a
-    422 on the API path, and the config loader into a ``ConfigLoadError``.
+    ``validate_name_is_identifier`` on the same models: Pydantic turns it into
+    a 422 on the API path. At config load it aborts startup, but not via a
+    curated ``ConfigLoadError`` banner — TOML mode wraps it into
+    ``ConfigurationError`` (the parent class, uncaught by the lifespan's
+    ``except ConfigLoadError``); Python mode lets the raw
+    ``pydantic.ValidationError`` escape uncaught.
     """
     _reject_data_placeholders(pattern)
 

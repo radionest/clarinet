@@ -229,8 +229,9 @@
   temporary and tracked by #552.
 - **Setting `Record.clarinet_storage_path` on record creation is now
   admin-only.** A non-admin supplying a non-`None` value is rejected (403) at
-  both record-creation routes. Creating a record without the field is
-  unaffected.
+  the `POST /api/records` route; a second, defensive check in the demo-records
+  helper is currently a no-op (that path never sets the field itself).
+  Creating a record without the field is unaffected.
 
 ### Security
 

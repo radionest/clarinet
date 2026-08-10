@@ -130,9 +130,11 @@ system is covered in [Domain model](./domain-model.md) and, in detail, in
 
 ## Path-safety guards
 
-A `FileDefinition.pattern` renders against `record.data` and DICOM
-identifiers, then the rendered name is joined onto the record's working
-directory. Both steps are guarded, and — like the anonymized-path strictness
+A `FileDefinition.pattern` renders against DICOM identifiers and other
+per-record fields, then the rendered name is joined onto the record's
+working directory. The render context still merges in `record.data`, but a
+pattern may no longer reference it — see "Config-load pattern validation"
+below. Both steps are guarded, and — like the anonymized-path strictness
 above — neither guard alone would be enough: an admin-authored `/` in a
 subdirectory pattern (`{study_uid}/mask.nrrd`) must stay legal, so the join
 can't reject every `/`; a value guard alone can't see what a literal pattern
@@ -143,11 +145,14 @@ segment contributes.
 `validate_file_pattern` (`clarinet/files/_template.py`, attached as a
 `@field_validator("pattern")` on `FileDefinitionRead` — **not** on
 `FileDefinition`, which is `table=True` and skips Pydantic validation)
-rejects an unsafe pattern before any record ever renders it: an absolute
-prefix, a `..` component, a backslash, NUL, a trailing separator, or a
-dot-leading basename in the pattern's *literal* text (placeholders are
-masked out first, so `{study_uid}/mask.nrrd` stays legal). This rule is
-permanent.
+rejects an unsafe pattern before any record ever renders it: empty or
+whitespace-only, a backslash, NUL, a `..` component, or a dot-leading
+basename in the pattern's *literal* text (placeholders masked out first, so
+`{study_uid}/mask.nrrd` stays legal) — plus two checks against the *full*
+pattern regardless of placeholders: an absolute prefix and a trailing
+separator. This rule is permanent, and a rejection here — unlike the
+stored-row case below — aborts startup: the process does not come up with
+the offending definition simply skipped.
 
 **Temporarily banned, tracked by
 [#552](https://github.com/radionest/clarinet/issues/552):** a pattern
@@ -230,8 +235,10 @@ round trip.
 - **Record submit** (`RecordService._validate_output_paths`, run before the
   submission persists, and `_sync_output_files`'s post-scan reconciliation
   backstop): translated to `422` — a user's own submitted data produced the
-  unsafe value, so per spec.md's "violations surface according to who caused
-  them", it is that user's problem to fix.
+  unsafe value, so on the principle that a violation surfaces according to
+  who caused it, it is that user's problem to fix. The 422 detail
+  deliberately **does** include the offending value (`exc.value!r`) — the
+  submitter already has it, they produced it — but it never reaches a log.
 - **Everywhere else a router lets it propagate** (the Slicer context
   builder, `resolve_output_file`, …): `500`, via the generic
   `ConfigurationError` exception handler in `exception_handlers.py` —
@@ -244,24 +251,41 @@ round trip.
   times with backoff and then lands in the DLQ, the same shape as
   `AnonPathError` above.
 
-**Never log the value.** Every raise site names the offending placeholder key
-and the violation reason in its message and its WARNING log; the substituted
-value itself travels only on `exc.value` (and `exc.metadata()`), never
-interpolated into the message — `record.data` may carry PHI that log
-scrubbing does not redact (`.claude/rules/logging-pii.md`).
+**Never log the value.** `assert_path_safe_value`'s two raise sites name the
+offending placeholder key in the message. `join_within`'s five raise sites
+name the working directory (`base`) instead — which, under `Files.for_reader`
+/ `fallback=True`, can itself be a path built from the record's **raw**,
+not-yet-anonymized patient id, and that message does reach a WARNING log at
+one call site (`record_service.py`'s `_sync_output_files`) — not
+every raise site is logged at all; `FileValidator.validate`
+(`services/file_validation.py`) lets `join_within` propagate uncaught. What
+never happens, anywhere: the *substituted value itself* lands in a message
+or a log — it travels only on `exc.value` (and `exc.metadata()`), which the
+record-submit 422 body above deliberately surfaces to the submitter but
+which no log statement reads. `record.data` may carry PHI that log
+scrubbing does not redact (`.claude/rules/logging-pii.md`); the
+working-directory path under unanonymized fallback is a separate, open risk
+this guard does not close.
 
 ### The storage-path override
 
 `Record.clarinet_storage_path` lets an admin redirect one record's entire
 working directory to an arbitrary absolute path — a real per-record
 override, exercised across the integration and unit test suites, not dead
-code. `_resolve_storage_base` (`clarinet/files/_resolver.py`) is the
-resolution choke point that every consumer goes through (`Files`, the
-Slicer context builder): it requires the value to be absolute and already
-normalized, raising `UnsafePathError` otherwise — this is what keeps
-`join_within`'s containment proof non-vacuous. It **deliberately does not**
-require containment under `settings.storage_path`: the field is *by design*
-a storage root disjoint from `settings.storage_path`, not a subdirectory
+code. `_resolve_storage_base` (`clarinet/files/_resolver.py`) has exactly one
+caller — `build_working_dirs`, reached whenever a `Files` instance is
+constructed for a `RecordRead` — and requires the value to be absolute and
+already normalized, raising `UnsafePathError` otherwise; this is what keeps
+`join_within`'s containment proof non-vacuous. The Slicer context builder
+reads `record.clarinet_storage_path` **raw**, twice
+(`services/slicer/context.py:60,282`) — it is protected only by ordering,
+not by a guard of its own: both raw reads happen after `build_slicer_context`
+already constructs `Files(record, ..., fallback=True)` (`context.py:170`),
+which raises first if the value is malformed. Reordering that construction
+later would silently drop this protection. `_resolve_storage_base`
+**deliberately does not** require containment under `settings.storage_path`:
+the field is *by design* a storage root disjoint from `settings.storage_path`,
+not a subdirectory
 selector, so a well-formed absolute path set by an admin — or already
 present in the database — is still honoured verbatim.
 `check_storage_path_admin_only` (`api/routers/record.py`) narrows *who* can
