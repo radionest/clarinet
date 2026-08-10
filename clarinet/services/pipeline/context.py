@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from clarinet.exceptions.domain import PipelineStepError
-from clarinet.files import Files
+from clarinet.files import Files, join_within
 from clarinet.models.base import RecordStatus
 from clarinet.utils.logger import logger
 
@@ -143,7 +143,7 @@ class RecordQuery:
                 if link.name == file:
                     fd = fd_map.get(file)
                     level = (fd.level if fd else None) or record.record_type.level
-                    return f.dir(level) / link.filename
+                    return join_within(f.dir(level), link.filename)
 
         # Fallback to pattern resolution
         if file not in fd_map:

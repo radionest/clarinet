@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from clarinet.exceptions.domain import AnonPathError, PipelineStepError
+from clarinet.exceptions.domain import AnonPathError, PipelineStepError, UnsafePathError
 from clarinet.files import Files, _patterns, _resolver
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
@@ -655,6 +655,27 @@ class TestRecordQuery:
 
         # Should use the filename from file_links, not resolve pattern
         assert result == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/seg_42.nrrd")
+
+    @pytest.mark.asyncio
+    @patch("clarinet.files._resolver.settings")
+    async def test_file_path_persisted_filename_traversal_is_refused(
+        self, mock_settings: MagicMock
+    ):
+        # A RecordFileLink row written before the guard existed (or by a path
+        # that bypassed validation) must be refused at read time rather than
+        # followed. No migration: the guard IS the remediation.
+        mock_settings.storage_path = "/data"
+        fd = _make_file_def(name="mask", pattern="mask_{id}.nrrd")
+        link = RecordFileLinkRead(name="mask", filename="../../etc/passwd", checksum=None)
+        record = _make_record_read(file_registry=[fd], file_links=[link])
+
+        client = AsyncMock()
+        client.find_records_advanced = AsyncMock(return_value=[record])
+        files = MagicMock(spec=Files)
+        rq = RecordQuery(client=client, files=files)
+
+        with pytest.raises(UnsafePathError):
+            await rq.file_path("ct_seg", file="mask", series_uid="1.2.3")
 
 
 # ── build_task_context ───────────────────────────────────────────────────────
