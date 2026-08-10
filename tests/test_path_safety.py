@@ -102,3 +102,17 @@ class TestJoinWithin:
         monkeypatch.setattr(Path, "resolve", explode)
         monkeypatch.setattr(Path, "exists", explode)
         assert join_within(BASE, "mask.nrrd") == BASE / "mask.nrrd"
+
+    def test_message_omits_the_rendered_name_but_the_exception_carries_it(self):
+        with pytest.raises(UnsafePathError) as exc:
+            join_within(BASE, "../MRN_12345.nrrd")
+        assert "MRN_12345" not in str(exc.value)
+        assert exc.value.value == "../MRN_12345.nrrd"
+
+    def test_dot_leading_basename_message_omits_the_rendered_name_but_the_exception_carries_it(
+        self,
+    ):
+        with pytest.raises(UnsafePathError) as exc:
+            join_within(BASE, ".MRN_12345")
+        assert "MRN_12345" not in str(exc.value)
+        assert exc.value.value == ".MRN_12345"
