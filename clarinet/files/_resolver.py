@@ -8,10 +8,12 @@ single rendering point shared with the writer and all other readers.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from clarinet.exceptions.domain import UnsafePathError
 from clarinet.files._storage import render_all_levels
 from clarinet.models.base import DicomQueryLevel
 from clarinet.settings import settings
@@ -46,6 +48,40 @@ class _SeriesLazySnapshot:
     anon_uid: str | None
     modality: str | None = None
     series_number: int | None = None
+
+
+def _resolve_storage_base(clarinet_storage_path: str | None) -> Path:
+    """Validate the per-record storage-path override, or fall back to the default.
+
+    Purely lexical (``os.path.normpath``, no filesystem access) — this is the
+    resolution choke point, so the check here covers every consumer
+    (``Files``, the Slicer context builder) and every row regardless of how
+    it was created, including rows already in a deployed database.
+
+    ``join_within``'s containment proof is purely lexical too, so it is only
+    as trustworthy as its own ``base`` argument: a relative or
+    ``..``-carrying base such as ``"../../../../etc"`` satisfies
+    ``Path.is_relative_to(base)`` for every filename joined onto it, making
+    the proof vacuous. Rejecting a malformed base here is what makes every
+    other guard added in this change mean something.
+
+    Deliberately does NOT require containment under ``settings.storage_path``
+    — ``clarinet_storage_path`` is a real, admin-only per-record storage-root
+    override (enforced at write time in ``api/routers/record.py``), not a
+    subdirectory selector. Multiple currently-passing tests
+    (``tests/integration/test_record_working_folder.py``,
+    ``tests/test_file_repository.py``, ``tests/test_pipeline_context.py``)
+    pin an intentionally disjoint root as correct behavior.
+    """
+    if not clarinet_storage_path:
+        return Path(settings.storage_path)
+    normalized = os.path.normpath(clarinet_storage_path)
+    if not os.path.isabs(clarinet_storage_path) or normalized != clarinet_storage_path:
+        raise UnsafePathError(
+            "clarinet_storage_path must be an absolute, normalized path",
+            value=clarinet_storage_path,
+        )
+    return Path(clarinet_storage_path)
 
 
 def build_working_dirs(
@@ -84,7 +120,7 @@ def build_working_dirs(
     Returns:
         Dict mapping each available level to its ``Path``.
     """
-    base = record.clarinet_storage_path or settings.storage_path
+    base = _resolve_storage_base(record.clarinet_storage_path)
 
     study = record.study
     if study is None and record.study_uid is not None:
@@ -103,7 +139,7 @@ def build_working_dirs(
         patient=record.patient,
         study=study,
         series=series,
-        storage_path=Path(base),
+        storage_path=base,
         fallback_to_unanonymized=fallback_to_unanonymized,
     )
 

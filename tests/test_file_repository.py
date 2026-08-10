@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from clarinet.exceptions.domain import AnonPathError
+from clarinet.exceptions.domain import AnonPathError, UnsafePathError
 from clarinet.files import Files as FileRepository
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -266,6 +266,43 @@ class TestFileRepositoryConfiguration:
 
         repo = FileRepository(record)
         assert repo.dir().is_relative_to(Path("/custom"))
+
+    @patch("clarinet.files._resolver.settings")
+    def test_relative_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
+        """A relative override defeats join_within's own containment proof.
+
+        join_within is purely lexical: it only proves the joined result
+        stays under `base`. If `base` itself is relative or `..`-laden, that
+        proof is vacuous — this is the case the resolver-level check exists
+        to close.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="relative/path")
+
+        with pytest.raises(UnsafePathError):
+            FileRepository(record)
+
+    @patch("clarinet.files._resolver.settings")
+    def test_traversal_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
+        """The vacuous-proof scenario: a `..`-laden relative base satisfies
+        `Path.is_relative_to(base)` for every filename joined onto it, so
+        join_within alone cannot reject it — the check on `base` itself must.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="../../../../etc")
+
+        with pytest.raises(UnsafePathError):
+            FileRepository(record)
+
+    @patch("clarinet.files._resolver.settings")
+    def test_unnormalized_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
+        """An absolute but non-normalized override (embedded ``..``) is
+        rejected too — absoluteness alone isn't sufficient."""
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="/custom/../etc")
+
+        with pytest.raises(UnsafePathError):
+            FileRepository(record)
 
     @patch("clarinet.files._storage.settings")
     @patch("clarinet.files._resolver.settings")
