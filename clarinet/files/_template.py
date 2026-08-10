@@ -42,10 +42,11 @@ renders to::
     CLARINET_42/CT_SR_20260415/00001_9.9.9.9.5
 """
 
+import os.path
 import re
 from collections.abc import Mapping
 from enum import Enum
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from string import Formatter
 from typing import Any
 
@@ -203,6 +204,40 @@ def assert_path_safe_value(key: str, value: str) -> None:
             f"placeholder {{{key}}} resolved to a bare directory reference ('.' or '..')",
             value=value,
         )
+
+
+def join_within(base: Path, rendered: str) -> Path:
+    """Join *rendered* onto *base*, refusing anything that escapes it.
+
+    Purely lexical — ``os.path.normpath`` plus a prefix comparison, no
+    filesystem access — so ``Files.resolve`` stays synchronous and cheap inside
+    the ``build_slicer_context`` loop. ``_filter_in_sandbox`` remains the
+    symlink-aware second layer at the delete and serve sinks.
+
+    Rejects a result outside *base*, equal to *base* (LENIENT can render a
+    whole-pattern placeholder to ``""``), carrying a ``..`` component, or whose
+    **basename** starts with a dot. Dot-checking is basename-level on purpose:
+    ``mask.seg.nrrd`` is normal, and checking the whole string would break
+    subdirectory patterns.
+    """
+    if not rendered or not rendered.strip():
+        raise UnsafePathError(
+            f"rendered name is empty; would resolve to the working dir {base}",
+            value=rendered,
+        )
+    joined = Path(os.path.normpath(base / rendered))
+    if not joined.is_relative_to(base):
+        raise UnsafePathError(f"rendered name escapes the working dir {base}", value=rendered)
+    if joined == base:
+        raise UnsafePathError(
+            f"rendered name resolves to the working dir {base} itself", value=rendered
+        )
+    relative = joined.relative_to(base)
+    if ".." in relative.parts:
+        raise UnsafePathError("rendered name contains a '..' component", value=rendered)
+    if joined.name.startswith("."):
+        raise UnsafePathError("rendered name has a dot-leading basename", value=rendered)
+    return joined
 
 
 def _resolve_dotted(fields: Mapping[str, Any], key: str) -> Any:

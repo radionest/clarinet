@@ -7,10 +7,12 @@ lexical containment check, and the config-time pattern validator.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from clarinet.exceptions.domain import AnonPathError, ConfigurationError, UnsafePathError
-from clarinet.files._template import assert_path_safe_value
+from clarinet.files._template import assert_path_safe_value, join_within
 
 
 class TestUnsafePathErrorTaxonomy:
@@ -59,3 +61,44 @@ class TestAssertPathSafeValue:
             assert_path_safe_value("data.secret_mrn", "/etc/passwd")
         assert "/etc/passwd" not in str(exc.value)
         assert exc.value.value == "/etc/passwd"
+
+
+BASE = Path("/data/storage/anon_1/study/series")
+
+
+class TestJoinWithin:
+    @pytest.mark.parametrize(
+        "rendered",
+        [
+            "/etc/passwd",  # absolute absorbs the base
+            "../sibling.nrrd",
+            "../../etc/passwd",
+            "sub/../../escape.nrrd",  # normalises out of the base
+            "",  # LENIENT rendered a whole-pattern placeholder away
+            ".",  # equals the base after normalisation
+            ".ssh",  # dot-leading basename
+            ".bashrc",
+            "sub/.hidden",  # dot-leading basename in a subdirectory
+        ],
+    )
+    def test_rejects(self, rendered):
+        with pytest.raises(UnsafePathError):
+            join_within(BASE, rendered)
+
+    @pytest.mark.parametrize(
+        "rendered",
+        ["mask.nrrd", "mask.seg.nrrd", "seg_7.seg.nrrd", "1.2.840.113619/mask.nrrd"],
+    )
+    def test_accepts(self, rendered):
+        result = join_within(BASE, rendered)
+        assert result.is_relative_to(BASE)
+
+    def test_performs_no_filesystem_access(self, monkeypatch):
+        # Files.resolve is sync and looped over the whole registry by
+        # build_slicer_context; a syscall here would be a latency regression.
+        def explode(*args, **kwargs):
+            raise AssertionError("join_within must not touch the filesystem")
+
+        monkeypatch.setattr(Path, "resolve", explode)
+        monkeypatch.setattr(Path, "exists", explode)
+        assert join_within(BASE, "mask.nrrd") == BASE / "mask.nrrd"
