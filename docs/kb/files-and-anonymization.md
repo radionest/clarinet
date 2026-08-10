@@ -240,11 +240,12 @@ round trip.
   deliberately **does** include the offending value (`exc.value!r`) — the
   submitter already has it, they produced it — but it never reaches a log.
 - **Everywhere else a router lets it propagate** (the Slicer context
-  builder, `resolve_output_file`, …): `500`, via the generic
-  `ConfigurationError` exception handler in `exception_handlers.py` —
-  `UnsafePathError` has no handler of its own. An administrator's bad
-  pattern, or a legacy poisoned row, is a server-side problem, not a
-  per-request one.
+  builder, `resolve_output_file`, …): `500`, via `UnsafePathError`'s own
+  dedicated handler (`handle_unsafe_path_error`, `exception_handlers.py`)
+  — registered separately from the generic `ConfigurationError` handler so
+  it can log without a traceback (see "Never log the value" below). An
+  administrator's bad pattern, or a legacy poisoned row, is a server-side
+  problem, not a per-request one.
 - **Pipeline tasks**: `UnsafePathError` is a `ConfigurationError`, not a
   `ClarinetAPIError`, so `RetryMiddleware` does not special-case it the way
   it special-cases a 4xx API error — it is retried `pipeline_retry_count`
@@ -256,25 +257,51 @@ offending placeholder key in the message. Three of `join_within`'s five
 raise sites name the working directory (`base`) instead (the other two — the
 `..`-component and dot-leading-basename checks — name neither) — which,
 under `Files.for_reader` / `fallback=True`, can itself be a path built from
-the record's **raw**, not-yet-anonymized patient id. That message is logged
-either way it propagates: at WARNING when a caller catches it explicitly
-(`record_service.py`'s `_sync_output_files`), and at **ERROR with a full
-traceback** when it doesn't — `FileValidator.validate`
-(`services/file_validation.py`) lets `join_within` propagate uncaught, and
-every current caller of it resolves back to an API router (directly, or via
-`RecordService`, which FastAPI constructs only per-request), so the generic
-`ConfigurationError` handler catches it:
-`logger.opt(exception=exc).error("Configuration error")`
-(`exception_handlers.py:376-379`) renders the full traceback, whose terminal
-line is the exception's own `str()` — `base` again. Propagating uncaught is
-not quieter; it is logged harder. What
-never happens, anywhere: the *substituted value itself* lands in a message
-or a log — it travels only on `exc.value` (and `exc.metadata()`), which the
-record-submit 422 body above deliberately surfaces to the submitter but
-which no log statement reads. `record.data` may carry PHI that log
-scrubbing does not redact (`.claude/rules/logging-pii.md`); the
-working-directory path under unanonymized fallback is a separate, open risk
-this guard does not close.
+the record's **raw**, not-yet-anonymized patient id. That message is
+logged either way it propagates, but keeping the *substituted value* itself
+out of every sink took a dedicated fix, not just
+`str(exc)`'s own omission of it. `UnsafePathError` has its own handler
+(`handle_unsafe_path_error`, `exception_handlers.py`), which Starlette
+dispatches ahead of the generic `ConfigurationError` handler whenever the
+exception is this specific subclass — handler lookup walks the exception's
+own MRO, so the specific registration wins regardless of registration
+order. It logs `str(exc)` plus the request method/path via a plain
+`logger.error(...)` — deliberately **not** `.opt(exception=exc)`, so no
+traceback is ever rendered. That distinction is the fix: the generic
+handler's `logger.opt(exception=exc).error(...)` *does* render a full
+traceback, and this project's console/file sinks run with `diagnose=True`,
+which prints **frame locals** into that traceback — including
+`assert_path_safe_value`'s own `value` parameter — regardless of what the
+message itself says. Before this handler existed, every `UnsafePathError`
+that reached a router uncaught leaked the raw value to stderr on every
+deployment; `str(exc)` omitting the value was never sufficient on its own.
+
+This closes it **for request paths through FastAPI** — the substituted
+value itself never lands in a message or a log there; it travels only on
+`exc.value` (and `exc.metadata()`), which the record-submit 422 body above
+deliberately surfaces to the submitter but which no log statement reads.
+It does not close two other paths:
+
+- **Pipeline and worker code never reaches FastAPI's exception handlers at
+  all.** Reachable, not hypothetical: the persisted-filename replay in
+  `services/pipeline/context.py:146` calls `join_within` inside the TaskIQ
+  worker process, entirely outside any ASGI request. The "Pipeline tasks"
+  bullet above covers where the exception itself ends up (retry, then
+  DLQ), not what — if anything — logs it along the way.
+- **Unverified — not a confirmed leak.** Anything that escapes Starlette's
+  `ExceptionMiddleware` entirely (fire-and-forget `RecordFlowEngine.fire` —
+  see `services/recordflow/engine.py:120-128` — ASGI middleware,
+  background tasks) is picked up by stdlib logging's `InterceptHandler`
+  (`utils/logger.py:214`), which forwards `exc_info` to loguru the same way
+  `.opt(exception=...)` does, re-opening the same frame-locals exposure.
+  Whether `UnsafePathError` actually reaches this path is not established
+  — it would need a project-authored `.call()` callback that touches
+  `Files` inside an entity flow fired via `engine.fire()`.
+
+`record.data` may carry PHI that log scrubbing does not redact
+(`.claude/rules/logging-pii.md`); the working-directory path under
+unanonymized fallback (`base`, embedded directly in `str(exc)`) remains a
+real, open exposure everywhere this section's guard does not reach.
 
 ### The storage-path override
 
