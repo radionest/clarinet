@@ -222,17 +222,39 @@ def test_template_leaf_import_is_light():
 
 
 class TestPathSafety:
-    def test_resolve_rejects_absolute_value_via_join_within(self, monkeypatch):
-        # Pins join_within's escape rule, not the value guard
-        # (assert_path_safe_value): pathlib's `/` join drops working_dir
-        # entirely when the RHS is absolute, so the rendered
-        # "/etc/passwd.nrrd" lands outside working_dir regardless of the
-        # value guard, and join_within's containment check is what raises.
-        # "/etc/passwd" is also not a regex-legal patient_id
-        # (PATIENT_ID_REGEX, clarinet/models/patient.py) -- unreachable
-        # through this field in practice. See
-        # test_resolve_rejects_bare_dotdot_patient_id below for the test
-        # that pins the value guard itself.
+    """resolve()/exists()/checksums() are guarded by two independent layers.
+
+    - The value guard, assert_path_safe_value (_template.py), runs during
+      rendering on each RAW substituted value: rejects "/", "\\", NUL
+      (_UNSAFE_IN_VALUE), or a value that is exactly "." or "..".
+    - join_within (_template.py), a purely lexical containment check on the
+      FULLY RENDERED path, runs after rendering completes.
+
+    "/" is in _UNSAFE_IN_VALUE, so a traversal-shaped value like
+    "../../etc" trips the value guard's "/" rule before join_within ever
+    runs. Tests suffixed "_caught_by_either_layer" use such inputs: with
+    the value guard present it raises via "/"; with it removed,
+    join_within independently raises on the same rendered path -- neither
+    run isolates one layer, and the two raises carry different
+    UnsafePathError.value payloads (the bare value vs. the rendered
+    filename).
+
+    A bare "." or ".." contains no "/", so it reaches the value guard's
+    second rule -- but only through a PREFIXED pattern
+    ("seg_{patient_id}.nrrd"): a BARE pattern renders ".." into "...nrrd",
+    whose leading dot join_within rejects on its own, again masking
+    whether the value guard ran. The prefix keeps the rendered basename
+    clear of every join_within rule, so
+    test_resolve_rejects_bare_dotdot_patient_id and
+    test_checksums_rejects_bare_dotdot_patient_id are the tests that pin
+    the value guard alone.
+    """
+
+    def test_resolve_rejects_absolute_value_caught_by_either_layer(self, monkeypatch):
+        # See class docstring: "/etc/passwd" contains "/", so the value
+        # guard raises here, not join_within. Also not a regex-legal
+        # patient_id (PATIENT_ID_REGEX) -- unreachable through this field
+        # in practice.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
@@ -245,15 +267,11 @@ class TestPathSafety:
         with pytest.raises(UnsafePathError):
             Files(record).resolve("mask")
 
-    def test_resolve_rejects_traversal_value_via_join_within(self, monkeypatch):
-        # Pins join_within's escape rule, not the value guard: the bare
-        # "{patient_id}.nrrd" pattern renders "../../etc.nrrd", and
-        # os.path.normpath walks it two levels above working_dir before
-        # join_within's containment check rejects it -- independent of
-        # assert_path_safe_value. "../../etc" is also not a regex-legal
+    def test_resolve_rejects_traversal_value_caught_by_either_layer(self, monkeypatch):
+        # See class docstring: "../../etc" contains "/", so the value
+        # guard raises here, not join_within. Also not a regex-legal
         # patient_id (PATIENT_ID_REGEX) -- unreachable through this field
-        # in practice. See test_resolve_rejects_bare_dotdot_patient_id
-        # below for the test that pins the value guard itself.
+        # in practice.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
@@ -272,16 +290,8 @@ class TestPathSafety:
         # scenario the design's plan cites as proof that the temporary
         # {data.*} ban (issue #552) is not sufficient by itself: a
         # regex-legal identity value can still be a bare directory
-        # reference, and Files.resolve must still reject it.
-        #
-        # Pattern is prefixed ("seg_{patient_id}.nrrd", unlike
-        # test_resolve_rejects_traversal_value's bare "{patient_id}.nrrd"):
-        # rendering ".." through a bare "{patient_id}.nrrd" pattern produces
-        # "...nrrd", which join_within's OWN dot-leading-basename rule also
-        # rejects, independently of the path_safe value guard this test
-        # exists to pin. The "seg_" prefix keeps the rendered basename
-        # ("seg_...nrrd") clear of every join_within rule, so the value
-        # guard is the only thing standing in the way here.
+        # reference, and Files.resolve must still reject it. Prefixed
+        # pattern isolates the value guard -- see class docstring.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
         from clarinet.models.patient import PATIENT_ID_PATTERN
@@ -305,12 +315,10 @@ class TestPathSafety:
         # constant and never carries record data, so it is not a PHI leak.
         assert exc_info.value.value == ".."
 
-    def test_exists_inherits_join_within(self, monkeypatch):
-        # exists() delegates to resolve(); this pins that it has no separate
-        # path. The traversal value here is caught by join_within (see
-        # test_resolve_rejects_traversal_value_via_join_within), not by the
-        # value guard -- so this test says nothing about whether exists()
-        # would still be safe if assert_path_safe_value were removed.
+    def test_exists_inherits_resolve_guards(self, monkeypatch):
+        # exists() delegates to resolve(); this pins that it has no
+        # separate path. (See class docstring for which layer actually
+        # raises on this input.)
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
@@ -368,13 +376,8 @@ class TestPathSafety:
     @pytest.mark.asyncio
     async def test_checksums_rejects_bare_dotdot_patient_id(self, monkeypatch):
         # Direct pin for the path_safe=True site in checksums()'s singular
-        # branch (facade.py). Prefixed pattern, same technique as
-        # test_resolve_rejects_bare_dotdot_patient_id: a bare
-        # "{patient_id}.nrrd" would render ".." into "...nrrd", which
-        # join_within's dot-leading-basename rule also rejects -- masking
-        # whether the value guard ran at all. The "mask_" prefix keeps the
-        # rendered basename clear of every join_within rule, so the value
-        # guard is the only thing standing in the way here.
+        # branch (facade.py). Prefixed pattern isolates the value guard --
+        # see class docstring and test_resolve_rejects_bare_dotdot_patient_id.
         from clarinet.exceptions.domain import UnsafePathError
         from clarinet.files.facade import Files
 
