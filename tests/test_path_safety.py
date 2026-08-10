@@ -17,6 +17,7 @@ from clarinet.files._template import (
     assert_path_safe_value,
     join_within,
     render_template,
+    validate_file_pattern,
 )
 
 
@@ -165,3 +166,63 @@ class TestRenderTemplatePathSafe:
             "seg_{id}_{mods}.seg.nrrd", {"id": 7, "mods": ["CT", "SR"]}, path_safe=True
         )
         assert out == "seg_7_CT_SR.seg.nrrd"
+
+
+# Un-banning under #552 moves entries from this list to LEGAL_PATTERNS below.
+BANNED_DATA_PATTERNS = [
+    "birads_{data.BIRADS_R}.txt",
+    "report_{data.timepoint}.pdf",
+    "{data.side}_mask.nrrd",
+    "{data}",
+    "seg_{id}_{data.lesion}.nrrd",
+]
+
+UNSAFE_LITERAL_PATTERNS = [
+    "/abs/mask.nrrd",
+    "../x.nrrd",
+    "sub/../x.nrrd",
+    "back\\slash.nrrd",
+    "outputs/",
+    "",
+    "   ",
+    ".hidden.nrrd",
+    "nul\x00.nrrd",
+]
+
+LEGAL_PATTERNS = [
+    "mask.nrrd",
+    "mask.seg.nrrd",
+    "seg_{id}.seg.nrrd",
+    "segmentation_{user_id}.seg.nrrd",
+    "{study_uid}/mask.nrrd",
+    "master_model.seg.nrrd",
+    "report_{parent_id}.pdf",
+]
+
+
+class TestValidateFilePattern:
+    @pytest.mark.parametrize("pattern", BANNED_DATA_PATTERNS)
+    def test_rejects_data_placeholders(self, pattern):
+        with pytest.raises(ValueError, match="data"):
+            validate_file_pattern(pattern)
+
+    def test_ban_error_suggests_replacements(self):
+        with pytest.raises(ValueError) as exc:
+            validate_file_pattern("birads_{data.BIRADS_R}.txt")
+        message = str(exc.value)
+        assert "data.BIRADS_R" in message
+        assert "{id}" in message
+
+    @pytest.mark.parametrize("pattern", UNSAFE_LITERAL_PATTERNS)
+    def test_rejects_unsafe_literal_text(self, pattern):
+        with pytest.raises(ValueError):
+            validate_file_pattern(pattern)
+
+    @pytest.mark.parametrize("pattern", LEGAL_PATTERNS)
+    def test_accepts(self, pattern):
+        assert validate_file_pattern(pattern) == pattern
+
+    def test_placeholder_content_is_masked_before_literal_check(self):
+        # A placeholder NAME containing a dot must not trip the dot-leading
+        # basename rule, and a placeholder standing alone as the basename is fine.
+        assert validate_file_pattern("{record_type.name}.nrrd") == "{record_type.name}.nrrd"

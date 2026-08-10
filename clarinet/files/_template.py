@@ -325,3 +325,57 @@ def render_template(
         return coerced
 
     return _PLACEHOLDER_RE.sub(_replace, template)
+
+
+def _reject_data_placeholders(pattern: str) -> None:
+    """Reject ``{data}`` / ``{data.FIELD}`` placeholders in a file pattern.
+
+    TEMPORARY — tracked by issue #552, which will reintroduce the placeholder
+    once the non-traversal corner cases are settled (length limits,
+    Windows-reserved basenames, unicode normalization, PHI in filenames, and
+    the fact that ``record.data`` is mutable, so a value-derived path changes
+    on every submit and orphans the file already written).
+
+    Un-banning is: delete this function and its one call in
+    ``validate_file_pattern``. The literal-text rules in that function are
+    permanent and stay.
+    """
+    offenders = sorted(
+        name for name in extract_placeholders(pattern) if name == "data" or name.startswith("data.")
+    )
+    if offenders:
+        raise ValueError(
+            f"file pattern may not interpolate record data: {', '.join(offenders)}. "
+            f"Use {{id}}, {{parent_id}} or {{user_id}} instead, or declare one "
+            f"FileDefinition per variant. This restriction is temporary — see "
+            f"https://github.com/radionest/clarinet/issues/552"
+        )
+
+
+def validate_file_pattern(pattern: str) -> str:
+    """Validate a ``FileDefinition.pattern`` at configuration-load time.
+
+    Raises ``ValueError`` (not ``UnsafePathError``) to match
+    ``validate_name_is_identifier`` on the same models: Pydantic turns it into a
+    422 on the API path, and the config loader into a ``ConfigLoadError``.
+    """
+    _reject_data_placeholders(pattern)
+
+    # Mask placeholders out — only admin-authored literal text is checked here.
+    literal = _PLACEHOLDER_RE.sub("\x01", pattern)
+    if not literal.strip() and not pattern.strip():
+        raise ValueError("file pattern must not be empty")
+    if pattern.startswith(("/", "\\")):
+        raise ValueError(f"file pattern must be relative, got {pattern!r}")
+    if "\\" in literal:
+        raise ValueError(f"file pattern must not contain a backslash, got {pattern!r}")
+    if "\x00" in literal:
+        raise ValueError("file pattern must not contain a NUL byte")
+    if pattern.endswith(("/", "\\")):
+        raise ValueError(f"file pattern must not end in a separator, got {pattern!r}")
+    if ".." in PurePosixPath(literal).parts:
+        raise ValueError(f"file pattern must not contain a '..' component, got {pattern!r}")
+    basename = PurePosixPath(literal).name
+    if basename.startswith("."):
+        raise ValueError(f"file pattern basename must not start with a dot, got {pattern!r}")
+    return pattern
