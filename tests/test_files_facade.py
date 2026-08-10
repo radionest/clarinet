@@ -248,6 +248,45 @@ class TestPathSafety:
         with pytest.raises(UnsafePathError):
             Files(record).resolve("mask")
 
+    def test_resolve_rejects_bare_dotdot_patient_id(self, monkeypatch):
+        # PATIENT_ID_REGEX (clarinet/models/patient.py) allows any 1-64 chars
+        # from A-Za-z0-9._-^, so ".." is a legal patient_id -- this is the
+        # scenario the design's plan cites as proof that the temporary
+        # {data.*} ban (issue #552) is not sufficient by itself: a
+        # regex-legal identity value can still be a bare directory
+        # reference, and Files.resolve must still reject it.
+        #
+        # Pattern is prefixed ("seg_{patient_id}.nrrd", unlike
+        # test_resolve_rejects_traversal_value's bare "{patient_id}.nrrd"):
+        # rendering ".." through a bare "{patient_id}.nrrd" pattern produces
+        # "...nrrd", which join_within's OWN dot-leading-basename rule also
+        # rejects, independently of the path_safe value guard this test
+        # exists to pin. The "seg_" prefix keeps the rendered basename
+        # ("seg_...nrrd") clear of every join_within rule, so the value
+        # guard is the only thing standing in the way here.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+        from clarinet.models.patient import PATIENT_ID_PATTERN
+
+        assert PATIENT_ID_PATTERN.fullmatch("..")  # confirms the premise
+
+        fd = MagicMock()
+        fd.name = "seg"
+        fd.pattern = "seg_{patient_id}.nrrd"
+        fd.level = None
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = ".."
+        with pytest.raises(UnsafePathError) as exc_info:
+            Files(record).resolve("seg")
+        # PHI contract: the raw value travels only on .value, never
+        # interpolated into the message (assert_path_safe_value's
+        # docstring). Not asserting ".." not in str(exc) here: for this one
+        # input, the guard's own message is the fixed phrase "('.' or
+        # '..')" describing the rule it enforces, which coincidentally
+        # contains the same two characters as the value -- that text is
+        # constant and never carries record data, so it is not a PHI leak.
+        assert exc_info.value.value == ".."
+
     def test_exists_inherits_the_guard(self, monkeypatch):
         # exists() delegates to resolve(); this pins that it has no separate path.
         from clarinet.exceptions.domain import UnsafePathError
