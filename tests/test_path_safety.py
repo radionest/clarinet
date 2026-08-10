@@ -53,3 +53,9 @@ class TestAssertPathSafeValue:
         with pytest.raises(UnsafePathError) as exc:
             assert_path_safe_value("data.secret_mrn", "/etc/passwd")
         assert "data.secret_mrn" in str(exc.value)
+
+    def test_message_omits_the_value_but_the_exception_carries_it(self):
+        with pytest.raises(UnsafePathError) as exc:
+            assert_path_safe_value("data.secret_mrn", "/etc/passwd")
+        assert "/etc/passwd" not in str(exc.value)
+        assert exc.value.value == "/etc/passwd"

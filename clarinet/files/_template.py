@@ -185,18 +185,24 @@ def assert_path_safe_value(key: str, value: str) -> None:
     """Reject a substituted value that could alter a path's structure.
 
     Runs on the *coerced* value, so a collection flattening to ``"a/b"`` is
-    caught. Raises ``UnsafePathError`` naming *key* and the reason; the value
-    itself goes only into the exception message, never into a log — record data
-    may carry PHI.
+    caught. Raises ``UnsafePathError`` naming *key* in the message; the
+    offending *value* is passed only as the exception's ``value`` attribute,
+    never interpolated into the message — ``ConfigurationError``'s handler
+    logs the message on every raise, and record data may carry PHI that log
+    scrubbing does not redact (see ``UnsafePathError``'s "PII guard" note).
     """
     for bad in _UNSAFE_IN_VALUE:
         if bad in value:
             raise UnsafePathError(
                 f"placeholder {{{key}}} resolved to a value containing {bad!r}, "
-                f"which would change the path structure: {value!r}"
+                f"which would change the path structure",
+                value=value,
             )
     if value in (".", ".."):
-        raise UnsafePathError(f"placeholder {{{key}}} resolved to {value!r}, a directory reference")
+        raise UnsafePathError(
+            f"placeholder {{{key}}} resolved to a bare directory reference ('.' or '..')",
+            value=value,
+        )
 
 
 def _resolve_dotted(fields: Mapping[str, Any], key: str) -> Any:

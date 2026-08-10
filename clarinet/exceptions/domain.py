@@ -490,7 +490,22 @@ class UnsafePathError(ConfigurationError):
     ``cli/anon.py`` counts a failure. If a traversal raised something those
     caught, the fallback would silently retry the poisoned path and the rest
     would record it as routine. A traversal must always propagate.
+
+    PII guard: ``str(exc)`` intentionally omits the offending value. The
+    ``ConfigurationError`` handler in ``api/exception_handlers.py`` logs
+    every instance's traceback (JSON file sink and Loki sink, see
+    ``utils/logger.py``), and ``scrub_sensitive`` there only redacts
+    credential-shaped text (passwords, tokens, DB URLs) — not PHI. The raw
+    value travels only via ``metadata()``, mirroring
+    :class:`InvalidPatientIdentifierError`.
     """
+
+    def __init__(self, message: str, *, value: str | None = None) -> None:
+        super().__init__(message)
+        self.value = value
+
+    def metadata(self) -> dict[str, str]:
+        return {} if self.value is None else {"value": self.value}
 
 
 # Database errors
