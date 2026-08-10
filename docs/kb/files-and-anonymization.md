@@ -269,31 +269,59 @@ order. It logs `str(exc)` plus the request method/path via a plain
 `logger.error(...)` — deliberately **not** `.opt(exception=exc)`, so no
 traceback is ever rendered. That distinction is the fix: the generic
 handler's `logger.opt(exception=exc).error(...)` *does* render a full
-traceback, and this project's console/file sinks run with `diagnose=True`,
-which prints **frame locals** into that traceback — including
-`assert_path_safe_value`'s own `value` parameter — regardless of what the
-message itself says. Before this handler existed, every `UnsafePathError`
+traceback, and this project's **stderr console sink runs with
+`diagnose=True` unconditionally**, which prints **frame locals** into that
+traceback — including `assert_path_safe_value`'s own `value` parameter —
+regardless of what the message itself says. (The file sink is
+conditional: `diagnose=not serialize` — off, and safe, in JSON mode, where
+an exception instead renders through a plain `traceback.format_exception`
+call with no frame locals; the Loki sink always formats that same way and
+is never exposed.) Before this handler existed, every `UnsafePathError`
 that reached a router uncaught leaked the raw value to stderr on every
 deployment; `str(exc)` omitting the value was never sufficient on its own.
 
-This closes it **for request paths through FastAPI** — the substituted
-value itself never lands in a message or a log there; it travels only on
-`exc.value` (and `exc.metadata()`), which the record-submit 422 body above
-deliberately surfaces to the submitter but which no log statement reads.
-It does not close two other paths:
+This closes it for an `UnsafePathError` that reaches FastAPI's exception
+handlers **uncaught** — not simply "any request on a FastAPI route": a
+broad `except Exception:` sitting between the raise and the router can
+still swallow it and log a traceback of its own before either handler
+ever runs. Three in-framework sites do exactly that, all on genuine
+request paths: `services/slicer/context_hydration.py:120-121` — directly
+on `POST /slicer/records/{id}/open`, the very endpoint the "Slicer context
+builder" mention above names as an `UnsafePathError` source —
+`services/schema_hydration.py:227-228`, and `api/routers/dicom.py:316`.
+Each catches broadly and logs with `logger.exception(...)`, which renders
+a traceback the same way the old generic handler did. Reaching any of
+them with an `UnsafePathError` needs project-authored callback code (a
+registered hydrator, or whatever the `dicom.py` in-process fallback
+wraps) that itself touches `Files`/`join_within` — no such code exists in
+this framework repo today, the same evidentiary status as the `.call()`
+residual below, not a confirmed leak either.
 
-- **Pipeline and worker code never reaches FastAPI's exception handlers at
-  all.** Reachable, not hypothetical: the persisted-filename replay in
-  `services/pipeline/context.py:146` calls `join_within` inside the TaskIQ
-  worker process, entirely outside any ASGI request. The "Pipeline tasks"
-  bullet above covers where the exception itself ends up (retry, then
-  DLQ), not what — if anything — logs it along the way.
+Where nothing intercepts it first, the substituted value itself never
+lands in a message or a log: it travels only on `exc.value` (and
+`exc.metadata()`), which the record-submit 422 body above deliberately
+surfaces to the submitter but which no log statement reads. Two more
+paths stay open:
+
+- **Pipeline and worker code — confirmed, not hypothetical.** The
+  persisted-filename replay in `services/pipeline/context.py:146` calls
+  `join_within` inside the TaskIQ worker process, entirely outside any
+  ASGI request, so neither exception handler above ever runs.
+  `services/pipeline/task.py:118-120` logs, then re-raises; TaskIQ's own
+  executor — an installed dependency, not clarinet code — catches
+  `BaseException` and logs it with `exc_info=True` through the **stdlib**
+  `logging` module (`taskiq/receiver/receiver.py:26,282-286`). Clarinet's
+  `InterceptHandler` (`utils/logger.py:189-214`) redirects all stdlib
+  logging into loguru — installed both at import (`utils/logger.py:392`)
+  and again by `reconfigure_for_worker` (`:383`, called at worker
+  startup) — forwarding `exc_info` into `.opt(exception=...)` exactly like
+  the generic handler used to. The worker's stderr sink runs with the
+  same unconditional `diagnose=True`. Frame locals — hence `exc.value` —
+  are rendered there every time.
 - **Unverified — not a confirmed leak.** Anything that escapes Starlette's
   `ExceptionMiddleware` entirely (fire-and-forget `RecordFlowEngine.fire` —
   see `services/recordflow/engine.py:120-128` — ASGI middleware,
-  background tasks) is picked up by stdlib logging's `InterceptHandler`
-  (`utils/logger.py:214`), which forwards `exc_info` to loguru the same way
-  `.opt(exception=...)` does, re-opening the same frame-locals exposure.
+  background tasks) is picked up the same way, through `InterceptHandler`.
   Whether `UnsafePathError` actually reaches this path is not established
   — it would need a project-authored `.call()` callback that touches
   `Files` inside an entity flow fired via `engine.fire()`.
