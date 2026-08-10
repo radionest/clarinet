@@ -396,10 +396,13 @@ def setup_exception_handlers(app: FastAPI) -> None:
         ``handle_configuration_error`` for the MRO ordering rationale.
         Without this explicit registration, ``UnsafePathError`` falls through
         to that generic handler, whose ``logger.opt(exception=exc)`` attaches
-        a traceback; the console/file sinks configured with ``diagnose=True``
-        (``utils/logger.py``) render **frame locals** into that traceback,
-        printing ``exc.value`` — and therefore potentially PHI — to stderr on
-        every deployment. Logging ``str(exc)`` plus the request method/path
+        a traceback; the stderr console sink runs with ``diagnose=True``
+        unconditionally (``utils/logger.py``) and renders **frame locals**
+        into that traceback, printing ``exc.value`` — and therefore
+        potentially PHI — to stderr on every deployment. (The file sink is
+        conditional — ``diagnose=not serialize``, off by default since
+        ``log_serialize`` defaults to ``True``.) Logging ``str(exc)`` plus
+        the request method/path
         (no ``.opt(exception=...)``, so no traceback is ever rendered) keeps
         the message and the endpoint locatable, without ever touching
         ``exc.value`` / ``exc.metadata()``. This is the authoritative
