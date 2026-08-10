@@ -270,6 +270,7 @@ def render_template(
     list_sorted: bool = True,
     missing: str = "",
     on_missing_leave_as_is: bool = False,
+    path_safe: bool = False,
 ) -> str:
     """Render ``template`` against ``fields`` with type-aware coercion.
 
@@ -287,10 +288,10 @@ def render_template(
             ``None`` values, empty collections, and dict values substitute
             ``missing``.
 
-    Safety checks (``/``, ``\\``, ``..``, leading ``.``) are NOT applied
-    here — they belong to caller code that knows whether a rendered string
-    is a single directory segment (where dots are forbidden) or a file
-    basename (where ``.ext`` is legitimate).
+    Safety checks (``/``, ``\\``, ``..``, leading ``.``) are applied to each
+    substituted value only when ``path_safe=True``. Callers that render a
+    filesystem path pass it; callers that render a free-form string (Slicer
+    script arguments, which may legitimately be absolute paths) do not.
     """
 
     def _replace(m: re.Match[str]) -> str:
@@ -312,6 +313,13 @@ def render_template(
             if mode is RenderMode.STRICT:
                 raise KeyError(key)
             return missing
+        # NOTE: outside the try/except above on purpose. In LENIENT mode that
+        # handler swallows ValueError and substitutes `missing`; a guard raising
+        # inside it would silently rewrite every violation to "". UnsafePathError
+        # is not a ValueError, so it escapes regardless — both properties are
+        # pinned by tests in tests/test_path_safety.py.
+        if path_safe:
+            assert_path_safe_value(key, coerced)
         return coerced
 
     return _PLACEHOLDER_RE.sub(_replace, template)

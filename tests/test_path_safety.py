@@ -12,7 +12,12 @@ from pathlib import Path
 import pytest
 
 from clarinet.exceptions.domain import AnonPathError, ConfigurationError, UnsafePathError
-from clarinet.files._template import assert_path_safe_value, join_within
+from clarinet.files._template import (
+    RenderMode,
+    assert_path_safe_value,
+    join_within,
+    render_template,
+)
 
 
 class TestUnsafePathErrorTaxonomy:
@@ -116,3 +121,40 @@ class TestJoinWithin:
             join_within(BASE, ".MRN_12345")
         assert "MRN_12345" not in str(exc.value)
         assert exc.value.value == ".MRN_12345"
+
+
+class TestRenderTemplatePathSafe:
+    def test_off_by_default(self):
+        out = render_template("{patient_id}", {"patient_id": "/etc/passwd"})
+        assert out == "/etc/passwd"
+
+    def test_rejects_when_enabled(self):
+        with pytest.raises(UnsafePathError):
+            render_template("{patient_id}", {"patient_id": "/etc/passwd"}, path_safe=True)
+
+    def test_lenient_mode_does_not_swallow_the_violation(self):
+        # _replace swallows ValueError in LENIENT mode and substitutes "".
+        # UnsafePathError must escape that handler, or every violation would be
+        # silently rewritten to an empty string.
+        with pytest.raises(UnsafePathError):
+            render_template(
+                "seg_{patient_id}.nrrd",
+                {"patient_id": "../../etc/passwd"},
+                mode=RenderMode.LENIENT,
+                path_safe=True,
+            )
+
+    def test_runs_after_coercion(self):
+        # A list coerces to "a_b" by default; with "/" as the separator it
+        # becomes "a/b", which only a post-coercion check can catch.
+        with pytest.raises(UnsafePathError):
+            render_template("{mods}", {"mods": ["a", "b"]}, list_separator="/", path_safe=True)
+
+    def test_missing_substitution_is_not_a_violation(self):
+        assert render_template("f_{nope}.txt", {"x": 1}, path_safe=True) == "f_.txt"
+
+    def test_legitimate_values_pass(self):
+        out = render_template(
+            "seg_{id}_{mods}.seg.nrrd", {"id": 7, "mods": ["CT", "SR"]}, path_safe=True
+        )
+        assert out == "seg_7_CT_SR.seg.nrrd"
