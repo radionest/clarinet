@@ -84,10 +84,8 @@ def _resolve_custom_args(
     resolved: dict[str, str] = {}
     for key, template in args.items():
         try:
-            # Files.render_template is deliberately unguarded (path_safe=False):
-            # these are Slicer script args, which may legitimately be absolute
-            # paths, and this never feeds a working-directory join. Do not "fix"
-            # this — see clarinet/files/facade.py Files.render_template.
+            # Deliberately unguarded (path_safe=False) — do not "fix" this here.
+            # See the comment on Files.render_template in clarinet/files/facade.py.
             resolved[key] = Files.render_template(template, format_vars, strict=True)
         except (KeyError, ValueError) as exc:
             logger.warning(f"Slicer arg '{key}': unresolved template '{template}' — {exc}")
