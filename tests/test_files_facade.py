@@ -219,3 +219,102 @@ def test_template_leaf_import_is_light():
         "assert not leaked, sorted(m for m in sys.modules if m.startswith('clarinet.files'))"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+class TestPathSafety:
+    def test_resolve_rejects_absolute_value(self, monkeypatch):
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "/etc/passwd"
+        with pytest.raises(UnsafePathError):
+            Files(record).resolve("mask")
+
+    def test_resolve_rejects_traversal_value(self, monkeypatch):
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError):
+            Files(record).resolve("mask")
+
+    def test_exists_inherits_the_guard(self, monkeypatch):
+        # exists() delegates to resolve(); this pins that it has no separate path.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError):
+            Files(record).exists("mask")
+
+    @pytest.mark.asyncio
+    async def test_checksums_rejects_escaping_name(self, monkeypatch):
+        # The singular branch performs its own working_dir / filename join and
+        # is a live bypass if only resolve() is guarded.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError):
+            await Files(record).checksums()
+
+    def test_render_is_path_safe(self, monkeypatch):
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        record.patient_id = "/etc/passwd"
+        with pytest.raises(UnsafePathError):
+            Files(record).render("{patient_id}.nrrd")
+
+    def test_render_for_is_path_safe(self, monkeypatch):
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        record.patient_id = "/etc/passwd"
+        with pytest.raises(UnsafePathError):
+            Files.render_for(record, "{patient_id}.nrrd")
+
+    def test_static_render_template_stays_unguarded(self):
+        # Slicer script args may legitimately be absolute paths.
+        from clarinet.files.facade import Files
+
+        assert Files.render_template("{p}", {"p": "/opt/slicer/data"}) == "/opt/slicer/data"
+
+    def test_subdirectory_pattern_still_resolves(self, monkeypatch):
+        # NEW coverage: no test in the suite exercised a subdirectory pattern
+        # before this change, despite the design relying on it staying legal.
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        record.study_uid = "1.2.840"
+        path = Files(record).render("{study_uid}/mask.nrrd")
+        assert path == "1.2.840/mask.nrrd"
+
+    def test_multi_dot_basename_still_renders(self, monkeypatch):
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        assert Files(record).render("mask.seg.nrrd") == "mask.seg.nrrd"

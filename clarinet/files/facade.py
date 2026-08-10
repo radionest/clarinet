@@ -145,9 +145,12 @@ class Files:
         fd = self._lookup(file_def)
         working_dir = self._dirs[fd.level or self._level]
         filename = _template.render_template(
-            fd.pattern, {**self._fields, **overrides}, mode=_template.RenderMode.LENIENT
+            fd.pattern,
+            {**self._fields, **overrides},
+            mode=_template.RenderMode.LENIENT,
+            path_safe=True,
         )
-        path = working_dir / filename
+        path = _template.join_within(working_dir, filename)
         self._accessed.setdefault(fd.name, path)
         return path
 
@@ -166,7 +169,9 @@ class Files:
         return dict(self._accessed)
 
     def render(self, pattern: str) -> str:
-        return _template.render_template(pattern, self._fields, mode=_template.RenderMode.LENIENT)
+        return _template.render_template(
+            pattern, self._fields, mode=_template.RenderMode.LENIENT, path_safe=True
+        )
 
     @staticmethod
     def render_for(record: RecordBase, pattern: str, *, parent: RecordBase | None = None) -> str:
@@ -177,8 +182,12 @@ class Files:
             pattern,
             _patterns.fields_from(record, parent),  # type: ignore[arg-type]
             mode=_template.RenderMode.LENIENT,
+            path_safe=True,
         )
 
+    # Deliberately NOT path-safe: this renders Slicer script arguments
+    # (services/slicer/context.py), which may legitimately be absolute paths.
+    # It never feeds a working-directory join. See design.md D3.
     @staticmethod
     def render_template(pattern: str, fields: dict[str, Any], *, strict: bool = False) -> str:
         mode = _template.RenderMode.STRICT if strict else _template.RenderMode.LENIENT
@@ -201,9 +210,14 @@ class Files:
                         out[f"{fd.name}:{p.name}"] = c
             else:
                 filename = _template.render_template(
-                    fd.pattern, self._fields, mode=_template.RenderMode.LENIENT
+                    fd.pattern,
+                    self._fields,
+                    mode=_template.RenderMode.LENIENT,
+                    path_safe=True,
                 )
-                c = await _checksums.compute_file_checksum(working_dir / filename)
+                c = await _checksums.compute_file_checksum(
+                    _template.join_within(working_dir, filename)
+                )
                 if c is not None:
                     out[fd.name] = c
         return out
