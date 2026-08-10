@@ -190,8 +190,9 @@ def assert_path_safe_value(key: str, value: str) -> None:
     offending *value* is passed only as the exception's ``value`` attribute,
     never interpolated into the message — ``UnsafePathError``'s dedicated
     handler logs the message on every raise, and record data may carry PHI
-    that log scrubbing does not redact (see ``UnsafePathError``'s "PII guard"
-    note).
+    that ``scrub_sensitive`` (``clarinet/utils/logger.py``) does not redact:
+    it only catches credential-shaped text (passwords, tokens, DB URLs),
+    never PHI (see ``.claude/rules/logging-pii.md``).
     """
     for bad in _UNSAFE_IN_VALUE:
         if bad in value:

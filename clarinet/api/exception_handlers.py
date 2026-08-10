@@ -374,10 +374,10 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Quarto CLI not installed"},
         )
 
-    # NOTE: ``UnsafePathError`` has its own handler registered immediately
-    # below — MRO ordering mirrors the identical note above
-    # ``handle_validation_error``; see that handler's docstring for why a
-    # dedicated registration exists at all.
+    # NOTE: ``UnsafePathError`` has its own handler, ``handle_unsafe_path_error``,
+    # registered immediately below — MRO ordering mirrors the identical note
+    # above ``handle_validation_error``; see ``handle_unsafe_path_error``'s own
+    # docstring for why a dedicated registration exists at all.
     @app.exception_handler(ConfigurationError)
     async def handle_configuration_error(_: Request, exc: ConfigurationError) -> JSONResponse:
         """Convert ConfigurationError to 500 response."""

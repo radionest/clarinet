@@ -491,11 +491,18 @@ class UnsafePathError(ConfigurationError):
     caught, the fallback would silently retry the poisoned path and the rest
     would record it as routine. A traversal must always propagate.
 
-    PII guard: ``str(exc)`` intentionally omits the offending value.
-    ``api/exception_handlers.py``'s dedicated ``handle_unsafe_path_error``
-    (see its docstring for the full rationale) logs only ``str(exc)`` — no
-    traceback, so no sink ever renders ``exc.value``. The raw value travels
-    only via ``metadata()``, mirroring :class:`InvalidPatientIdentifierError`.
+    PII guard: ``str(exc)`` intentionally omits the offending value. On
+    the FastAPI request path, ``handle_unsafe_path_error``
+    (``api/exception_handlers.py``) logs ``str(exc)`` plus the request
+    method/path via a plain ``logger.error(...)`` — no
+    ``.opt(exception=...)``, so no sink (console, file, JSON, Loki)
+    attaches a traceback to that log record. This does NOT hold on the
+    worker path: a ``join_within`` raise inside a TaskIQ task (e.g. via
+    ``RecordQuery.file_path``) is caught by TaskIQ's own receiver and
+    logged through stdlib ``logging`` with ``exc_info=True``, which
+    reaches loguru's ``diagnose=True`` console sink with a traceback
+    attached. The raw value travels only via ``metadata()``, mirroring
+    :class:`InvalidPatientIdentifierError`.
     """
 
     def __init__(self, message: str, *, value: str | None = None) -> None:
