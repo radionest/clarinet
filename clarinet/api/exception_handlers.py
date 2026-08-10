@@ -409,11 +409,17 @@ def setup_exception_handlers(app: FastAPI) -> None:
         """
         # Does NOT close: (1) the working-dir `base` some messages still
         # embed (join_within); (2) pipeline/worker paths, which never reach
-        # FastAPI's exception handlers; (3) unverified — anything that
-        # escapes Starlette's ExceptionMiddleware entirely (fire-and-forget
-        # RecordFlowEngine.fire, ASGI middleware, background tasks) logs via
-        # stdlib -> InterceptHandler with exc_info, which may re-render
-        # frame locals on the diagnose sinks.
+        # FastAPI's exception handlers; (3) in-framework broad excepts on
+        # request paths -- context_hydration.py / schema_hydration.py's
+        # hydrator loops catch + logger.exception(...) (a traceback) a
+        # project hydrator's exception before this handler ever runs;
+        # reachable only if that hydrator touches Files (the built-in one
+        # does not) -- unverified in this repo, same status as (4);
+        # (4) unverified -- anything that escapes Starlette's
+        # ExceptionMiddleware entirely (fire-and-forget RecordFlowEngine.fire,
+        # ASGI middleware, background tasks) logs via stdlib ->
+        # InterceptHandler with exc_info, which may re-render frame locals
+        # on the diagnose sinks.
         logger.error(f"Unsafe path rejected on {request.method} {request.url.path}: {exc}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

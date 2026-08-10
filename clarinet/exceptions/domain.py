@@ -491,17 +491,26 @@ class UnsafePathError(ConfigurationError):
     caught, the fallback would silently retry the poisoned path and the rest
     would record it as routine. A traversal must always propagate.
 
-    PII guard: ``str(exc)`` intentionally omits the offending value. On
-    the FastAPI request path, ``handle_unsafe_path_error``
+    PII guard: ``str(exc)`` intentionally omits the offending value. This
+    holds only when an ``UnsafePathError`` reaches FastAPI's exception
+    handlers **uncaught** — not for every exception merely raised on a
+    request path. When it does, ``handle_unsafe_path_error``
     (``api/exception_handlers.py``) logs ``str(exc)`` plus the request
     method/path via a plain ``logger.error(...)`` — no
     ``.opt(exception=...)``, so no sink (console, file, JSON, Loki)
-    attaches a traceback to that log record. This does NOT hold on the
-    worker path: a ``join_within`` raise inside a TaskIQ task (e.g. via
-    ``RecordQuery.file_path``) is caught by TaskIQ's own receiver and
-    logged through stdlib ``logging`` with ``exc_info=True``, which
-    reaches loguru's ``diagnose=True`` console sink with a traceback
-    attached. The raw value travels only via ``metadata()``, mirroring
+    attaches a traceback to that record. It does NOT hold: (1) on the
+    worker path — a ``join_within`` raise inside a TaskIQ task (e.g. via
+    ``RecordQuery.file_path``) never reaches FastAPI at all; TaskIQ's own
+    receiver catches it and logs via stdlib ``logging(exc_info=True)``,
+    reaching loguru's ``diagnose=True`` console sink with a traceback; (2)
+    where an in-framework broad except intercepts first — the hydrator
+    loops in ``context_hydration.py`` and ``schema_hydration.py`` catch any
+    exception a project hydrator raises and log it with
+    ``logger.exception(...)`` (a traceback) before this handler ever runs.
+    Reachable only if that hydrator itself touches ``Files``; the one
+    built-in hydrator does not, so this is unverified in this repo — same
+    status as the ``.call()`` residual noted on the handler. The raw value
+    travels only via ``metadata()``, mirroring
     :class:`InvalidPatientIdentifierError`.
     """
 
