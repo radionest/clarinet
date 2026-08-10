@@ -1,11 +1,16 @@
 """CRUD operations tests for Record."""
 
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 import pytest
+import pytest_asyncio
+from httpx import AsyncClient
 from sqlmodel import select
 
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import Record, RecordStatus, RecordType
+from tests.conftest import create_authenticated_client, create_mock_superuser
 from tests.utils.urls import RECORDS_BASE
 
 
@@ -736,3 +741,80 @@ async def test_assign_user_rejects_preparing_record(
         params={"user_id": str(test_user.id)},
     )
     assert response.status_code == 422
+
+
+# ── clarinet_storage_path — admin-only (Task 12 Part B, half 2) ────────────
+
+
+@pytest_asyncio.fixture
+async def regular_user_client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
+    """A client authenticated as a regular (non-admin) user."""
+    user = await create_mock_superuser(test_session, email="storage-path-regular@test.com")
+    user.is_superuser = False  # downgrade
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def storage_path_perm_type(test_session):
+    """PATIENT-level RecordType for the clarinet_storage_path permission tests."""
+    rt = RecordType(
+        name="storage-path-perm-type",
+        description="For clarinet_storage_path admin-only tests",
+        level=DicomQueryLevel.PATIENT,
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    await test_session.refresh(rt)
+    return rt
+
+
+class TestCreateRecordStoragePathPermission:
+    """POST /api/records/ — clarinet_storage_path may only be set by an admin."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_setting_storage_path_is_rejected(
+        self, regular_user_client, test_patient, storage_path_perm_type
+    ):
+        resp = await regular_user_client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+                "clarinet_storage_path": "/custom/storage/root",
+            },
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_admin_setting_storage_path_succeeds(
+        self, client, test_patient, storage_path_perm_type
+    ):
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+                "clarinet_storage_path": "/custom/storage/root",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["clarinet_storage_path"] == "/custom/storage/root"
+
+    @pytest.mark.asyncio
+    async def test_non_admin_without_storage_path_is_unaffected(
+        self, regular_user_client, test_patient, storage_path_perm_type
+    ):
+        """Guards against over-rejecting the common case: a non-admin who
+        never touches the field must be able to create records normally."""
+        resp = await regular_user_client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+            },
+        )
+        assert resp.status_code == 201
