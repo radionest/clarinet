@@ -49,6 +49,8 @@ from pathlib import PurePosixPath
 from string import Formatter
 from typing import Any
 
+from clarinet.exceptions.domain import UnsafePathError
+
 SUPPORTED_PLACEHOLDERS: frozenset[str] = frozenset(
     {
         "anon_patient_id",
@@ -174,6 +176,27 @@ def coerce_field_value(
             return list_separator.join(parts)
         case _:
             return str(value)
+
+
+_UNSAFE_IN_VALUE = ("/", "\\", "\x00")
+
+
+def assert_path_safe_value(key: str, value: str) -> None:
+    """Reject a substituted value that could alter a path's structure.
+
+    Runs on the *coerced* value, so a collection flattening to ``"a/b"`` is
+    caught. Raises ``UnsafePathError`` naming *key* and the reason; the value
+    itself goes only into the exception message, never into a log — record data
+    may carry PHI.
+    """
+    for bad in _UNSAFE_IN_VALUE:
+        if bad in value:
+            raise UnsafePathError(
+                f"placeholder {{{key}}} resolved to a value containing {bad!r}, "
+                f"which would change the path structure: {value!r}"
+            )
+    if value in (".", ".."):
+        raise UnsafePathError(f"placeholder {{{key}}} resolved to {value!r}, a directory reference")
 
 
 def _resolve_dotted(fields: Mapping[str, Any], key: str) -> Any:

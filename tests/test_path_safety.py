@@ -7,7 +7,10 @@ lexical containment check, and the config-time pattern validator.
 
 from __future__ import annotations
 
+import pytest
+
 from clarinet.exceptions.domain import AnonPathError, ConfigurationError, UnsafePathError
+from clarinet.files._template import assert_path_safe_value
 
 
 class TestUnsafePathErrorTaxonomy:
@@ -20,3 +23,33 @@ class TestUnsafePathErrorTaxonomy:
         # log and skip, cli/anon.py counts a failure. A traversal must never
         # degrade into any of those.
         assert not issubclass(UnsafePathError, AnonPathError)
+
+
+class TestAssertPathSafeValue:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "/etc/passwd",  # absolute: pathlib would discard the base entirely
+            "../../etc/passwd",  # classic relative traversal
+            "..",  # the split form, where the pattern supplies the "/"
+            ".",  # current-directory reference
+            "a/b",  # a coerced collection can produce this
+            "back\\slash",  # POSIX ignores it; the analyst's Slicer may not
+            "nul\x00byte",
+        ],
+    )
+    def test_rejects(self, value):
+        with pytest.raises(UnsafePathError):
+            assert_path_safe_value("patient_id", value)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["CT_SR", "mask.seg.nrrd", "1.2.840.113619.2.55", "a.b.c", "-dash", "_under"],
+    )
+    def test_accepts(self, value):
+        assert assert_path_safe_value("patient_id", value) is None
+
+    def test_error_names_the_key(self):
+        with pytest.raises(UnsafePathError) as exc:
+            assert_path_safe_value("data.secret_mrn", "/etc/passwd")
+        assert "data.secret_mrn" in str(exc.value)
