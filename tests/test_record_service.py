@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 from clarinet.exceptions.domain import BusinessRuleViolationError
 from clarinet.models import RecordStatus
@@ -15,6 +16,7 @@ from clarinet.services.record_service import (
     _stored_checksums,
 )
 from clarinet.services.study_service import StudyService
+from clarinet.utils.logger import logger
 
 
 class TestRecordServiceTriggers:
@@ -1128,6 +1130,19 @@ def _record_read_stub(
     )
 
 
+@pytest.fixture
+def captured_records():
+    """Capture every loguru record emitted during the test as raw dicts.
+
+    Loguru records never reach pytest's `caplog` (that captures the stdlib
+    `logging` module only) — mirrors the idiom in tests/test_auth_logging.py.
+    """
+    records: list[dict] = []
+    sink_id = logger.add(lambda msg: records.append(msg.record), level="DEBUG")
+    yield records
+    logger.remove(sink_id)
+
+
 class TestMissingOutputLinks:
     """Derivation of missing OUTPUT file links from computed checksums."""
 
@@ -1232,6 +1247,51 @@ class TestMissingOutputLinks:
         )
 
         assert _missing_output_links(record, {}) == {}
+
+    def test_unsafe_placeholder_value_returns_422(self) -> None:
+        """A user's own bad data yields a 422, not a 500 — the one place an
+        UnsafePathError becomes an HTTPException is the record-submit path.
+        {patient_id} is used (not {data.*}) because FileDefinitionRead's own
+        pattern validator now rejects {data.*} patterns at construction time;
+        the duck-typed stub still lets patient_id carry an unsafe value the
+        real Patient regex would never allow, which is exactly the runtime
+        case the guard exists for.
+        """
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+            id=7,
+            patient_id="SECRET_MRN_VALUE/../escape",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            _missing_output_links(record, {"seg": "abc123"})
+
+        assert exc_info.value.status_code == 422
+        # The submitter is the only audience for the raw value — it belongs in
+        # the 422 body (never in a log; see the warning test below).
+        assert "SECRET_MRN_VALUE" in exc_info.value.detail
+
+    def test_unsafe_placeholder_value_warning_omits_the_value(self, captured_records) -> None:
+        """record.data may carry PHI — the WARNING must name the record and the
+        file definition without ever repeating the offending value."""
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+            id=7,
+            patient_id="SECRET_MRN_VALUE/../escape",
+        )
+
+        with pytest.raises(HTTPException):
+            _missing_output_links(record, {"seg": "abc123"})
+
+        warnings = [r for r in captured_records if r["level"].name == "WARNING"]
+        assert len(warnings) == 1
+        message = warnings[0]["message"]
+        assert "SECRET_MRN_VALUE" not in message
+        assert "record 7" in message
+        assert "'seg'" in message
+        assert "patient_id" in message
 
 
 class TestStoredChecksums:

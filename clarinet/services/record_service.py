@@ -9,8 +9,10 @@ from uuid import UUID
 from clarinet.exceptions.domain import (
     BusinessRuleViolationError,
     RecordEditLockedError,
+    UnsafePathError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
+from clarinet.exceptions.http import UNPROCESSABLE_ENTITY
 from clarinet.files import Files
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -94,7 +96,21 @@ def _missing_output_links(
         fd = output_defs.get(name)
         if fd is None or name in linked or name in missing:
             continue
-        missing[name] = collection_file or Files.render_for(record, fd.pattern, parent=parent)
+        if collection_file:
+            missing[name] = collection_file
+            continue
+        try:
+            rendered = Files.render_for(record, fd.pattern, parent=parent)
+        except UnsafePathError as exc:
+            logger.warning(
+                f"unsafe output path rejected for record {record.id}, "
+                f"file definition '{fd.name}': {exc}"
+            )
+            raise UNPROCESSABLE_ENTITY.with_context(
+                f"File '{fd.name}' cannot be resolved from the submitted data: "
+                f"{exc} (offending value: {exc.value!r})"
+            ) from exc
+        missing[name] = rendered
     return missing
 
 
