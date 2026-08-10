@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from clarinet.exceptions.domain import UnsafePathError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.services.file_validation import (
@@ -475,3 +476,37 @@ class TestFileValidatorCrossLevel:
         assert result.valid is True
         assert result.matched_files["master_model"] == "master_model.seg.nrrd"
         assert result.matched_files["scan"] == "scan.nrrd"
+
+
+class TestFileValidatorPathSafety:
+    """Tests for the join-containment guard on the existence probe.
+
+    ``FileDefinitionRead.pattern`` normally can't carry an escaping literal —
+    its own ``@field_validator`` (D7/D8) rejects a ``..`` component at
+    construction time. But D7 also means a *legacy* ``filedefinition`` row
+    that predates that guard is never re-validated on load, so it can still
+    reach here with an escaping pattern. ``model_construct`` bypasses
+    ``FileDefinitionRead``'s validator to simulate exactly that row.
+    """
+
+    def test_escaping_literal_pattern_raises_instead_of_probing_outside(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A literal (no-placeholder) escaping pattern must raise
+        ``UnsafePathError`` rather than letting ``.is_file()`` probe outside
+        *target_dir*. No placeholder means the value guard
+        (``Files.render_for``'s ``path_safe=True``) never runs — this
+        exercises the join guard alone.
+        """
+        escaping_def = FileDefinitionRead.model_construct(
+            name="escape",
+            pattern="../escape.nrrd",
+            required=True,
+            role=FileRole.INPUT,
+        )
+
+        validator = FileValidator([escaping_def])
+        with pytest.raises(UnsafePathError):
+            validator.validate(mock_record, tmp_path)

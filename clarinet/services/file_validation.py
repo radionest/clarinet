@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from clarinet.exceptions.domain import ValidationError
-from clarinet.files import Files
+from clarinet.files import Files, join_within
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
 
@@ -91,6 +91,12 @@ class FileValidator:
 
         Returns:
             FileValidationResult with validation status and matched files
+
+        Raises:
+            UnsafePathError: if a file definition's rendered name would
+                escape *target_dir*. Propagates uncaught rather than
+                becoming a ``FileValidationError`` entry — see the comment
+                at the join below.
         """
         if not self._file_definitions:
             return FileValidationResult(valid=True)
@@ -107,7 +113,15 @@ class FileValidator:
             else:
                 target_dir = directory
 
-            filename = resolved if (target_dir / resolved).is_file() else None
+            # join_within raises UnsafePathError uncaught rather than being
+            # folded into `errors` below. Files.render_for above already
+            # guards the *value* half (path_safe=True), so anything this
+            # join rejects is a pattern-literal problem — an administrator
+            # misconfiguration or a legacy row predating the config-load
+            # guard (D7), never data the current caller submitted. Per
+            # spec.md "Violations surface according to who caused them",
+            # that makes it a server-side failure, not a per-record 422.
+            filename = resolved if join_within(target_dir, resolved).is_file() else None
 
             if filename:
                 matched[file_def.name] = filename
