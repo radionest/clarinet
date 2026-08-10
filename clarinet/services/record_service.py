@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import status
 
 from clarinet.exceptions.domain import (
+    AnonPathError,
     BusinessRuleViolationError,
     RecordEditLockedError,
     UnsafePathError,
@@ -578,6 +579,16 @@ class RecordService:
         is skipped there outright. Pre-rejecting either would 422 a record
         whose real checksum scan — and thus real submission — would have
         succeeded.
+
+        ``Files.for_reader`` itself can raise ``AnonPathError``: its fallback
+        retry (``facade.py``'s ``for_reader``) sits outside any handler, and
+        a rendered segment that is a bare ``.``/``..`` is rejected regardless
+        of the fallback flag (``_storage._safe_render``) — reachable on the
+        default template for a not-yet-anonymized patient whose raw id is
+        ``".."`` or ``"."`` (legal per ``PATIENT_ID_REGEX``). That must not
+        turn into a 500 from *this* pre-check: degrade to round 1's
+        conservative behavior (validate every non-``multiple`` OUTPUT
+        definition, skipping none) rather than propagate.
         """
         record = await self.repo.get_with_relations(record_id)
         output_defs = [
@@ -592,10 +603,13 @@ class RecordService:
         if record.parent_record_id is not None:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
-        working_dirs = Files.for_reader(record_read, parent=parent_read).dirs()
+        try:
+            working_dirs = Files.for_reader(record_read, parent=parent_read).dirs()
+        except AnonPathError:
+            working_dirs = None
         default_level = DicomQueryLevel(record_read.record_type.level)
         for fd in output_defs:
-            if working_dirs.get(fd.level or default_level) is None:
+            if working_dirs is not None and working_dirs.get(fd.level or default_level) is None:
                 continue
             _render_output_path(record_read, fd, parent_read)
 

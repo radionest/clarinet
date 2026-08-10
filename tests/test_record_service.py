@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from clarinet.exceptions.domain import BusinessRuleViolationError, UnsafePathError
+from clarinet.files import Files
 from clarinet.models import RecordStatus
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
@@ -229,9 +230,11 @@ class TestRecordServiceTriggers:
         the value guard IF rendered (patient_id="..", legal per
         PATIENT_ID_REGEX but rejected by assert_path_safe_value) must not
         block a submission whose real downstream checksum scan would have
-        succeeded. A sibling non-collection OUTPUT def is included and must
-        still be checked -- this is not a blanket skip of validation."""
-        safe_fd = FileDefinitionRead(name="report", pattern="report.pdf", role=FileRole.OUTPUT)
+        succeeded. A sibling non-collection, placeholder-bearing OUTPUT def
+        is included and is proven -- via the render_for call log, not just
+        the absence of a 422 -- to still be rendered: this is not a blanket
+        skip of validation, only the collection def is exempted."""
+        safe_fd = FileDefinitionRead(name="report", pattern="report_{id}.pdf", role=FileRole.OUTPUT)
         collection_fd = FileDefinitionRead(
             name="masks", pattern="mask_{patient_id}.nrrd", role=FileRole.OUTPUT, multiple=True
         )
@@ -255,12 +258,21 @@ class TestRecordServiceTriggers:
             patch("clarinet.services.record_service.RecordRead") as patched,
             patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
             patch("clarinet.services.record_service.Files.for_reader", return_value=reader_stub),
+            patch(
+                "clarinet.services.record_service.Files.render_for", wraps=Files.render_for
+            ) as render_for_spy,
         ):
             patched.model_validate.side_effect = lambda r: r
             await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
 
         repo_mock.update_data.assert_awaited_once()
         sync_mock.assert_awaited_once()
+        # Proof, not inference: the sibling was genuinely rendered (call
+        # recorded, with {id} actually substituted), and the collection
+        # def's pattern never reached render_for at all.
+        rendered_patterns = [call.args[1] for call in render_for_spy.call_args_list]
+        assert rendered_patterns == [safe_fd.pattern]
+        render_for_spy.assert_called_once_with(record, safe_fd.pattern, parent=None)
 
     @pytest.mark.asyncio
     async def test_sync_output_files_does_not_swallow_unsafe_path(self) -> None:
@@ -335,6 +347,73 @@ class TestRecordServiceTriggers:
         message = warnings[0]["message"]
         assert "SECRET_MRN_VALUE_2" not in message
         assert "record 7" in message
+
+    @pytest.mark.asyncio
+    async def test_submit_data_degrades_when_working_dirs_raise_anon_path_error(
+        self,
+    ) -> None:
+        """Files.for_reader's own fallback retry can itself raise AnonPathError
+        (facade.py:99-101 -- the retry is outside any try, so a second failure
+        propagates): a not-yet-anonymized patient whose raw id is ".." fails
+        the STRICT attempt for missing anon_id, then fails the FALLBACK
+        attempt too, because _storage._safe_render (_storage.py:320-321)
+        rejects a rendered ".." segment regardless of the fallback flag. This
+        drives the REAL Files.for_reader / _resolver / _storage chain -- no
+        stub -- so it is the only test that can see this failure mode.
+
+        The pre-check must degrade to round 1's conservative "validate
+        everything" rather than let AnonPathError escape as a 500, and the
+        422 must still be reachable for the placeholder-bearing pattern this
+        record's OUTPUT definition carries.
+        """
+        from clarinet.models.record import RecordRead as RealRecordRead
+
+        output_fd = FileDefinitionRead(
+            name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT
+        )
+        record = MagicMock()
+        record.__class__ = RealRecordRead
+        record.id = 7
+        record.parent_record_id = None
+        record.clarinet_storage_path = None
+        record.patient_id = ".."
+        # Not yet anonymized (anon_id=None) -- the STRICT attempt inside
+        # Files.for_reader fails here first, triggering the fallback retry.
+        record.patient = MagicMock(id="..", anon_id=None, auto_id=1)
+        # Study/series ARE already anonymized, so they resolve cleanly on
+        # both attempts -- isolates the failure to the patient segment.
+        record.study = MagicMock(study_uid="1.2.3", anon_uid="1.2.3.9")
+        record.study_uid = "1.2.3"
+        record.series = MagicMock(
+            series_uid="1.2.3.4", anon_uid="1.2.3.4.9", modality="CT", series_number=1
+        )
+        record.series_uid = "1.2.3.4"
+        record.record_type = SimpleNamespace(
+            name="test_type", level="SERIES", file_registry=[output_fd]
+        )
+        record.data = {}
+        record.file_links = []
+        record.status = RecordStatus.pending
+
+        repo_mock = AsyncMock()
+        repo_mock.get_with_relations.return_value = record
+        repo_mock.update_data.return_value = (record, RecordStatus.pending)
+        service = RecordService(repo_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+        ):
+            patched.model_validate.side_effect = lambda r: r
+            with pytest.raises(HTTPException) as exc_info:
+                await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
+
+        # The spec-mandated status for a placeholder-bearing pattern rejected
+        # by the value guard -- not the 500 an escaped AnonPathError would
+        # produce via the ConfigurationError handler.
+        assert exc_info.value.status_code == 422
+        repo_mock.update_data.assert_not_awaited()
+        sync_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_update_data_fires_data_update_trigger(self) -> None:
