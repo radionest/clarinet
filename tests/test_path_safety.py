@@ -94,9 +94,6 @@ class TestJoinWithin:
             "sub/../../escape.nrrd",  # normalises out of the base
             "",  # LENIENT rendered a whole-pattern placeholder away
             ".",  # equals the base after normalisation
-            ".ssh",  # dot-leading basename
-            ".bashrc",
-            "sub/.hidden",  # dot-leading basename in a subdirectory
         ],
     )
     def test_rejects(self, rendered):
@@ -110,6 +107,16 @@ class TestJoinWithin:
     def test_accepts(self, rendered):
         result = join_within(BASE, rendered)
         assert result.is_relative_to(BASE)
+
+    @pytest.mark.parametrize("rendered", [".ssh", ".bashrc", "sub/.hidden", ".txt"])
+    def test_accepts_a_dot_leading_basename(self, rendered):
+        # A dot-leading basename is a hidden file, not an escape, and it is
+        # exactly what an absent optional placeholder renders to
+        # ("{parent_id}.txt" for a parentless record). Rejecting it here made
+        # every render-then-join site hard-fail where it used to answer "file
+        # not found". The pattern that could produce it is rejected at config
+        # load instead -- see TestRejectsVanishingPlaceholderShapes below.
+        assert join_within(BASE, rendered).is_relative_to(BASE)
 
     def test_performs_no_filesystem_access(self, monkeypatch):
         # Files.resolve is sync and looped over the whole registry by
@@ -127,13 +134,14 @@ class TestJoinWithin:
         assert "MRN_12345" not in str(exc.value)
         assert exc.value.value == "../MRN_12345.nrrd"
 
-    def test_dot_leading_basename_message_omits_the_rendered_name_but_the_exception_carries_it(
-        self,
-    ):
+    def test_dotdot_component_message_omits_the_rendered_name_but_the_exception_carries_it(self):
+        # The one remaining raise site whose message interpolates neither
+        # `base` nor `rendered`. Reached only for a relative base, which no
+        # production call site produces -- kept as defence in depth.
         with pytest.raises(UnsafePathError) as exc:
-            join_within(BASE, ".MRN_12345")
+            join_within(Path(".."), "../MRN_12345.nrrd")
         assert "MRN_12345" not in str(exc.value)
-        assert exc.value.value == ".MRN_12345"
+        assert exc.value.value == "../MRN_12345.nrrd"
 
 
 class TestRenderTemplatePathSafe:
@@ -195,14 +203,30 @@ UNSAFE_LITERAL_PATTERNS = [
     "nul\x00.nrrd",
 ]
 
+# Patterns whose LITERAL text is safe, but which render to a name the
+# working-directory join cannot take once an optional placeholder is absent.
+# Each is a config a deployment could legally hold before this rule existed;
+# each now fails at config load instead of on somebody's request.
+VANISHING_PLACEHOLDER_PATTERNS = [
+    "{parent_id}.txt",  # parentless record -> ".txt"
+    "{user_id}",  # unassigned record -> ""
+    "{study_uid}.json",  # patient-level record -> ".json"
+    "{series_uid}.dcm",  # study-level record -> ".dcm"
+    "{study_uid}/mask.nrrd",  # patient-level record -> "/mask.nrrd"
+    "sub/{parent_id}.nrrd",  # parentless record -> "sub/.nrrd"
+    "{user_id}/{parent_id}/x.nrrd",  # both absent -> "//x.nrrd"
+    "{parent_id}{user_id}.nrrd",  # both absent -> ".nrrd"
+]
+
 LEGAL_PATTERNS = [
     "mask.nrrd",
     "mask.seg.nrrd",
     "seg_{id}.seg.nrrd",
     "segmentation_{user_id}.seg.nrrd",
-    "{study_uid}/mask.nrrd",
+    "study_{study_uid}/mask.nrrd",
     "master_model.seg.nrrd",
     "report_{parent_id}.pdf",
+    "{id}.nrrd",  # {id} is never absent, so it needs no literal prefix
 ]
 
 
@@ -232,6 +256,47 @@ class TestValidateFilePattern:
         # A placeholder NAME containing a dot must not trip the dot-leading
         # basename rule, and a placeholder standing alone as the basename is fine.
         assert validate_file_pattern("{record_type.name}.nrrd") == "{record_type.name}.nrrd"
+
+
+class TestRejectsVanishingPlaceholderShapes:
+    """Pins the rule that replaced ``join_within``'s empty / dot-leading checks.
+
+    Those two rules used to fire at request time, on the rendered name. That
+    made a legitimately absent placeholder -- a parentless record's
+    ``{parent_id}``, a patient-level record's ``{study_uid}``, an unassigned
+    record's ``{user_id}`` -- a hard failure on every render-then-join path,
+    where the same config previously answered "file not found". The rule now
+    runs once, at config load, against the pattern's worst-case render.
+    """
+
+    @pytest.mark.parametrize("pattern", VANISHING_PLACEHOLDER_PATTERNS)
+    def test_rejects(self, pattern):
+        with pytest.raises(ValueError, match="would render to"):
+            validate_file_pattern(pattern)
+
+    def test_error_shows_the_degenerate_render_and_names_the_fix(self):
+        with pytest.raises(ValueError) as exc:
+            validate_file_pattern("{parent_id}.txt")
+        message = str(exc.value)
+        assert "'.txt'" in message  # what it renders to, not just the pattern
+        assert "dot-leading basename" in message
+        assert "report_{parent_id}.pdf" in message  # the shape that works
+
+    @pytest.mark.parametrize(
+        "pattern",
+        ["{id}.nrrd", "{record_type.name}.nrrd", "{patient_id}.nrrd", "{origin_type}/x.nrrd"],
+    )
+    def test_accepts_a_placeholder_that_is_never_absent(self, pattern):
+        # Only OPTIONAL_PLACEHOLDERS are erased for the worst-case render;
+        # every other placeholder is masked to a non-empty sentinel, so a
+        # pattern resting on one of those needs no literal prefix.
+        assert validate_file_pattern(pattern) == pattern
+
+    def test_rule_runs_after_the_literal_text_rules(self):
+        # "../{user_id}" trips both families. The literal '..' message is the
+        # more specific one and must win.
+        with pytest.raises(ValueError, match=r"'\.\.' component"):
+            validate_file_pattern("../{user_id}")
 
 
 class TestFileDefinitionReadPatternValidation:

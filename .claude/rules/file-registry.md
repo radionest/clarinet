@@ -36,6 +36,20 @@ File definitions are stored in a normalized schema with M2M relationship.
 **`RecordFileLink`** (table): M2M link between `Record` and `FileDefinition` with `filename` and optional `checksum`.
 **`RecordFileLinkRead`** (DTO): per-file link with `name`, `filename`, `checksum`.
 
+**Pattern rules** (`validate_file_pattern`, `clarinet/files/_template.py`, wired
+as a validator on `FileDefinitionRead` only — `FileDefinition` is `table=True`,
+where SQLModel skips Pydantic validation). Besides the literal-text rules (no
+absolute prefix, backslash, NUL, `..`, trailing separator, dot-leading
+basename), a pattern must still render to a well-formed relative name when
+every **optional** placeholder is absent. Optional = `{parent_id}`,
+`{user_id}`, `{study_uid}`, `{series_uid}` — a parentless, unassigned,
+patient-level or study-level record legitimately has none. So `{parent_id}.txt`
+(→ `.txt`), `{user_id}` (→ `""`) and `{study_uid}/mask.nrrd` (→ `/mask.nrrd`)
+are rejected; give the segment literal text (`report_{parent_id}.txt`). `{id}`,
+`{patient_id}`, `{record_type.name}` and `{origin_type}` are never absent and
+need no prefix. Full rationale: the "Path-safety guards" section of the
+framework's `docs/kb/files-and-anonymization.md`.
+
 - `FileDefinition` and `FileDefinitionRead` both define identical `validate_name_is_identifier` — update both when changing.
 - `RecordRead.file_links`: `list[RecordFileLinkRead]` — structured M2M data, preferred over dict fields.
 - `RecordRead.files` / `RecordRead.file_checksums`: **deprecated** dict fields (use `file_links` instead).

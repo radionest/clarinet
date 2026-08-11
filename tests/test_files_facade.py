@@ -240,14 +240,12 @@ class TestPathSafety:
     filename).
 
     A bare "." or ".." contains no "/", so it trips the value guard's
-    second rule under any pattern -- but only a PREFIXED pattern
-    ("seg_{patient_id}.nrrd") isolates it: with the guard removed, a BARE
-    pattern renders ".." into "...nrrd", whose leading dot join_within
-    rejects on its own, again masking whether the value guard ran. The
-    prefix keeps the rendered basename clear of every join_within rule, so
+    second rule under any pattern, and the PREFIXED pattern
+    ("seg_{patient_id}.nrrd") keeps the rendered name clear of every
+    join_within rule as well. That makes
     test_resolve_rejects_bare_dotdot_patient_id and
-    test_checksums_rejects_bare_dotdot_patient_id are the tests that pin
-    the value guard alone.
+    test_checksums_rejects_bare_dotdot_patient_id the tests that pin the
+    value guard alone: remove it and nothing else raises.
     """
 
     def test_resolve_rejects_absolute_value_caught_by_either_layer(self, monkeypatch):

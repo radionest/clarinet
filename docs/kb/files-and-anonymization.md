@@ -136,9 +136,9 @@ working directory. The render context still merges in `record.data`, but a
 pattern may no longer reference it — see "Config-load pattern validation"
 below. Both steps are guarded, and — like the anonymized-path strictness
 above — neither guard alone would be enough: an admin-authored `/` in a
-subdirectory pattern (`{study_uid}/mask.nrrd`) must stay legal, so the join
-can't reject every `/`; a value guard alone can't see what a literal pattern
-segment contributes.
+subdirectory pattern (`study_{study_uid}/mask.nrrd`) must stay legal, so the
+join can't reject every `/`; a value guard alone can't see what a literal
+pattern segment contributes.
 
 ### Config-load pattern validation
 
@@ -148,11 +148,45 @@ segment contributes.
 rejects an unsafe pattern before any record ever renders it: empty or
 whitespace-only, a backslash, NUL, a `..` component, or a dot-leading
 basename in the pattern's *literal* text (placeholders masked out first, so
-`{study_uid}/mask.nrrd` stays legal) — plus two checks against the *full*
-pattern regardless of placeholders: an absolute prefix and a trailing
-separator. This rule is permanent, and a rejection here — unlike the
-stored-row case below — aborts startup: the process does not come up with
-the offending definition simply skipped.
+a `.` inside a placeholder *name* cannot trip it) — plus two checks against
+the *full* pattern regardless of placeholders: an absolute prefix and a
+trailing separator. This rule is permanent, and a rejection here — unlike
+the stored-row case below — aborts startup: the process does not come up
+with the offending definition simply skipped.
+
+#### Patterns that vanish when a placeholder is absent
+
+Four placeholders are **optional** — a perfectly well-formed record can lack
+them, and the LENIENT renderer substitutes `""` rather than raising:
+`{parent_id}` (a parentless record), `{user_id}` (an unassigned one),
+`{study_uid}` and `{series_uid}` (a patient- or study-level one). Everything
+else the renderer knows (`{id}`, `{patient_id}`, `{record_type.name}`,
+`{origin_type}`) is populated for any record that exists.
+
+So `validate_file_pattern` also checks the pattern's **worst-case render** —
+every optional placeholder erased, every other one masked to a non-empty
+sentinel — and rejects it unless the result is still a well-formed relative
+name. Three shapes fail:
+
+| Pattern | Worst-case render | Why it fails | Fix |
+|---|---|---|---|
+| `{user_id}` | `""` | an empty name | `seg_{user_id}.nrrd` |
+| `{parent_id}.txt` | `.txt` | dot-leading basename | `report_{parent_id}.txt` |
+| `{study_uid}/mask.nrrd` | `/mask.nrrd` | empty path segment | `study_{study_uid}/mask.nrrd` |
+
+A literal prefix on the affected segment is the fix in every case;
+`{id}.nrrd` and `{record_type.name}.nrrd` need none, because neither
+placeholder is ever absent.
+
+This is the rule that **replaced** two runtime checks. `join_within` used to
+reject an empty and a dot-leading *rendered* name, which turned an absent
+optional placeholder into a hard failure at request time — on record create,
+the Slicer context builder, every pipeline task's checksum scan, submit and
+auto-unblock — where the same configuration previously resolved to a path
+that simply did not exist and answered "file not found". Enforcing it once,
+against the pattern, puts the failure in front of the administrator who
+wrote it. A stored row that predates the rule is skipped, not fatal, by the
+`RecordType.file_registry` mechanism described next.
 
 **Temporarily banned, tracked by
 [#552](https://github.com/radionest/clarinet/issues/552):** a pattern
@@ -193,10 +227,12 @@ working-directory join.
 ### The joined path
 
 `join_within(base, rendered)` (`clarinet/files/_template.py`, re-exported
-from `clarinet.files`) checks the assembled path: not outside `base`, not
-equal to `base` itself (LENIENT rendering can flatten a whole-pattern
-placeholder to `""`), no `..` path component, and a basename that doesn't
-start with a dot. It is **purely lexical** — `os.path.normpath` plus
+from `clarinet.files`) checks the assembled path, and **containment only**:
+not outside `base`, not equal to `base` itself, no `..` path component. It
+deliberately accepts a dot-leading basename — a hidden file is not an
+escape, and it is what an absent optional placeholder renders to; see
+"Patterns that vanish when a placeholder is absent" above for where that
+rule went instead. It is **purely lexical** — `os.path.normpath` plus
 `Path.is_relative_to`, zero filesystem access — which is what lets
 `Files.resolve` stay synchronous inside `build_slicer_context`'s
 per-file-definition loop. `Files.resolve` and `Files.checksums` call it
@@ -253,9 +289,9 @@ round trip.
   `AnonPathError` above.
 
 **Never log the value.** `assert_path_safe_value`'s two raise sites name the
-offending placeholder key in the message. Three of `join_within`'s five
-raise sites name the working directory (`base`) instead (the other two — the
-`..`-component and dot-leading-basename checks — name neither) — which,
+offending placeholder key in the message. Two of `join_within`'s three
+raise sites name the working directory (`base`) instead (the third — the
+`..`-component check — names neither) — which,
 under `Files.for_reader` / `fallback=True`, can itself be a path built from
 the record's **raw**, not-yet-anonymized patient id. That message is
 logged either way it propagates, but keeping the *substituted value* itself

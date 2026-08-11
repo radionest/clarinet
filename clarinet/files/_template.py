@@ -216,17 +216,22 @@ def join_within(base: Path, rendered: str) -> Path:
     the ``build_slicer_context`` loop. ``_filter_in_sandbox`` remains the
     symlink-aware second layer at the delete and serve sinks.
 
-    Rejects a result outside *base*, equal to *base* (LENIENT can render a
-    whole-pattern placeholder to ``""``), carrying a ``..`` component, or whose
-    **basename** starts with a dot. Dot-checking is basename-level on purpose:
-    ``mask.seg.nrrd`` is normal, and checking the whole string would break
-    subdirectory patterns.
+    Rejects a result outside *base*, equal to *base* itself, or carrying a
+    ``..`` component — containment only.
+
+    It deliberately does NOT reject a **dot-leading basename**, and has no
+    dedicated empty-name branch. Both shapes are what a *legitimately absent*
+    placeholder renders to under LENIENT mode: a parentless record's
+    ``{parent_id}``, a patient-level record's ``{study_uid}``, an unassigned
+    record's ``{user_id}``. Rejecting them here turned "file not found" into a
+    hard failure on every render-then-join path. They are rejected at
+    configuration load instead — ``validate_file_pattern`` refuses any pattern
+    whose worst-case render (every optional placeholder absent) is not a
+    well-formed relative name — so an administrator learns about it at startup
+    rather than a user meeting a 500 mid-request. An empty *rendered* string
+    still cannot pass: it normalises to *base*, which the equality check
+    rejects.
     """
-    if not rendered or not rendered.strip():
-        raise UnsafePathError(
-            f"rendered name is empty; would resolve to the working dir {base}",
-            value=rendered,
-        )
     joined = Path(os.path.normpath(base / rendered))
     if not joined.is_relative_to(base):
         raise UnsafePathError(f"rendered name escapes the working dir {base}", value=rendered)
@@ -237,8 +242,6 @@ def join_within(base: Path, rendered: str) -> Path:
     relative = joined.relative_to(base)
     if ".." in relative.parts:
         raise UnsafePathError("rendered name contains a '..' component", value=rendered)
-    if joined.name.startswith("."):
-        raise UnsafePathError("rendered name has a dot-leading basename", value=rendered)
     return joined
 
 
@@ -360,8 +363,72 @@ def _reject_data_placeholders(pattern: str) -> None:
         )
 
 
+# Placeholders a perfectly well-formed record can legitimately lack, so that
+# `fields_from` (files/_patterns.py) hands them to the LENIENT renderer as None
+# and they substitute to "". Every other placeholder the renderer knows
+# (`{id}`, `{patient_id}`, `{record_type.name}`, `{origin_type}`) is populated
+# for any record that exists, so a pattern may rely on it being non-empty.
+OPTIONAL_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "parent_id",  # a parentless record
+        "user_id",  # a record nobody is assigned to
+        "study_uid",  # a patient-level record
+        "series_uid",  # a patient- or study-level record
+    }
+)
+
+
+def _reject_vanishing_placeholder_shapes(pattern: str) -> None:
+    """Reject a pattern that degenerates when an optional placeholder is absent.
+
+    The renderer runs LENIENT: an absent ``{parent_id}`` / ``{user_id}`` /
+    ``{study_uid}`` / ``{series_uid}`` substitutes ``""`` rather than raising.
+    So ``{parent_id}.txt`` renders to ``.txt`` for a parentless record and
+    ``{study_uid}/mask.nrrd`` renders to ``/mask.nrrd`` for a patient-level one
+    — neither is a name the working-directory join can accept, and the failure
+    lands on whoever happens to touch that record rather than on the
+    administrator who wrote the pattern.
+
+    Checked on the *worst case*: every optional placeholder erased, every other
+    one masked to a non-empty sentinel (so ``{id}.nrrd`` and
+    ``{record_type.name}.nrrd`` stay legal — those always render to something).
+    A literal prefix on the affected segment is the fix in every case.
+    """
+    worst = _PLACEHOLDER_RE.sub(
+        lambda m: "" if m.group(1) in OPTIONAL_PLACEHOLDERS else "\x01", pattern
+    )
+    if not worst.strip():
+        reason = "an empty name"
+    elif any(not segment.strip() for segment in worst.split("/")):
+        reason = "a path with an empty segment"
+    elif PurePosixPath(worst).name.startswith("."):
+        reason = "a dot-leading basename"
+    else:
+        return
+    shown = worst.replace("\x01", "…")
+    absent = sorted(OPTIONAL_PLACEHOLDERS & set(_PLACEHOLDER_RE.findall(pattern)))
+    when = (
+        f"for a record that legitimately has no {', '.join('{' + name + '}' for name in absent)}"
+        if absent
+        else "even with every placeholder populated"
+    )
+    raise ValueError(
+        f"file pattern {pattern!r} would render to {shown!r} — {reason} — {when}. "
+        f"Give the affected path segment some literal text "
+        f"(e.g. 'report_{{parent_id}}.pdf', not '{{parent_id}}.pdf')."
+    )
+
+
 def validate_file_pattern(pattern: str) -> str:
     """Validate a ``FileDefinition.pattern`` at configuration-load time.
+
+    Two families of rule: the pattern's own *literal* text must be a safe
+    relative name (placeholders masked out first, so a ``.`` inside a
+    placeholder name cannot trip the basename check), and the pattern must
+    still render to a well-formed relative name when every optional
+    placeholder is absent — see ``_reject_vanishing_placeholder_shapes``.
+    The second family is what keeps ``join_within`` from having to reject an
+    empty or dot-leading rendered name at request time.
 
     Raises ``ValueError`` (not ``UnsafePathError``) to match
     ``validate_name_is_identifier`` on the same models: Pydantic turns it into
@@ -390,4 +457,9 @@ def validate_file_pattern(pattern: str) -> str:
     basename = PurePosixPath(literal).name
     if basename.startswith("."):
         raise ValueError(f"file pattern basename must not start with a dot, got {pattern!r}")
+
+    # Last: the rules above judge the pattern's literal text, this one judges
+    # what the pattern *renders to* in the worst case. Running it after them
+    # keeps the more specific literal message for a pattern that trips both.
+    _reject_vanishing_placeholder_shapes(pattern)
     return pattern

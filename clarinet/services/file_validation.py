@@ -114,13 +114,16 @@ class FileValidator:
                 target_dir = directory
 
             # join_within raises UnsafePathError uncaught rather than being
-            # folded into `errors` below. Files.render_for above already
-            # guards the *value* half (path_safe=True), so anything this
-            # join rejects is a pattern-literal problem — an administrator
-            # misconfiguration or a legacy row predating the config-load
-            # guard (D7), never data the current caller submitted. On the
-            # principle that a violation surfaces according to who caused
-            # it, that makes it a server-side failure, not a per-record 422.
+            # folded into `errors` below. It enforces containment only, and
+            # the two halves that could feed it a non-contained name are
+            # already covered upstream: Files.render_for guards every
+            # substituted *value* (path_safe=True rejects "/", "\", NUL and a
+            # bare "."/".."), and validate_file_pattern guards the pattern's
+            # literal text at config load. So anything reaching this raise is
+            # an administrator misconfiguration or a legacy row predating that
+            # validator (D7) — never data the current caller submitted. On the
+            # principle that a violation surfaces according to who caused it,
+            # that makes it a server-side failure, not a per-record 422.
             filename = resolved if join_within(target_dir, resolved).is_file() else None
 
             if filename:

@@ -229,6 +229,19 @@
   temporary and tracked by #552. **This rejection aborts startup** — the
   process does not come up — unlike the stored-row case below, which the
   running app tolerates by skipping just that one definition.
+- **A file pattern must still render to a valid name when an optional
+  placeholder is absent.** `{parent_id}`, `{user_id}`, `{study_uid}` and
+  `{series_uid}` are legitimately empty for a parentless, unassigned,
+  patient-level or study-level record, so a pattern that leans on one of them
+  for a whole path segment degenerates: `{parent_id}.txt` → `.txt`,
+  `{user_id}` → `""`, `{study_uid}/mask.nrrd` → `/mask.nrrd`. All three are
+  now rejected when the configuration loads. Migration: give the affected
+  segment some literal text — `report_{parent_id}.txt`,
+  `seg_{user_id}.nrrd`, `study_{study_uid}/mask.nrrd`. Patterns resting on
+  `{id}`, `{patient_id}`, `{record_type.name}` or `{origin_type}` need no
+  change; those are never absent. A *stored* row that violates the rule is
+  skipped from `RecordType.file_registry` with a WARNING rather than being
+  fatal (see Security below).
 - **Setting `Record.clarinet_storage_path` on record creation is now
   admin-only.** A non-admin supplying a non-`None` value is rejected (403) at
   the `POST /api/records` route; a second, defensive check in the demo-records
@@ -240,7 +253,10 @@
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
-  checked for containment. Closes #521.
+  checked for containment. The join enforces containment *only* — it accepts
+  a dot-leading basename, because a hidden file is not an escape and
+  rejecting it would hard-fail the legitimate absent-placeholder renders
+  described under Breaking. Closes #521.
 - A `RecordFileLink.filename` row persisted with a traversal before this release
   is now refused at read time instead of being followed. No migration is needed —
   the guard is the remediation.

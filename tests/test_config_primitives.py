@@ -73,19 +73,22 @@ def test_file_def_rejects_absolute_pattern():
 
 
 def test_file_def_accepts_subdirectory_pattern():
-    file_def = FileDef(name="rep", pattern="{study_uid}/report.pdf", level="SERIES")
+    # The directory segment carries literal text on purpose: a bare
+    # "{study_uid}/report.pdf" renders to "/report.pdf" for a patient-level
+    # record and is rejected at config load (tests/test_path_safety.py).
+    file_def = FileDef(name="rep", pattern="study_{study_uid}/report.pdf", level="SERIES")
     ref = FileRef(file_def, "output")
-    assert fileref_to_file_definition(ref).pattern == "{study_uid}/report.pdf"
+    assert fileref_to_file_definition(ref).pattern == "study_{study_uid}/report.pdf"
 
 
 def test_filedef_accepts_string_level_and_normalizes() -> None:
-    f = FileDef(pattern="{study_uid}/mask.nrrd", level="STUDY")
+    f = FileDef(pattern="study_{study_uid}/mask.nrrd", level="STUDY")
     assert f.level is DicomQueryLevel.STUDY
 
 
 def test_filedef_accepts_lowercase_string_level() -> None:
     # _coerce_dicom_level upper()s its input, so this is valid at runtime.
-    f = FileDef(pattern="{study_uid}/mask.nrrd", level="study")
+    f = FileDef(pattern="study_{study_uid}/mask.nrrd", level="study")
     assert f.level is DicomQueryLevel.STUDY
 
 
