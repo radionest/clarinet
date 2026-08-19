@@ -41,6 +41,8 @@ master_model = FileDef(
 | `{parent_id}` | `record.parent_record_id` (FK value) — the exact per-parent discriminator, resolved without loading the parent |
 | `{data.FIELD}` | A field from `record.data` — temporarily rejected, see [#552](https://github.com/radionest/clarinet/issues/552) |
 
+`{parent_id}`, `{user_id}`, `{study_uid}` and `{series_uid}` are **optional** — a parentless, unassigned, patient-level or study-level record has none, and they render to `""`. A pattern that leans on one for a whole path segment (`{parent_id}.txt`, `{user_id}`, `{study_uid}/mask.nrrd`) is rejected at config load; give the segment literal text (`report_{parent_id}.txt`, `study_{study_uid}/mask.nrrd`).
+
 Pattern-resolution details are in `<clarinet>/clarinet/.claude/rules/file-registry.md`.
 
 ### `level` semantics

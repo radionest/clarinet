@@ -26,5 +26,5 @@ reference stays in the path-scoped `.claude/rules/`.
 
 # Imaging and storage
 
-* [Files and the anonymized-path contract](./files-and-anonymization.md) - Why Files is the only way to turn a record into a path on disk, and why resolvers raise AnonPathError instead of falling back to raw DICOM UIDs.
+* [Files and the anonymized-path contract](./files-and-anonymization.md) - Why Files is the entry point for turning a record into a path on disk, why resolvers raise AnonPathError instead of falling back to raw DICOM UIDs, and the path-safety guards that keep a rendered filename inside the record's working directory.
 * [Imaging stack](./imaging-stack.md) - How Clarinet talks to imaging systems — the async DICOM client against PACS, the DICOMweb proxy and its four-tier cache behind OHIF, and the HTTP integration with 3D Slicer.
