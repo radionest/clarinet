@@ -483,6 +483,21 @@ fn file_definition_decoder() -> decode.Decoder(FileDefinition) {
     None,
     decode.optional(decode.string),
   )
+  use allow_path_collision <- decode.optional_field(
+    "allow_path_collision",
+    False,
+    decode.bool,
+  )
+  use grid_conform_to <- decode.optional_field(
+    "grid_conform_to",
+    None,
+    decode.optional(decode.string),
+  )
+  use on_grid_mismatch <- decode.optional_field(
+    "on_grid_mismatch",
+    None,
+    decode.optional(decode.string),
+  )
   decode.success(models.FileDefinition(
     name: name,
     pattern: pattern,
@@ -491,6 +506,9 @@ fn file_definition_decoder() -> decode.Decoder(FileDefinition) {
     multiple: multiple,
     role: role,
     level: level,
+    allow_path_collision: allow_path_collision,
+    grid_conform_to: grid_conform_to,
+    on_grid_mismatch: on_grid_mismatch,
   ))
 }
 

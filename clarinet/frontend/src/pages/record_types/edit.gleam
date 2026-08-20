@@ -378,6 +378,10 @@ fn file_definitions_to_json(
           #("required", json.bool(f.required)),
           #("multiple", json.bool(f.multiple)),
           #("role", json.string(role_str)),
+          #("level", json.nullable(f.level, json.string)),
+          #("allow_path_collision", json.bool(f.allow_path_collision)),
+          #("grid_conform_to", json.nullable(f.grid_conform_to, json.string)),
+          #("on_grid_mismatch", json.nullable(f.on_grid_mismatch, json.string)),
         ])
       })
     None -> json.preprocessed_array([])
