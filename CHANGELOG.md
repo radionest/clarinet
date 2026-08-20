@@ -252,7 +252,8 @@
   `POST /api/records/{id}/submit` reject the submission with 422 when a
   `role=OUTPUT` `FileDefinition.pattern` would render to a path outside the
   record's working directory. The check runs before the submission is
-  persisted, so a rejected submit leaves the record untouched; a backstop
+  persisted, so a rejected submit leaves the record's data and status
+  untouched (re-matched INPUT file links may already have committed); a backstop
   check during the post-submit checksum scan can also reject, after the
   record's own data has committed. Neither PATCH variant is affected — they
   update data without re-running the output-path checks. The detail names the

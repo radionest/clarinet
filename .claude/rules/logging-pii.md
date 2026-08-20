@@ -35,7 +35,7 @@ never renders locals.
 
 A dedicated handler only covers what reaches FastAPI. **The worker path is a
 confirmed hole**: TaskIQ's receiver logs a failed task with stdlib
-`logger.exception(..., exc_info=True)`, which reaches the diagnose-enabled stderr
+`logger.error(..., exc_info=True)`, which reaches the diagnose-enabled stderr
 sink through `InterceptHandler`, so a PHI-bearing attribute raised inside a task
 is rendered as a frame local. Not every off-request path leaks, though — check
 before assuming. `RecordFlowEngine`'s action dispatch does **not**: its blanket
