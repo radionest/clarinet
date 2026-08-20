@@ -166,7 +166,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch.object(service, "sync_output_files", new_callable=AsyncMock) as sync_mock,
         ):
             patched.model_validate.return_value = record_read_mock
             result, result_old_status = await service.submit_data(1, data, RecordStatus.finished)
@@ -547,7 +547,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+            patch.object(service, "sync_output_files", new_callable=AsyncMock),
         ):
             patched.model_validate.return_value = MagicMock()
             await service.submit_data(1, data, RecordStatus.finished, user_id=actor, actor_id=actor)
@@ -601,7 +601,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+            patch.object(service, "sync_output_files", new_callable=AsyncMock),
         ):
             patched.model_validate.return_value = MagicMock()
             await service.submit_data(

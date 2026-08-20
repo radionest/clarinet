@@ -590,13 +590,20 @@ async def _process_submission(
 
     # Output grids are enforced pre-commit: the post-commit output sync
     # never raises, so this is the only point that can still reject.
+    repaired: list[str] = []
     if not skip_validation:
-        await enforce_output_grids(record_read, parent=parent_read)
+        repaired = await enforce_output_grids(record_read, parent=parent_read)
 
     if is_update:
         updated, _ = await service.update_data(
             record_id, validated_data, acting_user=user, actor_id=actor_id
         )
+        # A conform repair rewrote OUTPUT bytes; only submit_data runs the
+        # post-commit output sync, so the update path must sync explicitly or
+        # RecordFileLink.checksum keeps describing the pre-repair bytes and
+        # downstream file triggers never fire for the mutation.
+        if repaired:
+            await service.sync_output_files(updated)
     else:
         if file_result and file_result.matched_files:
             await repo.set_files(record, file_result.matched_files)

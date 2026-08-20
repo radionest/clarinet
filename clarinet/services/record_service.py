@@ -569,7 +569,7 @@ class RecordService:
 
         # Register output files that appeared on disk and emit file events
         if new_status == RecordStatus.finished:
-            await self._sync_output_files(record)
+            await self.sync_output_files(record)
 
         return record, old_status
 
@@ -1363,7 +1363,7 @@ class RecordService:
                 f"Record {record_id}: registered {created} output file link(s): {sorted(new_links)}"
             )
 
-    async def _sync_output_files(self, record: Record) -> None:
+    async def sync_output_files(self, record: Record) -> None:
         """Reconcile OUTPUT file state on disk with the DB after a submission.
 
         Computes checksums on disk for OUTPUT files, registers files that

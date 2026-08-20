@@ -455,6 +455,26 @@ async def test_patch_data_applies_delete_action(client, test_session, series_dir
     assert (refreshed.data or {}) == before_data
 
 
+async def test_patch_data_conform_repair_syncs_checksum(
+    client, test_session, series_dir, make_record
+):
+    """The POST path proves checksum-after-conform consistency; before this fix
+    the PATCH path repaired the bytes but left the stored checksum stale.
+    """
+    volume_path = _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    record = await make_record(on_grid_mismatch="conform", status=RecordStatus.finished)
+
+    response = await client.patch(record_data_url(record.id), json={"note": "edit"})
+
+    assert response.status_code == 200
+    relation = grid_relation(read_grid(volume_path), read_grid(seg_path))
+    assert relation.kind is RelationKind.SAME
+    refreshed = await RecordRepository(test_session).get_with_relations(record.id)
+    stored = {link.file_definition.name: link.checksum for link in refreshed.file_links}
+    assert stored["seg"] == await Files.checksum(Path(seg_path))
+
+
 async def test_post_data_status_failed_skips_the_guard(
     client, test_session, series_dir, make_record
 ):
