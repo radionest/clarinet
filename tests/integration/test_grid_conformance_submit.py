@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 import pytest_asyncio
 
+from clarinet.exceptions.domain import BusinessRuleViolationError
 from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
@@ -273,6 +274,72 @@ async def test_conform_refuses_to_quantize_a_non_uint8_output(
     assert seg_path.read_bytes() == before
 
 
+async def test_reject_409_includes_both_grid_summaries(
+    client, test_session, series_dir, make_record
+):
+    """#499 asked for '409 with both grid summaries' — the INPUT side had them,
+    the OUTPUT side reported only the ``RelationKind``.
+    """
+    volume_path = _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    record = await make_record(on_grid_mismatch="reject")
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 409
+    detail = str(response.json())
+    assert read_grid(seg_path).summary() in detail
+    assert read_grid(volume_path).summary() in detail
+
+
+async def test_failed_conform_repair_read_preserves_original_bytes(
+    client, test_session, series_dir, make_record, monkeypatch
+):
+    """A repair whose result cannot even be read must leave the original intact
+    (pre-fix, the repair overwrote the subject in place before the recheck).
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    before = seg_path.read_bytes()
+
+    def _bad_repair(seg, grid, *, out_path=None, **kwargs):
+        Path(out_path).write_bytes(b"garbage")
+        return True
+
+    monkeypatch.setattr("clarinet.services.grid_policy.conform_seg_to_grid", _bad_repair)
+    record = await make_record(on_grid_mismatch="conform")
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 409
+    assert seg_path.read_bytes() == before
+    assert not list(series_dir.glob(".repair.*"))
+
+
+async def test_failed_conform_recheck_preserves_original_bytes(
+    client, test_session, series_dir, make_record, monkeypatch
+):
+    """A repair that lands on a readable-but-still-wrong grid must 409 with the
+    original untouched and the temp file cleaned up.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    before = seg_path.read_bytes()
+
+    def _wrong_repair(seg, grid, *, out_path=None, **kwargs):
+        _write(Path(out_path), shape=(8, 8, 8))  # valid file, FOREIGN grid
+        return True
+
+    monkeypatch.setattr("clarinet.services.grid_policy.conform_seg_to_grid", _wrong_repair)
+    record = await make_record(on_grid_mismatch="conform")
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 409
+    assert seg_path.read_bytes() == before
+    assert not list(series_dir.glob(".repair.*"))
+
+
 async def test_missing_required_input_takes_priority_over_output_delete(
     client, test_session, series_dir, make_record
 ):
@@ -435,3 +502,21 @@ async def test_enforce_output_grids_skips_input_role(test_session, series_dir, m
     await enforce_output_grids(record_read)  # must not raise — INPUT is out of scope
 
     assert seg_path.read_bytes() == before  # untouched
+
+
+async def test_unbound_reference_is_a_conflict_at_runtime(test_session, series_dir, make_record):
+    """The runtime fallback 409 for a dangling ``grid_conform_to`` had no test —
+    only ``FileValidator``'s twin was covered.
+    """
+    _write(series_dir / "volume.nii")
+    _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+
+    record = await make_record(on_grid_mismatch="reject")
+    loaded = await RecordRepository(test_session).get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
+    record_read.record_type.file_registry = [
+        fd for fd in (record_read.record_type.file_registry or []) if fd.name == "seg"
+    ]
+
+    with pytest.raises(BusinessRuleViolationError, match="not bound"):
+        await enforce_output_grids(record_read)
