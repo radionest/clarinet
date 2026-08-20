@@ -419,8 +419,16 @@ def _reject_vanishing_placeholder_shapes(pattern: str) -> None:
     )
 
 
-def validate_file_pattern(pattern: str) -> str:
+def validate_file_pattern(pattern: str, *, is_collection: bool = False) -> str:
     """Validate a ``FileDefinition.pattern`` at configuration-load time.
+
+    *is_collection* mirrors ``FileDefinition.multiple``. A collection's pattern
+    is never rendered — ``_patterns.glob_file_paths`` substitutes every
+    placeholder with ``*`` and globs — so the vanishing-placeholder rule does
+    not apply to it: ``{parent_id}.nrrd`` globs to ``*.nrrd``, which is a
+    perfectly good collection pattern rather than a degenerate name. The
+    literal-text rules and the ``{data.*}`` ban still apply, because those
+    judge the pattern itself rather than what it renders to.
 
     Two families of rule: the pattern's own *literal* text must be a safe
     relative name (placeholders masked out first, so a ``.`` inside a
@@ -461,5 +469,8 @@ def validate_file_pattern(pattern: str) -> str:
     # Last: the rules above judge the pattern's literal text, this one judges
     # what the pattern *renders to* in the worst case. Running it after them
     # keeps the more specific literal message for a pattern that trips both.
-    _reject_vanishing_placeholder_shapes(pattern)
+    # Skipped for collections, which glob rather than render (see the
+    # is_collection note above).
+    if not is_collection:
+        _reject_vanishing_placeholder_shapes(pattern)
     return pattern

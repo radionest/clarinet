@@ -1261,11 +1261,13 @@ async def add_demo_records_for_user(
             record_type_name=record_type.name,
             series_uid=series.series_uid if record_type.level == "SERIES" else None,
         )
-        # This function never sets clarinet_storage_path itself, so the
-        # check is a no-op today — kept so the two Record(**...model_dump())
-        # construction sites (this one and add_record) enforce the same rule
-        # if either is ever extended to accept it from a caller.
-        await check_storage_path_admin_only(new_record, user)
+        # No check_storage_path_admin_only here on purpose. `user` is the
+        # record OWNER these demo records are created for, not the
+        # authenticated caller, so passing it would authorize against the
+        # wrong subject — granting or denying by the target user's roles.
+        # The invariant is structural instead: RecordCreate is built field by
+        # field just above and never takes clarinet_storage_path from input.
+        # Anything that changes that must add the caller's own check.
         records.append(Record(**new_record.model_dump()))
 
     if records:

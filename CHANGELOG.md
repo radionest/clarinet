@@ -239,7 +239,9 @@
   segment some literal text — `report_{parent_id}.txt`,
   `seg_{user_id}.nrrd`, `study_{study_uid}/mask.nrrd`. Patterns resting on
   `{id}`, `{patient_id}`, `{record_type.name}` or `{origin_type}` need no
-  change; those are never absent. A *stored* row that violates the rule is
+  change; those are never absent. **Collections (`multiple=True`) are exempt** —
+  their placeholders are replaced with `*` and globbed, never rendered, so
+  `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. A *stored* row that violates the rule is
   skipped from `RecordType.file_registry` with a WARNING rather than being
   fatal (see Security below).
 - **Setting `Record.clarinet_storage_path` on record creation is now

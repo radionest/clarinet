@@ -274,6 +274,24 @@ class TestRejectsVanishingPlaceholderShapes:
         with pytest.raises(ValueError, match="would render to"):
             validate_file_pattern(pattern)
 
+    @pytest.mark.parametrize("pattern", VANISHING_PLACEHOLDER_PATTERNS)
+    def test_collection_patterns_are_exempt(self, pattern):
+        """A collection globs, it never renders.
+
+        ``glob_file_paths`` substitutes every placeholder with ``*``, so
+        ``{parent_id}.nrrd`` becomes ``*.nrrd`` — a legitimate collection
+        pattern, not a degenerate name. Applying the rule to collections
+        aborted startup for configs that work fine.
+        """
+        assert validate_file_pattern(pattern, is_collection=True) == pattern
+
+    def test_collection_exemption_does_not_reach_the_literal_rules(self):
+        """Only the render-time rule is skipped; literal text is still judged."""
+        with pytest.raises(ValueError, match="must be relative"):
+            validate_file_pattern("/abs/{parent_id}.nrrd", is_collection=True)
+        with pytest.raises(ValueError, match="may not interpolate record data"):
+            validate_file_pattern("{data.side}_x.nrrd", is_collection=True)
+
     def test_error_shows_the_degenerate_render_and_names_the_fix(self):
         with pytest.raises(ValueError) as exc:
             validate_file_pattern("{parent_id}.txt")

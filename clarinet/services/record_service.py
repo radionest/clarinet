@@ -16,7 +16,7 @@ from clarinet.exceptions.domain import (
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.exceptions.http import CustomHTTPException
-from clarinet.files import Files
+from clarinet.files import Files, join_within
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -81,8 +81,16 @@ def _render_output_path(
     run before the submission is persisted) and the post-scan reconciliation
     (``_missing_output_links``, run after) — both need the identical PHI-safe
     shape: the WARNING logs ``str(exc)`` (placeholder key + reason, never the
-    value); the raw value reaches only the submitter, via ``exc.value`` in the
-    422 body. Raises a *fresh* ``CustomHTTPException`` rather than the shared
+    value); the raw value reaches the API caller, via ``exc.value`` in the
+    422 body.
+
+    Two reasons that last part is NOT "only the submitter": this helper also
+    runs from check-files, where nothing was submitted, and with ``{data.*}``
+    banned ``exc.value`` holds a *stored* identity field rather than anything
+    the caller supplied. Whether the 422 should echo it at all is an open
+    question on this branch — see the PR description.
+
+    Raises a *fresh* ``CustomHTTPException`` rather than the shared
     ``UNPROCESSABLE_ENTITY`` singleton — that singleton's ``.with_context()``
     mutates a module-level instance, and this is the one call path that puts
     PHI through it.
@@ -96,8 +104,11 @@ def _render_output_path(
         )
         raise CustomHTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            # Endpoint-neutral wording on purpose: this helper also runs from
+            # check-files, where nothing was submitted, so "from the submitted
+            # data" would be a lie there.
             detail=(
-                f"File '{fd.name}' cannot be resolved from the submitted data: "
+                f"File '{fd.name}' cannot be safely resolved for this record: "
                 f"{exc} (offending value: {exc.value!r})"
             ),
         ) from exc
@@ -1065,8 +1076,14 @@ class RecordService:
         if file_def.multiple:
             candidates = await Files.in_thread(f.glob, file_def)
         else:
-            file_path = target_dir / Files.render_for(
-                record_read, file_def.pattern, parent=parent_read
+            # join_within before the probe, not just _filter_in_sandbox after
+            # it: the sandbox filter guards what is finally deleted or served,
+            # but `.is_file()` on an unchecked join is itself an existence
+            # oracle for paths outside target_dir — the same defect fixed at
+            # the file-validation probe. This is the last render-then-join
+            # site, so the "every join is contained" claim now holds literally.
+            file_path = join_within(
+                target_dir, Files.render_for(record_read, file_def.pattern, parent=parent_read)
             )
             if not await Files.in_thread(file_path.is_file):
                 return []
@@ -1387,7 +1404,7 @@ class RecordService:
             raise CustomHTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    f"Output files cannot be resolved from the submitted data: "
+                    f"Output files cannot be safely resolved for this record: "
                     f"{exc} (offending value: {exc.value!r})"
                 ),
             ) from exc

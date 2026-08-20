@@ -68,7 +68,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/submit` | POST | 200 | Submit + run `slicer_result_validator` if configured; merges `__execResult` into data on save. **409** when the record is `blocked`, `preparing`, or already `finished`. **422**: same unsafe-OUTPUT-path rejection as POST `/data` |
 | `/api/records/{id}/submit` | PATCH | 200 | Re-submit a finished record (same Slicer-validator + `__execResult` merge as POST). **409** for non-superusers when the type locks submitted records |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
-| `/api/records/{id}/check-files` | POST | 200 | Check files |
+| `/api/records/{id}/check-files` | POST | 200 | Check files. **422** when an OUTPUT `FileDefinition.pattern` cannot be safely resolved while registering output links; **500** for the same failure raised earlier, by the checksum scan itself |
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record. Hard mode: **409** for non-superusers when the record is finished and its type locks submitted records |
