@@ -26,15 +26,22 @@ def _relate(subject: Path, reference: Path) -> tuple[GridRelation, Grid, Grid]:
     return grid_relation(reference_grid, subject_grid), reference_grid, subject_grid
 
 
+def _repair_tmp_path(subject: Path) -> Path:
+    """Hidden sibling temp target for a conform repair.
+
+    The dot-prefix keeps the extension chain intact (``.repair.seg.nii``), so
+    format detection by suffix still works.
+    """
+    return subject.with_name(".repair." + subject.name)
+
+
 def _repair_to_temp(subject: Path, reference: Path) -> Path:
     """Conform *subject* onto *reference*'s grid into a hidden sibling temp file.
 
-    The dot-prefix keeps the extension chain intact (``.repair.seg.nii``), so
-    format detection by suffix still works. The caller must verify the result
-    and ``os.replace`` it over *subject* — a failed repair never touches the
-    original bytes.
+    The caller must verify the result and ``os.replace`` it over *subject* —
+    a failed repair never touches the original bytes.
     """
-    tmp = subject.with_name(".repair." + subject.name)
+    tmp = _repair_tmp_path(subject)
     conform_seg_to_grid(subject, reference, out_path=tmp)
     return tmp
 
@@ -123,13 +130,14 @@ async def enforce_output_grids(
         action: GridMismatchAction = fd.on_grid_mismatch or "reject"
 
         if action == "conform" and relation.kind is RelationKind.REARRANGED:
-            tmp: Path | None = None
+            # Computed up front so the cleanup below also catches a repair
+            # that raised after partially writing the temp file.
+            tmp = _repair_tmp_path(subject)
             try:
-                tmp = await Files.in_thread(_repair_to_temp, subject, reference)
+                await Files.in_thread(_repair_to_temp, subject, reference)
                 recheck, recheck_ref, recheck_subj = await Files.in_thread(_relate, tmp, reference)
             except ImageError as e:
-                if tmp is not None:
-                    await Files.in_thread(_delete, tmp)
+                await Files.in_thread(_delete, tmp)
                 msg = f"Failed to conform output '{fd.name}' onto '{ref_def.name}': {e}"
                 logger.warning(f"Record {record.id}: OUTPUT grid guard — {msg}")
                 raise BusinessRuleViolationError(msg) from e
