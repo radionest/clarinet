@@ -1,5 +1,9 @@
 # Update Log
 
+## 2026-08-20
+
+* **Update**: [Domain model](./domain-model.md) — corrected the status-diagram edge into `blocked`: a record is blocked at creation or at the `preparing` exit, never demoted from `pending` (check-files only withholds an existing block's auto-unblock).
+
 ## 2026-07-27
 
 * **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — added the vendored-code convention: third-party/generated code goes in `plan/lib/`, both configurations installed by `clarinet quality init` exclude it from checking, and fixes go upstream and are re-vendored rather than patched locally.

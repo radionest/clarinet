@@ -74,7 +74,7 @@ stateDiagram-v2
     [*] --> pending
     preparing --> blocked : files missing or grid mismatch on exit
     preparing --> pending : files valid
-    pending --> blocked : required inputs missing or grid mismatch
+    [*] --> blocked : created with required inputs missing or grid mismatch
     blocked --> pending : check-files finds files valid
     pending --> inwork
     inwork --> finished

@@ -243,7 +243,7 @@ mutation, for every declaration that reaches the validator. Not all of them
 do: `RecordTypeCreate.file_registry` defaults to `None`, and some call sites
 attach file links separately, so a dangling `grid_conform_to` can still
 arrive at runtime, where both enforcement paths fail closed instead —
-`enforce_output_grids` with a 409 (`grid_policy.py:54-62`), `FileValidator`
+`enforce_output_grids` with a 409 (`grid_policy.py:93-103`), `FileValidator`
 with a `grid_mismatch` error (`file_validation.py:130-138`). Naming the
 RecordType and the declaring file, it rejects:
 
@@ -317,7 +317,7 @@ existence: a subject present while its reference is missing is itself a
 `grid_mismatch` error, not a skip (`file_validation.py:141-150`) — the same
 asymmetry as OUTPUT, just landing on `blocked`/422 instead of a 409.
 
-**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:31`)
+**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:58`)
 runs pre-commit inside `_process_submission`, after any
 `slicer_result_validator` has written its output and before the record data
 is written — the last point in the submit flow that can still reject (the
@@ -347,10 +347,14 @@ the first place, though: `required=True` on an OUTPUT binding is decorative
 today, so deleting the file outright is a clean way past this entire guard —
 deliberately out of scope here. It is **not** conditional on the reference's
 existence — an OUTPUT present while its reference is missing is itself a
-409 ("cannot verify the output's grid"). A `conform` repair is re-verified
-by re-reading both files from disk and re-classifying from scratch, never
-trusting `conform_seg_to_grid`'s return value; a `delete` unlinks (tolerating
-a concurrent delete that already won the race) before raising.
+409 ("cannot verify the output's grid"). A `conform` repair is written to a
+hidden sibling temp file (`.repair.<name>`) and re-verified by re-reading
+that temp file and the reference from disk and re-classifying from scratch,
+never trusting `conform_seg_to_grid`'s return value; only a `SAME` verdict
+atomically replaces the original, so a failed repair or a failed re-check
+409s with the original bytes untouched and the temp file removed. A `delete`
+unlinks (tolerating a concurrent delete that already won the race) before
+raising.
 
 **Scope: four submission endpoints, not two.** `enforce_output_grids` lives in
 `_process_submission`, which backs `POST`/`PATCH /records/{id}/submit`
@@ -360,6 +364,17 @@ unguarded would be a fail-open hole. The guard is skipped only when
 `skip_validation` is true, reachable exclusively via
 `POST /data?status=failed` (marking a record failed, where output files may
 legitimately not exist yet).
+
+**A successful `conform` repair is followed through on all four.** Each
+endpoint re-runs the post-commit output sync afterwards — `POST /data` and
+`POST /submit` through `submit_data`'s own sync, `PATCH /data` and
+`PATCH /submit` through an explicit `sync_output_files` call the router makes
+only when a repair actually happened — so `RecordFileLink.checksum` describes
+the repaired bytes rather than the pre-repair ones, and file-change triggers
+fire for the mutation. Every 409 raised on a *classified* mismatch carries
+both grids' `summary()` output; the branches that never got a grid to
+classify (a dangling reference, a reference missing from disk, an unreadable
+file) name the file and the reason instead.
 
 One consequence of that scope is worth stating plainly rather than
 discovering by accident: **`PATCH /records/{id}/data` is a metadata-only edit
@@ -396,6 +411,12 @@ calls `update_record_data`, which issues `PATCH /records/{id}/data`
 guard is any route — whoever or whatever triggers it — that reaches
 `update_status`/`bulk_update_status` directly instead of going through
 submission: the routes named above.
+
+The optional pre-open guard proposed in #499 was not built either: opening a
+record in Slicer never re-checks its declared INPUT pairs. An INPUT that
+drifts while the record sits `pending` — after creation and check-files have
+already passed it — therefore surfaces only at submit time, as a 422 raised
+once the painting effort is already spent.
 
 ### Adoption order
 

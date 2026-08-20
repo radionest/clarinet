@@ -594,6 +594,34 @@
   voxel-less has no layer to import, so the re-grid materializes the
   reference extent as an all-zero labelmap; without it Slicer's writer emits
   a degenerate 1×1×1 file and the post-write grid check deletes it.
+- The record-type edit UI no longer strips file-definition fields on save. The
+  form round-tripped only part of `FileDefinitionRead`, and the backend treats
+  a submitted `file_registry` as authoritative, so every save nulled
+  `grid_conform_to`, `on_grid_mismatch` and `level` on the global
+  `FileDefinition` row and reset `allow_path_collision` on the binding — in
+  TOML mode the background export then persisted the loss to disk. All ten
+  read fields now round-trip, pinned by a parity test against
+  `FileDefinitionRead.model_fields`.
+- An `on_grid_mismatch="conform"` repair no longer risks the original OUTPUT.
+  The repair is written to a hidden sibling temp file, re-read and
+  re-classified from disk, and only then atomically moved over the original —
+  a repair that fails, or lands on a still-mismatched grid, now 409s with the
+  original bytes intact instead of having already overwritten them in place.
+- A `conform` repair on the update paths (`PATCH /records/{id}/data`,
+  `PATCH /records/{id}/submit`) now syncs stored output checksums and fires
+  file-change triggers. Only the POST paths ran the post-commit output sync,
+  so a PATCH-triggered repair left `RecordFileLink.checksum` describing the
+  pre-repair bytes and no downstream file flow ever saw the mutation.
+- OUTPUT grid-mismatch 409s now carry both grids' summaries (shape, spacing,
+  origin, direction), matching what the INPUT side already reported — the
+  message previously named only the `RelationKind`.
+- Config load now rejects two grid-conformance declarations it used to accept:
+  a `grid_conform_to` pointing at a file that itself declares one (chains and
+  cycles — enforcement order is undefined and a repaired reference silently
+  invalidates its dependents), and an `on_grid_mismatch` set without a
+  `grid_conform_to` (the action could never run). An INPUT file referencing an
+  OUTPUT of the same RecordType is legal but now logs a `WARNING` — the record
+  stays blocked until that OUTPUT exists.
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

@@ -23,7 +23,7 @@ File definitions are stored in a normalized schema with M2M relationship.
 | `multiple` | `bool` | `True` = glob collection, `False` = singular |
 | `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |
 | `grid_conform_to` | `str \| None` | Name of another bound `FileDefinition` whose on-disk voxel grid this file must match. `None` = no check (see below) |
-| `on_grid_mismatch` | `str \| None` | `GridMismatchAction`: `conform` \| `delete` \| `reject`. Consulted only for OUTPUT files at submit time; `None` = `reject`. An out-of-vocabulary stored value is logged and read as `reject` by `FileDefinitionRead._coerce_unknown_mismatch_action` (`file_schema.py:232-246`) — read-DTO leniency only, since `FileDef`/`FileRegistryEntry` still reject such a value outright |
+| `on_grid_mismatch` | `str \| None` | `GridMismatchAction`: `conform` \| `delete` \| `reject`. Consulted for OUTPUT files on every submission/update endpoint (`POST`/`PATCH /data`, `POST`/`PATCH /submit`), including the destructive `delete` action on the metadata-only `PATCH /data`; `None` = `reject`. An out-of-vocabulary stored value is logged and read as `reject` by `FileDefinitionRead._coerce_unknown_mismatch_action` (`file_schema.py:232-246`) — read-DTO leniency only, since `FileDef`/`FileRegistryEntry` still reject such a value outright |
 
 **`RecordTypeFileLink`** (table) — M2M: RecordType ↔ FileDefinition:
 
@@ -113,7 +113,11 @@ pattern isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd` —
 `.seg.nrrd` is covered by the `.nrrd` check).
 
 The declaration is a property of the *file*, not of a `RecordTypeFileLink`
-binding — every RecordType binding a file inherits it. Only INPUT and OUTPUT
+binding — every RecordType binding a file inherits it, so all RecordTypes
+binding the same `FileDefinition` must agree on its
+`grid_conform_to`/`on_grid_mismatch`. Reconciliation is last-write-wins per
+definition, so disagreeing types flip the shared row back and forth on every
+reconcile pass and can 409 each other at runtime. Only INPUT and OUTPUT
 bindings are enforced at runtime; an INTERMEDIATE file may still declare
 `grid_conform_to` (config load applies no role filter) but nothing ever
 checks it — a silent no-op, not a rejection. INPUT mismatches are never
