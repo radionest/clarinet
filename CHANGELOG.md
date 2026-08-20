@@ -278,8 +278,10 @@
   missing" check is no longer enforced — file validation only inspects
   definitions present in `file_registry`, so a record can no longer be marked
   `blocked` for that file until the row's pattern is fixed.
-- A `clarinet_storage_path` that is not absolute or not normalized is now
-  refused at path-resolution time. This is deliberately narrower than full
+- A `clarinet_storage_path` that is not absolute, or that carries a `..`
+  component, is now refused at path-resolution time. A trailing slash or a
+  doubled separator stays legal — neither enables traversal, and a stored row
+  may already hold one. This is deliberately narrower than full
   containment: the field is *by design* a root disjoint from
   `settings.storage_path` (an admin-only per-record storage-root override, not
   a subdirectory selector), so no containment check applies — a well-formed

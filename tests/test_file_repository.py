@@ -304,6 +304,40 @@ class TestFileRepositoryConfiguration:
         with pytest.raises(UnsafePathError):
             FileRepository(record)
 
+    @pytest.mark.parametrize("override", ["/custom/storage/", "/custom//storage"])
+    @patch("clarinet.files._resolver.settings")
+    def test_cosmetically_unnormalized_storage_path_accepted(
+        self, mock_settings: MagicMock, override: str
+    ) -> None:
+        """A trailing slash or doubled separator is not a traversal.
+
+        ``Path()`` has always collapsed both, and rows in either shape can
+        already exist in a deployed database. Rejecting them would raise on
+        every ``Files`` construction for that record — a 500 on read paths,
+        not just writes. Only absoluteness and ``..`` components are checked.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path=override)
+
+        FileRepository(record)  # must not raise
+
+    @patch("clarinet.files._resolver.settings")
+    def test_posix_storage_path_accepted_regardless_of_platform(
+        self, mock_settings: MagicMock
+    ) -> None:
+        """A POSIX-style root must not depend on the host's path flavour.
+
+        Regression: the check compared the value against
+        ``os.path.normpath`` output, which on Windows rewrites
+        ``/custom/storage`` to ``\\custom\\storage`` — so every such row was
+        refused there while passing on Linux. Windows CI caught it; the
+        Linux-only suite could not.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="/custom/storage")
+
+        FileRepository(record)  # must not raise
+
     @patch("clarinet.files._storage.settings")
     @patch("clarinet.files._resolver.settings")
     def test_disk_path_template_custom_template_respected(

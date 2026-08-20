@@ -53,10 +53,14 @@ class _SeriesLazySnapshot:
 def _resolve_storage_base(clarinet_storage_path: str | None) -> Path:
     """Validate the per-record storage-path override, or fall back to the default.
 
-    Purely lexical (``os.path.normpath``, no filesystem access) — this is the
-    resolution choke point, so the check here covers every consumer
-    (``Files``, the Slicer context builder) and every row regardless of how
-    it was created, including rows already in a deployed database.
+    Purely lexical (no filesystem access) — this is the resolution choke
+    point, so the check here covers every consumer (``Files``, the Slicer
+    context builder) and every row regardless of how it was created,
+    including rows already in a deployed database. Because it runs on every
+    construction, it rejects only what actually enables traversal: a
+    non-absolute base, or one carrying a ``..`` component. Cosmetic shapes a
+    stored row may legitimately hold — a trailing slash, a doubled separator
+    — are accepted and collapsed by ``Path``.
 
     ``join_within``'s containment proof is purely lexical too, so it is only
     as trustworthy as its own ``base`` argument: a relative or
@@ -75,10 +79,17 @@ def _resolve_storage_base(clarinet_storage_path: str | None) -> Path:
     """
     if not clarinet_storage_path:
         return Path(settings.storage_path)
-    normalized = os.path.normpath(clarinet_storage_path)
-    if not os.path.isabs(clarinet_storage_path) or normalized != clarinet_storage_path:
+    # Check the two properties directly rather than comparing against
+    # os.path.normpath's output. That equality test was platform-dependent:
+    # on Windows normpath("/custom/storage") returns "\\custom\\storage", so
+    # every POSIX-style root was refused. It also made cosmetic shapes fatal
+    # -- a trailing slash or a doubled separator, which Path() has always
+    # collapsed harmlessly, would raise on every Files construction for a row
+    # already in the database. Neither enables traversal; only the two checks
+    # below do.
+    if not os.path.isabs(clarinet_storage_path) or ".." in Path(clarinet_storage_path).parts:
         raise UnsafePathError(
-            "clarinet_storage_path must be an absolute, normalized path",
+            "clarinet_storage_path must be absolute and free of '..' components",
             value=clarinet_storage_path,
         )
     return Path(clarinet_storage_path)
