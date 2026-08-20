@@ -247,6 +247,16 @@
   the `POST /api/records` route; a second, defensive check in the demo-records
   helper is currently a no-op (that path never sets the field itself).
   Creating a record without the field is unaffected.
+- **Finishing a record now returns 422 when an OUTPUT file pattern cannot be
+  safely resolved.** `POST /api/records/{id}/data` and
+  `POST /api/records/{id}/submit` reject the submission with 422 when a
+  `role=OUTPUT` `FileDefinition.pattern` would render to a path outside the
+  record's working directory. The check runs before the submission is
+  persisted, so a rejected submit leaves the record untouched; a backstop
+  check during the post-submit checksum scan can also reject, after the
+  record's own data has committed. Neither PATCH variant is affected — they
+  update data without re-running the output-path checks. The detail names the
+  offending file definition.
 
 ### Security
 

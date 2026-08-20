@@ -19,7 +19,7 @@ Durable, cross-cutting explanation lives in the knowledge base at [`docs/kb/`](.
 | `frontend-page-contract.md` | MVU page contract, Shared/OutMsg, effects, LoadStatus, cache, errors | `clarinet/frontend/src/**/*.gleam`, test |
 | `frontend-routing-forms.md` | API layer, routing under sub-path, list pattern, forms, server HTML | `clarinet/frontend/src/**/*.gleam`, test |
 | `frontend-reference.md` | Decoder gotchas, logging, common pitfalls, toolchain | `clarinet/frontend/src/**/*.gleam`, test |
-| `logging-pii.md` | Sanitize Referer/Origin before logging, loguru `extra=` quirk | `auth_config.py`, `logger.py` |
+| `logging-pii.md` | Sanitize Referer/Origin before logging, loguru `extra=` quirk, `diagnose=True` frame-locals leak | `auth_config.py`, `logger.py`, `exception_handlers.py`, `domain.py` |
 | `pipeline-ops.md` | Pipeline settings, testing, dependencies | `clarinet/services/pipeline/**` |
 | `pr-review.md` | Project-specific PR review checklist | used by `pr-diff-reviewer` subagent |
 | `project-setup.md` | Project init, settings, `plan/` structure | `settings.toml`, `plan/**` |

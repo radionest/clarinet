@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Files and the anonymized-path contract
-description: Why Files is the only way to turn a record into a path on disk, and why resolvers raise AnonPathError instead of falling back to raw DICOM UIDs.
+description: Why Files is the entry point for turning a record into a path on disk, why resolvers raise AnonPathError instead of falling back to raw DICOM UIDs, and the path-safety guards that keep a rendered filename inside the record's working directory.
 tags: [files, storage, anonymization, paths, contract]
 timestamp: 2026-07-21T19:46:32Z
 ---
