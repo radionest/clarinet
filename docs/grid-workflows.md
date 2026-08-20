@@ -260,7 +260,18 @@ RecordType and the declaring file, it rejects:
 4. `multiple=True` on either side — grid conformance is defined for singular
    files only;
 5. either pattern extension `read_grid` cannot classify — anything other than
-   `.nii`, `.nii.gz`, `.nrrd` (`.seg.nrrd` is covered by the `.nrrd` check).
+   `.nii`, `.nii.gz`, `.nrrd` (`.seg.nrrd` is covered by the `.nrrd` check);
+6. a reference that itself declares `grid_conform_to` — chained declarations
+   (and therefore cycles) are unsupported: enforcement order is undefined, and
+   a repaired reference would silently invalidate its dependents; point both
+   files at the same reference instead;
+7. `on_grid_mismatch` set on a file with no `grid_conform_to` — the action
+   could never run.
+
+One shape passes with a `WARNING` instead of a rejection: an INPUT file
+referencing an OUTPUT of the same RecordType. It is legal — a pipeline may
+write the OUTPUT before check-files runs — but the record stays `blocked`
+until that OUTPUT exists.
 
 ### The two enforcement seams
 

@@ -108,9 +108,13 @@ RecordType raise the identical "unknown" error — lookup is scoped to this
 RecordType's own registry); it's a self-reference; either side's *effective*
 level (own `level`, or the RecordType's when unset) is finer than the
 RecordType's own level, or the reference's finer than the declaring file's;
-either side has `multiple=True` (singular files only); or either
+either side has `multiple=True` (singular files only); either
 pattern isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd` —
-`.seg.nrrd` is covered by the `.nrrd` check).
+`.seg.nrrd` is covered by the `.nrrd` check); the reference itself declares
+`grid_conform_to` (chained declarations and cycles are unsupported); or
+`on_grid_mismatch` is set without `grid_conform_to` (the action could never
+run). An INPUT referencing an OUTPUT of the same RecordType passes with a
+`WARNING` — legal, but the record stays `blocked` until that OUTPUT exists.
 
 The declaration is a property of the *file*, not of a `RecordTypeFileLink`
 binding — every RecordType binding a file inherits it, so all RecordTypes
