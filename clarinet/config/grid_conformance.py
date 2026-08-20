@@ -14,6 +14,8 @@ check that catches those at config-load time instead.
 from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import RecordConstraintViolationError
+from clarinet.models.file_schema import FileRole
+from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models.record import RecordTypeCreate
@@ -38,9 +40,16 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
 
     For every file in the RecordType's registry that sets ``grid_conform_to``:
     the reference must be bound to the same RecordType, must not be the file
-    itself, neither side's effective level may be finer than the RecordType's
-    own level nor the reference's finer than the declaring file's, neither
-    side may be a collection, and both patterns must be grid-readable.
+    itself, must not itself declare ``grid_conform_to`` (chains and cycles are
+    unsupported), neither side's effective level may be finer than the
+    RecordType's own level nor the reference's finer than the declaring
+    file's, neither side may be a collection, and both patterns must be
+    grid-readable. A file that sets ``on_grid_mismatch`` without a reference
+    is rejected too — the action could never run.
+
+    Logs a ``WARNING`` (not an error) when an INPUT file references an OUTPUT
+    of the same RecordType: legal, but it keeps the record blocked until that
+    OUTPUT exists.
 
     Args:
         rt: A ``RecordTypeCreate``-shaped object exposing ``name``, ``level``
@@ -56,6 +65,12 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
     for fd in registry:
         ref_name = getattr(fd, "grid_conform_to", None)
         if not ref_name:
+            if getattr(fd, "on_grid_mismatch", None):
+                raise RecordConstraintViolationError(
+                    f"RecordType '{rt.name}' file '{fd.name}' sets on_grid_mismatch="
+                    f"'{fd.on_grid_mismatch}' without grid_conform_to — the action "
+                    f"can never run; declare the reference or drop the action"
+                )
             continue
 
         prefix = f"RecordType '{rt.name}' file '{fd.name}' grid_conform_to"
@@ -69,6 +84,15 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
                 f"{prefix}='{ref_name}' is unknown — no file of that name is "
                 f"bound to this RecordType. Bound files: "
                 f"{sorted(by_name) or '(none)'}"
+            )
+
+        if getattr(ref, "grid_conform_to", None):
+            raise RecordConstraintViolationError(
+                f"{prefix}='{ref_name}': the reference itself declares "
+                f"grid_conform_to='{ref.grid_conform_to}' — chained conformance "
+                f"declarations are not supported (enforcement order is undefined "
+                f"and a repaired reference silently invalidates its dependents); "
+                f"point both files at the same reference instead"
             )
 
         if getattr(fd, "multiple", False) or getattr(ref, "multiple", False):
@@ -106,3 +130,14 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
                     f"'{candidate.pattern}' is not a readable image format "
                     f"(expected one of {', '.join(_GRID_READABLE)})"
                 )
+
+        if (
+            getattr(fd, "role", None) == FileRole.INPUT
+            and getattr(ref, "role", None) == FileRole.OUTPUT
+        ):
+            logger.warning(
+                f"RecordType '{rt.name}': INPUT '{fd.name}' declares grid_conform_to="
+                f"'{ref_name}', which is bound as an OUTPUT of the same type — the "
+                f"record stays blocked until that OUTPUT exists (typically written "
+                f"by a pipeline before check-files). Confirm this is intended."
+            )

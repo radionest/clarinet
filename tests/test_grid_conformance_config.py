@@ -120,3 +120,38 @@ def test_non_image_extension_rejected():
     seg = _fd("seg", grid_conform_to="meta")
     with pytest.raises(RecordConstraintViolationError, match="not a readable image"):
         validate_grid_conformance(_rt(meta, seg))
+
+
+def test_chained_reference_rejected():
+    base = _fd("base", pattern="base.nii.gz", role=FileRole.INPUT)
+    volume = _fd("volume", pattern="volume.nii.gz", role=FileRole.INPUT, grid_conform_to="base")
+    seg = _fd("seg", grid_conform_to="volume")
+    with pytest.raises(RecordConstraintViolationError, match="chained"):
+        validate_grid_conformance(_rt(base, volume, seg))
+
+
+def test_cycle_rejected_as_chain():
+    a = _fd("a", pattern="a.nii", grid_conform_to="b")
+    b = _fd("b", pattern="b.nii", grid_conform_to="a")
+    with pytest.raises(RecordConstraintViolationError, match="chained"):
+        validate_grid_conformance(_rt(a, b))
+
+
+def test_action_without_reference_rejected():
+    seg = _fd("seg", on_grid_mismatch="delete")
+    with pytest.raises(RecordConstraintViolationError, match="without grid_conform_to"):
+        validate_grid_conformance(_rt(seg))
+
+
+def test_input_referencing_own_output_warns_but_passes():
+    from clarinet.utils.logger import logger
+
+    seg = _fd("seg", pattern="seg.nii")  # OUTPUT by _fd default
+    volume = _fd("volume", pattern="volume.nii.gz", role=FileRole.INPUT, grid_conform_to="seg")
+    messages: list[str] = []
+    handler_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        validate_grid_conformance(_rt(seg, volume))  # no raise
+    finally:
+        logger.remove(handler_id)
+    assert any("bound as an OUTPUT" in m for m in messages)
