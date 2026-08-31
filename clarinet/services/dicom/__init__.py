@@ -1,4 +1,4 @@
-"""DICOM client for query-retrieve operations."""
+"""DICOM client for query-retrieve operations. Core models live in dimsechord."""
 
 from pynetdicom import _config as _pynetdicom_config
 
@@ -19,7 +19,6 @@ from clarinet.services.dicom.models import (
     SeriesQuery,
     SeriesResult,
     SkippedSeriesInfo,
-    StorageMode,
     StudyQuery,
     StudyResult,
 )
@@ -53,7 +52,6 @@ __all__ = [
     "SeriesQuery",
     "SeriesResult",
     "SkippedSeriesInfo",
-    "StorageMode",
     "StudyQuery",
     "StudyResult",
 ]

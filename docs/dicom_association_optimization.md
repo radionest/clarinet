@@ -43,12 +43,13 @@ retrieve_study_metadata()
 
 ### 2. Global Association Semaphore
 
-A `threading.Semaphore` in `DicomOperations._association()` limits the total
-number of concurrent DICOM associations across all operations (DICOMweb proxy,
-anonymization, import, etc.).
+A `threading.Semaphore` inside dimsechord's SCU limits the total number of
+concurrent DICOM associations across all operations (DICOMweb proxy,
+anonymization, import, etc.). Sized from the app lifespan via
+`DicomClient.set_max_concurrent_associations()`.
 
 **Why `threading.Semaphore`:**
-- `_association()` is synchronous, called via `asyncio.to_thread()`
+- It is acquired inside the synchronous SCU, called via `asyncio.to_thread()`
 - `asyncio.Semaphore` is not thread-safe
 - Class-level (not instance-level) because `DicomClient` is created per-request
 

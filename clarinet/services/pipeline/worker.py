@@ -204,11 +204,10 @@ async def run_worker(
     # Start Storage SCP before loading tasks (they may use C-MOVE immediately)
     scp = None
     if start_scp:
-        from clarinet.services.dicom.scp import get_storage_scp
+        from clarinet.services.dicom.scp import start_storage_scp
 
-        scp = get_storage_scp()
         try:
-            scp.start(aet=settings.dicom_aet, port=settings.dicom_port, ip=settings.dicom_ip)
+            scp = start_storage_scp()
         except OSError as e:
             logger.error(
                 f"Failed to start Storage SCP on port {settings.dicom_port}: {e}. "

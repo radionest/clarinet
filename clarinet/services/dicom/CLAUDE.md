@@ -4,14 +4,18 @@ Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md), [Files and t
 
 Async DICOM client for Query/Retrieve operations against external PACS servers (e.g. Orthanc).
 
+The DIMSE core — SCU, Storage SCP, presentation contexts, C-FIND result
+mapping — is the [`dimsechord`](https://pypi.org/project/dimsechord/) package.
+This directory holds only what is Clarinet's: the retrieve-mode dispatch, the
+SCP lifecycle, anonymization, and the series filter.
+
 ## Architecture
 
 ```
 dicom/
-  models.py         # Pydantic models: DicomNode, queries, results, storage config
-  operations.py     # Synchronous pynetdicom wrapper (C-FIND, C-GET, C-MOVE)
-  handlers.py       # C-STORE event handlers (disk / memory / forward modes)
-  client.py         # Async facade — delegates to operations via asyncio.to_thread()
+  models.py         # Clarinet models (anonymization, PACS import) + dimsechord re-exports
+  client.py         # DicomClient — dimsechord's SCU plus dicom_retrieve_mode dispatch
+  scp.py            # Storage SCP singleton (dimsechord.StorageSCP) lifecycle
   anonymizer.py     # Anonymizer, PACS stubs (planned; not yet exported)
   series_filter.py  # Configurable series filter (modality blocklist, instance count, unknown policy)
   orchestrator.py   # AnonymizationOrchestrator — Record-aware skip-guard + Patient + submit
@@ -21,8 +25,34 @@ dicom/
 ```
 
 - `DicomClient` is the main entry point — all methods are async
-- `DicomOperations` is synchronous; never call it directly from async code
-- `StorageHandler` handles incoming C-STORE events in three modes: `DISK`, `MEMORY`, `FORWARD`
+- Generic Q/R models (`DicomNode`, queries, `*Result`, `RetrieveResult`,
+  `BatchStoreResult`) are dimsechord dataclasses, re-exported from `models.py`
+  so `from clarinet.services.dicom.models import ...` keeps working. They are
+  **not** Pydantic models — no `.model_dump()`, and construction is keyword-only
+
+## Retrieve modes
+
+`dicom_retrieve_mode` — not the call site — picks the transport, so the same
+`get_study` / `get_series` / `get_*_to_memory` calls work against a PACS that
+offers C-GET and one that offers only C-MOVE:
+
+| Mode | Transport | Needs |
+|---|---|---|
+| `c-get` (default), `c-get-study` | dimsechord's C-GET | nothing |
+| `c-move`, `c-move-study` | C-MOVE-to-self via `client._retrieve_via_move` | a running Storage SCP; the peer must route our AET back to it |
+
+Under c-move the client registers a **collect** session on the SCP singleton,
+runs `move_study`/`move_series` with `settings.dicom_aet` as the destination,
+then waits for the instances to physically arrive — the peer's sub-operation
+tally is not proof of arrival, so `num_completed` and `instances` come from the
+session and a shortfall sets `status="timeout"`. `dicom_cmove_timeout` bounds
+the move and the arrival wait together. The `-study` suffix does not change the
+transport; it is read by the DICOMweb cache and the Slicer helper to batch at
+study level.
+
+Progress under c-move is sampled from the receiving session (dimsechord's
+`move_*` exposes no per-sub-operation hook), so `on_progress` reports arrivals
+with `total=None` until the move returns.
 
 ## Settings (`clarinet/settings.py`)
 
@@ -54,7 +84,6 @@ Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 from clarinet.services.dicom import (
     DicomClient, DicomNode, StudyQuery, SeriesQuery,
     PacsImportRequest, PacsStudyWithSeries, RetrieveResult,
-    StorageMode,
 )
 from clarinet.settings import settings
 
@@ -77,14 +106,23 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 
 `store_instances_batch` sends multiple datasets over a single DICOM association (vs `store_instance` which opens one association per dataset).
 
-- **`operations.py`**: `store_instances_batch(config, datasets)` → `BatchStoreResult` (sync, one `ae.associate()`, loops `send_c_store`)
-- **`client.py`**: `store_instances_batch(datasets, peer)` → async wrapper via `asyncio.to_thread()`
-- **`models.py`**: `BatchStoreResult(total_sent, total_failed, failed_sop_uids)`
+- **dimsechord**: `DicomClient.store_instances_batch(datasets, peer)` → `BatchStoreResult` (one `ae.associate()`, loops `send_c_store`, off-loop via `asyncio.to_thread()`)
+- **`BatchStoreResult(total_sent, total_failed, failed_sop_uids)`**, re-exported from `models.py`
 - Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution — sequentially to every node in `self.destinations` (`pacs` + `extra_pacs`); failures are counted per node (`aet@host:port` keys) and one node's failure never aborts the rest
 
 ## Association Semaphore
 
-`DicomOperations._association()` enforces a global `threading.Semaphore` to limit concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in app lifespan via `DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)`. Uses `threading.Semaphore` (not `asyncio.Semaphore`) because `_association()` is synchronous, called via `asyncio.to_thread()`.
+dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in the app lifespan via `DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)`. It is a `threading.Semaphore` (not `asyncio.Semaphore`) because it is acquired inside the `asyncio.to_thread()` worker — size it with the loop's other `to_thread` work in mind.
+
+## Errors
+
+dimsechord raises typed errors; the two the SCU can raise are mapped to HTTP in
+`api/exception_handlers.py` — `AssociationError` → 409 (preserving the contract
+the inline layer had, where every association failure surfaced as CONFLICT) and
+`FindFailedError` → 502. The rest of the hierarchy (`PoolExhaustedError` /
+`RetrieveBusyError`, `ArrivalTimeoutError`, `MoveToSelfError`) belongs to
+`PullEngine` / `AssociationPool`, which Clarinet does not use yet — map them
+when it does.
 
 ## Anonymization API surface
 

@@ -401,22 +401,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
 
-    # Initialize DICOM association semaphore
-    from clarinet.services.dicom.operations import DicomOperations
+    # Cap concurrent DICOM associations process-wide
+    from clarinet.services.dicom import DicomClient
 
-    DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)
+    DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
 
     # Start Storage SCP for C-MOVE mode
     if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
-        from clarinet.services.dicom.scp import get_storage_scp
+        from clarinet.services.dicom.scp import start_storage_scp
 
-        scp = get_storage_scp()
-        scp.start(
-            aet=settings.dicom_aet,
-            port=settings.dicom_port,
-            ip=settings.dicom_ip,
-        )
-        app.state.storage_scp = scp
+        app.state.storage_scp = start_storage_scp()
         logger.info(
             f"Storage SCP started on port {settings.dicom_port} "
             f"(AET: {settings.dicom_aet}, mode: c-move)"

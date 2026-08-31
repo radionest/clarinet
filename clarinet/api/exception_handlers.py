@@ -7,6 +7,7 @@ and response formats for the API layer using FastAPI decorators.
 
 from typing import Any
 
+from dimsechord import AssociationError, FindFailedError
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -331,6 +332,28 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": str(exc) if str(exc) else "Slicer operation failed"},
+        )
+
+    @app.exception_handler(AssociationError)
+    async def handle_dicom_association(_: Request, exc: AssociationError) -> JSONResponse:
+        """Convert AssociationError to 409 — the PACS is unreachable or refused us.
+
+        409 rather than 502 preserves the contract the inline DICOM layer had
+        before dimsechord: every association failure surfaced as CONFLICT.
+        """
+        logger.opt(exception=exc).error("DICOM association failed")
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc) if str(exc) else "DICOM association failed"},
+        )
+
+    @app.exception_handler(FindFailedError)
+    async def handle_dicom_find_failed(_: Request, exc: FindFailedError) -> JSONResponse:
+        """Convert FindFailedError to 502 — the PACS answered C-FIND with a failure."""
+        logger.opt(exception=exc).error("C-FIND failed")
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc) if str(exc) else "PACS query failed"},
         )
 
     @app.exception_handler(PipelineError)

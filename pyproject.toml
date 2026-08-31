@@ -33,6 +33,7 @@ dependencies = [
     "aiofiles>=24.1.0",
     "fastapi-users>=13.0.0",
     "pynetdicom>=3.0.4",
+    "dimsechord>=0.8.0",
     "cachetools>=7.0.0",
     "tomli-w>=1.2.0",
     "taskiq>=0.12.0",

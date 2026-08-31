@@ -28,14 +28,15 @@ Request → 1. Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) 
         ↓ miss
         → 3. Disk cache ({storage_path}/dicomweb_cache/{study}/{series}/*.dcm)
         ↓ miss
-        → 4. C-GET to memory (StorageMode.MEMORY) → return immediately
+        → 4. Retrieve to memory → return immediately
           → background asyncio.Task writes .dcm to dicomweb_cache/
 ```
 
 - **Memory tier**: `TTLCache` holds `MemoryCachedSeries` with `dict[str, Dataset]` keyed by SOPInstanceUID. TTL controlled by `dicomweb_memory_cache_ttl_minutes`, max entries by `dicomweb_memory_cache_max_entries` (LRU eviction).
 - **dcm_anon tier**: Anonymized DICOM files written by `AnonymizationService` into working folder `dcm_anon/` subdirectories. The DICOM files themselves have no TTL — they persist until manually deleted. Path resolution renders `settings.disk_path_template` against Study/Patient/Series loaded from the DB and caches both hits and misses in `_dcm_anon_path_cache` (`TTLCache`, default `dicomweb_dcm_anon_path_cache_ttl_seconds=300`). The TTL bounds the negative-cache staleness window so an "anonymize-after-first-read" race recovers automatically; for an immediate invalidation use `DicomWebCache.invalidate_dcm_anon_path(study_uid, series_uid)`.
 - **Disk tier**: `.dcm` files + `.cached_at` marker. Read-path returns any present entry — DICOM on the PACS is immutable, so staleness is a non-concept. Lifecycle (TTL- and size-based eviction) is owned exclusively by `DicomWebCacheCleanupService`, driven by `dicomweb_cache_ttl_hours` and `dicomweb_cache_max_size_gb`. `dicomweb_cache_cleanup_enabled=True` is the de-facto contract for bounding disk growth. Loaded into memory on first access after restart.
-- **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`, guarded by `_disk_write_semaphore` (default 4) to avoid flooding the thread pool. On shutdown, pending tasks are cancelled.
+- **Retrieve tier**: `DicomClient.get_*_to_memory()` — a C-GET, or a C-MOVE-to-self when `dicom_retrieve_mode` is a c-move mode. The cache calls the same method either way; the transport is the client's business (see `services/dicom/CLAUDE.md`).
+- **Background persistence**: After the retrieve to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`, guarded by `_disk_write_semaphore` (default 4) to avoid flooding the thread pool. On shutdown, pending tasks are cancelled.
 
 ### Populating the disk tier from the pipeline
 
@@ -93,4 +94,4 @@ Both methods run off the event loop via `asyncio.to_thread()`. The service follo
 - Cache uses `asyncio.Lock` per (study_uid, series_uid) to prevent duplicate C-GETs; study-level lock (`{study_uid}/__STUDY__`) prevents duplicate study C-GETs
 - `ensure_study_cached()` retrieves all missing series in one study-level C-GET, groups by SeriesInstanceUID, caches unexpected series (SR/KO/PR) too
 - `FileNotFoundError` raised when cached instance not found (router handles as 404)
-- `StorageHandler.stored_instances` is `dict[str, Dataset]` keyed by SOPInstanceUID (not a list)
+- `RetrieveResult.instances` is `dict[str, Dataset]` keyed by SOPInstanceUID (not a list)

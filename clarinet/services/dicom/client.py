@@ -1,305 +1,76 @@
-"""Async DICOM client for query-retrieve operations."""
+"""Async DICOM client — dimsechord's SCU façade plus mode-aware retrieval.
+
+``dimsechord.DicomClient`` retrieves with C-GET only. Clarinet additionally
+supports ``dicom_retrieve_mode="c-move"``, where the PACS is asked to send the
+instances to our own Storage SCP (move-to-self) — the only option against a
+peer that does not offer C-GET. This subclass keeps every dimsechord method as
+is and overrides the four ``get_*`` entry points so that a single setting, not
+the call site, decides which transport runs.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from pathlib import Path
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from pydicom import Dataset
+from dimsechord import DicomClient as DimsechordClient
 
-from clarinet.services.dicom.models import (
-    AssociationConfig,
-    BatchStoreResult,
-    DicomNode,
-    ImageQuery,
-    ImageResult,
-    QueryRetrieveLevel,
-    RetrieveRequest,
-    RetrieveResult,
-    SeriesQuery,
-    SeriesResult,
-    StorageConfig,
-    StorageMode,
-    StudyQuery,
-    StudyResult,
-)
-from clarinet.services.dicom.operations import DicomOperations
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
-class DicomClient:
-    """Async DICOM client for Query/Retrieve operations.
+    from dimsechord import DicomNode, RetrieveResult
 
-    This client provides async interface to DICOM operations while using
-    synchronous pynetdicom library under the hood via asyncio.to_thread().
+#: Floor for the arrival wait, so a C-MOVE that returns just as the budget
+#: expires still gets a moment for its last C-STOREs to land.
+_MIN_ARRIVAL_WAIT = 1.0
+
+#: How often the c-move progress poller samples the receiving session.
+_PROGRESS_INTERVAL = 0.5
+
+
+def _is_move_mode() -> bool:
+    return settings.dicom_retrieve_mode in ("c-move", "c-move-study")
+
+
+def _write_instances(instances: dict[str, Any], output_dir: Path) -> None:
+    """Persist received instances as ``{sop_uid}.dcm``. Runs off the event loop."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for sop_uid, dataset in instances.items():
+        dataset.save_as(output_dir / f"{sop_uid}.dcm", enforce_file_format=True)
+
+
+class DicomClient(DimsechordClient):
+    """DICOM SCU with Clarinet's ``dicom_retrieve_mode`` dispatch.
+
+    In a c-get mode every ``get_*`` call falls through to dimsechord. In a
+    c-move mode they instead run C-MOVE-to-self against the Storage SCP
+    singleton, which must already be listening (the API lifespan and the
+    ``--dicom`` worker start it).
     """
-
-    def __init__(
-        self,
-        calling_aet: str,
-        max_pdu: int = 16384,
-    ):
-        """Initialize DICOM client.
-
-        Args:
-            calling_aet: Calling AE title
-            max_pdu: Maximum PDU size (0 for unlimited)
-        """
-        self.calling_aet = calling_aet
-        self.max_pdu = max_pdu
-        self._operations = DicomOperations(calling_aet=calling_aet, max_pdu=max_pdu)
-
-    def _create_association_config(
-        self,
-        called_aet: str,
-        peer_host: str,
-        peer_port: int,
-        timeout: float = 30.0,
-    ) -> AssociationConfig:
-        """Create association configuration.
-
-        Args:
-            called_aet: Called AE title
-            peer_host: Peer host address
-            peer_port: Peer port number
-            timeout: Association timeout
-
-        Returns:
-            Association configuration
-        """
-        return AssociationConfig(
-            calling_aet=self.calling_aet,
-            called_aet=called_aet,
-            peer_host=peer_host,
-            peer_port=peer_port,
-            max_pdu=self.max_pdu,
-            timeout=timeout,
-        )
-
-    async def find_studies(
-        self,
-        query: StudyQuery,
-        peer: DicomNode,
-        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-    ) -> list[StudyResult]:
-        """Find studies matching query criteria.
-
-        Args:
-            query: Study query parameters
-            peer: DICOM peer node
-            timeout: Operation timeout
-
-        Returns:
-            List of matching studies
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        logger.debug(f"Searching studies on {peer.aet}@{peer.host}:{peer.port}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        results = await asyncio.to_thread(
-            self._operations.find_studies,
-            config,
-            query,
-        )
-
-        logger.info(f"Found {len(results)} studies")
-        return results
-
-    async def find_series(
-        self,
-        query: SeriesQuery,
-        peer: DicomNode,
-        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-    ) -> list[SeriesResult]:
-        """Find series matching query criteria.
-
-        Args:
-            query: Series query parameters
-            peer: DICOM peer node
-            timeout: Operation timeout
-
-        Returns:
-            List of matching series
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        logger.debug(f"Searching series on {peer.aet}@{peer.host}:{peer.port}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        results = await asyncio.to_thread(
-            self._operations.find_series,
-            config,
-            query,
-        )
-
-        logger.info(f"Found {len(results)} series")
-        return results
-
-    async def find_images(
-        self,
-        query: ImageQuery,
-        peer: DicomNode,
-        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-    ) -> list[ImageResult]:
-        """Find images matching query criteria.
-
-        Args:
-            query: Image query parameters
-            peer: DICOM peer node
-            timeout: Operation timeout
-
-        Returns:
-            List of matching images
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        logger.debug(f"Searching images on {peer.aet}@{peer.host}:{peer.port}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        results = await asyncio.to_thread(
-            self._operations.find_images,
-            config,
-            query,
-        )
-
-        logger.info(f"Found {len(results)} images")
-        return results
-
-    async def _retrieve(
-        self,
-        study_uid: str,
-        peer: DicomNode,
-        level: QueryRetrieveLevel,
-        mode: StorageMode,
-        series_uid: str | None = None,
-        output_dir: Path | None = None,
-        patient_id: str | None = None,
-        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-        on_progress: Callable[[int, int | None], None] | None = None,
-    ) -> RetrieveResult:
-        """Core retrieval logic shared by all get_* methods.
-
-        Args:
-            study_uid: Study instance UID
-            peer: DICOM peer node
-            level: Query/retrieve level (STUDY or SERIES)
-            mode: Storage mode (DISK or MEMORY)
-            series_uid: Series instance UID (required for SERIES level)
-            output_dir: Directory to save DICOM files (required for DISK mode)
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
-            on_progress: Optional callback(completed, total) invoked every 50 instances
-
-        Returns:
-            Retrieve result with statistics
-        """
-        label = "series" if level == QueryRetrieveLevel.SERIES else "study"
-        uid = series_uid or study_uid
-        dest = str(output_dir) if output_dir else "memory"
-        logger.debug(f"Retrieving {label} {uid} to {dest}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        request = RetrieveRequest(
-            level=level,
-            study_instance_uid=study_uid,
-            series_instance_uid=series_uid,
-            patient_id=patient_id,
-        )
-
-        storage = StorageConfig(mode=mode, output_dir=output_dir)
-
-        if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
-            from clarinet.services.dicom.scp import get_storage_scp
-
-            scp = get_storage_scp()
-            result = await asyncio.to_thread(
-                self._operations.retrieve_via_move,
-                config,
-                request,
-                storage,
-                settings.dicom_aet,
-                scp,
-                settings.dicom_cmove_timeout,
-                on_progress=on_progress,
-            )
-        else:
-            result = await asyncio.to_thread(
-                self._operations.get_study,
-                config,
-                request,
-                storage,
-                on_progress=on_progress,
-            )
-
-        logger.info(
-            f"Retrieved {label}: {result.num_completed} completed, {result.num_failed} failed"
-        )
-        return result
 
     async def get_study(
         self,
         study_uid: str,
         peer: DicomNode,
         output_dir: Path,
-        patient_id: str | None = None,
+        *,
         timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
-        """Retrieve study and save to disk.
-
-        Args:
-            study_uid: Study instance UID
-            peer: DICOM peer node
-            output_dir: Directory to save DICOM files
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
-
-        Returns:
-            Retrieve result with statistics
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        return await self._retrieve(
-            study_uid,
-            peer,
-            QueryRetrieveLevel.STUDY,
-            StorageMode.DISK,
-            output_dir=output_dir,
-            patient_id=patient_id,
-            timeout=timeout,
-        )
+        """Retrieve a study to disk, via C-GET or C-MOVE-to-self."""
+        if _is_move_mode():
+            return await self._retrieve_via_move(
+                study_uid=study_uid,
+                series_uid=None,
+                peer=peer,
+                output_dir=output_dir,
+                timeout=timeout,
+            )
+        return await super().get_study(study_uid, peer, output_dir, timeout=timeout)
 
     async def get_series(
         self,
@@ -307,67 +78,40 @@ class DicomClient:
         series_uid: str,
         peer: DicomNode,
         output_dir: Path,
-        patient_id: str | None = None,
+        *,
         timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
-        """Retrieve series and save to disk.
-
-        Args:
-            study_uid: Study instance UID
-            series_uid: Series instance UID
-            peer: DICOM peer node
-            output_dir: Directory to save DICOM files
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
-
-        Returns:
-            Retrieve result with statistics
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        return await self._retrieve(
-            study_uid,
-            peer,
-            QueryRetrieveLevel.SERIES,
-            StorageMode.DISK,
-            series_uid=series_uid,
-            output_dir=output_dir,
-            patient_id=patient_id,
-            timeout=timeout,
-        )
+        """Retrieve a series to disk, via C-GET or C-MOVE-to-self."""
+        if _is_move_mode():
+            return await self._retrieve_via_move(
+                study_uid=study_uid,
+                series_uid=series_uid,
+                peer=peer,
+                output_dir=output_dir,
+                timeout=timeout,
+            )
+        return await super().get_series(study_uid, series_uid, peer, output_dir, timeout=timeout)
 
     async def get_study_to_memory(
         self,
         study_uid: str,
         peer: DicomNode,
-        patient_id: str | None = None,
+        *,
         timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
         on_progress: Callable[[int, int | None], None] | None = None,
     ) -> RetrieveResult:
-        """Retrieve study to memory.
-
-        Args:
-            study_uid: Study instance UID
-            peer: DICOM peer node
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
-            on_progress: Optional callback(received, total) for progress reporting
-
-        Returns:
-            Retrieve result with instances in memory
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        return await self._retrieve(
-            study_uid,
-            peer,
-            QueryRetrieveLevel.STUDY,
-            StorageMode.MEMORY,
-            patient_id=patient_id,
-            timeout=timeout,
-            on_progress=on_progress,
+        """Retrieve a study to memory, via C-GET or C-MOVE-to-self."""
+        if _is_move_mode():
+            return await self._retrieve_via_move(
+                study_uid=study_uid,
+                series_uid=None,
+                peer=peer,
+                output_dir=None,
+                timeout=timeout,
+                on_progress=on_progress,
+            )
+        return await super().get_study_to_memory(
+            study_uid, peer, timeout=timeout, on_progress=on_progress
         )
 
     async def get_series_to_memory(
@@ -375,193 +119,131 @@ class DicomClient:
         study_uid: str,
         series_uid: str,
         peer: DicomNode,
-        patient_id: str | None = None,
+        *,
         timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
-        """Retrieve series to memory.
+        """Retrieve a series to memory, via C-GET or C-MOVE-to-self."""
+        if _is_move_mode():
+            return await self._retrieve_via_move(
+                study_uid=study_uid,
+                series_uid=series_uid,
+                peer=peer,
+                output_dir=None,
+                timeout=timeout,
+            )
+        return await super().get_series_to_memory(study_uid, series_uid, peer, timeout=timeout)
 
-        Args:
-            study_uid: Study instance UID
-            series_uid: Series instance UID
-            peer: DICOM peer node
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
-
-        Returns:
-            Retrieve result with instances in memory (dict keyed by SOPInstanceUID)
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        return await self._retrieve(
-            study_uid,
-            peer,
-            QueryRetrieveLevel.SERIES,
-            StorageMode.MEMORY,
-            series_uid=series_uid,
-            patient_id=patient_id,
-            timeout=timeout,
-        )
-
-    async def store_instance(
+    async def _retrieve_via_move(
         self,
-        dataset: Dataset,
-        peer: DicomNode,
-        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-    ) -> bool:
-        """Send a single DICOM instance to a peer via C-STORE.
-
-        Args:
-            dataset: pydicom Dataset to send
-            peer: DICOM peer node
-            timeout: Operation timeout
-
-        Returns:
-            True if C-STORE succeeded
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        return await asyncio.to_thread(
-            self._operations.store_instance,
-            config,
-            dataset,
-        )
-
-    async def store_instances_batch(
-        self,
-        datasets: list[Dataset],
-        peer: DicomNode,
-        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-    ) -> BatchStoreResult:
-        """Send multiple DICOM instances via a single C-STORE association.
-
-        Args:
-            datasets: List of pydicom Datasets to send
-            peer: DICOM peer node
-            timeout: Operation timeout
-
-        Returns:
-            BatchStoreResult with counts and failed SOP UIDs
-
-        Raises:
-            CONFLICT: If association fails
-        """
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        return await asyncio.to_thread(
-            self._operations.store_instances_batch,
-            config,
-            datasets,
-        )
-
-    async def move_study(
-        self,
+        *,
         study_uid: str,
+        series_uid: str | None,
         peer: DicomNode,
-        destination_aet: str,
-        patient_id: str | None = None,
-        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+        output_dir: Path | None,
+        timeout: float,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+        on_progress: Callable[[int, int | None], None] | None = None,
     ) -> RetrieveResult:
-        """Move study to another DICOM node.
+        """C-MOVE-to-self: ask the peer to C-STORE the instances to our SCP.
 
-        Args:
-            study_uid: Study instance UID
-            peer: Source DICOM peer node
-            destination_aet: Destination AE title
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
+        The C-MOVE reports how many sub-operations it completed, but the
+        instances themselves arrive on a separate association, so the peer's
+        final status is not proof of arrival: the SCP session is told how many
+        to expect and then waited on. ``settings.dicom_cmove_timeout`` bounds
+        the move and the arrival wait together, measured from registration.
 
         Returns:
-            Move result with statistics
+            The C-MOVE result, with ``instances`` / ``num_completed`` taken from
+            what physically arrived, and ``status="timeout"`` if the wait ran out
+            before the last instance did.
 
         Raises:
-            CONFLICT: If association fails
+            RuntimeError: If the Storage SCP is not listening.
         """
-        logger.debug(f"Moving study {study_uid} to {destination_aet}")
+        from clarinet.services.dicom.scp import get_storage_scp
 
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
+        scp = get_storage_scp()
+        if not scp.is_running:
+            raise RuntimeError(
+                "Storage SCP not running — C-MOVE requires a running SCP. "
+                "Set dicom_retrieve_mode='c-get', start the worker with "
+                "--dicom AET:PORT, or start the API server."
+            )
 
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.STUDY,
-            study_instance_uid=study_uid,
-            patient_id=patient_id,
-        )
+        label = "series" if series_uid else "study"
+        key = f"{study_uid}/{series_uid or ''}"
+        session = scp.register_session(key, collect=True)
+        started = time.monotonic()
+        logger.debug(f"Retrieving {label} {series_uid or study_uid} via C-MOVE to self")
 
-        result = await asyncio.to_thread(
-            self._operations.move_study,
-            config,
-            request,
-            destination_aet,
-        )
+        try:
+            poller = (
+                asyncio.create_task(self._poll_progress(session, on_progress))
+                if on_progress is not None
+                else None
+            )
+            try:
+                if series_uid is None:
+                    result = await super().move_study(
+                        study_uid, peer, settings.dicom_aet, timeout=timeout
+                    )
+                else:
+                    result = await super().move_series(
+                        study_uid, series_uid, peer, settings.dicom_aet, timeout=timeout
+                    )
+            finally:
+                if poller is not None:
+                    poller.cancel()
+                    await asyncio.gather(poller, return_exceptions=True)
 
-        logger.info(f"Moved study: {result.num_completed} completed, {result.num_failed} failed")
-        return result
+            scp.set_expected(key, result.num_completed)
+            elapsed = time.monotonic() - started
+            remaining = max(settings.dicom_cmove_timeout - elapsed, _MIN_ARRIVAL_WAIT)
+            arrived = await asyncio.to_thread(scp.wait_for_completion, key, remaining)
 
-    async def move_series(
-        self,
-        study_uid: str,
-        series_uid: str,
-        peer: DicomNode,
-        destination_aet: str,
-        patient_id: str | None = None,
-        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
-    ) -> RetrieveResult:
-        """Move series to another DICOM node.
+            finished = scp.finish_session(key)
+            if finished is None:
+                return result
 
-        Args:
-            study_uid: Study instance UID
-            series_uid: Series instance UID
-            peer: Source DICOM peer node
-            destination_aet: Destination AE title
-            patient_id: Optional patient ID for query
-            timeout: Operation timeout
+            result.instances = finished.instances
+            result.num_completed = finished.received_count
 
-        Returns:
-            Move result with statistics
+            if not arrived:
+                logger.warning(
+                    f"C-MOVE timed out: received {finished.received_count}/"
+                    f"{finished.expected_count if finished.expected_count is not None else 'unknown'} "
+                    f"instances for {label} {series_uid or study_uid}"
+                )
+                result.status = "timeout"
 
-        Raises:
-            CONFLICT: If association fails
+            if output_dir is not None:
+                await asyncio.to_thread(_write_instances, finished.instances, output_dir)
+
+            if on_progress is not None:
+                on_progress(finished.received_count, finished.expected_count)
+
+            logger.info(f"C-MOVE retrieve complete: {finished.received_count} instances received")
+            return result
+        finally:
+            # Idempotent: a no-op when the success path already finished it,
+            # the cleanup that matters when the move raised.
+            scp.finish_session(key)
+
+    @staticmethod
+    async def _poll_progress(
+        session: Any,
+        on_progress: Callable[[int, int | None], None],
+    ) -> None:
+        """Report arrivals while the C-MOVE runs.
+
+        dimsechord's ``move_*`` exposes no per-sub-operation hook, so progress
+        is sampled from the receiving session instead of being driven by the
+        C-MOVE pending responses. ``expected_count`` is only known once the move
+        returns, so ``total`` stays ``None`` for the duration.
         """
-        logger.debug(f"Moving series {series_uid} to {destination_aet}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
-            timeout=timeout,
-        )
-
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.SERIES,
-            study_instance_uid=study_uid,
-            series_instance_uid=series_uid,
-            patient_id=patient_id,
-        )
-
-        result = await asyncio.to_thread(
-            self._operations.move_study,
-            config,
-            request,
-            destination_aet,
-        )
-
-        logger.info(f"Moved series: {result.num_completed} completed, {result.num_failed} failed")
-        return result
+        last = -1
+        while True:
+            await asyncio.sleep(_PROGRESS_INTERVAL)
+            received = session.received_count
+            if received != last:
+                last = received
+                on_progress(received, session.expected_count)
