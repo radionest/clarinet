@@ -52,8 +52,9 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   C-MOVE by destination AET, so each retrieving process needs its own registered
   `(AET, port)`: `storage_scp_wanted()` decides who starts one, `clarinet worker
   --dicom AET:PORT` gives a worker its own, and `dicom_scp_enabled=false` opts a
-  process out. A collision is a `StartupError`, naming the port and the ways
-  out, rather than a fallback to a port the PACS cannot route to.
+  process out. A collision names the port and the ways out rather than falling
+  back to a port the PACS cannot route to — as a `StartupError` in the API, and
+  as the same message on an `OSError` in the worker.
 - dimsechord's SCU holds a global **`threading.Semaphore`** (not asyncio — it is
   acquired inside the `to_thread` worker) limiting concurrent associations
   across DICOMweb, anonymization and import; sized from

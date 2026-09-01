@@ -569,10 +569,11 @@ async def _run_pipeline_worker(
         settings.dicom_aet = aet
         settings.dicom_port = port
         settings.have_dicom = True
-        # Only switch transport if it isn't already a move mode — forcing bare
-        # "c-move" would silently strip the -study suffix that the Slicer helper
-        # reads to batch at study level.
-        if settings.dicom_retrieve_mode not in ("c-move", "c-move-study"):
+        # Switch transport, keeping the level: forcing bare "c-move" would strip
+        # the -study suffix that the Slicer helper reads to batch at study level.
+        if settings.dicom_retrieve_mode == "c-get-study":
+            settings.dicom_retrieve_mode = "c-move-study"
+        elif settings.dicom_retrieve_mode == "c-get":
             settings.dicom_retrieve_mode = "c-move"
         # --dicom is an explicit request for a listener on this process; without
         # this it would silently no-op wherever the config says dicom_scp_enabled
@@ -591,15 +592,16 @@ async def _run_pipeline_worker(
             "Set CLARINET_PIPELINE_ENABLED=true to enable."
         )
 
-    from clarinet.services.dicom.scp import storage_scp_wanted
-
     await run_worker(
         queues=queues,
         workers=workers,
-        # Ownership, not just an explicit --dicom: a worker configured for
-        # c-move without the flag would otherwise only discover the missing
-        # listener at its first retrieve.
-        start_scp=storage_scp_wanted(),
+        # A worker takes a listener only when asked. The mode alone must not
+        # imply one: on a c-move deployment the API already owns dicom_aet on
+        # dicom_port, so every worker that inferred ownership from the mode
+        # would race it for the same port and lose. Give a worker its own
+        # identity with --dicom AET:PORT, or dicom_scp_enabled=true where the
+        # AET and port are already per-process.
+        start_scp=dicom_scp is not None or settings.dicom_scp_enabled is True,
         log_file=log_file,
     )
 

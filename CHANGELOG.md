@@ -8,8 +8,10 @@
   listening port belongs to one process and the PACS routes C-MOVE by
   destination AET to a host and port it was configured with, so on a c-move
   deployment every retrieving process needs its own registered `(AET, port)`.
-  `None` (the default) owns a listener when the retrieve mode is a c-move mode
-  and `have_dicom` is set; `false` never does; `true` always does.
+  `None` (the default) owns a listener in the API when the retrieve mode is a
+  c-move mode; `false` never does; `true` always does. A worker takes one only
+  when asked — `--dicom` or `dicom_scp_enabled=true` — since the API already
+  holds `dicom_aet:dicom_port` on such a deployment.
   `clarinet worker --dicom AET:PORT` now implies `true` alongside the AET, port
   and mode it already set, so the flag still works where one shared
   `EnvironmentFile` says otherwise, and warns when it overrides an explicit

@@ -238,7 +238,9 @@ class TestMoveDelegation:
         )
         assert local_aet == "CLARINET", "the C-MOVE destination is us, not the peer"
         assert passed_scp is scp
-        assert budget == ARRIVAL_BUDGET
+        # Both budgets asserted: swapping them would otherwise pass.
+        assert budget == ARRIVAL_BUDGET, "arrival budget is dicom_cmove_timeout"
+        assert config.timeout == 300.0, "association timeout is the method's own"
 
     async def test_study_call_to_disk_becomes_a_study_level_disk_retrieve(self, tmp_path: Path):
         client = DicomClient(calling_aet="TEST")

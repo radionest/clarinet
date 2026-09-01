@@ -117,7 +117,7 @@ helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.
 | `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
 | `dicom_retrieve_mode` | `c-get` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
 | `dicom_cmove_timeout` | `300.0` | Seconds bounding the C-MOVE *and* the wait for its instances to arrive |
-| `dicom_scp_enabled` | `None` | `None` = own a listener when the mode is c-move and `have_dicom`; `false` = never (this process must not retrieve via C-MOVE); `true` = always |
+| `dicom_scp_enabled` | `None` | `None` = the API owns a listener when the mode is c-move (a worker needs `--dicom` or `true`); `false` = never; `true` = always |
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |

@@ -140,8 +140,7 @@ class DicomClient(DimsechordClient):
         session, drive the C-MOVE, take the arrival target from the *first*
         pending response, wait, drain, write. The counters are the reason not to
         hand-roll it: a final Success response may omit them (PS3.4 C.4.2.1.6),
-        so a total summed at the end reads a stale ``num_remaining``, and failed
-        sub-operations must not count toward what will arrive.
+        so a total summed at the end reads a stale ``num_remaining``.
 
         ``settings.dicom_cmove_timeout`` bounds the move and the arrival wait
         together; ``timeout`` bounds the association.
