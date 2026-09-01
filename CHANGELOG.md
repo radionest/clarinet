@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- **`dicom_scp_enabled` names which process owns the C-MOVE listener.** A
+  listening port belongs to one process and the PACS routes C-MOVE by
+  destination AET to a host and port it was configured with, so on a c-move
+  deployment every retrieving process needs its own registered `(AET, port)`.
+  `None` (the default) owns a listener when the retrieve mode is a c-move mode
+  and `have_dicom` is set; `false` never does; `true` always does.
+  `clarinet worker --dicom AET:PORT` now implies `true` alongside the AET, port
+  and mode it already set, so the flag still works where one shared
+  `EnvironmentFile` says otherwise. A bind collision is now a `StartupError`
+  naming the port, the AET and the ways out, instead of an unlabelled `OSError`.
+
 ### Breaking
 
 - **The DICOM core moved to the `dimsechord` package.** `clarinet.services.dicom`
@@ -22,24 +35,10 @@
   path negotiates dimsechord's curated storage classes with compressed transfer
   syntaxes rather than 120 classes uncompressed-only — a peer sending
   compressed objects now works, while SOP classes outside the curated set do
-  not. The C-MOVE path is unaffected: the Storage SCP accepts every storage
-  class and every transfer syntax.
-- **`dicom_retrieve_mode` now defaults to `c-move`** (was `c-get`), so the
-  retrieve path with full SOP-class and transfer-syntax coverage is the one you
-  get without configuring anything. This needs the PACS to route `dicom_aet`
-  back to `dicom_ip:dicom_port` and that port to be reachable — a deployment
-  where it cannot must now set `dicom_retrieve_mode = "c-get"` explicitly, or
-  retrieves fail with a `RuntimeError` naming the AET and port to register.
-  `clarinet worker` now starts its Storage SCP whenever the configured mode is
-  a c-move mode, not only under `--dicom AET:PORT` (which still overrides the
-  AET and port it binds). Because a port belongs to one process and the PACS
-  routes C-MOVE by destination AET, **each retrieving process on a host needs
-  its own registered `(AET, port)`** — an API and a worker sharing the default
-  `CLARINET:11112` now fail at startup with a message naming the port and the
-  three ways out, rather than silently binding a port the PACS cannot route to.
-  New `dicom_scp_enabled` (`None` = own a listener when the mode is c-move,
-  `false` = never, `true` = always) marks which process owns it.
-
+  not. The C-MOVE path keeps the wider coverage: the Storage SCP accepts
+  pynetdicom's 120 `StoragePresentationContexts` with every transfer syntax,
+  because an acceptor matches the requester's proposals instead of proposing
+  its own, so the 128-context budget never binds.
 - **`RecordType.unique_by` replaces `unique_per_user`.** `unique_by:
   frozenset[str] | None` (subset of `{"user", "parent"}`) replaces the boolean
   `unique_per_user`: at most one record of the type may exist per unique

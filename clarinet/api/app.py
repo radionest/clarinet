@@ -410,7 +410,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from clarinet.services.dicom.scp import start_storage_scp, storage_scp_wanted
 
     if storage_scp_wanted():
-        app.state.storage_scp = start_storage_scp()
+        try:
+            app.state.storage_scp = start_storage_scp()
+        except OSError as e:
+            # StartupError, not a bare OSError: only the former reaches the
+            # CRITICAL banner and the JSONL sink, and the remedy is the whole
+            # point of the message.
+            raise StartupError(
+                component="DICOM SCP",
+                reason=str(e),
+                hint=f"Free port {settings.dicom_port} or give this process its own",
+                disableable=False,
+            ) from e
         logger.info(
             f"Storage SCP started on port {settings.dicom_port} "
             f"(AET: {settings.dicom_aet}, mode: {settings.dicom_retrieve_mode})"

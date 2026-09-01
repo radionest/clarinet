@@ -38,19 +38,23 @@ offers C-GET and one that offers only C-MOVE:
 
 | Mode | Transport | Needs |
 |---|---|---|
-| `c-move` (default), `c-move-study` | C-MOVE-to-self via `client._retrieve_via_move` | a running Storage SCP; the peer must route `dicom_aet` back to `dicom_ip:dicom_port` |
-| `c-get`, `c-get-study` | dimsechord's C-GET | nothing beyond an outbound association |
+| `c-get` (default), `c-get-study` | dimsechord's C-GET | nothing beyond an outbound association |
+| `c-move`, `c-move-study` | C-MOVE-to-self, delegated to dimsechord's `retrieve_via_move` | a running Storage SCP; the peer must route `dicom_aet` back to `dicom_ip:dicom_port` |
 
-**Why c-move is the default.** An association carries at most 128 presentation
-contexts, and the two paths spend that budget differently. The C-GET SCU must
-*propose* storage contexts, so it negotiates dimsechord's curated image classes
-across their compressed transfer syntaxes — broad on syntax, narrow on SOP
-class. The Storage SCP only *accepts*, matching against whatever the peer
-proposes, so it supports every storage class and every transfer syntax with no
-budget at all. Where the PACS can reach us, c-move is the path that never
-silently drops an unusual modality. Where it cannot — no inbound route, no AET
-registration — set `c-get` and check that your modalities are in dimsechord's
-`DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES`.
+**Which to choose.** An association carries at most 128 presentation contexts,
+and the two paths spend that budget differently. The C-GET SCU has to *propose*
+storage contexts, so it negotiates dimsechord's 26 curated image classes across
+their compressed transfer syntaxes — broad on syntax, narrow on SOP class. The
+Storage SCP only *accepts*, matching whatever the peer proposes, so it covers
+pynetdicom's 120 `StoragePresentationContexts` with every transfer syntax and
+never spends the budget.
+
+So c-get is the one that needs nothing from the network, and c-move is the one
+that never silently drops an unusual modality. On c-get, check your modalities
+against dimsechord's `DEFAULT_IMAGE_STORAGE_CLASSES` /
+`DEFAULT_OTHER_STORAGE_CLASSES`: a SOP class outside them has no accepted
+context, so its instances fail their sub-operations and the retrieve comes back
+short. Where the PACS can route back to us, c-move avoids that entirely.
 
 ### Listener ownership
 
@@ -63,8 +67,9 @@ call it:
 - **One process retrieving** — nothing to configure. It binds `dicom_aet` on
   `dicom_port`; register that pair on the PACS.
 - **Several retrieving on one host** — each needs its own registered
-  `(AET, port)`. `clarinet worker --dicom AET:PORT` sets both (and forces
-  c-move) for a worker.
+  `(AET, port)`. `clarinet worker --dicom AET:PORT` sets both for a worker, and
+  forces c-move and `dicom_scp_enabled=true` with them, so the flag still works
+  where one shared `EnvironmentFile` says otherwise.
 - **A process that must not retrieve** — `dicom_scp_enabled=false`. It binds
   nothing; a C-MOVE retrieve from it then raises a `RuntimeError` naming the
   AET and port that would have to be registered.
@@ -74,18 +79,21 @@ out. `start_storage_scp` deliberately does **not** fall back to a free port: the
 PACS was never told to route there, so the listener would receive nothing and
 every retrieve would time out instead of failing.
 
-Under c-move the client registers a **collect** session on the SCP singleton,
-runs `move_study`/`move_series` with `settings.dicom_aet` as the destination,
-then waits for the instances to physically arrive — the peer's sub-operation
-tally is not proof of arrival, so `num_completed` and `instances` come from the
-session and a shortfall sets `status="timeout"`. `dicom_cmove_timeout` bounds
-the move and the arrival wait together. The `-study` suffix does not change the
-transport; it is read by the DICOMweb cache and the Slicer helper to batch at
-study level.
+`_retrieve_via_move` translates the call and hands it to dimsechord: the Q/R
+level comes from whether a `series_uid` was passed, the storage mode from
+whether an `output_dir` was, the destination from `settings.dicom_aet`, and
+`dicom_cmove_timeout` becomes the arrival budget while the `timeout` argument
+bounds the association. Everything after that — the collect session, driving
+the C-MOVE, the arrival target, the wait, the disk write — is
+`DicomOperations.retrieve_via_move`, which Clarinet used to own and which was
+ported into dimsechord unchanged. **Do not reimplement it here.** The arrival
+target in particular has to be read from the *first* pending response: a final
+Success response may omit the sub-operation counters (PS3.4 C.4.2.1.6), so a
+total summed at the end sees a stale `NumberOfRemainingSuboperations`, and
+failed sub-operations must not be counted as instances that will arrive.
 
-Progress under c-move is sampled from the receiving session (dimsechord's
-`move_*` exposes no per-sub-operation hook), so `on_progress` reports arrivals
-with `total=None` until the move returns.
+The `-study` suffix does not reach this path at all — it is read by the Slicer
+helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.
 
 ## Settings (`clarinet/settings.py`)
 
@@ -96,9 +104,9 @@ with `total=None` until the move returns.
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
 | `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
-| `dicom_retrieve_mode` | `c-move` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
+| `dicom_retrieve_mode` | `c-get` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
 | `dicom_cmove_timeout` | `300.0` | Seconds bounding the C-MOVE *and* the wait for its instances to arrive |
-| `dicom_scp_enabled` | `None` | `None` = own a listener when the mode is c-move; `false` = never (this process must not retrieve via C-MOVE); `true` = always |
+| `dicom_scp_enabled` | `None` | `None` = own a listener when the mode is c-move and `have_dicom`; `false` = never (this process must not retrieve via C-MOVE); `true` = always |
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |

@@ -570,6 +570,11 @@ async def _run_pipeline_worker(
         settings.dicom_port = port
         settings.dicom_retrieve_mode = "c-move"
         settings.have_dicom = True
+        # --dicom is an explicit request for a listener on this process; without
+        # this it would silently no-op wherever the config says dicom_scp_enabled
+        # is false, which is exactly the shared-EnvironmentFile deployment where
+        # the flag is the only per-process escape.
+        settings.dicom_scp_enabled = True
 
     if not settings.pipeline_enabled:
         logger.warning(
