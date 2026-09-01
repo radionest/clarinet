@@ -406,14 +406,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
 
-    # Start Storage SCP for C-MOVE mode
-    if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
-        from clarinet.services.dicom.scp import start_storage_scp
+    # Start Storage SCP when this process owns the C-MOVE listener
+    from clarinet.services.dicom.scp import start_storage_scp, storage_scp_wanted
 
+    if storage_scp_wanted():
         app.state.storage_scp = start_storage_scp()
         logger.info(
             f"Storage SCP started on port {settings.dicom_port} "
-            f"(AET: {settings.dicom_aet}, mode: c-move)"
+            f"(AET: {settings.dicom_aet}, mode: {settings.dicom_retrieve_mode})"
         )
 
     # Initialize DICOMweb cache singleton

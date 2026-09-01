@@ -4,6 +4,42 @@
 
 ### Breaking
 
+- **The DICOM core moved to the `dimsechord` package.** `clarinet.services.dicom`
+  no longer exports `DicomOperations`, `StorageHandler`, `StorageMode`,
+  `StorageConfig`, `AssociationConfig`, `RetrieveRequest` or
+  `QueryRetrieveLevel.PATIENT` — they described the inline SCU/SCP, now deleted.
+  The generic Q/R models (`DicomNode`, `StudyQuery`/`SeriesQuery`/`ImageQuery`,
+  `StudyResult`/`SeriesResult`/`ImageResult`, `RetrieveResult`,
+  `BatchStoreResult`, `QueryRetrieveLevel`) are still importable from
+  `clarinet.services.dicom` and `...dicom.models`, but they are now dimsechord
+  **dataclasses**, not Pydantic models: construction is keyword-only and
+  `.model_dump()` / `.model_validate()` are gone (use `dataclasses.asdict`).
+  `DicomClient` keeps its full method surface and gains `dicom_retrieve_mode`
+  dispatch, so `get_study` / `get_series` / `get_*_to_memory` run C-MOVE-to-self
+  under a c-move mode instead of falling back to C-GET. Two wire-level changes
+  come with the upgrade: Q/R now uses the **Study Root** information model
+  exclusively (Patient-Root-only peers will refuse the context), and the C-GET
+  path negotiates dimsechord's curated storage classes with compressed transfer
+  syntaxes rather than 120 classes uncompressed-only — a peer sending
+  compressed objects now works, while SOP classes outside the curated set do
+  not. The C-MOVE path is unaffected: the Storage SCP accepts every storage
+  class and every transfer syntax.
+- **`dicom_retrieve_mode` now defaults to `c-move`** (was `c-get`), so the
+  retrieve path with full SOP-class and transfer-syntax coverage is the one you
+  get without configuring anything. This needs the PACS to route `dicom_aet`
+  back to `dicom_ip:dicom_port` and that port to be reachable — a deployment
+  where it cannot must now set `dicom_retrieve_mode = "c-get"` explicitly, or
+  retrieves fail with a `RuntimeError` naming the AET and port to register.
+  `clarinet worker` now starts its Storage SCP whenever the configured mode is
+  a c-move mode, not only under `--dicom AET:PORT` (which still overrides the
+  AET and port it binds). Because a port belongs to one process and the PACS
+  routes C-MOVE by destination AET, **each retrieving process on a host needs
+  its own registered `(AET, port)`** — an API and a worker sharing the default
+  `CLARINET:11112` now fail at startup with a message naming the port and the
+  three ways out, rather than silently binding a port the PACS cannot route to.
+  New `dicom_scp_enabled` (`None` = own a listener when the mode is c-move,
+  `false` = never, `true` = always) marks which process owns it.
+
 - **`RecordType.unique_by` replaces `unique_per_user`.** `unique_by:
   frozenset[str] | None` (subset of `{"user", "parent"}`) replaces the boolean
   `unique_per_user`: at most one record of the type may exist per unique

@@ -18,11 +18,20 @@ from clarinet.services.dicom.models import DicomNode
 PEER = DicomNode(aet="ORTHANC", host="localhost", port=4242)
 
 
-def _move_result(num_completed: int = 2) -> MagicMock:
+def _move_result(
+    num_completed: int = 2,
+    *,
+    num_remaining: int = 0,
+    num_failed: int = 0,
+    num_warning: int = 0,
+    status: str = "success",
+) -> MagicMock:
     result = MagicMock()
-    result.status = "success"
+    result.status = status
     result.num_completed = num_completed
-    result.num_failed = 0
+    result.num_remaining = num_remaining
+    result.num_failed = num_failed
+    result.num_warning = num_warning
     result.instances = {}
     return result
 
@@ -42,6 +51,61 @@ def _scp(session: MagicMock, *, running: bool = True, arrived: bool = True) -> M
     scp.wait_for_completion.return_value = arrived
     scp.finish_session.return_value = session
     return scp
+
+
+class TestOwnership:
+    """Which process gets to own the C-MOVE listener."""
+
+    @pytest.mark.parametrize(
+        ("mode", "wanted"),
+        [
+            ("c-move", True),
+            ("c-move-study", True),
+            ("c-get", False),
+            ("c-get-study", False),
+        ],
+    )
+    def test_mode_implies_ownership(self, mode: str, wanted: bool):
+        from clarinet.services.dicom import scp as scp_module
+
+        with patch.object(scp_module, "settings") as settings:
+            settings.dicom_scp_enabled = None
+            settings.dicom_retrieve_mode = mode
+            assert scp_module.storage_scp_wanted() is wanted
+
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_explicit_setting_overrides_the_mode(self, enabled: bool):
+        """A second process on the host opts out even though the mode is c-move."""
+        from clarinet.services.dicom import scp as scp_module
+
+        with patch.object(scp_module, "settings") as settings:
+            settings.dicom_scp_enabled = enabled
+            settings.dicom_retrieve_mode = "c-move"
+            assert scp_module.storage_scp_wanted() is enabled
+
+    def test_bind_collision_names_the_port_and_the_ways_out(self):
+        """The operator must not have to guess which process took the port."""
+        from clarinet.services.dicom import scp as scp_module
+
+        scp_module.shutdown_storage_scp()
+        instance = MagicMock()
+        instance.is_running = False
+        instance.start.side_effect = OSError("[Errno 98] Address already in use")
+        with (
+            patch.object(scp_module, "StorageSCP", return_value=instance),
+            patch.object(scp_module, "settings") as settings,
+        ):
+            settings.dicom_aet = "CLARINET"
+            settings.dicom_port = 11112
+            settings.dicom_ip = None
+            with pytest.raises(OSError) as excinfo:
+                scp_module.start_storage_scp()
+        message = str(excinfo.value)
+        assert "11112" in message
+        assert "CLARINET" in message
+        assert "--dicom AET:PORT" in message
+        assert "dicom_scp_enabled=false" in message
+        scp_module.shutdown_storage_scp()
 
 
 class TestSingleton:
@@ -231,6 +295,35 @@ class TestRetrieveViaMove:
             result = await client.get_series_to_memory("1.2.3", "1.2.4", PEER)
 
         assert result.status == "timeout"
+
+    async def test_aborted_move_still_expects_the_announced_total(self):
+        """A move that stops early must not certify its truncated set as complete.
+
+        The peer reports what it completed *and* what it had left; taking only
+        ``num_completed`` would make the arrival target match whatever arrived.
+        """
+        client = DicomClient(calling_aet="TEST")
+        scp = _scp(_session(received=3, expected=10), arrived=False)
+
+        with (
+            patch.object(
+                DimsechordClient,
+                "move_series",
+                new=AsyncMock(
+                    return_value=_move_result(num_completed=3, num_remaining=7, status="pending")
+                ),
+            ),
+            patch("clarinet.services.dicom.client.settings") as settings,
+            patch("clarinet.services.dicom.scp.get_storage_scp", return_value=scp),
+        ):
+            settings.dicom_retrieve_mode = "c-move"
+            settings.dicom_aet = "CLARINET"
+            settings.dicom_cmove_timeout = 300.0
+            result = await client.get_series_to_memory("1.2.3", "1.2.4", PEER)
+
+        scp.set_expected.assert_called_once_with("1.2.3/1.2.4", 10)
+        assert result.status == "timeout"
+        assert result.num_completed == 3
 
     async def test_session_is_finished_when_move_raises(self):
         client = DicomClient(calling_aet="TEST")

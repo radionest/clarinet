@@ -147,9 +147,10 @@ class DicomClient(DimsechordClient):
 
         The C-MOVE reports how many sub-operations it completed, but the
         instances themselves arrive on a separate association, so the peer's
-        final status is not proof of arrival: the SCP session is told how many
-        to expect and then waited on. ``settings.dicom_cmove_timeout`` bounds
-        the move and the arrival wait together, measured from registration.
+        tally is not proof of arrival: the SCP session is told how many the
+        peer *announced* — completed plus failed, warned and still-remaining —
+        and then waited on. ``settings.dicom_cmove_timeout`` bounds the move
+        and the arrival wait together, measured from registration.
 
         Returns:
             The C-MOVE result, with ``instances`` / ``num_completed`` taken from
@@ -164,9 +165,13 @@ class DicomClient(DimsechordClient):
         scp = get_storage_scp()
         if not scp.is_running:
             raise RuntimeError(
-                "Storage SCP not running — C-MOVE requires a running SCP. "
-                "Set dicom_retrieve_mode='c-get', start the worker with "
-                "--dicom AET:PORT, or start the API server."
+                f"Storage SCP not running — dicom_retrieve_mode="
+                f"{settings.dicom_retrieve_mode!r} needs one to receive the "
+                f"C-STORE sub-operations. Start the API server or the worker "
+                f"(both start it for a c-move mode), and make sure the PACS "
+                f"routes AET {settings.dicom_aet!r} back to port "
+                f"{settings.dicom_port}. Set dicom_retrieve_mode='c-get' if it "
+                f"cannot reach us."
             )
 
         label = "series" if series_uid else "study"
@@ -195,7 +200,18 @@ class DicomClient(DimsechordClient):
                     poller.cancel()
                     await asyncio.gather(poller, return_exceptions=True)
 
-            scp.set_expected(key, result.num_completed)
+            # The peer's *announced* total, not just what it says it completed.
+            # A move aborted mid-stream still carries the sub-operations it had
+            # left in the last response it sent, so the arrival target survives
+            # a partial transfer — taking num_completed alone would declare the
+            # truncated set complete.
+            scp.set_expected(
+                key,
+                result.num_completed
+                + result.num_failed
+                + result.num_warning
+                + result.num_remaining,
+            )
             elapsed = time.monotonic() - started
             remaining = max(settings.dicom_cmove_timeout - elapsed, _MIN_ARRIVAL_WAIT)
             arrived = await asyncio.to_thread(scp.wait_for_completion, key, remaining)

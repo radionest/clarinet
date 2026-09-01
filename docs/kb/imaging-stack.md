@@ -29,22 +29,34 @@ via `asyncio.to_thread()`. What stays in Clarinet is the retrieve-mode
 dispatch, the SCP lifecycle, anonymization and the series filter.
 
 - **Retrieve mode is a setting, not a call site.** `dicom_retrieve_mode`
-  selects C-GET (default) or C-MOVE-to-self for every `get_*` call, so the same
-  code works against a PACS that offers only C-MOVE. Under c-move the client
-  registers a collect session on the Storage SCP, moves with `dicom_aet` as the
-  destination, and takes the instance count from what actually arrived — a
-  shortfall within `dicom_cmove_timeout` yields `status="timeout"`.
+  selects C-MOVE-to-self (default) or C-GET for every `get_*` call, so the same
+  code works against a PACS that offers only one of them. Under c-move the
+  client registers a collect session on the Storage SCP, moves with `dicom_aet`
+  as the destination, and takes the instance count from what actually arrived —
+  a shortfall within `dicom_cmove_timeout` yields `status="timeout"`.
+- **Why c-move is the default.** The 128-context association budget forces a
+  choice. The C-GET SCU has to *propose* storage contexts, so it negotiates a
+  curated set of image classes across their compressed transfer syntaxes. The
+  Storage SCP only *accepts* — matching whatever the peer proposes — so it
+  covers every storage class and every transfer syntax without spending the
+  budget. Where the PACS can route `dicom_aet` back to us, c-move never
+  silently drops an unusual modality; where it cannot, set `c-get`.
 - `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
-  (`dimsechord.StorageSCP`), started by the API lifespan in a c-move mode and by
-  `clarinet worker --dicom`. It accepts every transfer syntax, so a PACS may
-  send compressed objects verbatim instead of failing sub-operations.
+  (`dimsechord.StorageSCP`). It accepts every storage class and every transfer
+  syntax, so a PACS may send compressed objects verbatim instead of failing
+  sub-operations.
+- **Listener ownership.** A port belongs to one process and the PACS routes
+  C-MOVE by destination AET, so each retrieving process needs its own registered
+  `(AET, port)`: `storage_scp_wanted()` decides who starts one, `clarinet worker
+  --dicom AET:PORT` gives a worker its own, and `dicom_scp_enabled=false` opts a
+  process out. A collision fails at startup naming the port and the ways out
+  rather than falling back to a port the PACS cannot route to.
 - dimsechord's SCU holds a global **`threading.Semaphore`** (not asyncio — it is
   acquired inside the `to_thread` worker) limiting concurrent associations
   across DICOMweb, anonymization and import; sized from
   `dicom_max_concurrent_associations` in the app lifespan.
-- Typed errors map to HTTP in `api/exception_handlers.py`: `AssociationError`
-  → 409 (an unreachable or refusing PACS, as before) and `FindFailedError`
-  → 502. Routers let them propagate.
+- `AssociationError` — an unreachable or refusing PACS — maps to 409 in
+  `api/exception_handlers.py`, as it did before. Routers let it propagate.
 - `store_instances_batch` sends many datasets over **one** association, versus
   `store_instance` which opens one per dataset. Anonymization uses it per series,
   fanning out to every destination node sequentially; one node's failure never

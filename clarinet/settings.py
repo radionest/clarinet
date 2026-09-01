@@ -257,7 +257,17 @@ class Settings(BaseSettings):
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
     dicom_max_concurrent_associations: int = 8
-    dicom_retrieve_mode: Literal["c-get", "c-get-study", "c-move", "c-move-study"] = "c-get"
+    # c-move by default: the Storage SCP accepts every storage SOP class and
+    # every transfer syntax, where the C-GET path negotiates a curated subset
+    # within the 128-context association budget. Requires the PACS to route
+    # dicom_aet back to dicom_ip:dicom_port — set c-get where it cannot.
+    dicom_retrieve_mode: Literal["c-get", "c-get-study", "c-move", "c-move-study"] = "c-move"
+    # Which process owns the C-MOVE listener. None = auto (own one when the
+    # retrieve mode is a c-move mode). Only one process per host can bind a
+    # given port, and the PACS routes by AET, so every additional retrieving
+    # process needs its own registered (AET, port) — or dicom_scp_enabled=false
+    # if it should not retrieve via C-MOVE at all.
+    dicom_scp_enabled: bool | None = None
     dicom_cmove_timeout: float = 300.0  # seconds to wait for SCP to receive instances
     dicom_log_identifiers: bool = False
 

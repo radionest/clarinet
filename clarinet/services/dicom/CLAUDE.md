@@ -38,8 +38,41 @@ offers C-GET and one that offers only C-MOVE:
 
 | Mode | Transport | Needs |
 |---|---|---|
-| `c-get` (default), `c-get-study` | dimsechord's C-GET | nothing |
-| `c-move`, `c-move-study` | C-MOVE-to-self via `client._retrieve_via_move` | a running Storage SCP; the peer must route our AET back to it |
+| `c-move` (default), `c-move-study` | C-MOVE-to-self via `client._retrieve_via_move` | a running Storage SCP; the peer must route `dicom_aet` back to `dicom_ip:dicom_port` |
+| `c-get`, `c-get-study` | dimsechord's C-GET | nothing beyond an outbound association |
+
+**Why c-move is the default.** An association carries at most 128 presentation
+contexts, and the two paths spend that budget differently. The C-GET SCU must
+*propose* storage contexts, so it negotiates dimsechord's curated image classes
+across their compressed transfer syntaxes — broad on syntax, narrow on SOP
+class. The Storage SCP only *accepts*, matching against whatever the peer
+proposes, so it supports every storage class and every transfer syntax with no
+budget at all. Where the PACS can reach us, c-move is the path that never
+silently drops an unusual modality. Where it cannot — no inbound route, no AET
+registration — set `c-get` and check that your modalities are in dimsechord's
+`DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES`.
+
+### Listener ownership
+
+A listening port belongs to one process, and the PACS routes C-MOVE by
+destination AET to a host and port it was configured with. Both consequences
+are the operator's to resolve, so `storage_scp_wanted()` (in `scp.py`) is the
+single place that decides, and both the API lifespan and `clarinet worker`
+call it:
+
+- **One process retrieving** — nothing to configure. It binds `dicom_aet` on
+  `dicom_port`; register that pair on the PACS.
+- **Several retrieving on one host** — each needs its own registered
+  `(AET, port)`. `clarinet worker --dicom AET:PORT` sets both (and forces
+  c-move) for a worker.
+- **A process that must not retrieve** — `dicom_scp_enabled=false`. It binds
+  nothing; a C-MOVE retrieve from it then raises a `RuntimeError` naming the
+  AET and port that would have to be registered.
+
+A bind collision raises at startup with the port, the AET and those three ways
+out. `start_storage_scp` deliberately does **not** fall back to a free port: the
+PACS was never told to route there, so the listener would receive nothing and
+every retrieve would time out instead of failing.
 
 Under c-move the client registers a **collect** session on the SCP singleton,
 runs `move_study`/`move_series` with `settings.dicom_aet` as the destination,
@@ -63,6 +96,9 @@ with `total=None` until the move returns.
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
 | `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
+| `dicom_retrieve_mode` | `c-move` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
+| `dicom_cmove_timeout` | `300.0` | Seconds bounding the C-MOVE *and* the wait for its instances to arrive |
+| `dicom_scp_enabled` | `None` | `None` = own a listener when the mode is c-move; `false` = never (this process must not retrieve via C-MOVE); `true` = always |
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |
@@ -116,13 +152,15 @@ dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concur
 
 ## Errors
 
-dimsechord raises typed errors; the two the SCU can raise are mapped to HTTP in
-`api/exception_handlers.py` — `AssociationError` → 409 (preserving the contract
-the inline layer had, where every association failure surfaced as CONFLICT) and
-`FindFailedError` → 502. The rest of the hierarchy (`PoolExhaustedError` /
-`RetrieveBusyError`, `ArrivalTimeoutError`, `MoveToSelfError`) belongs to
-`PullEngine` / `AssociationPool`, which Clarinet does not use yet — map them
-when it does.
+dimsechord raises typed errors. Only `AssociationError` is reachable from the
+code Clarinet runs, and it maps to 409 in `api/exception_handlers.py` —
+preserving the contract the inline layer had, where every association failure
+surfaced as CONFLICT. The rest of the hierarchy is unreachable today and is
+deliberately not mapped: `FindFailedError` comes from `find_iter` /
+`QueryEngine` (the typed `find_studies` / `find_series` log a warning and
+return partial results instead of raising), and `PoolExhaustedError` /
+`RetrieveBusyError`, `ArrivalTimeoutError`, `MoveToSelfError` belong to
+`PullEngine` / `AssociationPool`. Map them when Clarinet adopts those.
 
 ## Anonymization API surface
 

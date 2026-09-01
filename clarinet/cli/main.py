@@ -577,10 +577,15 @@ async def _run_pipeline_worker(
             "Set CLARINET_PIPELINE_ENABLED=true to enable."
         )
 
+    from clarinet.services.dicom.scp import storage_scp_wanted
+
     await run_worker(
         queues=queues,
         workers=workers,
-        start_scp=dicom_scp is not None,
+        # Ownership, not just an explicit --dicom: the retrieve mode defaults to
+        # c-move, so a worker without the flag would otherwise only discover the
+        # missing listener at its first retrieve.
+        start_scp=storage_scp_wanted(),
         log_file=log_file,
     )
 

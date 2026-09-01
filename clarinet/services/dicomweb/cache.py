@@ -453,7 +453,7 @@ class DicomWebCache:
 
             if result.num_completed == 0:
                 raise RuntimeError(
-                    f"C-GET returned 0 instances for series {series_uid} (status: {result.status})"
+                    f"DICOM retrieve returned 0 instances for series {series_uid} (status: {result.status})"
                 )
 
             self._validate_series_in_study(study_uid, series_uid, result.instances)

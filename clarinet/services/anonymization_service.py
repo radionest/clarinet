@@ -117,7 +117,7 @@ class AnonymizationService:
                 raise
             except Exception:
                 logger.exception(
-                    f"C-GET failed for series {series.series_uid} (attempt {attempt}/{retries})"
+                    f"DICOM retrieve failed for series {series.series_uid} (attempt {attempt}/{retries})"
                 )
                 if attempt < retries:
                     await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
@@ -130,14 +130,14 @@ class AnonymizationService:
                 return result
 
             logger.warning(
-                f"Incomplete C-GET for series {series.series_uid}: "
+                f"Incomplete DICOM retrieve for series {series.series_uid}: "
                 f"got {received}/{expected or '?'} instances "
                 f"(attempt {attempt}/{retries})"
             )
             if attempt < retries:
                 await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
 
-        logger.error(f"All {retries} C-GET attempts failed for series {series.series_uid}")
+        logger.error(f"All {retries} retrieve attempts failed for series {series.series_uid}")
         return None
 
     async def anonymize_study(

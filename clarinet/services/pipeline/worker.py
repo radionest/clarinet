@@ -209,10 +209,8 @@ async def run_worker(
         try:
             scp = start_storage_scp()
         except OSError as e:
-            logger.error(
-                f"Failed to start Storage SCP on port {settings.dicom_port}: {e}. "
-                "Ensure the port is not already in use by another process."
-            )
+            # start_storage_scp's message already names the port and the ways out.
+            logger.error(f"Worker cannot start: {e}")
             raise
 
     receiver_tasks: list[asyncio.Task[None]] = []
