@@ -592,6 +592,14 @@ async def _run_pipeline_worker(
             "Set CLARINET_PIPELINE_ENABLED=true to enable."
         )
 
+    start_scp = dicom_scp is not None or settings.dicom_scp_enabled is True
+    if not start_scp and settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
+        logger.warning(
+            f"dicom_retrieve_mode={settings.dicom_retrieve_mode!r} but this worker owns no "
+            "Storage SCP, so any DICOM retrieve it runs will fail. Start it with "
+            "--dicom AET:PORT (registered on the PACS) if it retrieves."
+        )
+
     await run_worker(
         queues=queues,
         workers=workers,
@@ -601,7 +609,7 @@ async def _run_pipeline_worker(
         # would race it for the same port and lose. Give a worker its own
         # identity with --dicom AET:PORT, or dicom_scp_enabled=true where the
         # AET and port are already per-process.
-        start_scp=dicom_scp is not None or settings.dicom_scp_enabled is True,
+        start_scp=start_scp,
         log_file=log_file,
     )
 

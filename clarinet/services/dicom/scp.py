@@ -16,8 +16,11 @@ does not pick a free port on its own: a port the operator never registered is
 one the PACS cannot route to, so the listener would sit there receiving nothing.
 
 Lifecycle:
-    - Started in ``app.py`` lifespan and in ``pipeline/worker.py``, both gated
-      on ``storage_scp_wanted()``
+    - Started in ``app.py`` lifespan when :func:`storage_scp_wanted` says so,
+      and in ``pipeline/worker.py`` only when the worker was asked explicitly
+      (``--dicom AET:PORT`` or ``dicom_scp_enabled=true``) — on a c-move
+      deployment the API already holds the port, so a worker must not infer
+      ownership from the mode
     - Stopped in the matching shutdown block
     - ``get_storage_scp()`` / ``shutdown_storage_scp()`` follow the
       re-create-after-shutdown pattern (see ``clarinet/files/_fs.py``).
@@ -43,7 +46,10 @@ _scp: StorageSCP | None = None
 
 
 def storage_scp_wanted() -> bool:
-    """Whether this process should own a Storage SCP listener.
+    """Whether the API process should own a Storage SCP listener.
+
+    The worker does not use this: it takes one only when asked, because the API
+    has already bound the port on any deployment where this would return True.
 
     ``dicom_scp_enabled`` decides when set; otherwise a c-move retrieve mode
     implies one, since that mode cannot retrieve anything without it. The mode
@@ -67,7 +73,8 @@ def get_storage_scp() -> StorageSCP:
 def start_storage_scp() -> StorageSCP:
     """Start the singleton on the configured local AET/port; no-op if running.
 
-    Callers gate this on :func:`storage_scp_wanted`.
+    The API gates this on :func:`storage_scp_wanted`; the worker on an explicit
+    ``--dicom`` / ``dicom_scp_enabled=true``.
 
     Raises:
         OSError: If the port is already taken — by another Clarinet process

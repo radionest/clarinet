@@ -50,9 +50,9 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   sub-operations.
 - **Listener ownership.** A port belongs to one process and the PACS routes
   C-MOVE by destination AET, so each retrieving process needs its own registered
-  `(AET, port)`: `storage_scp_wanted()` decides who starts one, `clarinet worker
-  --dicom AET:PORT` gives a worker its own, and `dicom_scp_enabled=false` opts a
-  process out. A collision names the port and the ways out rather than falling
+  `(AET, port)`: `storage_scp_wanted()` decides for the API, a worker takes one
+  only when asked (`clarinet worker --dicom AET:PORT`, or `dicom_scp_enabled=true`
+  per process), and `dicom_scp_enabled=false` opts a process out. A collision names the port and the ways out rather than falling
   back to a port the PACS cannot route to — as a `StartupError` in the API, and
   as the same message on an `OSError` in the worker.
 - dimsechord's SCU holds a global **`threading.Semaphore`** (not asyncio — it is

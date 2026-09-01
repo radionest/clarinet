@@ -58,19 +58,28 @@ returns short — with a partial series, not an error. The curated set covers CT
 MR, Enhanced CT/MR, PET, CR, DX-for-presentation, SC, US and US multi-frame,
 plus RT, SEG, SR, KO, PR and encapsulated documents. Notably **absent**: X-Ray
 Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA/XRF, Breast
-Tomosynthesis and the VL/endoscopic family. A site with any of those wants
+Tomosynthesis and the VL/endoscopic family, among others. A site with any of those wants
 c-move until dimsechord takes a storage-class argument.
 
 ### Listener ownership
 
 A listening port belongs to one process, and the PACS routes C-MOVE by
 destination AET to a host and port it was configured with. Both consequences
-are the operator's to resolve, so `storage_scp_wanted()` (in `scp.py`) is the
-single place that decides, and both the API lifespan and `clarinet worker`
-call it:
+are the operator's to resolve, and the two processes resolve them differently:
 
-- **One process retrieving** — nothing to configure. It binds `dicom_aet` on
-  `dicom_port`; register that pair on the PACS.
+| Process | Owns a listener when |
+|---|---|
+| API lifespan | `storage_scp_wanted()` — `dicom_scp_enabled`, else a c-move mode |
+| `clarinet worker` | asked explicitly — `--dicom AET:PORT`, or `dicom_scp_enabled=true` |
+
+The worker must not infer it from the mode: on a c-move deployment the API
+already holds `dicom_aet` on `dicom_port`, so a worker that inferred ownership
+would race it for the same port and lose.
+
+- **One process retrieving** — nothing to configure *if it is the API*. It binds
+  `dicom_aet` on `dicom_port`; register that pair on the PACS. A worker
+  retrieving on its own still needs `--dicom`, or it starts with no listener and
+  raises at its first retrieve.
 - **Several retrieving on one host** — each needs its own registered
   `(AET, port)`. `clarinet worker --dicom AET:PORT` sets both for a worker, and
   forces c-move and `dicom_scp_enabled=true` with them, so the flag still works
@@ -78,6 +87,11 @@ call it:
 - **A process that must not retrieve** — `dicom_scp_enabled=false`. It binds
   nothing; a C-MOVE retrieve from it then raises a `RuntimeError` naming the
   AET and port that would have to be registered.
+
+Both `dicom_scp_enabled` values are **per-process**. Setting `true` in a shared
+`EnvironmentFile` — which both deploy templates read — makes the API and every
+worker claim the same port, and whichever starts second crash-loops. Give each
+process its own AET and port instead; for a worker that is what `--dicom` is.
 
 A bind collision raises at startup with the port, the AET and those three ways
 out. `start_storage_scp` deliberately does **not** fall back to a free port: the

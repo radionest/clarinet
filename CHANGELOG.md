@@ -36,10 +36,12 @@
   under a c-move mode instead of falling back to C-GET. Two wire-level changes
   come with the upgrade: Q/R now uses the **Study Root** information model
   exclusively (Patient-Root-only peers will refuse the context), and the C-GET
-  path negotiates dimsechord's curated storage classes with compressed transfer
-  syntaxes rather than 120 classes uncompressed-only — a peer sending
-  compressed objects now works, while SOP classes outside the curated set do
-  not. The C-MOVE path keeps the wider coverage: the Storage SCP accepts
+  path — which `dicom_retrieve_mode` still selects by default — negotiates
+  dimsechord's 26 curated storage classes with compressed transfer syntaxes
+  rather than 120 classes uncompressed-only: a peer sending compressed objects
+  now works, while a SOP class outside the curated set (X-Ray Angiographic,
+  Nuclear Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis and
+  the VL family among them) comes back as a short series rather than an error. The C-MOVE path keeps the wider coverage: the Storage SCP accepts
   pynetdicom's 120 `StoragePresentationContexts` with every transfer syntax,
   because an acceptor matches the requester's proposals instead of proposing
   its own, so the 128-context budget never binds.
