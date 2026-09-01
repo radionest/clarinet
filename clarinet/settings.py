@@ -259,7 +259,7 @@ class Settings(BaseSettings):
     dicom_max_concurrent_associations: int = 8
     dicom_retrieve_mode: Literal["c-get", "c-get-study", "c-move", "c-move-study"] = "c-get"
     # Which process owns the C-MOVE listener. None = auto (own one when the
-    # retrieve mode is a c-move mode and a PACS is configured). Only one process
+    # retrieve mode is a c-move mode). Only one process
     # per host can bind a given port, and the PACS routes by AET, so every
     # additional retrieving process needs its own registered (AET, port) — or
     # dicom_scp_enabled=false if it should not retrieve via C-MOVE at all.

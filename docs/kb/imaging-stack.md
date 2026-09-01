@@ -35,12 +35,15 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   session on the Storage SCP, moves with `dicom_aet` as the destination, and
   takes the instance count from what actually arrived.
 - **Which mode.** The 128-context association budget forces a choice. The C-GET
-  SCU has to *propose* storage contexts, so it negotiates 26 curated image
-  classes across their compressed transfer syntaxes; the Storage SCP only
-  *accepts* — matching whatever the peer proposes — so it covers pynetdicom's
-  120 `StoragePresentationContexts` with every transfer syntax without spending
-  the budget. c-get needs nothing from the network; c-move needs a route back
-  but never silently drops a modality outside those 26.
+  SCU has to *propose* storage contexts, so it negotiates 26 curated classes (10
+  image ones across their compressed transfer syntaxes, 16 non-image ones
+  uncompressed); the Storage SCP only *accepts* — matching whatever the peer
+  proposes — so it covers pynetdicom's 120 `StoragePresentationContexts` with
+  every transfer syntax without spending the budget. c-get needs nothing from
+  the network, but a modality outside those 26 — X-Ray Angiographic, Nuclear
+  Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis, the VL
+  family — comes back as a short series rather than an error. c-move needs a
+  route back and drops nothing.
 - `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
   (`dimsechord.StorageSCP`). It accepts 120 storage classes with every transfer
   syntax, so a PACS may send compressed objects verbatim instead of failing

@@ -43,18 +43,23 @@ offers C-GET and one that offers only C-MOVE:
 
 **Which to choose.** An association carries at most 128 presentation contexts,
 and the two paths spend that budget differently. The C-GET SCU has to *propose*
-storage contexts, so it negotiates dimsechord's 26 curated image classes across
-their compressed transfer syntaxes — broad on syntax, narrow on SOP class. The
-Storage SCP only *accepts*, matching whatever the peer proposes, so it covers
-pynetdicom's 120 `StoragePresentationContexts` with every transfer syntax and
-never spends the budget.
+storage contexts, so it negotiates dimsechord's 26 curated classes — 10 image
+classes, each across the compressed transfer syntaxes, plus 16 non-image ones
+uncompressed — broad on syntax, narrow on SOP class. The Storage SCP only
+*accepts*, matching whatever the peer proposes, so it covers pynetdicom's 120
+`StoragePresentationContexts` with every transfer syntax and never spends the
+budget.
 
-So c-get is the one that needs nothing from the network, and c-move is the one
-that never silently drops an unusual modality. On c-get, check your modalities
-against dimsechord's `DEFAULT_IMAGE_STORAGE_CLASSES` /
-`DEFAULT_OTHER_STORAGE_CLASSES`: a SOP class outside them has no accepted
-context, so its instances fail their sub-operations and the retrieve comes back
-short. Where the PACS can route back to us, c-move avoids that entirely.
+So c-get needs nothing from the network, and c-move never silently drops an
+unusual modality. **On c-get, check your modalities first**: a SOP class outside
+`DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES` gets no
+accepted context, so its instances fail their sub-operations and the retrieve
+returns short — with a partial series, not an error. The curated set covers CT,
+MR, Enhanced CT/MR, PET, CR, DX-for-presentation, SC, US and US multi-frame,
+plus RT, SEG, SR, KO, PR and encapsulated documents. Notably **absent**: X-Ray
+Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA/XRF, Breast
+Tomosynthesis and the VL/endoscopic family. A site with any of those wants
+c-move until dimsechord takes a storage-class argument.
 
 ### Listener ownership
 
@@ -89,8 +94,14 @@ the C-MOVE, the arrival target, the wait, the disk write — is
 ported into dimsechord unchanged. **Do not reimplement it here.** The arrival
 target in particular has to be read from the *first* pending response: a final
 Success response may omit the sub-operation counters (PS3.4 C.4.2.1.6), so a
-total summed at the end sees a stale `NumberOfRemainingSuboperations`, and
-failed sub-operations must not be counted as instances that will arrive.
+total summed at the end sees a stale `NumberOfRemainingSuboperations`.
+
+Two known rough edges in that upstream code, both pre-dating the move to the
+package: the target is the peer's *announced* total, so a retrieve with failed
+sub-operations waits out `dicom_cmove_timeout` and reports `status="timeout"`
+with the instances that did arrive; and a peer that omits the counters entirely
+on its first pending response leaves the target unset, with the same effect on
+an otherwise successful retrieve. Both want fixing in dimsechord, not here.
 
 The `-study` suffix does not reach this path at all — it is read by the Slicer
 helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.

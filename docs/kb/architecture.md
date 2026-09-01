@@ -90,8 +90,9 @@ non-session work (HTTP calls, `asyncio.to_thread` CPU work).
    per-queue broker → `app.state.pipeline_brokers` (plural — one per queue) →
    `sync_pipeline_definitions()`
 10. Session cleanup service, if `session_cleanup_enabled`
-11. DICOM association semaphore; plus a Storage SCP when `dicom_retrieve_mode`
-    is `c-move` or `c-move-study` → `app.state.storage_scp`
+11. DICOM association cap; plus a Storage SCP when `storage_scp_wanted()` says
+    this process owns one — `dicom_scp_enabled`, else a c-move retrieve mode →
+    `app.state.storage_scp`. A bind collision is a `StartupError`.
 12. DICOMweb cache and its cleanup service, if `dicomweb_enabled`; SSE event
     bus, if `sse_enabled`
 

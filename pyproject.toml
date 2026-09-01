@@ -33,7 +33,10 @@ dependencies = [
     "aiofiles>=24.1.0",
     "fastapi-users>=13.0.0",
     "pynetdicom>=3.0.4",
-    "dimsechord>=0.8.0",
+    # Upper-pinned: the published wheel ships this spec unlocked, Clarinet
+    # imports dimsechord._models for the retrieve_via_move argument types,
+    # and 0.x minors carry breaking changes.
+    "dimsechord>=0.8.0,<0.9",
     "cachetools>=7.0.0",
     "tomli-w>=1.2.0",
     "taskiq>=0.12.0",

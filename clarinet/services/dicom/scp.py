@@ -46,13 +46,14 @@ def storage_scp_wanted() -> bool:
     """Whether this process should own a Storage SCP listener.
 
     ``dicom_scp_enabled`` decides when set; otherwise a c-move retrieve mode
-    implies one, since that mode cannot retrieve anything without it — but only
-    where a PACS is configured at all, so an install with ``have_dicom=false``
-    never opens a listening port it has no use for.
+    implies one, since that mode cannot retrieve anything without it. The mode
+    is the whole test: ``have_dicom`` looks like a guard here but is a worker
+    queue-capability flag (it sits with ``have_gpu`` / ``have_quarto`` and
+    routes queues), and the API retrieves DICOM without ever setting it.
     """
     if settings.dicom_scp_enabled is not None:
         return settings.dicom_scp_enabled
-    return settings.have_dicom and settings.dicom_retrieve_mode in ("c-move", "c-move-study")
+    return settings.dicom_retrieve_mode in ("c-move", "c-move-study")
 
 
 def get_storage_scp() -> StorageSCP:

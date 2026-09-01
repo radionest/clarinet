@@ -568,12 +568,21 @@ async def _run_pipeline_worker(
         aet, port = dicom_scp
         settings.dicom_aet = aet
         settings.dicom_port = port
-        settings.dicom_retrieve_mode = "c-move"
         settings.have_dicom = True
+        # Only switch transport if it isn't already a move mode — forcing bare
+        # "c-move" would silently strip the -study suffix that the Slicer helper
+        # reads to batch at study level.
+        if settings.dicom_retrieve_mode not in ("c-move", "c-move-study"):
+            settings.dicom_retrieve_mode = "c-move"
         # --dicom is an explicit request for a listener on this process; without
         # this it would silently no-op wherever the config says dicom_scp_enabled
         # is false, which is exactly the shared-EnvironmentFile deployment where
         # the flag is the only per-process escape.
+        if settings.dicom_scp_enabled is False:
+            logger.warning(
+                "--dicom overrides dicom_scp_enabled=false: this process will own "
+                f"a Storage SCP on {aet}:{port}"
+            )
         settings.dicom_scp_enabled = True
 
     if not settings.pipeline_enabled:
@@ -587,9 +596,9 @@ async def _run_pipeline_worker(
     await run_worker(
         queues=queues,
         workers=workers,
-        # Ownership, not just an explicit --dicom: the retrieve mode defaults to
-        # c-move, so a worker without the flag would otherwise only discover the
-        # missing listener at its first retrieve.
+        # Ownership, not just an explicit --dicom: a worker configured for
+        # c-move without the flag would otherwise only discover the missing
+        # listener at its first retrieve.
         start_scp=storage_scp_wanted(),
         log_file=log_file,
     )

@@ -420,7 +420,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 component="DICOM SCP",
                 reason=str(e),
                 hint=f"Free port {settings.dicom_port} or give this process its own",
-                disableable=False,
             ) from e
         logger.info(
             f"Storage SCP started on port {settings.dicom_port} "

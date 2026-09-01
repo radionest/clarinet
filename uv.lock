@@ -707,7 +707,7 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=4.0.1" },
     { name = "cachetools", specifier = ">=7.0.0" },
     { name = "dicom-anonymizer", specifier = ">=1.0.0" },
-    { name = "dimsechord", specifier = ">=0.8.0" },
+    { name = "dimsechord", specifier = ">=0.8.0,<0.9" },
     { name = "fastapi", specifier = ">=0.95.0" },
     { name = "fastapi-users", specifier = ">=13.0.0" },
     { name = "httptools", marker = "extra == 'performance'", specifier = ">=0.6.0" },

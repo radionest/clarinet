@@ -35,11 +35,16 @@ def _scp(*, running: bool = True) -> MagicMock:
     return scp
 
 
+#: Deliberately not the 300.0 that ``get_*`` defaults ``timeout`` to — the two
+#: budgets are different things and a shared value cannot tell them apart.
+ARRIVAL_BUDGET = 123.0
+
+
 def _move_settings(settings: MagicMock, mode: str = "c-move") -> None:
     settings.dicom_retrieve_mode = mode
     settings.dicom_aet = "CLARINET"
     settings.dicom_port = 11112
-    settings.dicom_cmove_timeout = 300.0
+    settings.dicom_cmove_timeout = ARRIVAL_BUDGET
 
 
 class TestOwnership:
@@ -220,15 +225,20 @@ class TestMoveDelegation:
             call=lambda: client.get_series_to_memory("1.2.3", "1.2.4", PEER),
         )
 
-        _, request, storage, local_aet, passed_scp, budget, _ = move.call_args.args
+        config, request, storage, local_aet, passed_scp, budget, _ = move.call_args.args
         assert request.level is QueryRetrieveLevel.SERIES
         assert request.study_instance_uid == "1.2.3"
         assert request.series_instance_uid == "1.2.4"
         assert storage.mode is StorageMode.MEMORY
         assert storage.output_dir is None
-        assert local_aet == "CLARINET"
+        assert (config.called_aet, config.peer_host, config.peer_port) == (
+            PEER.aet,
+            PEER.host,
+            PEER.port,
+        )
+        assert local_aet == "CLARINET", "the C-MOVE destination is us, not the peer"
         assert passed_scp is scp
-        assert budget == 300.0
+        assert budget == ARRIVAL_BUDGET
 
     async def test_study_call_to_disk_becomes_a_study_level_disk_retrieve(self, tmp_path: Path):
         client = DicomClient(calling_aet="TEST")
@@ -258,3 +268,21 @@ class TestMoveDelegation:
         )
 
         assert move.call_args.args[-1] is on_progress
+
+    async def test_level_follows_the_call_not_the_mode_suffix(self):
+        """``c-move-study`` retrieving one series is still a SERIES-level move.
+
+        The suffix is the Slicer helper's batching hint; it must not widen a
+        series request into a whole study.
+        """
+        client = DicomClient(calling_aet="TEST")
+        move = await self._call(
+            client,
+            _scp(),
+            mode="c-move-study",
+            call=lambda: client.get_series_to_memory("1.2.3", "1.2.4", PEER),
+        )
+
+        request = move.call_args.args[1]
+        assert request.level is QueryRetrieveLevel.SERIES
+        assert request.series_instance_uid == "1.2.4"

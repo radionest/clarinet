@@ -12,8 +12,10 @@
   and `have_dicom` is set; `false` never does; `true` always does.
   `clarinet worker --dicom AET:PORT` now implies `true` alongside the AET, port
   and mode it already set, so the flag still works where one shared
-  `EnvironmentFile` says otherwise. A bind collision is now a `StartupError`
-  naming the port, the AET and the ways out, instead of an unlabelled `OSError`.
+  `EnvironmentFile` says otherwise, and warns when it overrides an explicit
+  `false`. A bind collision in the API lifespan is now a `StartupError` naming
+  the port, the AET and the ways out (the worker still surfaces the same message
+  as an `OSError`).
 
 ### Breaking
 
