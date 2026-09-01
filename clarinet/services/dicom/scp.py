@@ -48,8 +48,10 @@ _scp: StorageSCP | None = None
 def storage_scp_wanted() -> bool:
     """Whether the API process should own a Storage SCP listener.
 
-    The worker does not use this: it takes one only when asked, because the API
-    has already bound the port on any deployment where this would return True.
+    The worker does not use this: it takes one only when asked. On a combined
+    host the API has already bound the port, and on a worker-only host nothing
+    has — but a listener the PACS was never told to route to receives nothing
+    either way, so the AET and port have to be given deliberately.
 
     ``dicom_scp_enabled`` decides when set; otherwise a c-move retrieve mode
     implies one, since that mode cannot retrieve anything without it. The mode

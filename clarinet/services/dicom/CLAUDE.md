@@ -82,8 +82,9 @@ would race it for the same port and lose.
   raises at its first retrieve.
 - **Several retrieving on one host** — each needs its own registered
   `(AET, port)`. `clarinet worker --dicom AET:PORT` sets both for a worker, and
-  forces c-move and `dicom_scp_enabled=true` with them, so the flag still works
-  where one shared `EnvironmentFile` says otherwise.
+  switches the transport to C-MOVE *keeping the Q/R level* (`c-get-study` →
+  `c-move-study`) plus `dicom_scp_enabled=true`, so the flag still works where
+  one shared `EnvironmentFile` says otherwise.
 - **A process that must not retrieve** — `dicom_scp_enabled=false`. It binds
   nothing; a C-MOVE retrieve from it then raises a `RuntimeError` naming the
   AET and port that would have to be registered.

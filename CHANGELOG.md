@@ -17,7 +17,9 @@
   `EnvironmentFile` says otherwise, and warns when it overrides an explicit
   `false`. A bind collision in the API lifespan is now a `StartupError` naming
   the port, the AET and the ways out (the worker still surfaces the same message
-  as an `OSError`).
+  as an `OSError`). A worker configured for a c-move mode but holding no
+  listener now warns at startup, naming `--dicom AET:PORT`, instead of starting
+  cleanly and failing at its first retrieve.
 
 ### Breaking
 
@@ -41,7 +43,8 @@
   rather than 120 classes uncompressed-only: a peer sending compressed objects
   now works, while a SOP class outside the curated set (X-Ray Angiographic,
   Nuclear Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis and
-  the VL family among them) comes back as a short series rather than an error. The C-MOVE path keeps the wider coverage: the Storage SCP accepts
+  the VL family among them) comes back as a short series rather than an
+  error. The C-MOVE path keeps the wider coverage: the Storage SCP accepts
   pynetdicom's 120 `StoragePresentationContexts` with every transfer syntax,
   because an acceptor matches the requester's proposals instead of proposing
   its own, so the 128-context budget never binds.

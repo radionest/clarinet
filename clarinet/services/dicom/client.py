@@ -156,9 +156,10 @@ class DicomClient(DimsechordClient):
                 f"Storage SCP not running — dicom_retrieve_mode="
                 f"{settings.dicom_retrieve_mode!r} needs one to receive the "
                 f"C-STORE sub-operations, and this process owns none. Either it "
-                f"should (unset dicom_scp_enabled, or set it true, and give it a "
-                f"free port the PACS routes AET {settings.dicom_aet!r} to), or it "
-                f"should not retrieve via C-MOVE (set dicom_retrieve_mode='c-get')."
+                f"should (unset dicom_scp_enabled, or set it true, and have the "
+                f"PACS route AET {settings.dicom_aet!r} to port "
+                f"{settings.dicom_port}), or it should not retrieve via C-MOVE "
+                f"(set dicom_retrieve_mode='c-get')."
             )
 
         config = self._create_association_config(peer.aet, peer.host, peer.port, timeout)
