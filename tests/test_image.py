@@ -28,6 +28,7 @@ from clarinet.services.image import (
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
 from clarinet.services.image.orientation import ground_truth_slice_geometry
+from clarinet.services.image.segmentation import is_conform_repairable
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -2314,6 +2315,26 @@ class TestConformSegToGrid:
 
         assert seg_path.read_bytes() == before
 
+    def test_is_conform_repairable_for_a_uint8_subject(self, tmp_path: Path) -> None:
+        seg_path = tmp_path / "seg.nii.gz"
+        self._write_volume(seg_path, (10, 10, 10))
+
+        assert is_conform_repairable(seg_path) is True
+
+    def test_is_conform_repairable_refuses_a_wider_dtype(self, tmp_path: Path) -> None:
+        """The header-only probe the submit policy consults before choosing to
+        repair — the same rule the writer enforces, without the ImageError
+        round-trip."""
+        seg_path = tmp_path / "seg.nii.gz"
+        wide = Image()
+        wide._direction = np.eye(3)
+        wide._origin = (0.0, 0.0, 0.0)
+        wide._spacing = (1.0, 1.0, 1.0)
+        wide.img = np.zeros((10, 10, 10), dtype=np.int16)
+        wide.save_as(seg_path, FileType.NIFTI)
+
+        assert is_conform_repairable(seg_path) is False
+
     def test_conform_noop_when_same_grid(self, tmp_path: Path) -> None:
         shape = (8, 8, 8)
         vol_path = tmp_path / "volume.nii.gz"
@@ -2551,6 +2572,32 @@ class TestConformLayeredSegToGrid:
         # round-trips through the public reader too, not just the raw header dict
         seg_meta = LayeredSegmentation.read_header(seg_path)
         assert seg_meta.segments == [("cortex", 0, 1), ("lesion", 1, 2)]
+
+    def test_is_conform_repairable_for_any_4d_layered_dtype(self, tmp_path: Path) -> None:
+        """A layered file is repairable whatever its dtype: the 4-D path never
+        routes through Segmentation's forced-uint8 read, so a uint16 layer stack
+        must not trip the 8-bit rule that governs 3-D subjects."""
+        shape = (6, 7, 5)
+        seg_path = tmp_path / "layered.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            np.zeros((2, *shape), dtype=np.uint16),
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": np.vstack([np.full(3, np.nan), np.eye(3)]),
+                "space origin": np.array([0.0, 0.0, 0.0]),
+                "encoding": "raw",
+                "Segment0_Name": "cortex",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+                "Segment1_Name": "lesion",
+                "Segment1_LabelValue": "2",
+                "Segment1_Layer": "1",
+            },
+        )
+
+        assert is_conform_repairable(seg_path) is True
 
     def test_conform_4d_layered_relabels_space_to_lps(self, tmp_path: Path) -> None:
         """A layered source whose header carries a foreign `space` (RAS) must still

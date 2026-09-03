@@ -734,7 +734,8 @@ def conform_seg_to_grid(
             uses would otherwise silently quantize a wider format (e.g. an
             int16/float32 intensity volume). The 4-D layered path is unaffected:
             it never routes through :class:`Segmentation` and always preserves the
-            source dtype (see :func:`_conform_layered_seg`).
+            source dtype (see :func:`_conform_layered_seg`). The same rule is
+            available up front as :func:`is_conform_repairable`.
         GeometryMismatchError: the grids are ``FOREIGN`` and *allow_resample* is False.
     """
     seg_path = Path(seg_path)
@@ -766,7 +767,7 @@ def conform_seg_to_grid(
             f"  {grid_path}: {ref_grid.summary()}"
         )
 
-    is_layered = ".nrrd" in seg_path.suffixes and len(nrrd.read_header(str(seg_path))["sizes"]) == 4
+    is_layered = _is_layered_nrrd(seg_path)
     if is_layered and filetype is not FileType.NRRD:
         raise ImageError(
             f"Cannot write a 4-D layered segmentation to {target.name}: the layered "
@@ -776,12 +777,10 @@ def conform_seg_to_grid(
     if is_layered:
         _conform_layered_seg(seg_path, target, seg_grid=seg_grid, ref_grid=ref_grid)
     else:
-        probe = Image()
-        probe.read(seg_path, load_data=False)
-        if probe.on_disk_dtype != np.uint8:
+        if not is_conform_repairable(seg_path):
             raise ImageError(
                 f"{seg_path.name} is not an 8-bit mask on disk (dtype="
-                f"{probe.on_disk_dtype}); the segmentation read this function uses "
+                f"{_on_disk_dtype(seg_path)}); the segmentation read this function uses "
                 "forces uint8 and would silently quantize a wider format. Use "
                 "on_grid_mismatch='reject' and re-export this file already "
                 "conformed to its reference instead."
@@ -793,6 +792,28 @@ def conform_seg_to_grid(
 
     logger.info(f"Conformed segmentation {seg_path.name} onto grid of {grid_path.name}")
     return True
+
+
+def is_conform_repairable(seg_path: Path) -> bool:
+    """Can :func:`conform_seg_to_grid` rearrange *seg_path* without quantizing it?
+
+    Header-only — no voxel data is read. A 4-D layered NRRD always qualifies
+    (the layered path preserves the source dtype); a 3-D file only when it is
+    uint8 on disk, because the :class:`Segmentation` read the 3-D path uses
+    forces uint8. This is the writer's own guard exposed as a probe, so a
+    caller can decide against a repair without first attempting one.
+    """
+    return _is_layered_nrrd(seg_path) or _on_disk_dtype(seg_path) == np.uint8
+
+
+def _is_layered_nrrd(path: Path) -> bool:
+    return ".nrrd" in path.suffixes and len(nrrd.read_header(str(path))["sizes"]) == 4
+
+
+def _on_disk_dtype(path: Path) -> np.dtype | None:
+    probe = Image()
+    probe.read(path, load_data=False)
+    return probe.on_disk_dtype
 
 
 def _grid_template(grid: Grid) -> Image:

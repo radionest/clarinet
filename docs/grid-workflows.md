@@ -243,7 +243,7 @@ mutation, for every declaration that reaches the validator. Not all of them
 do: `RecordTypeCreate.file_registry` defaults to `None`, and some call sites
 attach file links separately, so a dangling `grid_conform_to` can still
 arrive at runtime, where both enforcement paths fail closed instead —
-`enforce_output_grids` with a 409 (`grid_policy.py:93-103`), `FileValidator`
+`enforce_output_grids` with a 409 (`grid_policy.py:247-256`), `FileValidator`
 with a `grid_mismatch` error (`file_validation.py:130-138`). Naming the
 RecordType and the declaring file, it rejects:
 
@@ -328,28 +328,33 @@ existence: a subject present while its reference is missing is itself a
 `grid_mismatch` error, not a skip (`file_validation.py:141-150`) — the same
 asymmetry as OUTPUT, just landing on `blocked`/422 instead of a 409.
 
-**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:58`)
+**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:210`)
 runs pre-commit inside `_process_submission`, after any
 `slicer_result_validator` has written its output and before the record data
 is written — the last point in the submit flow that can still reject (the
 post-commit output-checksum sync never raises, so it cannot serve as a
-guard). For every declared OUTPUT pair it classifies the relation, then
-applies `on_grid_mismatch`:
+guard). For every declared OUTPUT pair it classifies the relation, probes
+whether the subject `is_conform_repairable`, and hands both to `decide()`
+(`grid_policy.py:53`) — the pure function this table transcribes; `_apply`
+then carries the verdict out on disk:
 
 | `on_grid_mismatch` | `REARRANGED` | `FOREIGN` |
 |---|---|---|
 | `reject` (also the default when unset) | 409, file untouched | 409, file untouched |
-| `conform` | repaired exactly via `conform_seg_to_grid`\* if the subject is already 8-bit on disk, else 409, file untouched | 409, file untouched |
+| `conform`, subject `is_conform_repairable` (8-bit or 4-D layered) | repaired exactly via `conform_seg_to_grid`\* | 409, file untouched |
+| `conform`, wider dtype | 409, file untouched — the 409 names the dtype rule | 409, file untouched |
 | `delete` | file deleted, then 409 | file deleted, then 409 |
 
 \* `conform_seg_to_grid`'s non-layered repair path reads the subject through
 `Segmentation`, which forces a uint8 cast — silently quantizing a wider
 format (an int16/float32 intensity volume, say) if the file isn't already an
-8-bit mask. A dtype guard refuses that repair up front (`ImageError`, mapped
-to the same 409 as any other unrepairable pair) rather than letting it
-through; the 4-D layered path is unaffected — it always preserves the
-source dtype (see "Why guarded repair" in the [design rationale](#design-rationale)
-below).
+8-bit mask. `is_conform_repairable` (`segmentation.py:797`) is that rule as a
+header-only probe, and both sides call it: the writer's own guard refuses the
+repair with `ImageError`, and the submit policy asks it *before* deciding, so
+a wider file gets a REJECT verdict whose 409 states the dtype reason instead
+of a failed repair attempt. The 4-D layered path is unaffected — it always
+preserves the source dtype (see "Why guarded repair" in the
+[design rationale](#design-rationale) below).
 
 Enforcement is conditional on the *declaring* OUTPUT file's own existence: if
 it isn't on disk yet, its declaration is skipped and the submission proceeds
@@ -579,7 +584,7 @@ rearrangement (nearest-neighbour resampling lands precisely on voxel centers for
 a signed-permutation transform — no interpolation blur), and `FOREIGN` raises
 `GeometryMismatchError` unless the caller explicitly opts in with
 `allow_resample=True`. The 4-D layered path
-(`_conform_layered_seg`, `segmentation.py:813`) preserves the original NRRD header
+(`_conform_layered_seg`, `segmentation.py:834`) preserves the original NRRD header
 verbatim — every `Segment{i}_Name`/`LabelValue`/`Layer`/`Color` and the layer
 count — deliberately *not* by round-tripping through
 `LayeredSegmentation.from_layers` (`layered_segmentation.py:92`), which forces one
@@ -593,9 +598,11 @@ mask, silently lossy for anything else (a resampled CT, a float volume). A
 guard reads the on-disk dtype header-only (`Image.on_disk_dtype`) before that
 cast can happen and raises `ImageError` if it isn't already uint8, rather
 than quantizing first and letting the caller find out from corrupted voxel
-values. The 4-D layered path needs no such guard — it never routes through
-`Segmentation` and preserves whatever dtype it read (proven by
-`test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2605`).
+values. The same check is exposed as `is_conform_repairable`
+(`segmentation.py:797`), so the submit-time policy can rule a repair out
+without attempting it. The 4-D layered path needs no such guard — it never
+routes through `Segmentation` and preserves whatever dtype it read (proven by
+`test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2652`).
 
 ### Why the canonical slice sense is the IOP-normal side, not a fixed dominant axis
 
