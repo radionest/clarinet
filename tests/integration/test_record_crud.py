@@ -6,13 +6,15 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import Record, RecordStatus, RecordType
-from clarinet.models.user import User, UserRole, UserRolesLink
-from tests.conftest import create_authenticated_client, create_mock_superuser
+from tests.conftest import (
+    create_authenticated_client,
+    create_mock_superuser,
+    create_mock_user_with_role,
+)
 from tests.utils.urls import RECORDS_BASE
 
 
@@ -765,21 +767,9 @@ async def admin_role_client(test_session, test_settings) -> AsyncGenerator[Async
     covered. Without this the whole ``"admin" in get_user_role_names(user)``
     branch could be deleted and every test would stay green.
     """
-    user = await create_mock_superuser(test_session, email="storage-path-admin-role@test.com")
-
-    if await test_session.get(UserRole, "admin") is None:
-        test_session.add(UserRole(name="admin"))
-        await test_session.commit()
-    test_session.add(UserRolesLink(user_id=user.id, role_name="admin"))
-    await test_session.commit()
-
-    # Reload so `roles` is populated, THEN downgrade: setting is_superuser on
-    # the pre-reload instance is silently undone here, which would leave the
-    # caller a superuser and the role branch untested.
-    stmt = select(User).where(User.id == user.id).options(selectinload(User.roles))
-    user = (await test_session.execute(stmt)).scalars().first()
-    user.is_superuser = False
-
+    user = await create_mock_user_with_role(
+        test_session, "admin", email="storage-path-admin-role@test.com"
+    )
     async for ac in create_authenticated_client(user, test_session, test_settings):
         yield ac
 

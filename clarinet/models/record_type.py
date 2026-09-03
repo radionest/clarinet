@@ -37,14 +37,18 @@ if TYPE_CHECKING:
     from .record import Record
 
 
-# (record type name, file definition name) pairs already reported by
-# `RecordType.file_registry`. Module-level because the warning describes a
-# *configuration* fact that cannot change while the process runs, while
-# `file_registry` is a property re-evaluated on every record-type read — so
-# without this a single un-migrated `{data.*}` row logged a WARNING on every
-# request, for ever. Bounded by the size of the config. Tests clear it between
-# cases (see tests/test_record_type_model.py).
-_warned_skipped_definitions: set[tuple[str, str]] = set()
+# (record type name, file definition name, pattern) triples already reported by
+# `RecordType.file_registry`. Module-level because `file_registry` is a property
+# re-evaluated on every record-type read, so without this a single un-migrated
+# `{data.*}` row logged a WARNING on every request, for ever.
+#
+# The *pattern* is part of the key, not just the definition's identity: a
+# pattern is not immutable for the life of the process — `sync_file_links` →
+# `FileDefinitionRepository.get_or_create` reassigns it in place — so keying on
+# the name alone would silently swallow the warning for an operator who edits a
+# legacy row into a second, still-invalid pattern. Bounded by the size of the
+# config. Tests clear it between cases (see tests/test_record_type_model.py).
+_warned_skipped_definitions: set[tuple[str, str, str]] = set()
 
 
 class SlicerSettings(SQLModel):
@@ -321,7 +325,11 @@ class RecordType(RecordTypeBase, table=True):
                     )
                 )
             except ValidationError as exc:
-                already_warned = (self.name, link.file_definition.name)
+                already_warned = (
+                    self.name,
+                    link.file_definition.name,
+                    link.file_definition.pattern,
+                )
                 if already_warned not in _warned_skipped_definitions:
                     _warned_skipped_definitions.add(already_warned)
                     from clarinet.utils.logger import logger

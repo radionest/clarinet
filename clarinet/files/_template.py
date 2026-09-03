@@ -242,9 +242,12 @@ def join_within(base: Path, rendered: str) -> Path:
     """
     if "\x00" in rendered:
         # normpath and is_relative_to are pure string work and pass a NUL
-        # straight through, so without this the failure would surface much
-        # later as an untyped `ValueError: embedded null byte` from whichever
-        # syscall touched the path first. The persisted-filename site
+        # straight through, so without this the name reaches the filesystem
+        # intact. `Path.is_file()` then answers False rather than raising —
+        # it swallows the underlying `ValueError: embedded null byte` — so a
+        # poisoned RecordFileLink.filename was indistinguishable from a
+        # missing file and simply went unreported. Failing loudly and typed
+        # is the point; the persisted-filename site
         # (services/pipeline/context.py) has no value guard upstream of it,
         # so `rendered` there is whatever the column holds.
         raise UnsafePathError("rendered name contains a NUL byte", value=rendered)
@@ -387,6 +390,11 @@ def _reject_data_placeholders(pattern: str) -> None:
 # `_reject_data_placeholders` (issue #552), whose message carries the migration
 # note and must keep winning. Kept honest by a drift test in
 # tests/test_path_safety.py that rebuilds this set from `fields_from` itself.
+#
+# One known limit: `Files.resolve` renders against `{**self._fields, **overrides}`,
+# so a caller passing an override name outside this set would supply something
+# the renderer *does* resolve but this gate refuses at config load. No in-tree
+# caller does that today; if one ever needs to, its names belong here.
 KNOWN_PLACEHOLDERS: frozenset[str] = frozenset(
     {
         "id",
@@ -420,10 +428,20 @@ def _reject_unknown_placeholders(pattern: str) -> None:
     misspelling there is harmless for the same reason: ``{study_uid}`` and
     ``{studyuid}`` both glob to ``*``.
     """
-    # Same two-parser union as _reject_data_placeholders, for the same reason:
-    # the renderer substitutes via _PLACEHOLDER_RE, which has no concept of
-    # `{{` escaping, so `{{studyuid}}` really is interpolated.
-    names = extract_placeholders(pattern) | set(_PLACEHOLDER_RE.findall(pattern))
+    # _PLACEHOLDER_RE alone — deliberately NOT the two-parser union that
+    # _reject_data_placeholders uses. There the union is safe because the rule
+    # is a *denylist*: over-matching only catches more bad patterns. Here the
+    # same set drives an *allowlist*, where over-matching rejects good ones —
+    # `Formatter().parse()` reports numeric fields like `{1}`, which the regex
+    # (first char `[a-zA-Z_]`) never matches and the renderer therefore never
+    # substitutes. `set{1}.nrrd` renders literally and produces a file actually
+    # named that; refusing it at config load would demand a migration that
+    # changes the resolved filename and orphans what is on disk.
+    #
+    # No coverage is lost: the regex has no concept of `{{` escaping, so it
+    # matches the inner `{studyuid}` of `{{studyuid}}` anyway — which is exactly
+    # what render_template substitutes with.
+    names = set(_PLACEHOLDER_RE.findall(pattern))
     # `data.*` is skipped rather than reported: `_reject_data_placeholders` runs
     # first and owns that message today, and once #552 deletes it this exclusion
     # is what lets `{data.FIELD}` through instead of silently keeping the ban
@@ -479,13 +497,21 @@ def _reject_vanishing_placeholder_shapes(pattern: str) -> None:
         reason = "an empty name"
     elif any(not segment.strip() for segment in worst.split("/")):
         reason = "a path with an empty segment"
-    elif any(segment == "." for segment in worst.split("/")):
-        # Checked on the raw segments, not via PurePosixPath: pathlib collapses
-        # a "." component away, and `PurePosixPath(".").name` is "" — which does
-        # NOT start with a dot, so the branch below never fires for a render of
-        # ".". (`PurePosixPath("..").name` is ".."; only the single dot has this
-        # asymmetry.) Such a pattern therefore loaded fine and then raised at
-        # join_within's equals-the-base branch on every resolve.
+    elif worst.split("/")[-1] == ".":
+        # Only the LAST segment, and checked on the raw string rather than via
+        # PurePosixPath. Two separate reasons:
+        #
+        # Raw, because pathlib collapses a "." component away, and
+        # `PurePosixPath(".").name` is "" — which does NOT start with a dot, so
+        # the branch below never fires for a render of ".".
+        # (`PurePosixPath("..").name` is ".."; only the single dot is asymmetric.)
+        # Such a pattern loaded fine and then raised at join_within's
+        # equals-the-base branch on every resolve.
+        #
+        # Last only, because an *interior* "." is harmless — normpath collapses
+        # it, so "./mask.nrrd" joins to `<base>/mask.nrrd` exactly as it always
+        # did. Rejecting every "." segment refused patterns that resolve
+        # correctly today, turning an upgrade into a startup abort.
         reason = "a bare directory reference ('.')"
     elif PurePosixPath(worst).name.startswith("."):
         reason = "a dot-leading basename"

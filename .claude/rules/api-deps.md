@@ -62,6 +62,7 @@ AuditActorDep       = Annotated[UUID | None, Depends(get_audit_actor)]  # curren
 ```
 
 - `get_user_role_names(user)` — returns `set(user.role_names)`; delegates to the `User.role_names` computed_field, which logs a warning when `roles` was not eagerly loaded
+- `is_admin(user)` — `is_superuser` OR membership in the built-in `admin` role. The single definition for every caller that can import it: `current_admin_user` turns it into a 403, and the sites that branch on it inline read it directly (the `clarinet_storage_path` guard in `record.py`, actor-email masking in the record audit feed, `SseConnection.is_admin`). Never re-spell the predicate inline. One copy survives in `models/capability.py::resolve_capabilities`, which is derived from primitives and cannot import this module
 - `authorize_record_access` — checks superuser -> role_name match -> raises `AuthorizationError`
 - `authorize_mutable_record_access` (`MutableRecordDep`) — builds on `AuthorizedRecordDep`; mutation allowed for superuser, the assigned user, or an unassigned record. Additionally bypasses the owner check when `record.record_type.shared_editing` is `True`; any role-holder may then mutate the record regardless of `user_id`
 - `require_mutable_config(request)` — raises `AuthorizationError` when `app.state.config_mode == "python"` (RecordType mutations disabled — Python files are the single source of truth)

@@ -512,13 +512,16 @@ class UnsafePathError(ConfigurationError):
     ``Files``; the one built-in hydrator does not, so this is unverified
     in this repo — same status as the handler's ``RecordFlowEngine.fire``
     residual. The raw value lives only on ``exc.value`` (``exc.metadata()``
-    is a thin, currently-unused wrapper around it), and **nothing reads it**
-    — not a log statement, and not the 422 response detail either. It was
+    is a thin, currently-unused wrapper around it), and **nothing surfaces
+    it** — not a log statement, and not the 422 response detail either.
+    (``Files.checksums`` does re-raise carrying it forward, which is
+    propagation rather than disclosure.) It was
     briefly echoed to the submitter on the grounds that they had produced
-    it; with ``{data.*}`` banned they had not, since the only fields a file
-    pattern can still interpolate are stored identity fields that
-    ``api/masking.py`` withholds from a non-superuser (see
-    ``record_service._render_output_path``).
+    it; with ``{data.*}`` banned they had not. Every field a pattern can
+    still interpolate is a *stored* record attribute rather than anything
+    the caller supplied, and three of them — ``patient_id``, ``study_uid``,
+    ``series_uid`` — are ones ``api/masking.py`` may withhold from that
+    same caller (see ``record_service._render_output_path``).
     """
 
     def __init__(self, message: str, *, value: str | None = None) -> None:

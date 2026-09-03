@@ -152,10 +152,11 @@ class TestJoinWithin:
     def test_rejects_a_nul_byte(self):
         # The persisted-filename site (services/pipeline/context.py) joins a
         # stored RecordFileLink.filename with no value guard upstream, so a NUL
-        # in that column passes containment here and then surfaces as an
-        # untyped `ValueError: embedded null byte` from inside .is_file() --
-        # which the LENIENT renderer's `except ValueError` is built to swallow.
-        # Keep the failure typed and at the boundary.
+        # in that column passed containment here and reached the filesystem
+        # intact. Path.is_file() then answers False -- it swallows the
+        # underlying "embedded null byte" ValueError -- so a poisoned row was
+        # indistinguishable from a missing file and went unreported. Fail
+        # loudly and typed at the boundary instead.
         with pytest.raises(UnsafePathError):
             join_within(BASE, "mask\x00.nrrd")
 
@@ -345,6 +346,17 @@ class TestRejectsVanishingPlaceholderShapes:
         with pytest.raises(ValueError, match=r"'\.\.' component"):
             validate_file_pattern("../{user_id}")
 
+    @pytest.mark.parametrize(
+        "pattern", ["./mask.nrrd", "sub/./mask.nrrd", "out/./seg_{id}.nrrd", "./{id}.nrrd"]
+    )
+    def test_accepts_an_interior_dot_component(self, pattern):
+        # normpath collapses "./" away, so all of these join to an ordinary
+        # path inside the working dir -- `./mask.nrrd` -> `<base>/mask.nrrd`.
+        # Only a *trailing* bare "." degenerates into the directory itself, so
+        # rejecting every "." segment refused patterns that resolve correctly
+        # today, aborting config load on upgrade.
+        assert validate_file_pattern(pattern) == pattern
+
     def test_rejects_a_render_that_collapses_to_a_bare_directory_reference(self):
         # PurePosixPath('.').name is '' while PurePosixPath('..').name is '..',
         # so the dot-leading basename rule never fires for a worst-case render
@@ -377,6 +389,25 @@ class TestRejectsUnknownPlaceholders:
     def test_rejects(self, pattern):
         with pytest.raises(ValueError, match="unknown placeholder"):
             validate_file_pattern(pattern)
+
+    @pytest.mark.parametrize("pattern", ["set{1}.nrrd", "f_{0}.nrrd", "report_{2024}.pdf"])
+    def test_accepts_a_numeric_brace_group_the_renderer_leaves_literal(self, pattern):
+        # _PLACEHOLDER_RE requires [a-zA-Z_] as the first character, so `{1}` is
+        # never substituted: it renders literally and produces a file genuinely
+        # named "set{1}.nrrd". `Formatter().parse()` *does* report it as a
+        # field, so unioning the two parsers -- safe for the {data.*} denylist,
+        # where over-matching only catches more bad patterns -- over-rejects
+        # here, where the same set drives an allowlist. The migration advice
+        # would also be wrong: dropping the braces changes the resolved
+        # filename and orphans whatever is already on disk.
+        assert validate_file_pattern(pattern) == pattern
+
+    def test_escaped_braces_are_still_caught_without_the_formatter(self):
+        # The regex has no concept of `{{` escaping and matches the inner
+        # `{studyuid}` anyway -- which is what render_template substitutes with
+        # -- so dropping Formatter() from the union costs no coverage here.
+        with pytest.raises(ValueError, match="unknown placeholder"):
+            validate_file_pattern("{{studyuid}}.nrrd")
 
     def test_error_names_the_offender_and_the_catalogue(self):
         with pytest.raises(ValueError) as exc:

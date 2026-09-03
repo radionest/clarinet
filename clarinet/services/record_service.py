@@ -85,16 +85,17 @@ def _render_output_path(
     gets the file definition's name, which is what they can actually act on.
 
     The value is withheld rather than echoed because the caller did not
-    necessarily produce it. With ``{data.*}`` banned, ``fields_from``
-    (``files/_patterns.py``) can only supply *stored* identity fields —
-    ``patient_id``, ``study_uid``, ``series_uid`` — and ``api/masking.py``
-    withholds those from a non-superuser once the patient is anonymized, while
-    the render here runs against the raw value. This helper also serves
-    check-files, where nothing was submitted at all. Today the guard only trips
-    on a degenerate value (``PATIENT_ID_REGEX`` admits ``.`` and ``..`` and
-    nothing else that could escape), so echoing it disclosed nothing in
-    practice — but #552 relaxing the pattern grammar would turn that into a
-    live disclosure with no test standing against it.
+    necessarily produce it. With ``{data.*}`` banned, every name ``fields_from``
+    (``files/_patterns.py``) can supply is a *stored* record attribute rather
+    than submitted input, and three of them — ``patient_id``, ``study_uid``,
+    ``series_uid`` — are exactly what ``api/masking.py`` may withhold from a
+    non-superuser once the patient is anonymized, while the render here runs
+    against the raw value. This helper also serves check-files, where nothing
+    was submitted at all. Today the guard only trips on a degenerate value (of
+    those nine names only ``patient_id``'s grammar admits ``.`` or ``..`` at
+    all), so echoing it disclosed nothing in practice — but #552 relaxing the
+    pattern grammar would turn that into a live disclosure with no test
+    standing against it.
 
     Raises a *fresh* ``CustomHTTPException`` rather than the shared
     ``UNPROCESSABLE_ENTITY`` singleton — that singleton's ``.with_context()``
@@ -1406,7 +1407,15 @@ class RecordService:
             logger.warning(f"unsafe output path rejected for record {record.id}: {exc}")
             raise CustomHTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                # No exc.value here either — same reasoning as _render_output_path.
+                # No exc.value here either, for the same reason as
+                # _render_output_path — but note the surfaces are NOT identical.
+                # That helper is render-only, so str(exc) there names a
+                # placeholder key. This one catches from Files.checksums, which
+                # reaches join_within, and two of its four messages interpolate
+                # the working directory — which under the unanonymized-path
+                # fallback can itself be built from a raw patient id. That is the
+                # `base`-in-message residual accepted change-wide (see
+                # UnsafePathError's docstring), not something this line closes.
                 detail=f"Output files cannot be safely resolved for this record: {exc}",
             ) from exc
         except Exception as e:

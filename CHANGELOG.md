@@ -314,15 +314,32 @@
      retries and lands in the DLQ;
   6. the single-file download endpoint 404s for it.
 
-  A WARNING is therefore not cosmetic — run the `{data.%` scan below before
-  release and migrate every hit.
+  A WARNING is therefore not cosmetic. **A `LIKE '%{data.%'` scan is necessary
+  but no longer sufficient** — this release adds two further config-load
+  rejections (unknown placeholder, degenerate worst-case render), and a stored
+  row failing either is skipped with the same six consequences while matching
+  no `{data.` pattern. Before release, validate *every* stored pattern rather
+  than grepping for one shape:
+
+  ```python
+  # against a copy of the deployment's DB
+  from clarinet.files import validate_file_pattern
+  for name, pattern, multiple in rows:  # SELECT name, pattern, multiple FROM filedefinition
+      try:
+          validate_file_pattern(pattern, is_collection=multiple)
+      except ValueError as exc:
+          print(f"{name}: {pattern!r} — {exc}")
+  ```
+
+  Every line printed is a definition that will be dropped from
+  `RecordType.file_registry` after the upgrade.
 - A rendered name containing a NUL byte is now refused by the containment
   check itself. `os.path.normpath` and `Path.is_relative_to` are pure string
-  operations and passed it through, so the failure previously surfaced as an
-  untyped `ValueError: embedded null byte` from whichever syscall touched the
-  path first — inside a `except ValueError` that the lenient renderer uses to
-  swallow routine coercion failures. Reachable from the persisted-filename
-  path, which has no value guard upstream of the join.
+  operations and passed it through, and `Path.is_file()` answers `False` for
+  such a path rather than raising — so a poisoned `RecordFileLink.filename`
+  was indistinguishable from a missing file and went unreported. Reachable
+  from the persisted-filename path, which has no value guard upstream of the
+  join.
 - A `clarinet_storage_path` that is not absolute, or that carries a `..`
   component, is now refused at path-resolution time. A trailing slash or a
   doubled separator stays legal — neither enables traversal, and a stored row

@@ -18,9 +18,8 @@ Models carry **no** path logic — `RecordRead`, `StudyRead`, `SeriesRead` and
 `PatientRead` have no `working_folder` field and no `_format_path` helpers.
 
 `clarinet.files`'s public surface is six names, all served as lazy
-`__getattr__` re-exports (`clarinet/files/__init__.py`) so the stdlib-only
-`_template` leaf stays importable from `clarinet.settings` validators without
-pulling in the rest of the package graph: `Files`, `AnonPathError`,
+`__getattr__` re-exports (`clarinet/files/__init__.py`) so importing one does
+not drag in the rest of the package: `Files`, `AnonPathError`,
 `PLACEHOLDER_REGEX`, and three path-safety primitives —
 `validate_file_pattern`, `assert_path_safe_value`, `join_within` — covered
 below under "Path-safety guards". Those three are meant to be imported
@@ -267,9 +266,27 @@ holding one un-migrated row the affected file quietly loses:
 | `ctx.files.resolve("name")` in a pipeline task raises `KeyError` → retry → DLQ | `files/facade.py` |
 | the single-file download endpoint 404s for it | `record_service.resolve_output_file` |
 
-This is why the pre-release `SELECT name, pattern FROM filedefinition WHERE
-pattern LIKE '%{data.%'` scan matters: a hit is not a cosmetic warning, it is
-a file definition that has stopped working in six distinct ways.
+This is why the pre-release audit matters: a WARNING is not cosmetic, it is a
+file definition that has stopped working in six distinct ways.
+
+Grepping for `pattern LIKE '%{data.%'` finds only the `{data.*}` ban's
+casualties. Two other config-load rules — unknown placeholder and a degenerate
+worst-case render — drop rows that match no such pattern. Run every stored
+pattern through the validator instead, against a copy of the deployment's
+database:
+
+```python
+from clarinet.files import validate_file_pattern
+# SELECT name, pattern, multiple FROM filedefinition
+for name, pattern, multiple in rows:
+    try:
+        validate_file_pattern(pattern, is_collection=multiple)
+    except ValueError as exc:
+        print(f"{name}: {pattern!r} — {exc}")
+```
+
+Passing `is_collection` matters: a collection is exempt from both render-time
+rules, so validating it as a singular file over-reports.
 
 ### The substituted value
 
@@ -290,8 +307,9 @@ working-directory join.
 ### The joined path
 
 `join_within(base, rendered)` (`clarinet/files/_template.py`, re-exported
-from `clarinet.files`) checks the assembled path, and **containment only**:
-not outside `base`, not equal to `base` itself, no `..` path component. It
+from `clarinet.files`) checks the assembled path — containment, plus the one
+character pathlib carries silently but no syscall accepts: not outside `base`,
+not equal to `base` itself, no `..` path component, no NUL byte. It
 deliberately accepts a dot-leading basename — a hidden file is not an
 escape, and it is what an absent optional placeholder renders to; see
 "Patterns that vanish when a placeholder is absent" above for where that
@@ -358,9 +376,9 @@ round trip.
   `AnonPathError` above.
 
 **Never log the value.** `assert_path_safe_value`'s two raise sites name the
-offending placeholder key in the message. Two of `join_within`'s three
-raise sites name the working directory (`base`) instead (the third — the
-`..`-component check — names neither) — which,
+offending placeholder key in the message. Two of `join_within`'s four
+raise sites name the working directory (`base`) instead (the other two — the
+`..`-component and NUL checks — name neither) — which,
 under `Files.for_reader` / `fallback=True`, can itself be a path built from
 the record's **raw**, not-yet-anonymized patient id. That message is
 logged either way it propagates, but keeping the *substituted value* itself
@@ -403,8 +421,8 @@ confirmed leak either.
 
 Where nothing intercepts it first, the substituted value itself never
 lands in a message or a log: it travels only on `exc.value` (and
-`exc.metadata()`), which the record-submit 422 body above deliberately
-surfaces to the submitter but which no log statement reads. Two more
+`exc.metadata()`), which nothing reads — not a log statement, and, since the
+round-2 fix, not the record-submit 422 body either. Two more
 paths stay open:
 
 - **Pipeline and worker code — confirmed, not hypothetical.** The

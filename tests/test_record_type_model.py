@@ -165,3 +165,23 @@ def test_file_registry_still_skips_the_bad_definition_after_the_warning_is_dedup
 
     assert [fd.name for fd in first] == ["good_file"]
     assert [fd.name for fd in second] == ["good_file"]
+
+
+def test_file_registry_warns_again_when_the_pattern_changes(captured_records):
+    """A pattern is not immutable for the life of the process.
+
+    ``sync_file_links`` -> ``FileDefinitionRepository.get_or_create`` reassigns
+    ``pattern`` in place, so an operator who edits a legacy row into a second,
+    still-invalid pattern must hear about it. Keying the warn-once set on the
+    definition's name alone would swallow that silently.
+    """
+    rt = _record_type_with_one_legacy_and_one_valid_file()
+    _ = rt.file_registry
+
+    rt.file_links[1].file_definition.pattern = "still_{data.OTHER}.txt"
+    _ = rt.file_registry
+
+    warnings = [r for r in captured_records if r["level"].name == "WARNING"]
+    assert len(warnings) == 2
+    assert "data.BIRADS_R" in warnings[0]["message"]
+    assert "data.OTHER" in warnings[1]["message"]
