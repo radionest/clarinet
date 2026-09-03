@@ -203,8 +203,9 @@ A literal prefix on the affected segment is the fix in every case;
 `{id}.nrrd` and `{record_type.name}.nrrd` need none, because neither
 placeholder is ever absent.
 
-The last row is checked on the raw `/`-separated segments rather than through
-`PurePosixPath`, because pathlib collapses a `.` component away:
+The last row is checked on the pattern's **final** `/`-separated segment, on
+the raw string rather than through `PurePosixPath`. Raw, because pathlib
+collapses a `.` component away:
 `PurePosixPath(".").name` is `""`, which does *not* start with a dot, so the
 dot-leading rule never fired for it. (`PurePosixPath("..").name` is `".."` —
 only the single dot has this asymmetry.) Such a pattern therefore loaded
@@ -213,11 +214,21 @@ resolve, including inside the `build_slicer_context` loop, which 500s the
 Slicer open endpoint for the whole record.
 
 **Collections are exempt from this rule**, as from the unknown-placeholder
-rule above. A `multiple=True` definition is never rendered —
-`_patterns.glob_file_paths` substitutes every placeholder with `*` and globs —
+rule above. A `multiple=True` definition is meant to be *globbed*, not
+rendered — `_patterns.glob_file_paths` substitutes every placeholder with `*` —
 so `{parent_id}.nrrd` becomes `*.nrrd`, a perfectly good collection pattern
 rather than a degenerate name. This exemption is why `validate_file_pattern`
-needs to see `multiple`, and hence why it is a model validator. The
+needs to see `multiple`, and hence why it is a model validator.
+
+**The exemption is only sound while nothing renders a collection**, and that is
+an *enforced* invariant rather than a passive fact. `Files.resolve` raises
+`ValueError` for a `multiple=True` definition instead of rendering it — it used
+to render them, so a legal `{study_uid}/x.dcm` collection resolved to `/x.dcm`
+on a patient-level record and 500'd out of `build_slicer_context`, which
+catches `(KeyError, ValueError)` and so could not see an `UnsafePathError`. One
+violation is still open: `FileValidator.validate` renders collections too
+(issue #562). Any new consumer of a pattern must branch on `multiple` the way
+`Files.checksums` does. The
 literal-text rules and the `{data.*}` ban still apply to collections, because
 those judge the pattern itself rather than what it renders to.
 
@@ -248,7 +259,9 @@ stored definition that fails `FileDefinitionRead` construction is skipped
 from the registry — logged as a WARNING naming the record type and
 definition — rather than raising and nulling the entire registry for every
 other file on that record type. The WARNING is emitted **once per process**
-per `(record type, definition)` pair: `file_registry` is a property
+per `(record type, definition, pattern)` triple — the pattern is in the key
+because `sync_file_links` reassigns it in place, so an operator editing a legacy
+row into a second bad pattern still hears about it. `file_registry` is a property
 re-evaluated on every record-type read, so logging it unconditionally meant
 one line per request, for ever, for a fact that cannot change while the
 process runs.
@@ -317,10 +330,12 @@ rule went instead. It is **purely lexical** — `os.path.normpath` plus
 `Path.is_relative_to`, zero filesystem access — which is what lets
 `Files.resolve` stay synchronous inside `build_slicer_context`'s
 per-file-definition loop. `Files.resolve` and `Files.checksums` call it
-internally right after rendering; `FileValidator.validate`
-(`services/file_validation.py`) and the persisted-filename replay in
-`services/pipeline/context.py` call it directly on a name they already have
-in hand (a rendered pattern, or a stored `RecordFileLink.filename`).
+internally right after rendering; three sites call it directly on a name they
+already have in hand — `FileValidator.validate`
+(`services/file_validation.py`), the persisted-filename replay in
+`services/pipeline/context.py`, and `_resolve_paths_for_file_def`
+(`services/record_service.py`), which guards the singular-file existence probe
+so `.is_file()` cannot act as an oracle for paths outside the working dir.
 
 Being lexical, `join_within`'s containment proof is only as trustworthy as
 its own `base` argument — a relative or `..`-carrying base satisfies
@@ -357,11 +372,13 @@ round trip.
   The detail names the **file definition** and the reason (`str(exc)`); it
   does **not** include `exc.value`, and neither does any log. The value was
   briefly echoed on the grounds that the submitter had produced it — with
-  `{data.*}` banned they had not. `fields_from` can only supply stored
-  identity fields (`patient_id`, `study_uid`, `series_uid`), which
-  `api/masking.py` withholds from a non-superuser once the patient is
-  anonymized, while the render runs against the raw value; and this same
-  helper serves check-files, where nothing was submitted at all.
+  `{data.*}` banned from *patterns* they had not. `fields_from` still exposes a
+  `data` key, but no pattern may reference it, so every name a pattern can
+  interpolate is a stored record attribute; three of those (`patient_id`,
+  `study_uid`, `series_uid`) are what `api/masking.py` may withhold from a
+  non-superuser once the patient is anonymized, while the render runs against
+  the raw value. This same helper also serves check-files, where nothing was
+  submitted at all.
 - **Everywhere else a router lets it propagate** (the Slicer context
   builder, `resolve_output_file`, …): `500`, via `UnsafePathError`'s own
   dedicated handler (`handle_unsafe_path_error`, `exception_handlers.py`)

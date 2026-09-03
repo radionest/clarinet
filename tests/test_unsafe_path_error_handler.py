@@ -120,7 +120,7 @@ async def test_unsafe_path_error_log_includes_request_method_and_path(
 ) -> None:
     """The ERROR line must be locatable -- with the traceback deliberately
     gone, method + path are the only way to tell which endpoint (and which
-    of the nine ``UnsafePathError`` raise sites) produced it. Mirrors the
+    of the eight ``UnsafePathError`` raise sites) produced it. Mirrors the
     method+path logging pattern used by ``handle_invalid_patient_identifier``."""
     response = await client.get("/trigger/unsafe-path")
     assert response.status_code == 500

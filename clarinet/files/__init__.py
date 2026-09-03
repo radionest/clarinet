@@ -4,10 +4,13 @@ Only ``Files`` (and ``AnonPathError`` for ``except`` clauses), plus
 ``PLACEHOLDER_REGEX`` for matching ``{placeholder}`` tokens and the
 path-safety primitives ``validate_file_pattern``, ``assert_path_safe_value``,
 and ``join_within``, are public. Lazy ``__getattr__`` keeps this package
-import-light so the stdlib-only ``clarinet.files._template`` leaf stays
-importable from ``clarinet.settings`` without dragging in models / services
-(avoids a bootstrap import cycle) — and so no caller ever needs to import
-that private leaf directly.
+import-light, so importing one name does not drag in models / services and no
+bootstrap import cycle forms.
+
+``clarinet.files._template`` is no longer the stdlib-only leaf it once was —
+it imports ``clarinet.exceptions.domain``, which pulls in fastapi (see that
+module's own docstring). ``clarinet.settings`` still imports ``validate_template``
+from it directly, since that name is not re-exported here.
 """
 
 from typing import TYPE_CHECKING

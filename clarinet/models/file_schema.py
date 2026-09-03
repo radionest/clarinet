@@ -194,7 +194,7 @@ class FileDefinitionRead(SQLModel):
         because the rules differ for a collection, and only the whole model
         knows ``multiple``. A field validator saw the pattern alone and so
         rejected ``{parent_id}.nrrd`` even with ``multiple=True``, where it
-        globs to ``*.nrrd`` and is never rendered.
+        globs to ``*.nrrd`` rather than being rendered.
         """
         from clarinet.files import validate_file_pattern
 

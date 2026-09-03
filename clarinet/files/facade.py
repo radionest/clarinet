@@ -142,7 +142,29 @@ class Files:
         return file_def
 
     def resolve(self, file_def: FileDefArg, **overrides: Any) -> Path:
+        """Absolute path for a *singular* file definition.
+
+        Raises ``ValueError`` for a ``multiple=True`` definition: a collection
+        has no single path, and its pattern is a glob rather than a name. This
+        branch is what makes the config-load collection exemption safe — that
+        exemption lets ``{study_uid}/x.dcm`` through on the grounds that a
+        collection globs rather than renders, so rendering one here turned a
+        *legal* pattern into a request-time ``UnsafePathError`` (``/x.dcm`` for
+        a patient-level record) and a 500 out of ``build_slicer_context``.
+
+        Deliberately a ``ValueError`` and not an ``UnsafePathError``: callers
+        that walk a whole registry (``build_slicer_context``) catch
+        ``(KeyError, ValueError)`` and degrade to "unresolved", while
+        ``UnsafePathError`` stays outside that net so a genuine traversal can
+        never be swallowed. Asking for one path from a collection is a caller
+        mistake, not a traversal. Use ``glob`` instead.
+        """
         fd = self._lookup(file_def)
+        if fd.multiple:
+            raise ValueError(
+                f"file definition {fd.name!r} is a collection (multiple=True) and has no "
+                f"single path; use Files.glob() instead of Files.resolve()"
+            )
         working_dir = self._dirs[fd.level or self._level]
         filename = _template.render_template(
             fd.pattern,

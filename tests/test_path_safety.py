@@ -36,10 +36,11 @@ class TestUnsafePathErrorTaxonomy:
         assert issubclass(UnsafePathError, ConfigurationError)
 
     def test_is_not_an_anon_path_error(self):
-        # Four sites catch AnonPathError and degrade: Files.for_reader retries
+        # Five sites catch AnonPathError and degrade: Files.for_reader retries
         # with a raw-UID fallback, dicomweb/cache.py and tasks/cache_dicomweb.py
-        # log and skip, cli/anon.py counts a failure. A traversal must never
-        # degrade into any of those.
+        # log and skip, cli/anon.py counts a failure, and
+        # record_service._validate_output_paths falls back to checking every
+        # level. A traversal must never degrade into any of those.
         assert not issubclass(UnsafePathError, AnonPathError)
 
     def test_is_re_exported_from_the_exceptions_package(self):
@@ -161,9 +162,10 @@ class TestJoinWithin:
             join_within(BASE, "mask\x00.nrrd")
 
     def test_dotdot_component_message_omits_the_rendered_name_but_the_exception_carries_it(self):
-        # The one remaining raise site whose message interpolates neither
-        # `base` nor `rendered`. Reached only for a relative base, which no
-        # production call site produces -- kept as defence in depth.
+        # One of join_within's two raise sites whose message interpolates
+        # neither `base` nor `rendered` (the other is the NUL check above).
+        # Reached only for a relative base, which no production call site
+        # produces -- kept as defence in depth.
         with pytest.raises(UnsafePathError) as exc:
             join_within(Path(".."), "../MRN_12345.nrrd")
         assert "MRN_12345" not in str(exc.value)

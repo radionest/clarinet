@@ -85,15 +85,18 @@ def _render_output_path(
     gets the file definition's name, which is what they can actually act on.
 
     The value is withheld rather than echoed because the caller did not
-    necessarily produce it. With ``{data.*}`` banned, every name ``fields_from``
-    (``files/_patterns.py``) can supply is a *stored* record attribute rather
-    than submitted input, and three of them — ``patient_id``, ``study_uid``,
-    ``series_uid`` — are exactly what ``api/masking.py`` may withhold from a
-    non-superuser once the patient is anonymized, while the render here runs
-    against the raw value. This helper also serves check-files, where nothing
-    was submitted at all. Today the guard only trips on a degenerate value (of
-    those nine names only ``patient_id``'s grammar admits ``.`` or ``..`` at
-    all), so echoing it disclosed nothing in practice — but #552 relaxing the
+    necessarily produce it. The ``{data.*}`` ban applies to *patterns*, not to
+    the field dict — ``fields_from`` (``files/_patterns.py``) still exposes a
+    ``data`` key — but since no pattern may reference it, nothing the caller
+    submitted can reach the rendered value. Every name a pattern can actually
+    interpolate is a stored record attribute, and three of them —
+    ``patient_id``, ``study_uid``, ``series_uid`` — are exactly what
+    ``api/masking.py`` may withhold from a non-superuser once the patient is
+    anonymized, while the render here runs against the raw value. This helper
+    also serves check-files, where nothing was submitted at all. Today the
+    guard only trips on a degenerate value (of those names only
+    ``patient_id``'s grammar admits ``.`` or ``..`` at all), so echoing it
+    disclosed nothing in practice — but #552 relaxing the
     pattern grammar would turn that into a live disclosure with no test
     standing against it.
 

@@ -1516,11 +1516,13 @@ class TestMissingOutputLinks:
         """The 422 body must not echo the offending value back to the caller.
 
         The echo was justified on the grounds that the submitter produced the
-        value. With {data.*} banned they did not: the only fields a pattern can
-        still interpolate are *stored* identity fields — patient_id, study_uid,
-        series_uid — which api/masking.py withholds from a non-superuser when
-        the patient is anonymized, while the render runs against the raw value.
-        This helper also serves check-files, where nothing was submitted at all.
+        value. With {data.*} banned from *patterns* they did not: fields_from
+        still exposes a `data` key, but no pattern may reference it, so every
+        name a pattern can interpolate is a stored record attribute. Three of
+        those — patient_id, study_uid, series_uid — are what api/masking.py may
+        withhold from a non-superuser once the patient is anonymized, while the
+        render runs against the raw value. This helper also serves check-files,
+        where nothing was submitted at all.
         """
         record = _record_read_stub(
             [FileDefinitionRead(name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT)],

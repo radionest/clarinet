@@ -120,6 +120,7 @@ def test_files_resolve(monkeypatch):
     fd.name = "seg"
     fd.pattern = "seg_{id}.nrrd"
     fd.level = None
+    fd.multiple = False  # singular def; MagicMock would make it truthy
     f = Files(_record(monkeypatch, registry=[fd]))
     assert f.resolve("seg") == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
     assert f.accessed["seg"] == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
@@ -248,6 +249,51 @@ class TestPathSafety:
     value guard alone: remove it and nothing else raises.
     """
 
+    def test_resolve_refuses_a_collection_instead_of_rendering_it(self, monkeypatch):
+        """A collection has no single path, so resolve() must not render one.
+
+        The config-load exemption for collections rests on "a multiple=True
+        definition is never rendered" -- but resolve() had no `multiple` branch
+        (unlike checksums()), so it rendered them anyway. That made a *legal*
+        collection pattern a request-time failure: `{study_uid}/x.dcm` on a
+        patient-level record renders to "/x.dcm", which join_within refuses.
+
+        The error must be a ValueError, not UnsafePathError: build_slicer_context
+        catches (KeyError, ValueError) and degrades to `unresolved`, while
+        UnsafePathError is deliberately outside that net so a real traversal can
+        never be swallowed. Rendering a collection is a caller mistake, not a
+        traversal.
+        """
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "slices"
+        fd.pattern = "{study_uid}/x.dcm"
+        fd.level = None
+        fd.multiple = True
+        record = _record(monkeypatch, registry=[fd])
+        record.study_uid = None  # patient-level record: the placeholder vanishes
+
+        with pytest.raises(ValueError, match="collection"):
+            Files(record).resolve("slices")
+
+    def test_resolve_refuses_a_collection_before_it_can_raise_unsafe_path(self, monkeypatch):
+        """The collection branch must come first, or the 500 is merely relabelled."""
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "slices"
+        fd.pattern = "{study_uid}/x.dcm"
+        fd.level = None
+        fd.multiple = True
+        record = _record(monkeypatch, registry=[fd])
+        record.study_uid = None
+
+        with pytest.raises(ValueError) as exc:
+            Files(record).resolve("slices")
+        assert not isinstance(exc.value, UnsafePathError)
+
     def test_resolve_rejects_absolute_value_caught_by_either_layer(self, monkeypatch):
         # See class docstring: "/etc/passwd" contains "/", so the value
         # guard raises here, not join_within. Also not a regex-legal
@@ -260,6 +306,7 @@ class TestPathSafety:
         fd.name = "mask"
         fd.pattern = "{patient_id}.nrrd"
         fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
         record = _record(monkeypatch, registry=[fd])
         record.patient_id = "/etc/passwd"
         with pytest.raises(UnsafePathError):
@@ -277,6 +324,7 @@ class TestPathSafety:
         fd.name = "mask"
         fd.pattern = "{patient_id}.nrrd"
         fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
         record = _record(monkeypatch, registry=[fd])
         record.patient_id = "../../etc"
         with pytest.raises(UnsafePathError):
@@ -300,6 +348,7 @@ class TestPathSafety:
         fd.name = "seg"
         fd.pattern = "seg_{patient_id}.nrrd"
         fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
         record = _record(monkeypatch, registry=[fd])
         record.patient_id = ".."
         with pytest.raises(UnsafePathError) as exc_info:
@@ -324,6 +373,7 @@ class TestPathSafety:
         fd.name = "mask"
         fd.pattern = "{patient_id}.nrrd"
         fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
         record = _record(monkeypatch, registry=[fd])
         record.patient_id = "../../etc"
         with pytest.raises(UnsafePathError):

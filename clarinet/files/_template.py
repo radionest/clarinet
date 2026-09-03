@@ -195,9 +195,11 @@ def assert_path_safe_value(key: str, value: str) -> None:
     Runs on the *coerced* value, so a collection flattening to ``"a/b"`` is
     caught. Raises ``UnsafePathError`` naming *key* in the message; the
     offending *value* is passed only as the exception's ``value`` attribute,
-    never interpolated into the message — ``UnsafePathError``'s dedicated
-    handler logs the message on every raise, and record data may carry PHI
-    that ``scrub_sensitive`` (``clarinet/utils/logger.py``) does not redact:
+    never interpolated into the message — the message is what gets logged
+    wherever this propagates uncaught (``UnsafePathError``'s dedicated handler
+    on the request path; TaskIQ's receiver on the worker path), and record data
+    may carry PHI that ``scrub_sensitive`` (``clarinet/utils/logger.py``) does
+    not redact:
     it only catches credential-shaped text (passwords, tokens, DB URLs),
     never PHI (see ``.claude/rules/logging-pii.md``).
     """
@@ -535,22 +537,29 @@ def validate_file_pattern(pattern: str, *, is_collection: bool = False) -> str:
     """Validate a ``FileDefinition.pattern`` at configuration-load time.
 
     *is_collection* mirrors ``FileDefinition.multiple``. A collection's pattern
-    is never rendered — ``_patterns.glob_file_paths`` substitutes every
-    placeholder with ``*`` and globs — so neither render-time rule applies to
-    it: ``{parent_id}.nrrd`` globs to ``*.nrrd``, a perfectly good collection
+    is meant to be globbed, not rendered — ``_patterns.glob_file_paths``
+    substitutes every placeholder with ``*`` — so neither render-time rule
+    applies to it: ``{parent_id}.nrrd`` globs to ``*.nrrd``, a perfectly good collection
     pattern rather than a degenerate name, and ``slice_{n}.dcm`` globs to
     ``slice_*.dcm``, where ``{n}`` is a positional wildcard rather than an
     unknown placeholder. The literal-text rules and the ``{data.*}`` ban still
     apply, because those judge the pattern itself rather than what it renders
     to.
 
-    Two families of rule: the pattern's own *literal* text must be a safe
-    relative name (placeholders masked out first, so a ``.`` inside a
-    placeholder name cannot trip the basename check), and the pattern must
-    still render to a well-formed relative name when every optional
-    placeholder is absent — see ``_reject_vanishing_placeholder_shapes``.
-    The second family is what keeps ``join_within`` from having to reject an
-    empty or dot-leading rendered name at request time.
+    Three families of rule, matching the ``file-registry.md`` rule files:
+
+    1. The pattern's own *literal* text must be a safe relative name
+       (placeholders masked out first, so a ``.`` inside a placeholder name
+       cannot trip the basename check).
+    2. Every placeholder *name* must be one the renderer can resolve — see
+       ``_reject_unknown_placeholders``.
+    3. The pattern must still render to a well-formed relative name when every
+       optional placeholder is absent — see
+       ``_reject_vanishing_placeholder_shapes``.
+
+    Families 2 and 3 are what keep ``join_within`` from having to reject an
+    empty or dot-leading rendered name at request time; both are skipped for
+    collections.
 
     Raises ``ValueError`` (not ``UnsafePathError``) to match
     ``validate_name_is_identifier`` on the same models: Pydantic turns it into

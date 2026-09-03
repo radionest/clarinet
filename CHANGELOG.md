@@ -240,15 +240,20 @@
   `seg_{user_id}.nrrd`, `study_{study_uid}/mask.nrrd`. Patterns resting on
   `{id}`, `{patient_id}`, `{record_type.name}` or `{origin_type}` need no
   change; those are never absent. **Collections (`multiple=True`) are exempt** —
-  their placeholders are replaced with `*` and globbed, never rendered, so
-  `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. A *stored* row that violates the rule is
+  their placeholders are replaced with `*` and globbed rather than rendered, so
+  `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. `Files.resolve` now
+  refuses a collection outright (`ValueError`) instead of rendering one, which
+  is what makes that exemption safe — see Fixed. A *stored* row that violates the rule is
   skipped from `RecordType.file_registry` with a WARNING rather than being
   fatal (see Security below).
 - **A file pattern may only use placeholders the renderer knows.** Every
   `{name}` in a `FileDefinition.pattern` must be one of `{id}`, `{parent_id}`,
   `{user_id}`, `{patient_id}`, `{study_uid}`, `{series_uid}`, `{origin_type}`
-  or `{record_type.name}`; anything else is rejected when the configuration
-  loads. Previously an unrecognised name silently substituted `""`, so a typo
+  or `{record_type.name}`; any other *name-shaped* placeholder is rejected when
+  the configuration loads. Brace groups the renderer never substitutes are
+  unaffected and keep rendering literally — `set{1}.nrrd` and
+  `seg_{studyuid:s}.nrrd` stay legal, because `{1}` and a format spec are not
+  placeholders as far as the renderer is concerned. Previously an unrecognised name silently substituted `""`, so a typo
   like `{studyuid}` either failed later at the working-directory join — a 500
   on every read of that record, including the Slicer open endpoint — or, in
   `{studyuid}.nrrd`, quietly resolved to the hidden file `.nrrd` and kept
@@ -288,7 +293,8 @@
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
-  checked for containment. The join enforces containment *only* — it accepts
+  checked for containment (plus a NUL-byte rejection, below). The join is
+  otherwise containment *only* — it accepts
   a dot-leading basename, because a hidden file is not an escape and
   rejecting it would hard-fail the legitimate absent-placeholder renders
   described under Breaking. Closes #521.
@@ -440,6 +446,16 @@
 
 ### Fixed
 
+- **`Files.resolve` no longer renders a collection**, which turned a *legal*
+  `multiple=True` pattern into a 500. Collections are exempt from the
+  config-load render rules on the grounds that they glob rather than render —
+  but `resolve` had no `multiple` branch (unlike `checksums`), so
+  `{study_uid}/x.dcm` on a patient-level record rendered to `/x.dcm` and raised
+  `UnsafePathError`. `build_slicer_context` loops `resolve` over the whole
+  registry catching `(KeyError, ValueError)`, and `UnsafePathError` is
+  deliberately neither, so `POST /slicer/records/{id}/open` failed uncaught for
+  every user of that record instead of degrading to `unresolved`. It now raises
+  `ValueError` naming the definition and pointing at `Files.glob()`.
 - The demo's anonymization wrapper (`examples/demo`) no longer shadows the built-in
   task. It was named `anonymize_study_pipeline`, and `@pipeline_task` derives
   `task_name` as `{namespace}:{function_name}` — not module-qualified — so it
