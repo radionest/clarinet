@@ -107,6 +107,20 @@ class FileDefinition(SQLModel, table=True):
         return v
 
 
+# Row-level fields of ``FileDefinition`` — shared by every RecordType binding
+# the file (``RecordTypeFileLink`` carries the per-binding ones: role, required,
+# allow_path_collision). Every path that upserts, compares or merges a shared
+# row iterates this tuple, so a new column added here stays in step everywhere.
+FILE_DEFINITION_FIELDS: tuple[str, ...] = (
+    "pattern",
+    "description",
+    "multiple",
+    "level",
+    "grid_conform_to",
+    "on_grid_mismatch",
+)
+
+
 class RecordTypeFileLink(SQLModel, table=True):
     """M2M link between RecordType and FileDefinition.
 

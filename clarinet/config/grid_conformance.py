@@ -83,7 +83,10 @@ def validate_grid_conformance(rt: "RecordTypeCreate | Any") -> None:
             raise RecordConstraintViolationError(
                 f"{prefix}='{ref_name}' is unknown — no file of that name is "
                 f"bound to this RecordType. Bound files: "
-                f"{sorted(by_name) or '(none)'}"
+                f"{sorted(by_name) or '(none)'}. A file's declaration is shared "
+                f"by every RecordType binding it, so each of them must bind the "
+                f"reference too: add '{ref_name}' to this RecordType's files, or "
+                f"fix the name if it is a typo"
             )
 
         if getattr(ref, "grid_conform_to", None):

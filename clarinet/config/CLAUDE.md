@@ -116,6 +116,15 @@ async def reconcile_record_types(
 
 Algorithm: SELECT all → for each config: CREATE if new, UPDATE if changed, skip if identical → orphans warned/deleted → single commit.
 
+Before touching the DB, `validate_shared_file_definitions` rejects
+(`RecordConstraintViolationError`) a config in which two RecordTypes declare
+the same file with different row-level fields (`FILE_DEFINITION_FIELDS` in
+`file_schema.py`: pattern, description, multiple, level, `grid_conform_to`,
+`on_grid_mismatch`). A `FileDefinition` row is shared by every binder and
+upserted once per type in config order, so last-write-wins would flip it on
+every reconcile pass and silently drop one type's `grid_conform_to`.
+Binding-level fields (role, required, `allow_path_collision`) may differ.
+
 `ReconcileResult`: created, updated, unchanged, orphaned, errors.
 
 Compares fields explicitly set in config. Fields with a concrete (non-None) default additionally heal toward that default when left unset — a DB row that drifted (migration backfill, a past model != server_default mismatch) reconciles on restart; unset nullable fields keep "don't touch DB" (issue #389).

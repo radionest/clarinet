@@ -218,6 +218,11 @@ A broken plan file must crash startup, never degrade silently.
   `ConfigurationError` on unknown names. The guard covers config-defined record
   types only; types mutated through the API in TOML mode and orphaned DB rows are
   caught by runtime logs alone.
+- `reconcile_record_types` rejects, before any DB write, a config in which two
+  record types declare the same file with different row-level fields (pattern,
+  description, multiple, level, `grid_conform_to`, `on_grid_mismatch`) — a
+  `FileDefinition` row is shared by every type binding it, so the types must
+  agree or the row would flip to whichever type reconciled last.
 - `app.py` converts `ConfigLoadError` → `StartupError`; `run_worker` converts it
   → `SystemExit(1)`.
 

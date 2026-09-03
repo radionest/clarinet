@@ -10,8 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from clarinet.config.reconciler import _COMPARED_FIELDS, ReconcileResult, reconcile_record_types
-from clarinet.exceptions.domain import ConfigurationError
+from clarinet.config.reconciler import (
+    _COMPARED_FIELDS,
+    ReconcileResult,
+    reconcile_record_types,
+    validate_shared_file_definitions,
+)
+from clarinet.exceptions.domain import ConfigurationError, RecordConstraintViolationError
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
@@ -1364,3 +1369,100 @@ async def test_reconcile_config_allows_shared_editing_without_unique_per_user(
 
         result = await reconcile_config(folder="/fake/path")
         assert "shared-ok" in result.created
+
+
+# --- A FileDefinition row is shared by every RecordType binding it ---------
+
+_SHARED_VOLUME: dict[str, object] = {
+    "name": "volume",
+    "pattern": "volume.nii.gz",
+    "role": "input",
+    "required": True,
+}
+_PLAIN_SEG: dict[str, object] = {
+    "name": "seg",
+    "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness no-ops
+    "role": "output",
+    "required": True,
+    "description": "lesion mask",
+    "level": "SERIES",
+}
+_GUARDED_SEG: dict[str, object] = {
+    **_PLAIN_SEG,
+    "grid_conform_to": "volume",
+    "on_grid_mismatch": "reject",
+}
+
+
+def _binders(seg_in_a: dict[str, object], seg_in_b: dict[str, object]) -> list[RecordTypeCreate]:
+    """Two RecordTypes binding ``volume`` and ``seg``, each with its own seg entry."""
+    return [
+        _make_config("type-a", file_registry=[_SHARED_VOLUME, seg_in_a]),
+        _make_config("type-b", file_registry=[_SHARED_VOLUME, seg_in_b]),
+    ]
+
+
+def test_shared_file_declared_identically_passes() -> None:
+    config = [*_binders(_GUARDED_SEG, dict(_GUARDED_SEG)), _make_config("type-c")]
+    validate_shared_file_definitions(config)  # no raise; type-c binds nothing
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"role": "input"}, {"required": False}, {"allow_path_collision": True}],
+    ids=["role", "required", "allow_path_collision"],
+)
+def test_binding_fields_may_differ_between_types(override: dict[str, object]) -> None:
+    """role/required/allow_path_collision live on the link row, not the shared file row."""
+    validate_shared_file_definitions(_binders(_PLAIN_SEG, {**_PLAIN_SEG, **override}))
+
+
+@pytest.mark.parametrize(
+    ("field", "other"),
+    [
+        ("pattern", "seg_{id}.nii.gz"),
+        ("description", "a different purpose"),
+        ("multiple", True),
+        ("level", "STUDY"),
+    ],
+)
+def test_row_field_disagreement_names_file_field_and_both_types(field: str, other: object) -> None:
+    with pytest.raises(
+        RecordConstraintViolationError, match=rf"'seg'.*'type-a'.*'type-b'.*{field}"
+    ):
+        validate_shared_file_definitions(_binders(_PLAIN_SEG, {**_PLAIN_SEG, field: other}))
+
+
+def test_omitting_grid_declaration_in_one_type_is_rejected() -> None:
+    """The #499 hole in config form: type-b binds seg without the guard type-a
+    declares. Last-write-wins would leave the shared row in whichever state
+    reconciled last, so this must be a config error, not a silent flip.
+    """
+    with pytest.raises(
+        RecordConstraintViolationError, match=r"'seg'.*'type-a'.*'type-b'.*grid_conform_to"
+    ):
+        validate_shared_file_definitions(_binders(_GUARDED_SEG, _PLAIN_SEG))
+
+
+def test_grid_mismatch_action_disagreement_is_rejected() -> None:
+    with pytest.raises(
+        RecordConstraintViolationError, match=r"'seg'.*'type-a'.*'type-b'.*on_grid_mismatch"
+    ):
+        validate_shared_file_definitions(
+            _binders(_GUARDED_SEG, {**_GUARDED_SEG, "on_grid_mismatch": "conform"})
+        )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_rejects_disagreeing_shared_file_before_any_write(
+    test_session: AsyncSession,
+) -> None:
+    """Reconcile aborts before creating anything when two types disagree on a
+    shared file — otherwise the row would end up in whichever state reconciled
+    last, silently disabling the other type's guard until the next restart.
+    """
+    with pytest.raises(RecordConstraintViolationError, match="grid_conform_to"):
+        await reconcile_record_types(_binders(_GUARDED_SEG, _PLAIN_SEG), test_session)
+
+    rows = (await test_session.execute(select(RecordType))).scalars().all()
+    assert rows == []
