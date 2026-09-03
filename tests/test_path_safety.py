@@ -12,12 +12,17 @@ SQLModel skips Pydantic validation on).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from clarinet.exceptions.domain import AnonPathError, ConfigurationError, UnsafePathError
+from clarinet.files._patterns import fields_from
 from clarinet.files._template import (
+    KNOWN_PLACEHOLDERS,
+    OPTIONAL_PLACEHOLDERS,
     RenderMode,
     assert_path_safe_value,
     join_within,
@@ -36,6 +41,16 @@ class TestUnsafePathErrorTaxonomy:
         # log and skip, cli/anon.py counts a failure. A traversal must never
         # degrade into any of those.
         assert not issubclass(UnsafePathError, AnonPathError)
+
+    def test_is_re_exported_from_the_exceptions_package(self):
+        # Every other domain exception is reachable as
+        # `from clarinet.exceptions import X`, AnonPathError included. Project
+        # plan/ code and pipeline tasks that want `except UnsafePathError`
+        # should not have to reach into the private `.domain` leaf.
+        import clarinet.exceptions as exceptions
+
+        assert exceptions.UnsafePathError is UnsafePathError
+        assert "UnsafePathError" in exceptions.__all__
 
     def test_is_not_a_value_error(self):
         # render_template's _replace swallows ValueError in LENIENT mode. If a
@@ -134,6 +149,16 @@ class TestJoinWithin:
         assert "MRN_12345" not in str(exc.value)
         assert exc.value.value == "../MRN_12345.nrrd"
 
+    def test_rejects_a_nul_byte(self):
+        # The persisted-filename site (services/pipeline/context.py) joins a
+        # stored RecordFileLink.filename with no value guard upstream, so a NUL
+        # in that column passes containment here and then surfaces as an
+        # untyped `ValueError: embedded null byte` from inside .is_file() --
+        # which the LENIENT renderer's `except ValueError` is built to swallow.
+        # Keep the failure typed and at the boundary.
+        with pytest.raises(UnsafePathError):
+            join_within(BASE, "mask\x00.nrrd")
+
     def test_dotdot_component_message_omits_the_rendered_name_but_the_exception_carries_it(self):
         # The one remaining raise site whose message interpolates neither
         # `base` nor `rendered`. Reached only for a relative base, which no
@@ -216,6 +241,10 @@ VANISHING_PLACEHOLDER_PATTERNS = [
     "sub/{parent_id}.nrrd",  # parentless record -> "sub/.nrrd"
     "{user_id}/{parent_id}/x.nrrd",  # both absent -> "//x.nrrd"
     "{parent_id}{user_id}.nrrd",  # both absent -> ".nrrd"
+    "{parent_id}.",  # parentless record -> "." -- the working dir itself
+    "{user_id}.",  # unassigned record -> "."
+    "{parent_id}.{user_id}",  # both absent -> "."
+    "sub/{parent_id}.",  # parentless record -> "sub/." -- the "sub" dir itself
 ]
 
 LEGAL_PATTERNS = [
@@ -315,6 +344,96 @@ class TestRejectsVanishingPlaceholderShapes:
         # more specific one and must win.
         with pytest.raises(ValueError, match=r"'\.\.' component"):
             validate_file_pattern("../{user_id}")
+
+    def test_rejects_a_render_that_collapses_to_a_bare_directory_reference(self):
+        # PurePosixPath('.').name is '' while PurePosixPath('..').name is '..',
+        # so the dot-leading basename rule never fires for a worst-case render
+        # of "." -- it needs its own segment-level check. Unguarded, the pattern
+        # loaded fine and every resolve() 500ed at join_within's equals-the-base
+        # branch instead, including the build_slicer_context loop.
+        with pytest.raises(ValueError, match="bare directory reference"):
+            validate_file_pattern("{parent_id}.")
+
+
+class TestRejectsUnknownPlaceholders:
+    """A placeholder the renderer cannot resolve must fail at config load.
+
+    ``render_template`` runs LENIENT, so an unrecognised name substitutes ``""``
+    rather than raising: a typo'd ``{studyuid}`` silently became ``""`` and the
+    failure surfaced at ``join_within`` on somebody's request -- or, worse,
+    never surfaced at all when the pattern still rendered to a usable name.
+    """
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "{studyuid}",  # typo for {study_uid} -> "" -> equals the base
+            "{studyuid}/mask.nrrd",  # -> "/mask.nrrd" -> absolute, absorbs the base
+            "{studyuid}.nrrd",  # -> ".nrrd" -> a hidden file, silently wrong
+            "{Study_UID}.nrrd",  # the catalogue is case-sensitive
+            "{record_type}.nrrd",  # a Mapping coerces to "" under LENIENT
+        ],
+    )
+    def test_rejects(self, pattern):
+        with pytest.raises(ValueError, match="unknown placeholder"):
+            validate_file_pattern(pattern)
+
+    def test_error_names_the_offender_and_the_catalogue(self):
+        with pytest.raises(ValueError) as exc:
+            validate_file_pattern("seg_{studyuid}.nrrd")
+        message = str(exc.value)
+        assert "studyuid" in message
+        assert "study_uid" in message  # the catalogue, so the typo is obvious
+
+    @pytest.mark.parametrize("pattern", ["{studyuid}.nrrd", "slice_{n}.dcm", "{frame}/x.nrrd"])
+    def test_collections_are_exempt(self, pattern):
+        """In a collection the placeholder's *name* carries no meaning.
+
+        ``glob_file_paths`` substitutes ``*`` for every placeholder whatever it
+        is called, so ``slice_{n}.dcm`` -> ``slice_*.dcm`` is a deliberate
+        positional-wildcard idiom, and a misspelling is harmless for the same
+        reason -- ``{study_uid}`` and ``{studyuid}`` both glob to ``*``.
+        """
+        assert validate_file_pattern(pattern, is_collection=True) == pattern
+
+    def test_data_ban_wins_over_the_unknown_placeholder_message(self):
+        # {data.*} is unknown to the catalogue too, but its own message carries
+        # the #552 migration note and must not be shadowed.
+        with pytest.raises(ValueError, match="may not interpolate record data"):
+            validate_file_pattern("birads_{data.BIRADS_R}.txt")
+
+    @pytest.mark.parametrize("name", sorted(KNOWN_PLACEHOLDERS))
+    def test_accepts_every_catalogued_placeholder(self, name):
+        pattern = "f_{" + name + "}.nrrd"
+        assert validate_file_pattern(pattern) == pattern
+
+    def test_catalogue_is_rebuilt_from_the_renderer_it_guards(self):
+        """The catalogue must track ``fields_from``, or it refuses a legal pattern.
+
+        A hand-maintained list of names silently goes stale the moment
+        ``fields_from`` grows a key: the new placeholder would work perfectly at
+        render time and be rejected at startup. Rebuild the set from the
+        renderer's own output instead of trusting the transcription.
+        """
+        record = MagicMock()
+        record.record_type.name = "ct-segmentation"
+        # Deliberately empty: `{data.*}` is banned (#552) and its keys are
+        # per-record anyway, so `data` contributes nothing to a static catalogue.
+        record.data = {}
+
+        resolvable: set[str] = set()
+        for key, value in fields_from(record).items():
+            if isinstance(value, Mapping):
+                resolvable |= {f"{key}.{leaf}" for leaf in value}
+            else:
+                resolvable.add(key)
+
+        assert resolvable == KNOWN_PLACEHOLDERS
+
+    def test_optional_placeholders_are_a_subset_of_the_catalogue(self):
+        # An optional placeholder outside the catalogue would be erased for the
+        # worst-case render and then rejected as unknown — an unreachable rule.
+        assert OPTIONAL_PLACEHOLDERS <= KNOWN_PLACEHOLDERS
 
 
 class TestFileDefinitionReadPatternValidation:
