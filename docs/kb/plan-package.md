@@ -3,7 +3,7 @@ type: Subsystem
 title: Project configuration and the clarinet_plan package
 description: How a downstream project declares record types and custom Python code, how those files are imported through the single clarinet_plan anchor, and why loading fails fast.
 tags: [config, plan, importlib, reconciler, startup, vendoring]
-timestamp: 2026-07-27T13:09:00Z
+timestamp: 2026-09-03T20:51:55Z
 ---
 
 Clarinet is a framework: the interesting declarations live in the *project*, not

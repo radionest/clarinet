@@ -1,5 +1,9 @@
 # Update Log
 
+## 2026-09-03
+
+* **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — the fail-fast contract now lists the cross-type shared-file check: two record types declaring the same file with different row-level fields abort reconcile before any DB write, because the `FileDefinition` row is shared by every type binding it.
+
 ## 2026-08-20
 
 * **Update**: [Domain model](./domain-model.md) — corrected the status-diagram edge into `blocked`: a record is blocked at creation or at the `preparing` exit, never demoted from `pending` (check-files only withholds an existing block's auto-unblock).
