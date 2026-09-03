@@ -37,6 +37,16 @@ if TYPE_CHECKING:
     from .record import Record
 
 
+# (record type name, file definition name) pairs already reported by
+# `RecordType.file_registry`. Module-level because the warning describes a
+# *configuration* fact that cannot change while the process runs, while
+# `file_registry` is a property re-evaluated on every record-type read — so
+# without this a single un-migrated `{data.*}` row logged a WARNING on every
+# request, for ever. Bounded by the size of the config. Tests clear it between
+# cases (see tests/test_record_type_model.py).
+_warned_skipped_definitions: set[tuple[str, str]] = set()
+
+
 class SlicerSettings(SQLModel):
     """Settings for Slicer workspace and validation scripts."""
 
@@ -311,14 +321,17 @@ class RecordType(RecordTypeBase, table=True):
                     )
                 )
             except ValidationError as exc:
-                from clarinet.utils.logger import logger
+                already_warned = (self.name, link.file_definition.name)
+                if already_warned not in _warned_skipped_definitions:
+                    _warned_skipped_definitions.add(already_warned)
+                    from clarinet.utils.logger import logger
 
-                logger.warning(
-                    f"RecordType('{self.name}'): file definition "
-                    f"'{link.file_definition.name}' (pattern="
-                    f"{link.file_definition.pattern!r}) failed validation and "
-                    f"was skipped from file_registry: {exc}"
-                )
+                    logger.warning(
+                        f"RecordType('{self.name}'): file definition "
+                        f"'{link.file_definition.name}' (pattern="
+                        f"{link.file_definition.pattern!r}) failed validation and "
+                        f"was skipped from file_registry: {exc}"
+                    )
         return registry
 
     def __hash__(self) -> int:

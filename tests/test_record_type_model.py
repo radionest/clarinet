@@ -72,6 +72,20 @@ def test_non_iterable_unique_by_is_validation_error_not_500():
 # One bad definition must be skipped + logged, not swallow its siblings. ---
 
 
+@pytest.fixture(autouse=True)
+def _reset_skipped_definition_warnings():
+    """Clear the process-wide warn-once set so these cases stay order-independent.
+
+    ``RecordType.file_registry`` reports each bad definition once per process;
+    without this every test after the first would observe zero warnings.
+    """
+    from clarinet.models.record_type import _warned_skipped_definitions
+
+    _warned_skipped_definitions.clear()
+    yield
+    _warned_skipped_definitions.clear()
+
+
 @pytest.fixture
 def captured_records():
     """Capture every loguru record emitted during the test as raw dicts.
@@ -124,3 +138,30 @@ def test_file_registry_warns_naming_the_offending_definition(captured_records):
     message = warnings[0]["message"]
     assert "legacy-mix" in message  # record type name
     assert "legacy_file" in message  # file definition name
+
+
+def test_file_registry_warns_once_per_definition_not_once_per_read(captured_records):
+    """A legacy row must not log a WARNING on every request for ever.
+
+    ``file_registry`` is a property, re-evaluated on every record-type read, so
+    a deployment holding one un-migrated ``{data.*}`` pattern emitted a WARNING
+    per request — unbounded log volume for a fact that never changes.
+    """
+    rt = _record_type_with_one_legacy_and_one_valid_file()
+
+    for _ in range(3):
+        _ = rt.file_registry
+
+    warnings = [r for r in captured_records if r["level"].name == "WARNING"]
+    assert len(warnings) == 1
+
+
+def test_file_registry_still_skips_the_bad_definition_after_the_warning_is_deduped():
+    """Dedup must silence the log line, never the skip itself."""
+    rt = _record_type_with_one_legacy_and_one_valid_file()
+
+    first = rt.file_registry
+    second = rt.file_registry
+
+    assert [fd.name for fd in first] == ["good_file"]
+    assert [fd.name for fd in second] == ["good_file"]
