@@ -5,6 +5,7 @@ import pytest_asyncio
 from httpx import AsyncClient
 
 from clarinet.models.record import RecordType
+from tests.utils.urls import RECORD_TYPES
 
 # Base URL prefix for record endpoints
 BASE = "/api/records"
@@ -299,7 +300,7 @@ class TestUpdateRecordType:
             "multiple": False,
         }
         response = await client.post(
-            f"{BASE}/types",
+            RECORD_TYPES,
             json={
                 "name": "registry-patch-type",
                 "level": "SERIES",
@@ -315,7 +316,7 @@ class TestUpdateRecordType:
 
         # The reported case: the same registry sent back unchanged.
         response = await client.patch(
-            f"{BASE}/types/registry-patch-type",
+            f"{RECORD_TYPES}/registry-patch-type",
             json={"file_registry": [seg_input, mask_output]},
             headers=auth_headers,
         )
@@ -327,7 +328,7 @@ class TestUpdateRecordType:
 
         # A changed registry: one file dropped, one added.
         response = await client.patch(
-            f"{BASE}/types/registry-patch-type",
+            f"{RECORD_TYPES}/registry-patch-type",
             json={"file_registry": [mask_output, report_output]},
             headers=auth_headers,
         )
@@ -339,7 +340,7 @@ class TestUpdateRecordType:
 
         # The response must match what a fresh read sees.
         test_session.expire_all()
-        response = await client.get(f"{BASE}/types/registry-patch-type", headers=auth_headers)
+        response = await client.get(f"{RECORD_TYPES}/registry-patch-type", headers=auth_headers)
         assert response.status_code == 200
         assert {f["name"] for f in response.json()["file_registry"]} == {
             "mask_output",

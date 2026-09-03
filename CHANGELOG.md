@@ -454,6 +454,17 @@
 
 ### Fixed
 
+- **`PATCH /types/{name}` no longer answers with an empty `file_registry`
+  after a successful sync.** `sync_file_links(clear_existing=True)` deleted the
+  old `RecordTypeFileLink` rows with `session.delete()` and then reassigned
+  `record_type.file_links`; the deleted links were still in the loaded
+  collection, and their remove events — through pydantic's value-based
+  `__eq__` on link models — knocked the freshly inserted links out of the new
+  collection. The rows were right, but the response was served from that same
+  identity-mapped object and carried `"file_registry": []` until the next
+  request. Links now go through the relationship itself (`delete-orphan`
+  cascade), so the response lists the files just synced. `POST /types` was
+  never affected (#567).
 - **`Files.resolve` no longer renders a collection**, which turned a *legal*
   `multiple=True` pattern into a 500. Collections are exempt from the
   config-load render rules on the grounds that they glob rather than render —

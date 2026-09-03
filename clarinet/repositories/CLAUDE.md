@@ -93,8 +93,9 @@ Alternatives when you don't use `options`:
 Pattern for updating M2M relationships (e.g. `file_links` on RecordType) —
 reference implementation `clarinet/utils/file_link_sync.py`:
 1. Clear the loaded collection → `parent.links = []` → `session.flush()`. The
-   relationship carries `delete-orphan`, so the flush deletes the orphaned rows —
-   and they must be gone before a link with the same PK is inserted
+   relationship carries `delete-orphan` (SQLModel `Relationship(cascade_delete=True)`
+   = `cascade="all, delete-orphan"`), so the flush deletes the orphaned rows — and
+   they must be gone before a link with the same PK is inserted
 2. Build new link objects → `parent.links.append(link)` each (save-update cascade
    adds them to the session with the parent set)
 3. `session.commit()`
