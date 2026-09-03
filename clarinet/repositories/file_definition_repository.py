@@ -74,13 +74,7 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
         result_map: dict[str, FileDefinition] = {}
         for defn in definitions:
             fd = await self.get_or_create(
-                defn.name,
-                pattern=defn.pattern,
-                description=defn.description,
-                multiple=defn.multiple,
-                level=defn.level,
-                grid_conform_to=defn.grid_conform_to,
-                on_grid_mismatch=defn.on_grid_mismatch,
+                defn.name, **{name: getattr(defn, name) for name in FILE_DEFINITION_FIELDS}
             )
             result_map[defn.name] = fd
         return result_map
