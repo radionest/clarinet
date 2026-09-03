@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.exceptions.domain import AnonPathError
+from clarinet.exceptions.domain import AnonPathError, UnsafePathError
 from clarinet.files import _checksums, _fs, _patterns, _resolver, _storage, _template
 from clarinet.models.base import DicomQueryLevel
 from clarinet.settings import settings
@@ -142,17 +142,58 @@ class Files:
         return file_def
 
     def resolve(self, file_def: FileDefArg, **overrides: Any) -> Path:
+        """Absolute path for a *singular* file definition.
+
+        Raises ``ValueError`` for a ``multiple=True`` definition: a collection
+        has no single path, and its pattern is a glob rather than a name. This
+        branch is what makes the config-load collection exemption safe — that
+        exemption lets ``{study_uid}/x.dcm`` through on the grounds that a
+        collection globs rather than renders, so rendering one here turned a
+        *legal* pattern into a request-time ``UnsafePathError`` (``/x.dcm`` for
+        a patient-level record) and a 500 out of ``build_slicer_context``.
+
+        Deliberately a ``ValueError`` and not an ``UnsafePathError``: asking one
+        path of a collection is a caller mistake, and the two must stay
+        distinguishable, since ``UnsafePathError`` sits outside every
+        ``except ValueError`` net so a genuine traversal can never be swallowed.
+
+        This raise is a contract guard, **not** something callers are expected
+        to catch and carry on from. ``build_slicer_context`` does catch
+        ``(KeyError, ValueError)``, but its ``unresolved`` list is not a
+        fallback — a non-empty one raises ``ScriptArgumentError`` (422) — so it
+        filters collections out *before* calling this. Use ``glob`` for a
+        collection; ``exists`` already branches on ``multiple`` for you.
+        """
         fd = self._lookup(file_def)
+        if fd.multiple:
+            raise ValueError(
+                f"file definition {fd.name!r} is a collection (multiple=True) and has no "
+                f"single path; use Files.glob() instead of Files.resolve()"
+            )
         working_dir = self._dirs[fd.level or self._level]
         filename = _template.render_template(
-            fd.pattern, {**self._fields, **overrides}, mode=_template.RenderMode.LENIENT
+            fd.pattern,
+            {**self._fields, **overrides},
+            mode=_template.RenderMode.LENIENT,
+            path_safe=True,
         )
-        path = working_dir / filename
+        path = _template.join_within(working_dir, filename)
         self._accessed.setdefault(fd.name, path)
         return path
 
     def exists(self, file_def: FileDefArg, **overrides: Any) -> bool:
-        return self.resolve(file_def, **overrides).is_file()
+        """True when the definition has at least one file on disk.
+
+        Branches on ``multiple`` rather than inheriting ``resolve``'s refusal:
+        a collection exists when any member matches, and the shipped task
+        pattern (``examples/project_template/.claude/CLAUDE.md``) tells every
+        project to call ``ctx.files.exists(output_file_def)`` — including for
+        collections, which would otherwise raise here.
+        """
+        fd = self._lookup(file_def)
+        if fd.multiple:
+            return bool(self.glob(fd))
+        return self.resolve(fd, **overrides).is_file()
 
     def glob(self, file_def: FileDefArg) -> list[Path]:
         fd = self._lookup(file_def)
@@ -166,7 +207,9 @@ class Files:
         return dict(self._accessed)
 
     def render(self, pattern: str) -> str:
-        return _template.render_template(pattern, self._fields, mode=_template.RenderMode.LENIENT)
+        return _template.render_template(
+            pattern, self._fields, mode=_template.RenderMode.LENIENT, path_safe=True
+        )
 
     @staticmethod
     def render_for(record: RecordBase, pattern: str, *, parent: RecordBase | None = None) -> str:
@@ -177,8 +220,13 @@ class Files:
             pattern,
             _patterns.fields_from(record, parent),  # type: ignore[arg-type]
             mode=_template.RenderMode.LENIENT,
+            path_safe=True,
         )
 
+    # Deliberately NOT path-safe: this renders Slicer script arguments
+    # (services/slicer/context.py), which may legitimately be absolute paths.
+    # It never feeds a working-directory join. See "Path-safety guards" in
+    # ../../docs/kb/files-and-anonymization.md.
     @staticmethod
     def render_template(pattern: str, fields: dict[str, Any], *, strict: bool = False) -> str:
         mode = _template.RenderMode.STRICT if strict else _template.RenderMode.LENIENT
@@ -187,7 +235,13 @@ class Files:
     async def checksums(self, defs: list[FileDefinitionRead] | None = None) -> dict[str, str]:
         """SHA256 of registered files, keyed by name (singular) / ``name:filename``
         (collections). Resolves each def at its own ``level``; missing files are
-        omitted. Replaces both ``snapshot_checksums`` and ``compute_checksums``."""
+        omitted. Replaces both ``snapshot_checksums`` and ``compute_checksums``.
+
+        Raises ``UnsafePathError`` (naming the failing ``fd.name``, never the
+        offending value — see the class's PII guard) if any definition's
+        pattern cannot be safely rendered or contained, aborting the whole
+        scan rather than silently omitting that one entry.
+        """
         targets = defs if defs is not None else list(self._registry.values())
         out: dict[str, str] = {}
         for fd in targets:
@@ -200,10 +254,19 @@ class Files:
                     if c is not None:
                         out[f"{fd.name}:{p.name}"] = c
             else:
-                filename = _template.render_template(
-                    fd.pattern, self._fields, mode=_template.RenderMode.LENIENT
-                )
-                c = await _checksums.compute_file_checksum(working_dir / filename)
+                try:
+                    filename = _template.render_template(
+                        fd.pattern,
+                        self._fields,
+                        mode=_template.RenderMode.LENIENT,
+                        path_safe=True,
+                    )
+                    path = _template.join_within(working_dir, filename)
+                except UnsafePathError as exc:
+                    raise UnsafePathError(
+                        f"{exc} (file definition {fd.name!r})", value=exc.value
+                    ) from exc
+                c = await _checksums.compute_file_checksum(path)
                 if c is not None:
                     out[fd.name] = c
         return out

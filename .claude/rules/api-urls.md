@@ -48,7 +48,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/records` | POST | 201 | Create record. **409**: `RECORD_LIMIT_REACHED`, `UNIQUE_PER_USER`, `PARENT_REQUIRED` (record_type with `parent_required=True` and no `parent_record_id` in payload). `user_id` is inherited from the parent only when RecordType has `inherit_user_from_parent=True` |
+| `/api/records` | POST | 201 | Create record. **403**: a non-admin caller set `clarinet_storage_path` (admin-only per-record storage-root override). **409**: `RECORD_LIMIT_REACHED`, `UNIQUE_PER_USER`, `PARENT_REQUIRED` (record_type with `parent_required=True` and no `parent_record_id` in payload). `user_id` is inherited from the parent only when RecordType has `inherit_user_from_parent=True` |
 | `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
@@ -60,15 +60,15 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/status` | PATCH | 200 | Update status. **409** for non-superusers when the record is finished and its type locks submitted records; **409** on `preparing` → `inwork`/`finished` (must exit via `pending`). Preparing → pending re-validates files (may land in `blocked`) |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |
 | `/api/records/{id}/context-info` | PATCH | 200 | Replace context_info (markdown). Body: `{"context_info": str \| null}`. Auth: superuser/owner/unassigned |
-| `/api/records/{id}/data` | POST | 200 | Submit data. **409** when the record is `blocked`, `preparing`, or already `finished` |
+| `/api/records/{id}/data` | POST | 200 | Submit data. **409** when the record is `blocked`, `preparing`, or already `finished`. **422** (finished submissions only) when an OUTPUT `FileDefinition.pattern` cannot be safely rendered for this record — the pre-check runs before the submission is persisted, and a backstop in the post-submit checksum scan can also reject after the data commits; detail names the file definition |
 | `/api/records/{id}/data` | PATCH | 200 | Update data. **409** for non-superusers when the type locks submitted records (`editable=False` or expired `edit_window_days`) |
 | `/api/records/{id}/data/prefill` | POST | 200 | Prefill data (error if exists). Allowed statuses: `pending`/`blocked`/`preparing` |
 | `/api/records/{id}/data/prefill` | PUT | 200 | Replace prefill data. Allowed statuses: `pending`/`blocked`/`preparing` |
 | `/api/records/{id}/data/prefill` | PATCH | 200 | Merge into prefill data. Allowed statuses: `pending`/`blocked`/`preparing` |
-| `/api/records/{id}/submit` | POST | 200 | Submit + run `slicer_result_validator` if configured; merges `__execResult` into data on save. **409** when the record is `blocked`, `preparing`, or already `finished` |
+| `/api/records/{id}/submit` | POST | 200 | Submit + run `slicer_result_validator` if configured; merges `__execResult` into data on save. **409** when the record is `blocked`, `preparing`, or already `finished`. **422**: same unsafe-OUTPUT-path rejection as POST `/data` |
 | `/api/records/{id}/submit` | PATCH | 200 | Re-submit a finished record (same Slicer-validator + `__execResult` merge as POST). **409** for non-superusers when the type locks submitted records |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
-| `/api/records/{id}/check-files` | POST | 200 | Check files |
+| `/api/records/{id}/check-files` | POST | 200 | Check files. **500** when an OUTPUT `FileDefinition.pattern` cannot be safely resolved — the checksum scan raises first, and on this endpoint nothing was submitted, so it is a server-side config fault. A **422** is also declared for the same condition detected later, while registering output links, but that branch is unreachable in practice (anything present in `checksums` already rendered safely) and is kept only as a backstop; its detail names the file definition and never echoes the offending value |
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record. Hard mode: **409** for non-superusers when the record is finished and its type locks submitted records |

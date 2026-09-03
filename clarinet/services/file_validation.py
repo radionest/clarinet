@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from clarinet.exceptions.domain import ValidationError
-from clarinet.files import Files
+from clarinet.files import Files, join_within
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
 
@@ -91,6 +91,17 @@ class FileValidator:
 
         Returns:
             FileValidationResult with validation status and matched files
+
+        Raises:
+            UnsafePathError: if a singular definition's rendered name would
+                escape *target_dir*, or a substituted value could alter the
+                path (``Files.render_for``'s value guard). Propagates uncaught
+                rather than becoming a ``FileValidationError`` entry — see the
+                comment at the join below.
+
+        A ``multiple=True`` definition is never rendered here. A required one
+        is reported as ``missing`` without touching the disk — matching a
+        collection by glob is issue #562.
         """
         if not self._file_definitions:
             return FileValidationResult(valid=True)
@@ -99,15 +110,57 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in self._file_definitions:
-            resolved = Files.render_for(record, file_def.pattern, parent=parent)
-
             # Level-aware directory resolution
             if file_def.level and working_dirs and file_def.level in working_dirs:
                 target_dir = working_dirs[file_def.level]
             else:
                 target_dir = directory
 
-            filename = resolved if (target_dir / resolved).is_file() else None
+            if file_def.multiple:
+                # Never rendered. A collection's placeholders are wildcards,
+                # and validate_file_pattern skips both render-time rules for
+                # it on exactly that premise — so `{study_uid}/slice_{n}.dcm`
+                # is a *legal* collection which, rendered for a patient-level
+                # record, is `/slice_.dcm`: join_within below would rightly
+                # refuse it, turning a config-load-legal definition into a
+                # 500. Matching a collection by glob is issue #562; until then
+                # a required one is reported missing without touching the
+                # disk — the verdict rendering reached anyway, since a
+                # wildcard rendered to nothing and the probe never found a
+                # file.
+                if file_def.required:
+                    errors.append(
+                        FileValidationError(
+                            file_name=file_def.name,
+                            error_type="missing",
+                            message=f"Required file '{file_def.name}' is a collection "
+                            f"(multiple=True), which file validation cannot match yet "
+                            f"(pattern: {file_def.pattern}; see issue #562)",
+                        )
+                    )
+                continue
+
+            resolved = Files.render_for(record, file_def.pattern, parent=parent)
+
+            # join_within raises UnsafePathError uncaught rather than being
+            # folded into `errors` below. It enforces containment only, and
+            # both halves that could feed it a non-contained name are covered
+            # upstream: Files.render_for guards every substituted *value*
+            # (path_safe=True rejects "/", "\", NUL and a bare "."/"..", and
+            # raises UnsafePathError itself for a degenerate stored identity
+            # value — a patient_id of ".." is legal per PATIENT_ID_REGEX), and
+            # validate_file_pattern guards the pattern's literal text and its
+            # worst-case render. That validator also runs on every stored row
+            # when RecordType.file_registry is read — a failing legacy row is
+            # skipped with a WARNING, never handed on — so a definition that
+            # arrives here through validate_record_files has passed it. The
+            # join is a backstop for a caller that hands FileValidator an
+            # unvalidated definition directly (none in-tree). Either way the
+            # violation is a server-side fact — a stored value or a definition
+            # — never data the current caller submitted. On the principle that
+            # a violation surfaces according to who caused it, that makes it a
+            # server-side failure, not a per-record 422.
+            filename = resolved if join_within(target_dir, resolved).is_file() else None
 
             if filename:
                 matched[file_def.name] = filename

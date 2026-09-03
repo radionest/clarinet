@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Files and the anonymized-path contract
-description: Why Files is the only way to turn a record into a path on disk, and why resolvers raise AnonPathError instead of falling back to raw DICOM UIDs.
+description: Why Files is the entry point for turning a record into a path on disk, why resolvers raise AnonPathError instead of falling back to raw DICOM UIDs, and the path-safety guards that keep a rendered filename inside the record's working directory.
 tags: [files, storage, anonymization, paths, contract]
 timestamp: 2026-07-21T19:46:32Z
 ---
@@ -11,13 +11,22 @@ surprisingly load-bearing operation: the writer, half a dozen readers, the CLI
 and every pipeline task must agree on the answer. Clarinet solves that with one
 rendering engine and one public facade.
 
-## `Files` is the only entry point
+## `Files` is the entry point for path resolution
 
 `clarinet/files/facade.py`, imported as `from clarinet.files import Files`.
 Models carry **no** path logic — `RecordRead`, `StudyRead`, `SeriesRead` and
-`PatientRead` have no `working_folder` field and no `_format_path` helpers. The
-implementation lives behind private `clarinet/files/_*` leaves; never import
-those directly.
+`PatientRead` have no `working_folder` field and no `_format_path` helpers.
+
+`clarinet.files`'s public surface is six names, all served as lazy
+`__getattr__` re-exports (`clarinet/files/__init__.py`) so importing one does
+not drag in the rest of the package: `Files`, `AnonPathError`,
+`PLACEHOLDER_REGEX`, and three path-safety primitives —
+`validate_file_pattern`, `assert_path_safe_value`, `join_within` — covered
+below under "Path-safety guards". Those three are meant to be imported
+directly, by callers that build their own render-then-join step (e.g.
+`services/file_validation.py`) or that validate a pattern outside the
+config-load path. Everything else under `clarinet/files/_*` is a private
+leaf; never import those directly.
 
 ```python
 f = Files(record)              # strict: raises AnonPathError when not anonymized
@@ -117,3 +126,394 @@ What a name like `"mask"` means is declared by the project's file registry —
 `FileDefinition` rows linked to record types and records. That side of the
 system is covered in [Domain model](./domain-model.md) and, in detail, in
 `.claude/rules/file-registry.md`.
+
+## Path-safety guards
+
+A `FileDefinition.pattern` renders against DICOM identifiers and other
+per-record fields, then the rendered name is joined onto the record's
+working directory. The render context still merges in `record.data`, but a
+pattern may no longer reference it — see "Config-load pattern validation"
+below. Both steps are guarded, and — like the anonymized-path strictness
+above — neither guard alone would be enough: an admin-authored `/` in a
+subdirectory pattern (`study_{study_uid}/mask.nrrd`) must stay legal, so the
+join can't reject every `/`; a value guard alone can't see what a literal
+pattern segment contributes.
+
+### Config-load pattern validation
+
+`validate_file_pattern` (`clarinet/files/_template.py`, attached as a
+`@model_validator(mode="after")` on `FileDefinitionRead` — **not** on
+`FileDefinition`, which is `table=True` and skips Pydantic validation)
+rejects an unsafe pattern before any record ever renders it: empty or
+whitespace-only, a backslash, NUL, a `..` component, or a dot-leading
+basename in the pattern's *literal* text (placeholders masked out first, so
+a `.` inside a placeholder *name* cannot trip it) — plus two checks against
+the *full* pattern regardless of placeholders: an absolute prefix and a
+trailing separator. This rule is permanent, and a rejection here — unlike
+the stored-row case below — aborts startup: the process does not come up
+with the offending definition simply skipped.
+
+It is a *model* validator rather than a field one because the render-time
+rule below needs to read `multiple` alongside `pattern`; a field validator
+cannot see a sibling field, and as one it was aborting startup for valid
+collection configs.
+
+Two further rules concern placeholder *names*:
+
+- **Unknown placeholders** (`_reject_unknown_placeholders`) — in a
+  non-collection pattern every *name-shaped* placeholder must be one
+  `fields_from` can resolve. A brace group the renderer never substitutes —
+  `{1}`, or anything carrying a format spec like `{x:s}` — is not a placeholder
+  as far as `_PLACEHOLDER_RE` is concerned, renders literally, and is
+  unaffected. The names it does check:
+  `{id}`, `{parent_id}`, `{user_id}`, `{patient_id}`, `{study_uid}`,
+  `{series_uid}`, `{origin_type}`, `{record_type.name}`. The renderer runs
+  LENIENT, so an unrecognised name substituted `""` instead of raising: a
+  typo'd `{studyuid}` rendered to `""` (rejected at the join, 500ing every
+  read of the record) or, in `{studyuid}.nrrd`, to the perfectly joinable
+  hidden file `.nrrd` — a wrong-but-working path with no diagnostic anywhere.
+  The catalogue is kept in step with `fields_from` by a drift test that
+  rebuilds it from the renderer's own output. **Collections are exempt**: a
+  collection globs rather than renders, and `glob_file_paths` substitutes `*`
+  for every placeholder whatever it is called, so the name carries no meaning
+  at all — `slice_{n}.dcm` → `slice_*.dcm` is a positional-wildcard idiom, and
+  a misspelling there is harmless because `{study_uid}` and `{studyuid}` both
+  glob to `*`.
+- **`{data.*}`** (`_reject_data_placeholders`) — banned outright, temporarily,
+  for collections too; see below.
+
+#### Patterns that vanish when a placeholder is absent
+
+Four placeholders are **optional** — a perfectly well-formed record can lack
+them, and the LENIENT renderer substitutes `""` rather than raising:
+`{parent_id}` (a parentless record), `{user_id}` (an unassigned one),
+`{study_uid}` and `{series_uid}` (a patient- or study-level one). Everything
+else the renderer knows (`{id}`, `{patient_id}`, `{record_type.name}`,
+`{origin_type}`) is populated for any record that exists.
+
+So `validate_file_pattern` also checks the pattern's **worst-case render** —
+every optional placeholder erased, every other one masked to a non-empty
+sentinel — and rejects it unless the result is still a well-formed relative
+name. Four shapes fail:
+
+| Pattern | Worst-case render | Why it fails | Fix |
+|---|---|---|---|
+| `{user_id}` | `""` | an empty name | `seg_{user_id}.nrrd` |
+| `{parent_id}.txt` | `.txt` | dot-leading basename | `report_{parent_id}.txt` |
+| `{study_uid}/mask.nrrd` | `/mask.nrrd` | empty path segment | `study_{study_uid}/mask.nrrd` |
+| `{parent_id}.` | `.` | bare directory reference | `report_{parent_id}.` |
+
+A literal prefix on the affected segment is the fix in every case;
+`{id}.nrrd` and `{record_type.name}.nrrd` need none, because neither
+placeholder is ever absent.
+
+The last row is checked on the pattern's **final** `/`-separated segment, on
+the raw string rather than through `PurePosixPath`. Raw, because pathlib
+collapses a `.` component away:
+`PurePosixPath(".").name` is `""`, which does *not* start with a dot, so the
+dot-leading rule never fired for it. (`PurePosixPath("..").name` is `".."` —
+only the single dot has this asymmetry.) Such a pattern therefore loaded
+cleanly and then raised at `join_within`'s equals-the-base branch on every
+resolve, including inside the `build_slicer_context` loop, which 500s the
+Slicer open endpoint for the whole record.
+
+**Collections are exempt from this rule**, as from the unknown-placeholder
+rule above. A `multiple=True` definition is meant to be *globbed*, not
+rendered — `_patterns.glob_file_paths` substitutes every placeholder with `*` —
+so `{parent_id}.nrrd` becomes `*.nrrd`, a perfectly good collection pattern
+rather than a degenerate name. This exemption is why `validate_file_pattern`
+needs to see `multiple`, and hence why it is a model validator.
+
+**The exemption is only sound while nothing renders a collection**, and that is
+an *enforced* invariant rather than a passive fact. `Files.resolve` raises
+`ValueError` for a `multiple=True` definition instead of rendering it — it used
+to render them, so a legal `{study_uid}/x.dcm` collection resolved to `/x.dcm`
+on a patient-level record and 500'd out of `build_slicer_context`, which
+catches `(KeyError, ValueError)` and so could not see an `UnsafePathError`.
+
+That guard is a contract check, not a recovery point. Consumers must skip
+collections *before* reaching it, because `build_slicer_context`'s `unresolved`
+list is not a fallback — a non-empty one raises `ScriptArgumentError` (422), so
+routing collections into it would fail the Slicer endpoint for every record
+type that declares one. The registry loop therefore filters on `multiple`;
+`Files.exists` branches to `glob`; `RecordQuery.file_path` converts the
+`ValueError` into a `PipelineStepError` so a worker failure stays classified.
+`FileValidator.validate` no longer renders one either: it reports a required
+collection as missing without touching the disk, because a collection has no
+single filename to record — matching one by glob is issue #562. Any new
+consumer of a pattern must branch on `multiple` the way `Files.checksums`
+does. The literal-text rules and the `{data.*}` ban still apply to
+collections, because those judge the pattern itself rather than what it
+renders to.
+
+This is the rule that **replaced** two runtime checks. `join_within` used to
+reject an empty and a dot-leading *rendered* name, which turned an absent
+optional placeholder into a hard failure at request time — on record create,
+the Slicer context builder, every pipeline task's checksum scan, submit and
+auto-unblock — where the same configuration previously resolved to a path
+that simply did not exist and answered "file not found". Enforcing it once,
+against the pattern, puts the failure in front of the administrator who
+wrote it. A stored row that predates the rule is skipped, not fatal, by the
+`RecordType.file_registry` mechanism described next.
+
+**Temporarily banned, tracked by
+[#552](https://github.com/radionest/clarinet/issues/552):** a pattern
+containing `{data.FIELD}` or bare `{data}` is rejected at the same
+config-load point — `record.data` is user-submitted and, at best,
+JSON-Schema validated, never with filesystem safety in mind. The ban is
+reversible in one commit once the non-traversal corner cases it defers
+(length limits, Windows-reserved basenames, unicode normalization,
+`record.data`'s mutability) are settled; `{id}`, `{parent_id}` and
+`{user_id}` are safe replacements today. The ban lives in
+`FileDefinitionRead`'s validator and nowhere else: a `FileDef` handed straight
+to `ctx.files.resolve()` or `Files.checksums(defs=…)` is never converted to one
+(`fileref_to_file_definition` is the sole conversion, and it runs at config
+load), so such a definition bypasses every config-load rule. That loses scope
+reduction, not containment — the value guard and `join_within` still hold at
+render time, which is what lets the ban be temporary at all.
+
+Because a `FileDefinition` row is never re-validated once stored (`table=True`
+skips Pydantic), a row written before this validator existed can still carry
+an unsafe pattern. `RecordType.file_registry` catches that at read time: a
+stored definition that fails `FileDefinitionRead` construction is skipped
+from the registry — logged as a WARNING naming the record type and
+definition — rather than raising and nulling the entire registry for every
+other file on that record type. The WARNING is emitted **once per process**
+per `(record type, definition, pattern)` triple — the pattern is in the key
+because `sync_file_links` reassigns it in place, so an operator editing a legacy
+row into a second bad pattern still hears about it. `file_registry` is a property
+re-evaluated on every record-type read, so logging it unconditionally meant
+one line per request, for ever, for a fact that cannot change while the
+process runs.
+
+**The trade-off is larger than the missing-file check.** Everything that
+reads `file_registry` simply does not see the definition, so for a deployment
+holding one un-migrated row the affected file quietly loses:
+
+| Consequence | Site |
+|---|---|
+| the `required=True, role=INPUT` "missing file" gate stops firing — the record can no longer be `blocked` for it | `services/file_validation.py` |
+| it is never checksummed, so its `RecordFileLink` is never created and the file stays untracked | `record_service._sync_output_files` |
+| file-change triggers stop firing — a RecordFlow `file(x).on_update().invalidate_all_records(...)` silently dies | `record_service.check_files` |
+| it is skipped by output-path collection, so `clear_output_files` and `delete_record_cascade` **leave the file on disk** | `record_service._collect_output_file_paths` |
+| `ctx.files.resolve("name")` in a pipeline task raises `KeyError` → retry → DLQ | `files/facade.py` |
+| the single-file download endpoint 404s for it | `record_service.resolve_output_file` |
+
+This is why the pre-release audit matters: a WARNING is not cosmetic, it is a
+file definition that has stopped working in six distinct ways.
+
+Grepping for `pattern LIKE '%{data.%'` finds only the `{data.*}` ban's
+casualties. Two other config-load rules — unknown placeholder and a degenerate
+worst-case render — drop rows that match no such pattern. Run every stored
+pattern through the validator instead, against a copy of the deployment's
+database:
+
+```python
+from clarinet.files import validate_file_pattern
+# SELECT name, pattern, multiple FROM filedefinition
+for name, pattern, multiple in rows:
+    try:
+        validate_file_pattern(pattern, is_collection=multiple)
+    except ValueError as exc:
+        print(f"{name}: {pattern!r} — {exc}")
+```
+
+Passing `is_collection` matters: a collection is exempt from both render-time
+rules, so validating it as a singular file over-reports.
+
+### The substituted value
+
+`render_template(..., path_safe=True)` runs `assert_path_safe_value` on
+every *coerced* placeholder value (so a list that flattens to `"a/b"` is
+still caught). It rejects a value containing `/`, `\` or NUL, and separately
+rejects a value that is exactly `.` or `..` — it does not reject a leading
+dot in general (`mask.seg.nrrd` stays fine, and a dot-leading *rendered* name
+is accepted at the join too; the pattern that could produce one is refused at
+config load instead — see "Patterns that vanish when a placeholder is absent"
+above). `Files.resolve`, `Files.render`,
+`Files.render_for` and `Files.checksums` all render with `path_safe=True`.
+`Files.render_template` — the static renderer feeding Slicer script
+arguments (`services/slicer/context.py`) — deliberately does **not**: those
+arguments may legitimately be absolute paths, and the result never feeds a
+working-directory join.
+
+### The joined path
+
+`join_within(base, rendered)` (`clarinet/files/_template.py`, re-exported
+from `clarinet.files`) checks the assembled path — containment, plus the one
+character pathlib carries silently but no syscall accepts: not outside `base`,
+not equal to `base` itself, no `..` path component, no NUL byte. It
+deliberately accepts a dot-leading basename — a hidden file is not an
+escape, and it is what an absent optional placeholder renders to; see
+"Patterns that vanish when a placeholder is absent" above for where that
+rule went instead. It is **purely lexical** — `os.path.normpath` plus
+`Path.is_relative_to`, zero filesystem access — which is what lets
+`Files.resolve` stay synchronous inside `build_slicer_context`'s
+per-file-definition loop. `Files.resolve` and `Files.checksums` call it
+internally right after rendering; three sites call it directly on a name they
+already have in hand — `FileValidator.validate`
+(`services/file_validation.py`), the persisted-filename replay in
+`services/pipeline/context.py`, and `_resolve_paths_for_file_def`
+(`services/record_service.py`), which guards the singular-file existence probe
+so `.is_file()` cannot act as an oracle for paths outside the working dir.
+
+Being lexical, `join_within`'s containment proof is only as trustworthy as
+its own `base` argument — a relative or `..`-carrying base satisfies
+`is_relative_to(base)` for every filename joined onto it, making the proof
+vacuous. See "The storage-path override" below for the one caller-influenced
+base in the system, and how it stays trustworthy without that check.
+
+`join_within` is **not** symlink-aware — no `Path.resolve()`, by design, to
+keep `Files.resolve` synchronous. It is not the last line of defense
+everywhere; see the next section.
+
+### The symlink-aware layer at the delete and serve sinks
+
+`_filter_in_sandbox` (`services/record_service.py`) is a second, independent
+guard — unchanged by this change — at the three sinks where a symlink could
+matter: `resolve_output_file`, `clear_output_files` and
+`delete_record_cascade` (the latter two share `_collect_output_file_paths`;
+all three funnel through `_resolve_paths_for_file_def`). Unlike
+`join_within`, it calls `Path.resolve()` — a real filesystem syscall that
+chases symlinks — and drops any candidate whose resolved location escapes
+the resolved sandbox. `join_within` and `_filter_in_sandbox` are
+complementary, not redundant: the former is cheap enough to run inside
+`Files.resolve`'s hot, synchronous, per-file-definition loop; the latter is
+only affordable at the handful of sinks that already pay for a filesystem
+round trip.
+
+### Where `UnsafePathError` surfaces
+
+- **Record submit** (`RecordService._validate_output_paths`, run before the
+  submission persists, and `_sync_output_files`'s post-scan reconciliation
+  backstop): translated to `422` — the submission is the request that cannot
+  be completed, so on the principle that a violation surfaces according to
+  who caused it, it is answered to that caller rather than as a server error.
+  The detail names the **file definition** and the reason (`str(exc)`); it
+  does **not** include `exc.value`, and neither does any log. The value was
+  briefly echoed on the grounds that the submitter had produced it — with
+  `{data.*}` banned from *patterns* they had not. `fields_from` still exposes a
+  `data` key, but no pattern may reference it, so every name a pattern can
+  interpolate is a stored record attribute; three of those (`patient_id`,
+  `study_uid`, `series_uid`) are what `api/masking.py` may withhold from a
+  non-superuser once the patient is anonymized, while the render runs against
+  the raw value. This same helper also serves check-files, where nothing was
+  submitted at all.
+- **Everywhere else a router lets it propagate** (the Slicer context
+  builder, `resolve_output_file`, …): `500`, via `UnsafePathError`'s own
+  dedicated handler (`handle_unsafe_path_error`, `exception_handlers.py`)
+  — registered separately from the generic `ConfigurationError` handler so
+  it can log without a traceback (see "Never log the value" below). An
+  administrator's bad pattern, or a legacy poisoned row, is a server-side
+  problem, not a per-request one.
+- **Pipeline tasks**: `UnsafePathError` is a `ConfigurationError`, not a
+  `ClarinetAPIError`, so `RetryMiddleware` does not special-case it the way
+  it special-cases a 4xx API error — it is retried `pipeline_retry_count`
+  times with backoff and then lands in the DLQ, the same shape as
+  `AnonPathError` above.
+
+**Never log the value.** `assert_path_safe_value`'s two raise sites name the
+offending placeholder key in the message. Two of `join_within`'s four
+raise sites name the working directory (`base`) instead (the other two — the
+`..`-component and NUL checks — name neither) — which,
+under `Files.for_reader` / `fallback=True`, can itself be a path built from
+the record's **raw**, not-yet-anonymized patient id. That message is
+logged either way it propagates, but keeping the *substituted value* itself
+out of every sink took a dedicated fix, not just
+`str(exc)`'s own omission of it. `UnsafePathError` has its own handler
+(`handle_unsafe_path_error`, `exception_handlers.py`), which Starlette
+dispatches ahead of the generic `ConfigurationError` handler whenever the
+exception is this specific subclass — handler lookup walks the exception's
+own MRO, so the specific registration wins regardless of registration
+order. It logs `str(exc)` plus the request method/path via a plain
+`logger.error(...)` — deliberately **not** `.opt(exception=exc)`, so no
+traceback is ever rendered. That distinction is the fix: the generic
+handler's `logger.opt(exception=exc).error(...)` *does* render a full
+traceback, and this project's **stderr console sink runs with
+`diagnose=True` unconditionally**, which prints **frame locals** into that
+traceback — including `assert_path_safe_value`'s own `value` parameter —
+regardless of what the message itself says. (The file sink is
+conditional: `diagnose=not serialize` — off, and safe, in JSON mode, where
+an exception instead renders through a plain `traceback.format_exception`
+call with no frame locals; the Loki sink always formats that same way and
+is never exposed.) Before this handler existed, every `UnsafePathError`
+that reached a router uncaught leaked the raw value to stderr on every
+deployment; `str(exc)` omitting the value was never sufficient on its own.
+
+This closes it for an `UnsafePathError` that reaches FastAPI's exception
+handlers **uncaught** — not simply "any request on a FastAPI route": a
+broad `except Exception:` sitting between the raise and the router can
+still swallow it and log a traceback of its own before either handler
+ever runs. Two in-framework sites do exactly that, both on genuine
+request paths: `services/slicer/context_hydration.py:120-121` — directly
+on `POST /slicer/records/{id}/open`, the very endpoint the "Slicer context
+builder" mention above names as an `UnsafePathError` source — and
+`services/schema_hydration.py:227-228`. Each catches broadly and logs with
+`logger.exception(...)`, which renders a traceback the same way the old
+generic handler did. Reaching either with an `UnsafePathError` needs
+project-authored callback code — a registered hydrator — that itself
+touches `Files`/`join_within`: no such code exists in this framework repo
+today, the same evidentiary status as the `.call()` residual below, not a
+confirmed leak either.
+
+Where nothing intercepts it first, the substituted value itself never
+lands in a message or a log: it travels only on `exc.value` (and
+`exc.metadata()`), which nothing reads — not a log statement, and, since the
+round-2 fix, not the record-submit 422 body either. Two more
+paths stay open:
+
+- **Pipeline and worker code — confirmed, not hypothetical.** The
+  built-in `convert_series_to_nifti` task calls
+  `ctx.files.resolve(VOLUME_NIFTI)`
+  (`services/pipeline/tasks/convert_series.py:60`), reaching `join_within`
+  inside the TaskIQ worker process with no project code involved, entirely
+  outside any ASGI request — so neither exception handler above ever
+  runs. `services/pipeline/task.py:118-120` logs, then re-raises; TaskIQ's own
+  executor — an installed dependency, not clarinet code — catches
+  `BaseException` and logs it with `exc_info=True` through the **stdlib**
+  `logging` module (`taskiq/receiver/receiver.py:26,282-286`). Clarinet's
+  `InterceptHandler` (`utils/logger.py:189-214`) redirects all stdlib
+  logging into loguru — installed both at import (`utils/logger.py:392`)
+  and again by `reconfigure_for_worker` (`:383`, called at worker
+  startup) — forwarding `exc_info` into `.opt(exception=...)` exactly like
+  the generic handler used to. The worker's stderr sink runs with the
+  same unconditional `diagnose=True`. Frame locals — hence `exc.value` —
+  are rendered there every time.
+- **Unverified — not a confirmed leak.** Anything that escapes Starlette's
+  `ExceptionMiddleware` entirely (fire-and-forget `RecordFlowEngine.fire` —
+  see `services/recordflow/engine.py:120-128` — ASGI middleware,
+  background tasks) is picked up the same way, through `InterceptHandler`.
+  Whether `UnsafePathError` actually reaches this path is not established
+  — it would need a project-authored `.call()` callback that touches
+  `Files` inside an entity flow fired via `engine.fire()`.
+
+`record.data` may carry PHI that log scrubbing does not redact
+(`.claude/rules/logging-pii.md`); the working-directory path under
+unanonymized fallback (`base`, embedded directly in `str(exc)`) remains a
+real, open exposure everywhere this section's guard does not reach.
+
+### The storage-path override
+
+`Record.clarinet_storage_path` lets an admin redirect one record's entire
+working directory to an arbitrary absolute path — a real per-record
+override, exercised across the integration and unit test suites, not dead
+code. `_resolve_storage_base` (`clarinet/files/_resolver.py`) has exactly one
+caller — `build_working_dirs`, reached whenever a `Files` instance is
+constructed for a `RecordRead` — and requires the value to be absolute and
+already normalized, raising `UnsafePathError` otherwise; this is what keeps
+`join_within`'s containment proof non-vacuous. The Slicer context builder
+reads `record.clarinet_storage_path` **raw**, twice
+(`services/slicer/context.py:60,294`) — it is protected only by ordering,
+not by a guard of its own: both raw reads happen after `build_slicer_context`
+already constructs `Files(record, ..., fallback=True)` (`context.py:170`),
+which raises first if the value is malformed. Reordering that construction
+later would silently drop this protection. `_resolve_storage_base`
+**deliberately does not** require containment under `settings.storage_path`:
+the field is *by design* a storage root disjoint from `settings.storage_path`,
+not a subdirectory
+selector, so a well-formed absolute path set by an admin — or already
+present in the database — is still honoured verbatim.
+`check_storage_path_admin_only` (`api/routers/record.py`) narrows *who* can
+reach that capability: a non-admin supplying a non-`None` value is rejected
+(403) at record creation. The combination is a deliberate, accepted
+residual, not an oversight — see the CHANGELOG entry for this release.

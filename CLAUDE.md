@@ -153,7 +153,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 | [clarinet_plan package](docs/kb/plan-package.md) | project config modes, custom-code loading, fail-fast contract |
 | [RecordFlow](docs/kb/recordflow.md) | workflow DSL, triggers, evaluation context, invalidation semantics |
 | [Pipeline](docs/kb/pipeline.md) | TaskIQ queues, task contract, chains, retry/DLQ, run audit |
-| [Files & anonymization](docs/kb/files-and-anonymization.md) | `Files` facade, anonymized-path contract, anonymization entry points |
+| [Files & anonymization](docs/kb/files-and-anonymization.md) | `Files` facade, anonymized-path contract, path-safety guards, anonymization entry points |
 | [Imaging stack](docs/kb/imaging-stack.md) | DICOM client, DICOMweb cache tiers, 3D Slicer integration |
 
 Update the most specific file. Scoped CLAUDE.md files and rules deliberately keep their own bodies — they auto-load on path match, which `docs/kb/` does not — so where the same fact lives in both, change both.

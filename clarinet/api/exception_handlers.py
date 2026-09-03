@@ -82,6 +82,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         ReportQueryError,
         SlicerConnectionError,
         SlicerError,
+        UnsafePathError,
         ValidationError,
         WorkflowDigestAlreadyUsedError,
         WorkflowPlanDigestMismatchError,
@@ -373,10 +374,56 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Quarto CLI not installed"},
         )
 
+    # NOTE: ``UnsafePathError`` has its own handler, ``handle_unsafe_path_error``,
+    # registered immediately below — MRO ordering mirrors the identical note
+    # above ``handle_validation_error``; see ``handle_unsafe_path_error``'s own
+    # docstring for why a dedicated registration exists at all.
     @app.exception_handler(ConfigurationError)
     async def handle_configuration_error(_: Request, exc: ConfigurationError) -> JSONResponse:
         """Convert ConfigurationError to 500 response."""
         logger.opt(exception=exc).error("Configuration error")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Server configuration error"},
+        )
+
+    @app.exception_handler(UnsafePathError)
+    async def handle_unsafe_path_error(request: Request, exc: UnsafePathError) -> JSONResponse:
+        """Convert UnsafePathError to 500 — same response shape as
+        ``handle_configuration_error`` above, but logged without a traceback.
+
+        Subclass of ``ConfigurationError`` — see the note above
+        ``handle_configuration_error`` for the MRO ordering rationale.
+        Without this explicit registration, ``UnsafePathError`` falls through
+        to that generic handler, whose ``logger.opt(exception=exc)`` attaches
+        a traceback; the stderr console sink runs with ``diagnose=True``
+        unconditionally (``utils/logger.py``) and renders **frame locals**
+        into that traceback, printing ``exc.value`` — and therefore
+        potentially PHI — to stderr on every deployment. (The file sink is
+        conditional — ``diagnose=not serialize``, off by default since
+        ``log_serialize`` defaults to ``True``.) Logging ``str(exc)`` plus
+        the request method/path
+        (no ``.opt(exception=...)``, so no traceback is ever rendered) keeps
+        the message and the endpoint locatable, without ever touching
+        ``exc.value`` / ``exc.metadata()``. This is the authoritative
+        explanation of why this handler exists — ``UnsafePathError``'s
+        PII-guard docstring (``exceptions/domain.py``) and this handler's
+        test module point back here instead of repeating it.
+        """
+        # Does NOT close: (1) the working-dir `base` some messages still
+        # embed (join_within); (2) pipeline/worker paths, which never reach
+        # FastAPI's exception handlers; (3) in-framework broad excepts on
+        # request paths -- context_hydration.py / schema_hydration.py's
+        # hydrator loops catch + logger.exception(...) (a traceback) a
+        # project hydrator's exception before this handler ever runs;
+        # reachable only if that hydrator touches Files (the built-in one
+        # does not) -- unverified in this repo, same status as (4);
+        # (4) unverified -- anything that escapes Starlette's
+        # ExceptionMiddleware entirely (fire-and-forget RecordFlowEngine.fire,
+        # ASGI middleware, background tasks) logs via stdlib ->
+        # InterceptHandler with exc_info, which may re-render frame locals
+        # on the diagnose sinks.
+        logger.error(f"Unsafe path rejected on {request.method} {request.url.path}: {exc}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Server configuration error"},

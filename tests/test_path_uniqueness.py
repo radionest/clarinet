@@ -83,7 +83,7 @@ def test_per_file_optout_suppresses():
         level="SERIES",
         unique_by=None,
         max_records=4,
-        output_pattern="report_{data.timepoint}.pdf",
+        output_pattern="report_{origin_type}.pdf",  # was {data.timepoint}; see #552
         file_allow_path_collision=True,
     )
     validate_output_path_uniqueness(rt)
@@ -95,7 +95,8 @@ def test_optout_does_not_cover_siblings():
         level="SERIES",
         unique_by=None,
         max_records=4,
-        outputs=[("report_{data.timepoint}.pdf", True), ("summary.txt", False)],
+        # was {data.timepoint}; see #552
+        outputs=[("report_{origin_type}.pdf", True), ("summary.txt", False)],
     )
     with pytest.raises(RecordConstraintViolationError, match="summary"):
         validate_output_path_uniqueness(rt)

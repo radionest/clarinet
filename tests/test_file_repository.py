@@ -7,13 +7,15 @@ StudyRead, PatientRead), the level-semantics of ``dir()``, the
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from clarinet.exceptions.domain import AnonPathError
+from clarinet.exceptions.domain import AnonPathError, UnsafePathError
 from clarinet.files import Files as FileRepository
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -266,6 +268,88 @@ class TestFileRepositoryConfiguration:
 
         repo = FileRepository(record)
         assert repo.dir().is_relative_to(Path("/custom"))
+
+    @patch("clarinet.files._resolver.settings")
+    def test_relative_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
+        """A relative override defeats join_within's own containment proof.
+
+        join_within is purely lexical: it only proves the joined result
+        stays under `base`. If `base` itself is relative or `..`-laden, that
+        proof is vacuous — this is the case the resolver-level check exists
+        to close.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="relative/path")
+
+        with pytest.raises(UnsafePathError):
+            FileRepository(record)
+
+    @patch("clarinet.files._resolver.settings")
+    def test_traversal_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
+        """The vacuous-proof scenario: a `..`-laden relative base satisfies
+        `Path.is_relative_to(base)` for every filename joined onto it, so
+        join_within alone cannot reject it — the check on `base` itself must.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="../../../../etc")
+
+        with pytest.raises(UnsafePathError):
+            FileRepository(record)
+
+    @patch("clarinet.files._resolver.settings")
+    def test_unnormalized_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
+        """An absolute but non-normalized override (embedded ``..``) is
+        rejected too — absoluteness alone isn't sufficient."""
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="/custom/../etc")
+
+        with pytest.raises(UnsafePathError):
+            FileRepository(record)
+
+    @pytest.mark.parametrize("override", ["/custom/storage/", "/custom//storage"])
+    @patch("clarinet.files._resolver.settings")
+    def test_cosmetically_unnormalized_storage_path_accepted(
+        self, mock_settings: MagicMock, override: str
+    ) -> None:
+        """A trailing slash or doubled separator is not a traversal.
+
+        ``Path()`` has always collapsed both, and rows in either shape can
+        already exist in a deployed database. Rejecting them would raise on
+        every ``Files`` construction for that record — a 500 on read paths,
+        not just writes. Only absoluteness and ``..`` components are checked.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path=override)
+
+        FileRepository(record)  # must not raise
+
+    @pytest.mark.skipif(
+        os.name == "nt" and sys.version_info >= (3, 13),
+        reason="ntpath.isabs('/custom/storage') is False from 3.13: a driveless root is "
+        "drive-relative there, so _resolve_storage_base refuses it on a 3.13 Windows host",
+    )
+    @patch("clarinet.files._resolver.settings")
+    def test_posix_storage_path_not_refused_by_path_normalisation(
+        self, mock_settings: MagicMock
+    ) -> None:
+        """A POSIX-style root must not be refused by the host's path
+        *normalisation*.
+
+        Regression: the check compared the value against
+        ``os.path.normpath`` output, which on Windows rewrites
+        ``/custom/storage`` to ``\\custom\\storage`` — so every such row was
+        refused there while passing on Linux. Windows CI caught it; the
+        Linux-only suite could not.
+
+        Absoluteness itself stays the host's call and is Python-version
+        dependent on Windows — see the ``skipif`` above: on 3.12 (CI's pin)
+        ``ntpath.isabs`` accepts a driveless root, on 3.13 it does not. That is
+        an availability caveat on that one platform, not a traversal.
+        """
+        mock_settings.storage_path = "/default"
+        record = _make_record_mock(clarinet_storage_path="/custom/storage")
+
+        FileRepository(record)  # must not raise
 
     @patch("clarinet.files._storage.settings")
     @patch("clarinet.files._resolver.settings")

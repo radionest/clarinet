@@ -220,6 +220,149 @@
   internal (x, y) axes; the NIfTI-convention flip moved to the width axis), so
   its physical output for a given COCO file + reference volume is unchanged
   across the epoch.
+- **File patterns may no longer interpolate record data.** A
+  `FileDefinition.pattern` containing `{data.FIELD}` (or bare `{data}`) is now
+  rejected when the configuration loads. Migration: replace it with `{id}`,
+  `{parent_id}` or `{user_id}`, or declare one `FileDefinition` per variant. If
+  files already exist on disk under the old name, rename them to match the new
+  pattern — the resolved filename changes with the pattern. This restriction is
+  temporary and tracked by #552. **This rejection aborts startup** — the
+  process does not come up — unlike the stored-row case below, which the
+  running app tolerates by skipping just that one definition.
+- **A file pattern must still render to a valid name when an optional
+  placeholder is absent.** `{parent_id}`, `{user_id}`, `{study_uid}` and
+  `{series_uid}` are legitimately empty for a parentless, unassigned,
+  patient-level or study-level record, so a pattern that leans on one of them
+  for a whole path segment degenerates: `{parent_id}.txt` → `.txt`,
+  `{user_id}` → `""`, `{study_uid}/mask.nrrd` → `/mask.nrrd`, `{parent_id}.` →
+  `.`. All four are now rejected when the configuration loads. Migration: give
+  the affected segment some literal text — `report_{parent_id}.txt`,
+  `seg_{user_id}.nrrd`, `study_{study_uid}/mask.nrrd`. Patterns resting on
+  `{id}`, `{patient_id}`, `{record_type.name}` or `{origin_type}` need no
+  change; those are never absent. **Collections (`multiple=True`) are exempt** —
+  their placeholders are replaced with `*` and globbed rather than rendered, so
+  `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. `Files.resolve` now
+  refuses a collection outright (`ValueError`) instead of rendering one, and
+  the consumers that walk a whole registry skip collections before reaching it
+  — see Fixed. `FileValidator.validate` no longer renders one either: a
+  required collection INPUT is reported missing without rendering it (the
+  verdict it already reached by rendering a wildcard to nothing), so the
+  exemption is enforced by every in-tree consumer; matching collections by
+  glob is issue #562. A *stored*
+  row that violates the rule is
+  skipped from `RecordType.file_registry` with a WARNING rather than being
+  fatal (see Security below).
+- **A file pattern may only use placeholders the renderer knows.** Every
+  `{name}` in a `FileDefinition.pattern` must be one of `{id}`, `{parent_id}`,
+  `{user_id}`, `{patient_id}`, `{study_uid}`, `{series_uid}`, `{origin_type}`
+  or `{record_type.name}`; any other *name-shaped* placeholder is rejected when
+  the configuration loads. Brace groups the renderer never substitutes are
+  unaffected and keep rendering literally — `set{1}.nrrd` and
+  `seg_{studyuid:s}.nrrd` stay legal, because `{1}` and a format spec are not
+  placeholders as far as the renderer is concerned. Previously an unrecognised name silently substituted `""`, so a typo
+  like `{studyuid}` either failed later at the working-directory join — a 500
+  on every read of that record, including the Slicer open endpoint — or, in
+  `{studyuid}.nrrd`, quietly resolved to the hidden file `.nrrd` and kept
+  working against the wrong path. Migration: fix the spelling. **Collections
+  (`multiple=True`) are exempt**, as they are from the rule above: a collection
+  globs rather than renders and substitutes `*` for every placeholder whatever
+  it is named, so `slice_{n}.dcm` → `slice_*.dcm` remains a legal
+  positional-wildcard idiom.
+- **Setting `Record.clarinet_storage_path` on record creation is now
+  admin-only.** A non-admin supplying a non-`None` value is rejected (403) at
+  the `POST /api/records` route — the only client-facing path that accepts the
+  field. Creating a record without the field is unaffected. Both admitted
+  caller kinds are covered: a superuser, and a non-superuser holding the
+  built-in `admin` role.
+- **Finishing a record now returns 422 when an OUTPUT file pattern cannot be
+  safely resolved.** `POST /api/records/{id}/data` and
+  `POST /api/records/{id}/submit` reject the submission with 422 when a
+  `role=OUTPUT` `FileDefinition.pattern` would render to a path outside the
+  record's working directory. The check runs before the submission is
+  persisted, so a rejected submit leaves the record's data and status
+  untouched (re-matched INPUT file links may already have committed); a backstop
+  check during the post-submit checksum scan can also reject, after the
+  record's own data has committed. Neither PATCH variant is affected — they
+  update data without re-running the output-path checks. The detail names the
+  offending file definition and the reason; it does **not** echo the value
+  that tripped the guard, which with `{data.*}` banned can only be a stored
+  identity field the caller may not be entitled to see.
+- **A record whose `patient_id` is exactly `.` or `..` can no longer finish.**
+  Both are legal under `PATIENT_ID_REGEX` (`^[A-Za-z0-9._\-^]{1,64}$`) but
+  render to a bare directory reference, so a submit against a pattern
+  interpolating `{patient_id}` now returns 422 where it previously succeeded
+  with a logged warning. No known deployment holds such a patient id; rename
+  it if one does.
+
+### Security
+
+- Rendered file paths are now confined to the record's working directory. A
+  substituted value containing `/`, `\`, or NUL is rejected, and a value that
+  is exactly `.` or `..` is rejected separately; the joined path is then
+  checked for containment (plus a NUL-byte rejection, below). The join is
+  otherwise containment *only* — it accepts
+  a dot-leading basename, because a hidden file is not an escape and
+  rejecting it would hard-fail the legitimate absent-placeholder renders
+  described under Breaking. Closes #521.
+- A `RecordFileLink.filename` row persisted with a traversal before this release
+  is now refused at read time instead of being followed. No migration is needed —
+  the guard is the remediation.
+- A legacy `FileDefinition.pattern` that fails the path-safety validator is now
+  skipped from `RecordType.file_registry` (logged as a WARNING, once per
+  process per record-type/definition/pattern rather than once per request —
+  the pattern is in the key because `sync_file_links` reassigns it in place)
+  instead of nulling the
+  entire registry for that record type. **Residual — read this before
+  upgrading:** everything that reads `file_registry` simply stops seeing the
+  definition, so the affected file loses six behaviours at once, not just the
+  one previously listed here:
+  1. the `required=True, role=INPUT` "missing file" gate stops firing, so a
+     record can no longer be marked `blocked` for it;
+  2. it is never checksummed, so its `RecordFileLink` is never created and the
+     file stays untracked;
+  3. file-change triggers stop firing — a RecordFlow
+     `file(x).on_update().invalidate_all_records(...)` silently dies;
+  4. `clear_output_files` and `delete_record_cascade` no longer collect it, so
+     the file is **left on disk** after the record is deleted;
+  5. `ctx.files.resolve("name")` in a pipeline task raises `KeyError`, which
+     retries and lands in the DLQ;
+  6. the single-file download endpoint 404s for it.
+
+  A WARNING is therefore not cosmetic. **A `LIKE '%{data.%'` scan is necessary
+  but no longer sufficient** — this release adds two further config-load
+  rejections (unknown placeholder, degenerate worst-case render), and a stored
+  row failing either is skipped with the same six consequences while matching
+  no `{data.` pattern. Before release, validate *every* stored pattern rather
+  than grepping for one shape:
+
+  ```python
+  # against a copy of the deployment's DB
+  from clarinet.files import validate_file_pattern
+  for name, pattern, multiple in rows:  # SELECT name, pattern, multiple FROM filedefinition
+      try:
+          validate_file_pattern(pattern, is_collection=multiple)
+      except ValueError as exc:
+          print(f"{name}: {pattern!r} — {exc}")
+  ```
+
+  Every line printed is a definition that will be dropped from
+  `RecordType.file_registry` after the upgrade.
+- A rendered name containing a NUL byte is now refused by the containment
+  check itself. `os.path.normpath` and `Path.is_relative_to` are pure string
+  operations and passed it through, and `Path.is_file()` answers `False` for
+  such a path rather than raising — so a poisoned `RecordFileLink.filename`
+  was indistinguishable from a missing file and went unreported. Reachable
+  from the persisted-filename path, which has no value guard upstream of the
+  join.
+- A `clarinet_storage_path` that is not absolute, or that carries a `..`
+  component, is now refused at path-resolution time. A trailing slash or a
+  doubled separator stays legal — neither enables traversal, and a stored row
+  may already hold one. This is deliberately narrower than full
+  containment: the field is *by design* a root disjoint from
+  `settings.storage_path` (an admin-only per-record storage-root override, not
+  a subdirectory selector), so no containment check applies — a well-formed
+  absolute path set by an admin, or already present in the database, is still
+  honoured. This residual is accepted, not an oversight.
 
 ### Added
 
@@ -311,6 +454,27 @@
 
 ### Fixed
 
+- **`Files.resolve` no longer renders a collection**, which turned a *legal*
+  `multiple=True` pattern into a 500. Collections are exempt from the
+  config-load render rules on the grounds that they glob rather than render —
+  but `resolve` had no `multiple` branch (unlike `checksums`), so
+  `{study_uid}/x.dcm` on a patient-level record rendered to `/x.dcm` and raised
+  `UnsafePathError`. `build_slicer_context` loops `resolve` over the whole
+  registry catching `(KeyError, ValueError)`, and `UnsafePathError` is
+  deliberately neither, so `POST /slicer/records/{id}/open` failed uncaught for
+  every user of that record. `Files.resolve` now raises `ValueError` naming the
+  definition and pointing at `Files.glob()`, and — because that list is not a
+  fallback but a hard `ScriptArgumentError` (422) — the Slicer context loop
+  skips collections before reaching it, so a record type declaring one opens
+  normally. `Files.exists` branches to `glob` for a collection, and
+  `RecordQuery.file_path` reports one as `PipelineStepError` rather than
+  letting a bare `ValueError` escape to TaskIQ.
+  **Downstream note:** project code that called `ctx.files.resolve(name)` on a
+  `multiple=True` definition previously received a meaningless path (every
+  placeholder substituted, e.g. `slice_.dcm`) and now gets a `ValueError`. Such
+  a call was already broken — it can only have resolved to a file that does not
+  exist — but it fails loudly now rather than silently. Use `ctx.files.glob()`
+  for collections.
 - The demo's anonymization wrapper (`examples/demo`) no longer shadows the built-in
   task. It was named `anonymize_study_pipeline`, and `@pipeline_task` derives
   `task_name` as `{namespace}:{function_name}` — not module-qualified — so it

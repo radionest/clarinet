@@ -480,13 +480,28 @@ def get_user_role_names(user: User) -> set[str]:
     return set(user.role_names)
 
 
+def is_admin(user: User) -> bool:
+    """True for a superuser OR a member of the built-in 'admin' role.
+
+    The single definition of "admin" for every caller that can reach it.
+    ``current_admin_user`` turns it into a 403; the sites that must branch on it
+    inline rather than gate a whole route read it directly — the
+    ``clarinet_storage_path`` guard, the actor-email masking in the record audit
+    feed, and ``SseConnection.is_admin``, which decides whether a live event
+    stream may carry admin-only frames.
+
+    One further copy of the same predicate survives in
+    ``models/capability.py::resolve_capabilities``, which is derived from
+    primitives and deliberately cannot import this module.
+    """
+    return user.is_superuser or "admin" in get_user_role_names(user)
+
+
 async def current_admin_user(
     user: Annotated[User, Depends(current_active_user)],
 ) -> User:
     """Require an active superuser OR a member of the built-in 'admin' role."""
-    if user.is_superuser:
-        return user
-    if "admin" in get_user_role_names(user):
+    if is_admin(user):
         return user
     raise HTTPException(status_code=403, detail="Not authorized for admin operations")
 

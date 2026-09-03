@@ -3,6 +3,8 @@ paths:
   - "clarinet/api/auth_config.py"
   - "clarinet/api/routers/auth.py"
   - "clarinet/utils/logger.py"
+  - "clarinet/api/exception_handlers.py"
+  - "clarinet/exceptions/domain.py"
 ---
 
 # Logging PII & Headers
@@ -10,6 +12,39 @@ paths:
 `clarinet.utils.logger.scrub_sensitive` already redacts `password=`, `Bearer …`,
 `token=`, DB URLs, etc. **It does NOT touch URL query strings, fragments, or
 arbitrary headers.** Anything you log explicitly is your responsibility.
+
+## Tracebacks leak frame locals — `diagnose=True`
+
+The stderr console sink is configured with `diagnose=True` **unconditionally**
+(`clarinet/utils/logger.py`), so any log call that attaches an exception —
+`logger.opt(exception=exc)`, `logger.exception(...)`, or stdlib `exc_info=True`
+routed through `InterceptHandler` — renders **frame locals** into the traceback.
+A value deliberately kept out of `str(exc)` still reaches stderr that way: it is
+printed as a local of whichever frame raised.
+
+So keeping PHI out of an exception *message* is not enough. When an exception
+carries a sensitive attribute (`UnsafePathError.value`), give it a **dedicated**
+handler in `clarinet/api/exception_handlers.py` that logs with a plain
+`logger.error(f"...: {exc}")` — never `.opt(exception=...)`. Starlette resolves
+handlers by walking `type(exc).__mro__`, so a registration for the subclass wins
+over the one for its base regardless of registration order.
+
+The JSON file sink is safe (`diagnose=not serialize`, and `log_serialize`
+defaults to `True`); `_LokiSink` formats via `traceback.format_exception` and
+never renders locals.
+
+A dedicated handler only covers what reaches FastAPI. **The worker path is a
+confirmed hole**: TaskIQ's receiver logs a failed task with stdlib
+`logger.error(..., exc_info=True)`, which reaches the diagnose-enabled stderr
+sink through `InterceptHandler`, so a PHI-bearing attribute raised inside a task
+is rendered as a frame local. Not every off-request path leaks, though — check
+before assuming. `RecordFlowEngine`'s action dispatch does **not**: its blanket
+`except Exception` logs `logger.error(f"...: {e}")` with no `.opt(exception=…)`,
+so no traceback is rendered. The rule is that an *exception-attaching* log call
+is what leaks, not merely being off the request path.
+
+Worked example: the "Never log the value" part of
+[Files and anonymization → Path-safety guards](../../docs/kb/files-and-anonymization.md#path-safety-guards).
 
 ## Headers — sanitize before logging
 

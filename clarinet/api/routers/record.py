@@ -48,6 +48,7 @@ from clarinet.api.dependencies import (
     SlicerServiceDep,
     get_client_ip,
     get_user_role_names,
+    is_admin,
     require_mutable_config,
 )
 from clarinet.api.masking import mask_record_patient_data, mask_records
@@ -57,7 +58,7 @@ from clarinet.config.toml_exporter import (
     export_record_type_to_toml,
     export_ui_schema_sidecar,
 )
-from clarinet.exceptions import CONFLICT, NOT_FOUND
+from clarinet.exceptions import CONFLICT, NOT_FOUND, CustomHTTPException
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
     PipelineTaskRunRead,
@@ -344,11 +345,41 @@ async def check_record_constraints(
     )
 
 
+async def check_storage_path_admin_only(
+    new_record: RecordCreate,
+    user: CurrentUserDep,
+) -> None:
+    """Reject a non-null ``clarinet_storage_path`` from a non-admin caller.
+
+    ``clarinet_storage_path`` redirects the record's entire working
+    directory to an arbitrary absolute path (see
+    ``clarinet/files/_resolver.py``) — the resolver rejects a malformed
+    value, but a well-formed one is honoured verbatim, so only an admin may
+    choose it. A caller who omits the field (leaves it ``None``) is
+    unaffected — this only fires when it is explicitly set.
+
+    Args:
+        new_record: Record creation payload.
+        user: Authenticated caller.
+
+    Raises:
+        CustomHTTPException: 403 if a non-admin caller set the field.
+    """
+    if new_record.clarinet_storage_path is None:
+        return
+    if is_admin(user):
+        return
+    raise CustomHTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only an admin may set clarinet_storage_path",
+    )
+
+
 @router.post(
     "/",
     response_model=RecordRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(check_record_constraints)],
+    dependencies=[Depends(check_record_constraints), Depends(check_storage_path_admin_only)],
 )
 async def add_record(
     new_record: RecordCreate,
@@ -914,14 +945,14 @@ async def get_record_events(
     events = await events_repo.list_for_record(
         record.id, skip=pagination.skip, limit=pagination.limit
     )
-    is_admin = user.is_superuser or "admin" in get_user_role_names(user)
+    caller_is_admin = is_admin(user)
     # Every event here belongs to ``record``, so its patient is the record's
     # patient; mask once and apply to all rows (mirrors get_record_pipeline_runs).
     masked_patient_id = mask_record_patient_data(RecordRead.model_validate(record), user).patient_id
     masked: list[RecordEventRead] = []
     for event in events:
         update: dict[str, str | None] = {"patient_id": masked_patient_id}
-        if not is_admin:
+        if not caller_is_admin:
             # actor email is admin-only — other users with record access don't see it
             update["actor_name"] = None
         masked.append(RecordEventRead.model_validate(event).model_copy(update=update))
@@ -1231,6 +1262,13 @@ async def add_demo_records_for_user(
             record_type_name=record_type.name,
             series_uid=series.series_uid if record_type.level == "SERIES" else None,
         )
+        # No check_storage_path_admin_only here on purpose. `user` is the
+        # record OWNER these demo records are created for, not the
+        # authenticated caller, so passing it would authorize against the
+        # wrong subject — granting or denying by the target user's roles.
+        # The invariant is structural instead: RecordCreate is built field by
+        # field just above and never takes clarinet_storage_path from input.
+        # Anything that changes that must add the caller's own check.
         records.append(Record(**new_record.model_dump()))
 
     if records:

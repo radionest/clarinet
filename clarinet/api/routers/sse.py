@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from clarinet.api.auth_config import DatabaseStrategy
-from clarinet.api.dependencies import CurrentUserDep, get_user_role_names
+from clarinet.api.dependencies import CurrentUserDep, get_user_role_names, is_admin
 from clarinet.models import User
 from clarinet.repositories.record_type_repository import RecordTypeRepository
 from clarinet.services.events.bus import SseConnection, get_event_bus
@@ -66,7 +66,7 @@ async def events_stream(request: Request, user: CurrentUserDep) -> StreamingResp
     token = request.cookies.get(settings.cookie_name)
     conn = SseConnection(
         user_id=user.id,
-        is_admin=user.is_superuser or "admin" in get_user_role_names(user),
+        is_admin=is_admin(user),
         allowed_types=await _load_allowed_types(user),
         queue=asyncio.Queue(maxsize=settings.sse_send_queue_size),
     )

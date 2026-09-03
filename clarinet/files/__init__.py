@@ -1,10 +1,16 @@
 """Public facade for on-disk path resolution and file access.
 
 Only ``Files`` (and ``AnonPathError`` for ``except`` clauses), plus
-``PLACEHOLDER_REGEX`` for matching ``{placeholder}`` tokens, are public.
-Lazy ``__getattr__`` keeps this package import-light so the stdlib-only
-``clarinet.files._template`` leaf stays importable from ``clarinet.settings``
-without dragging in models / services (avoids a bootstrap import cycle).
+``PLACEHOLDER_REGEX`` for matching ``{placeholder}`` tokens and the
+path-safety primitives ``validate_file_pattern``, ``assert_path_safe_value``,
+and ``join_within``, are public. Lazy ``__getattr__`` keeps this package
+import-light, so importing one name does not drag in models / services and no
+bootstrap import cycle forms.
+
+``clarinet.files._template`` is no longer the stdlib-only leaf it once was —
+it imports ``clarinet.exceptions.domain``, which pulls in fastapi (see that
+module's own docstring). ``clarinet.settings`` still imports ``validate_template``
+from it directly, since that name is not re-exported here.
 """
 
 from typing import TYPE_CHECKING
@@ -12,9 +18,21 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from clarinet.exceptions.domain import AnonPathError
     from clarinet.files._patterns import PLACEHOLDER_REGEX
+    from clarinet.files._template import (
+        assert_path_safe_value,
+        join_within,
+        validate_file_pattern,
+    )
     from clarinet.files.facade import Files
 
-__all__ = ["PLACEHOLDER_REGEX", "AnonPathError", "Files"]
+__all__ = [
+    "PLACEHOLDER_REGEX",
+    "AnonPathError",
+    "Files",
+    "assert_path_safe_value",
+    "join_within",
+    "validate_file_pattern",
+]
 
 
 def __getattr__(name: str) -> object:
@@ -30,4 +48,16 @@ def __getattr__(name: str) -> object:
         from clarinet.files._patterns import PLACEHOLDER_REGEX
 
         return PLACEHOLDER_REGEX
+    if name == "validate_file_pattern":
+        from clarinet.files._template import validate_file_pattern
+
+        return validate_file_pattern
+    if name == "assert_path_safe_value":
+        from clarinet.files._template import assert_path_safe_value
+
+        return assert_path_safe_value
+    if name == "join_within":
+        from clarinet.files._template import join_within
+
+        return join_within
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

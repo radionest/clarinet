@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from clarinet.exceptions.domain import PipelineStepError
-from clarinet.files import Files
+from clarinet.files import Files, join_within
 from clarinet.models.base import RecordStatus
 from clarinet.utils.logger import logger
 
@@ -116,7 +116,10 @@ class RecordQuery:
             Absolute path to the resolved file.
 
         Raises:
-            PipelineStepError: If no record is found.
+            PipelineStepError: If no record is found, if the record type has no
+                such file definition, or if that definition is a collection —
+                which has no single path. Use ``ctx.files.glob(name)`` for a
+                collection instead.
         """
         records = await self.find(
             type_name,
@@ -143,7 +146,7 @@ class RecordQuery:
                 if link.name == file:
                     fd = fd_map.get(file)
                     level = (fd.level if fd else None) or record.record_type.level
-                    return f.dir(level) / link.filename
+                    return join_within(f.dir(level), link.filename)
 
         # Fallback to pattern resolution
         if file not in fd_map:
@@ -151,7 +154,14 @@ class RecordQuery:
                 type_name,
                 f"File definition '{file}' not found in record type '{record.record_type.name}'",
             )
-        return f.resolve(fd_map[file])
+        try:
+            return f.resolve(fd_map[file])
+        except ValueError as exc:
+            # A collection reaches here whenever it has no RecordFileLink to
+            # match above. Files.resolve refuses it with a bare ValueError,
+            # which this method's contract does not declare and which would
+            # escape to TaskIQ as an unclassified failure.
+            raise PipelineStepError(type_name, str(exc)) from exc
 
 
 @dataclass

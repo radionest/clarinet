@@ -480,6 +480,60 @@ class AnonPathError(ConfigurationError):
     """
 
 
+class UnsafePathError(ConfigurationError):
+    """Raised when a rendered file path would escape its working directory.
+
+    A deliberate *sibling* of ``AnonPathError``, not a subclass. Five sites
+    catch ``AnonPathError`` and degrade — ``Files.for_reader`` retries with a
+    raw-UID fallback, ``services/dicomweb/cache.py`` and
+    ``services/pipeline/tasks/cache_dicomweb.py`` log and skip,
+    ``cli/anon.py`` counts a failure, and
+    ``record_service._validate_output_paths`` falls back to checking every
+    level. If a traversal raised something those caught, the fallback would
+    silently retry the poisoned path and the rest would record it as routine.
+    A traversal must always propagate.
+
+    PII guard: ``str(exc)`` intentionally omits the offending value —
+    always, regardless of path. That guarantee's other half — the value
+    never reaching a log — holds only when an ``UnsafePathError`` reaches
+    FastAPI's exception handlers **uncaught**, not for every exception
+    merely raised on a request path. When it does,
+    ``handle_unsafe_path_error`` (``api/exception_handlers.py``) logs
+    ``str(exc)`` plus the request method/path via a plain
+    ``logger.error(...)`` — no ``.opt(exception=...)``, so no sink
+    (console, file, JSON, Loki) attaches a traceback to that record. It
+    does NOT hold: (1) on the worker path — a ``join_within`` raise inside
+    a TaskIQ task (e.g. via ``RecordQuery.file_path``) never reaches
+    FastAPI at all; TaskIQ's own receiver catches it and logs via stdlib
+    ``logging(exc_info=True)``, reaching loguru's ``diagnose=True``
+    console sink with a traceback; (2) where an in-framework broad except
+    intercepts first — the hydrator loops in ``context_hydration.py`` and
+    ``schema_hydration.py`` catch any exception a project hydrator raises
+    and log it with ``logger.exception(...)`` (a traceback) before this
+    handler ever runs. Reachable only if that hydrator itself touches
+    ``Files``; the one built-in hydrator does not, so this is unverified
+    in this repo — same status as the handler's ``RecordFlowEngine.fire``
+    residual. The raw value lives only on ``exc.value`` (``exc.metadata()``
+    is a thin, currently-unused wrapper around it), and **nothing surfaces
+    it** — not a log statement, and not the 422 response detail either.
+    (``Files.checksums`` does re-raise carrying it forward, which is
+    propagation rather than disclosure.) It was
+    briefly echoed to the submitter on the grounds that they had produced
+    it; with ``{data.*}`` banned they had not. Every field a pattern can
+    still interpolate is a *stored* record attribute rather than anything
+    the caller supplied, and three of them — ``patient_id``, ``study_uid``,
+    ``series_uid`` — are ones ``api/masking.py`` may withhold from that
+    same caller (see ``record_service._render_output_path``).
+    """
+
+    def __init__(self, message: str, *, value: str | None = None) -> None:
+        super().__init__(message)
+        self.value = value
+
+    def metadata(self) -> dict[str, str]:
+        return {} if self.value is None else {"value": self.value}
+
+
 # Database errors
 class DatabaseError(ClarinetError):
     """Raised when there's a database operation error."""

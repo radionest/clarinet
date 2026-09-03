@@ -84,6 +84,8 @@ def _resolve_custom_args(
     resolved: dict[str, str] = {}
     for key, template in args.items():
         try:
+            # Deliberately unguarded (path_safe=False) — do not "fix" this here.
+            # See the comment on Files.render_template in clarinet/files/facade.py.
             resolved[key] = Files.render_template(template, format_vars, strict=True)
         except (KeyError, ValueError) as exc:
             logger.warning(f"Slicer arg '{key}': unresolved template '{template}' — {exc}")
@@ -196,6 +198,18 @@ def build_slicer_context(
     if file_registry:
         unresolved: list[str] = []
         for fd in file_registry:
+            if fd.multiple:
+                # A collection has no single path, so there is nothing to put in
+                # this layer. Skipping is not a loss: before the guard in
+                # Files.resolve, a collection rendered here with every
+                # placeholder blanked ("slice_{n}.dcm" -> "slice_.dcm"), giving
+                # the script a path to a file that cannot exist. Letting it
+                # reach resolve() is actively harmful — `unresolved` below is
+                # not a degradation list, it raises ScriptArgumentError (422),
+                # so one collection anywhere in the registry would fail the
+                # whole endpoint for every record of that type. Scripts that
+                # need the members call ctx.files.glob(name).
+                continue
             try:
                 context[fd.name] = str(f.resolve(fd))
             except (KeyError, ValueError) as exc:

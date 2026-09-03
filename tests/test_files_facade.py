@@ -120,6 +120,7 @@ def test_files_resolve(monkeypatch):
     fd.name = "seg"
     fd.pattern = "seg_{id}.nrrd"
     fd.level = None
+    fd.multiple = False  # singular def; MagicMock would make it truthy
     f = Files(_record(monkeypatch, registry=[fd]))
     assert f.resolve("seg") == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
     assert f.accessed["seg"] == Path("/data/CLARINET_1/S/SE/seg_7.nrrd")
@@ -219,3 +220,280 @@ def test_template_leaf_import_is_light():
         "assert not leaked, sorted(m for m in sys.modules if m.startswith('clarinet.files'))"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+class TestPathSafety:
+    """resolve()/exists()/checksums() are guarded by two independent layers.
+
+    - The value guard, assert_path_safe_value (_template.py), runs during
+      rendering on each COERCED substituted value: rejects "/", "\\", NUL
+      (_UNSAFE_IN_VALUE), or a value that is exactly "." or "..".
+    - join_within (_template.py), a purely lexical containment check on the
+      FULLY RENDERED path, runs after rendering completes.
+
+    "/" is in _UNSAFE_IN_VALUE, so a traversal-shaped value like
+    "../../etc" trips the value guard's "/" rule before join_within ever
+    runs. Tests suffixed "_caught_by_either_layer" use such inputs: with
+    the value guard present it raises via "/"; with it removed,
+    join_within independently raises on the same rendered path -- neither
+    run isolates one layer, and the two raises carry different
+    UnsafePathError.value payloads (the bare value vs. the rendered
+    filename).
+
+    A bare "." or ".." contains no "/", so it trips the value guard's
+    second rule under any pattern, and the PREFIXED pattern
+    ("seg_{patient_id}.nrrd") keeps the rendered name clear of every
+    join_within rule as well. That makes
+    test_resolve_rejects_bare_dotdot_patient_id and
+    test_checksums_rejects_bare_dotdot_patient_id the tests that pin the
+    value guard alone: remove it and nothing else raises.
+    """
+
+    def test_resolve_refuses_a_collection_instead_of_rendering_it(self, monkeypatch):
+        """A collection has no single path, so resolve() must not render one.
+
+        The config-load exemption for collections rests on "a multiple=True
+        definition is never rendered" -- but resolve() had no `multiple` branch
+        (unlike checksums()), so it rendered them anyway. That made a *legal*
+        collection pattern a request-time failure: `{study_uid}/x.dcm` on a
+        patient-level record renders to "/x.dcm", which join_within refuses.
+
+        A plain ValueError, not UnsafePathError: asking one path of a collection
+        is a caller mistake, not a traversal, and the two must stay
+        distinguishable — UnsafePathError deliberately sits outside every
+        `except ValueError` net so a real traversal can never be swallowed.
+        Note this does NOT make the caller degrade gracefully:
+        build_slicer_context's `unresolved` list hard-raises
+        ScriptArgumentError, so it filters collections out before calling
+        resolve at all (see tests/test_slicer_context.py).
+        """
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "slices"
+        fd.pattern = "{study_uid}/x.dcm"
+        fd.level = None
+        fd.multiple = True
+        record = _record(monkeypatch, registry=[fd])
+        record.study_uid = None  # patient-level record: the placeholder vanishes
+
+        with pytest.raises(ValueError, match="collection") as exc:
+            Files(record).resolve("slices")
+        # Exactly ValueError -- the guard runs before any render or join, so no
+        # UnsafePathError is constructed. (Asserting `not isinstance(...,
+        # UnsafePathError)` inside pytest.raises(ValueError) would be vacuous:
+        # UnsafePathError does not derive from ValueError, so such a raise
+        # could never have been bound here in the first place.)
+        assert type(exc.value) is ValueError
+
+    def test_exists_answers_a_collection_by_globbing_it(self, monkeypatch):
+        """`exists` must keep working for a collection, not inherit resolve's raise.
+
+        `exists` is `resolve(...).is_file()`, so the collection guard would have
+        made it raise -- and the shipped task docs
+        (`examples/project_template/.claude/CLAUDE.md`) tell every project to
+        call `ctx.files.exists(output_file_def)`. A collection exists when any
+        member matches, which is what `glob` already answers.
+        """
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "slices"
+        fd.pattern = "slice_{n}.dcm"
+        fd.level = None
+        fd.multiple = True
+        record = _record(monkeypatch, registry=[fd])
+
+        # The working dir does not exist on disk, so nothing matches -> False,
+        # rather than an exception.
+        assert Files(record).exists("slices") is False
+
+    def test_resolve_rejects_absolute_value_caught_by_either_layer(self, monkeypatch):
+        # See class docstring: "/etc/passwd" contains "/", so the value
+        # guard raises here, not join_within. Also not a regex-legal
+        # patient_id (PATIENT_ID_REGEX) -- unreachable through this field
+        # in practice.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "/etc/passwd"
+        with pytest.raises(UnsafePathError):
+            Files(record).resolve("mask")
+
+    def test_resolve_rejects_traversal_value_caught_by_either_layer(self, monkeypatch):
+        # See class docstring: "../../etc" contains "/", so the value
+        # guard raises here, not join_within. Also not a regex-legal
+        # patient_id (PATIENT_ID_REGEX) -- unreachable through this field
+        # in practice.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError):
+            Files(record).resolve("mask")
+
+    def test_resolve_rejects_bare_dotdot_patient_id(self, monkeypatch):
+        # PATIENT_ID_REGEX (clarinet/models/patient.py) allows any 1-64 chars
+        # from A-Za-z0-9._-^, so ".." is a legal patient_id -- this is the
+        # scenario the design's plan cites as proof that the temporary
+        # {data.*} ban (issue #552) is not sufficient by itself: a
+        # regex-legal identity value can still be a bare directory
+        # reference, and Files.resolve must still reject it. Prefixed
+        # pattern isolates the value guard -- see class docstring.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+        from clarinet.models.patient import PATIENT_ID_PATTERN
+
+        assert PATIENT_ID_PATTERN.fullmatch("..")  # confirms the premise
+
+        fd = MagicMock()
+        fd.name = "seg"
+        fd.pattern = "seg_{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = ".."
+        with pytest.raises(UnsafePathError) as exc_info:
+            Files(record).resolve("seg")
+        # PHI contract: the raw value travels only on .value, never
+        # interpolated into the message (assert_path_safe_value's
+        # docstring). Not asserting ".." not in str(exc) here: for this one
+        # input, the guard's own message is the fixed phrase "('.' or
+        # '..')" describing the rule it enforces, which coincidentally
+        # contains the same two characters as the value -- that text is
+        # constant and never carries record data, so it is not a PHI leak.
+        assert exc_info.value.value == ".."
+
+    def test_exists_inherits_resolve_guards(self, monkeypatch):
+        # exists() delegates to resolve(); this pins that it has no
+        # separate path. (See class docstring for which layer actually
+        # raises on this input.)
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False  # singular def; MagicMock would make it truthy
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError):
+            Files(record).exists("mask")
+
+    @pytest.mark.asyncio
+    async def test_checksums_rejects_escaping_name(self, monkeypatch):
+        # The singular branch performs its own working_dir / filename join and
+        # is a live bypass if only resolve() is guarded.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError):
+            await Files(record).checksums()
+
+    @pytest.mark.asyncio
+    async def test_checksums_names_the_file_definition(self, monkeypatch):
+        # checksums() loops internally, so a caller catching UnsafePathError
+        # here has no `fd` of its own in scope (unlike render_for's callers) --
+        # record_service.py's _sync_output_files relies on this message to
+        # name the file definition in its WARNING (the WARNING is expected to
+        # name the record, the file definition, the placeholder key and the
+        # reason). The value itself must still travel only on .value, never
+        # the message.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = "../../etc"
+        with pytest.raises(UnsafePathError) as exc_info:
+            await Files(record).checksums()
+        assert "mask" in str(exc_info.value)
+        assert "../../etc" not in str(exc_info.value)
+        assert exc_info.value.value == "../../etc"
+
+    @pytest.mark.asyncio
+    async def test_checksums_rejects_bare_dotdot_patient_id(self, monkeypatch):
+        # Direct pin for the path_safe=True site in checksums()'s singular
+        # branch (facade.py). Prefixed pattern isolates the value guard --
+        # see class docstring and test_resolve_rejects_bare_dotdot_patient_id.
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        fd = MagicMock()
+        fd.name = "mask"
+        fd.pattern = "mask_{patient_id}.nrrd"
+        fd.level = None
+        fd.multiple = False
+        record = _record(monkeypatch, registry=[fd])
+        record.patient_id = ".."
+        with pytest.raises(UnsafePathError) as exc_info:
+            await Files(record).checksums()
+        # PHI contract: not asserting ".." not in str(exc) -- the guard's
+        # own message is the fixed phrase "('.' or '..')" describing the
+        # rule, which would make that assertion false-by-boilerplate (see
+        # test_resolve_rejects_bare_dotdot_patient_id).
+        assert exc_info.value.value == ".."
+
+    def test_render_is_path_safe(self, monkeypatch):
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        record.patient_id = "/etc/passwd"
+        with pytest.raises(UnsafePathError):
+            Files(record).render("{patient_id}.nrrd")
+
+    def test_render_for_is_path_safe(self, monkeypatch):
+        from clarinet.exceptions.domain import UnsafePathError
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        record.patient_id = "/etc/passwd"
+        with pytest.raises(UnsafePathError):
+            Files.render_for(record, "{patient_id}.nrrd")
+
+    def test_static_render_template_stays_unguarded(self):
+        # Slicer script args may legitimately be absolute paths.
+        from clarinet.files.facade import Files
+
+        assert Files.render_template("{p}", {"p": "/opt/slicer/data"}) == "/opt/slicer/data"
+
+    def test_subdirectory_pattern_still_resolves(self, monkeypatch):
+        # NEW coverage: no test in the suite exercised a subdirectory pattern
+        # before this change, despite the design relying on it staying legal.
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        record.study_uid = "1.2.840"
+        path = Files(record).render("{study_uid}/mask.nrrd")
+        assert path == "1.2.840/mask.nrrd"
+
+    def test_multi_dot_basename_still_renders(self, monkeypatch):
+        from clarinet.files.facade import Files
+
+        record = _record(monkeypatch)
+        assert Files(record).render("mask.seg.nrrd") == "mask.seg.nrrd"

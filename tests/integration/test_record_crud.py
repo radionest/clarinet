@@ -1,12 +1,21 @@
 """CRUD operations tests for Record."""
 
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 import pytest
+import pytest_asyncio
+from httpx import AsyncClient
 from sqlmodel import select
 
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import Record, RecordStatus, RecordType
-from tests.utils.urls import RECORDS_BASE
+from tests.conftest import (
+    create_authenticated_client,
+    create_mock_superuser,
+    create_mock_user_with_role,
+)
+from tests.utils.urls import RECORD_TYPES, RECORDS_BASE
 
 
 @pytest.mark.asyncio
@@ -736,3 +745,145 @@ async def test_assign_user_rejects_preparing_record(
         params={"user_id": str(test_user.id)},
     )
     assert response.status_code == 422
+
+
+# ── clarinet_storage_path — admin-only (Task 12 Part B, half 2) ────────────
+
+
+@pytest_asyncio.fixture
+async def regular_user_client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
+    """A client authenticated as a regular (non-admin) user."""
+    user = await create_mock_superuser(test_session, email="storage-path-regular@test.com")
+    user.is_superuser = False  # downgrade
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def admin_role_client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
+    """A client authenticated as a non-superuser holding the built-in 'admin' role.
+
+    The gate admits two distinct kinds of caller and only the superuser one was
+    covered. Without this the whole ``"admin" in get_user_role_names(user)``
+    branch could be deleted and every test would stay green.
+    """
+    user = await create_mock_user_with_role(
+        test_session, "admin", email="storage-path-admin-role@test.com"
+    )
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def storage_path_perm_type(test_session):
+    """PATIENT-level RecordType for the clarinet_storage_path permission tests."""
+    rt = RecordType(
+        name="storage-path-perm-type",
+        description="For clarinet_storage_path admin-only tests",
+        level=DicomQueryLevel.PATIENT,
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    await test_session.refresh(rt)
+    return rt
+
+
+class TestCreateRecordStoragePathPermission:
+    """POST /api/records/ — clarinet_storage_path may only be set by an admin."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_setting_storage_path_is_rejected(
+        self, regular_user_client, test_patient, storage_path_perm_type
+    ):
+        resp = await regular_user_client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+                "clarinet_storage_path": "/custom/storage/root",
+            },
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_admin_setting_storage_path_succeeds(
+        self, client, test_patient, storage_path_perm_type
+    ):
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+                "clarinet_storage_path": "/custom/storage/root",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["clarinet_storage_path"] == "/custom/storage/root"
+
+    @pytest.mark.asyncio
+    async def test_admin_role_without_superuser_may_set_storage_path(
+        self, admin_role_client, test_patient, storage_path_perm_type
+    ):
+        """The 'admin' role is the gate's second admitted caller, not just superuser."""
+        resp = await admin_role_client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+                "clarinet_storage_path": "/custom/storage/root",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["clarinet_storage_path"] == "/custom/storage/root"
+
+    @pytest.mark.asyncio
+    async def test_non_admin_without_storage_path_is_unaffected(
+        self, regular_user_client, test_patient, storage_path_perm_type
+    ):
+        """Guards against over-rejecting the common case: a non-admin who
+        never touches the field must be able to create records normally."""
+        resp = await regular_user_client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+            },
+        )
+        assert resp.status_code == 201
+
+
+# ── {data.*} file-pattern ban — the API path ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_record_type_rejects_data_placeholder_pattern(client):
+    """POST /api/records/types — a ``{data.*}`` file pattern is a 422 naming the placeholder.
+
+    The ban lives in ``FileDefinitionRead``'s validator; this pins that the
+    request-body path reaches it (``RecordTypeCreate.file_registry`` is a list
+    of that model) and that the response carries the offending name, which is
+    what an operator needs to find the definition to change.
+    """
+    resp = await client.post(
+        RECORD_TYPES,
+        json={
+            "name": "banned-pattern-type",
+            "description": "file pattern interpolating record data",
+            "level": "SERIES",
+            "file_registry": [
+                {
+                    "name": "report",
+                    "pattern": "report_{data.timepoint}.pdf",
+                    "role": "output",
+                    "required": False,
+                    "multiple": False,
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert "data.timepoint" in resp.text

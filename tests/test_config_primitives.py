@@ -51,14 +51,44 @@ def test_allow_path_collision_defaults_false():
     assert fileref_to_file_definition(ref).allow_path_collision is False
 
 
+# --- FileDef.pattern is not itself validated (it's a plain, unvalidated
+# container like FileDefinition) — the real entry point is
+# fileref_to_file_definition, which the Python config loader
+# (config/python_loader.py::_to_record_type_create) calls for every FileRef in
+# RecordDef.files. {data.*} is temporarily banned; see #552. ---
+
+
+def test_file_def_rejects_data_placeholder():
+    file_def = FileDef(name="rep", pattern="report_{data.timepoint}.pdf", level="SERIES")
+    ref = FileRef(file_def, "output")
+    with pytest.raises(ValidationError, match=r"data\.timepoint"):
+        fileref_to_file_definition(ref)
+
+
+def test_file_def_rejects_absolute_pattern():
+    file_def = FileDef(name="rep", pattern="/abs/report.pdf", level="SERIES")
+    ref = FileRef(file_def, "output")
+    with pytest.raises(ValidationError):
+        fileref_to_file_definition(ref)
+
+
+def test_file_def_accepts_subdirectory_pattern():
+    # The directory segment carries literal text on purpose: a bare
+    # "{study_uid}/report.pdf" renders to "/report.pdf" for a patient-level
+    # record and is rejected at config load (tests/test_path_safety.py).
+    file_def = FileDef(name="rep", pattern="study_{study_uid}/report.pdf", level="SERIES")
+    ref = FileRef(file_def, "output")
+    assert fileref_to_file_definition(ref).pattern == "study_{study_uid}/report.pdf"
+
+
 def test_filedef_accepts_string_level_and_normalizes() -> None:
-    f = FileDef(pattern="{study_uid}/mask.nrrd", level="STUDY")
+    f = FileDef(pattern="study_{study_uid}/mask.nrrd", level="STUDY")
     assert f.level is DicomQueryLevel.STUDY
 
 
 def test_filedef_accepts_lowercase_string_level() -> None:
     # _coerce_dicom_level upper()s its input, so this is valid at runtime.
-    f = FileDef(pattern="{study_uid}/mask.nrrd", level="study")
+    f = FileDef(pattern="study_{study_uid}/mask.nrrd", level="study")
     assert f.level is DicomQueryLevel.STUDY
 
 

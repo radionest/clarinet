@@ -102,8 +102,8 @@ Which fields are populated depends on the DSL trigger: `record("X").on_finished(
 #### `ctx.files` — `Files`
 
 ```python
-ctx.files.resolve(file_def) -> Path        # absolute path to the file
-ctx.files.exists(file_def) -> bool         # does the file exist
+ctx.files.resolve(file_def) -> Path        # absolute path; ValueError for a collection
+ctx.files.exists(file_def) -> bool         # does it exist (globs when multiple=True)
 ctx.files.glob(file_def) -> list[Path]     # all files in a glob collection (multiple=True)
 ctx.files.dir() -> Path                    # the record's working folder (at its own level)
 ```
@@ -126,8 +126,10 @@ if parents:
 (sync) — it's a wrapper around the `Files(record)` constructor **without**
 `parent`. The framework itself builds `ctx.files` as
 `Files(record, parent=parent)`, so placeholders that fall back to the parent
-(`{user_id}`, `{origin_type}`, merged `{data.FIELD}`) may resolve differently
-via `ctx.files_for` — if you need parent-fallback, build the facade yourself:
+(`{user_id}`, `{origin_type}`, merged `{data.FIELD}` — temporarily rejected,
+see [#552](https://github.com/radionest/clarinet/issues/552)) may resolve
+differently via `ctx.files_for` — if you need parent-fallback, build the
+facade yourself:
 `Files(record, parent=parent_record)`. The same facade is also available
 outside a task (standalone scripts without `ctx`):
 

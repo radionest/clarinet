@@ -1,9 +1,16 @@
 """Pure validation primitives for the disk path template setting.
 
-Kept dependency-free (stdlib only) so it can be imported by
-``clarinet.settings.Settings`` validators without triggering the rest of
-the package graph. The richer rendering helpers — including DB-aware
-context building — live in ``clarinet.files._storage``.
+Historically stdlib-only, so it could be imported by
+``clarinet.settings.Settings`` validators without triggering the rest of the
+package graph. The path-safety guards ended that: ``UnsafePathError`` must be
+a real ``ConfigurationError`` sibling for the "never degrade into a fallback"
+contract to hold, so this module now imports ``clarinet.exceptions.domain``,
+which pulls in fastapi via the exceptions package's ``__init__``. No import
+cycle results, and ``clarinet/__init__.py`` already imports fastapi, so
+nothing is paid twice — but this module is no longer a cheap leaf, and adding
+a *further* dependency here should be a deliberate decision, not a reflex.
+The richer rendering helpers — including DB-aware context building — live in
+``clarinet.files._storage``.
 
 A template has exactly three ``/``-separated non-empty segments mapping
 to the PATIENT / STUDY / SERIES levels of the DICOM hierarchy. Each
@@ -42,12 +49,15 @@ renders to::
     CLARINET_42/CT_SR_20260415/00001_9.9.9.9.5
 """
 
+import os.path
 import re
 from collections.abc import Mapping
 from enum import Enum
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from string import Formatter
 from typing import Any
+
+from clarinet.exceptions.domain import UnsafePathError
 
 SUPPORTED_PLACEHOLDERS: frozenset[str] = frozenset(
     {
@@ -176,6 +186,86 @@ def coerce_field_value(
             return str(value)
 
 
+_UNSAFE_IN_VALUE = ("/", "\\", "\x00")
+
+
+def assert_path_safe_value(key: str, value: str) -> None:
+    """Reject a substituted value that could alter a path's structure.
+
+    Runs on the *coerced* value, so a collection flattening to ``"a/b"`` is
+    caught. Raises ``UnsafePathError`` naming *key* in the message; the
+    offending *value* is passed only as the exception's ``value`` attribute,
+    never interpolated into the message — the message is what gets logged
+    wherever this propagates uncaught (``UnsafePathError``'s dedicated handler
+    on the request path; TaskIQ's receiver on the worker path), and record data
+    may carry PHI that ``scrub_sensitive`` (``clarinet/utils/logger.py``) does
+    not redact:
+    it only catches credential-shaped text (passwords, tokens, DB URLs),
+    never PHI (see ``.claude/rules/logging-pii.md``).
+    """
+    for bad in _UNSAFE_IN_VALUE:
+        if bad in value:
+            raise UnsafePathError(
+                f"placeholder {{{key}}} resolved to a value containing {bad!r}, "
+                f"which would change the path structure",
+                value=value,
+            )
+    if value in (".", ".."):
+        raise UnsafePathError(
+            f"placeholder {{{key}}} resolved to a bare directory reference ('.' or '..')",
+            value=value,
+        )
+
+
+def join_within(base: Path, rendered: str) -> Path:
+    """Join *rendered* onto *base*, refusing anything that escapes it.
+
+    Purely lexical — ``os.path.normpath`` plus a prefix comparison, no
+    filesystem access — so ``Files.resolve`` stays synchronous and cheap inside
+    the ``build_slicer_context`` loop. ``_filter_in_sandbox`` remains the
+    symlink-aware second layer at the delete and serve sinks.
+
+    Rejects a result outside *base*, equal to *base* itself, carrying a ``..``
+    component, or holding a NUL byte — containment, plus the one character
+    pathlib carries silently but no syscall accepts.
+
+    It deliberately does NOT reject a **dot-leading basename**, and has no
+    dedicated empty-name branch. Both shapes are what a *legitimately absent*
+    placeholder renders to under LENIENT mode: a parentless record's
+    ``{parent_id}``, a patient-level record's ``{study_uid}``, an unassigned
+    record's ``{user_id}``. Rejecting them here turned "file not found" into a
+    hard failure on every render-then-join path. They are rejected at
+    configuration load instead — ``validate_file_pattern`` refuses any pattern
+    whose worst-case render (every optional placeholder absent) is not a
+    well-formed relative name — so an administrator learns about it at startup
+    rather than a user meeting a 500 mid-request. An empty *rendered* string
+    still cannot pass: it normalises to *base*, which the equality check
+    rejects.
+    """
+    if "\x00" in rendered:
+        # normpath and is_relative_to are pure string work and pass a NUL
+        # straight through, so without this the name reaches the filesystem
+        # intact. `Path.is_file()` then answers False rather than raising —
+        # it swallows the underlying `ValueError: embedded null byte` — so a
+        # poisoned RecordFileLink.filename was indistinguishable from a
+        # missing file and simply went unreported. Failing loudly and typed
+        # is the point; the persisted-filename site
+        # (services/pipeline/context.py) has no value guard upstream of it,
+        # so `rendered` there is whatever the column holds.
+        raise UnsafePathError("rendered name contains a NUL byte", value=rendered)
+    joined = Path(os.path.normpath(base / rendered))
+    if not joined.is_relative_to(base):
+        raise UnsafePathError(f"rendered name escapes the working dir {base}", value=rendered)
+    if joined == base:
+        raise UnsafePathError(
+            f"rendered name resolves to the working dir {base} itself", value=rendered
+        )
+    relative = joined.relative_to(base)
+    if ".." in relative.parts:
+        raise UnsafePathError("rendered name contains a '..' component", value=rendered)
+    return joined
+
+
 def _resolve_dotted(fields: Mapping[str, Any], key: str) -> Any:
     """Walk a dotted path through nested Mappings.
 
@@ -206,6 +296,7 @@ def render_template(
     list_sorted: bool = True,
     missing: str = "",
     on_missing_leave_as_is: bool = False,
+    path_safe: bool = False,
 ) -> str:
     """Render ``template`` against ``fields`` with type-aware coercion.
 
@@ -223,10 +314,12 @@ def render_template(
             ``None`` values, empty collections, and dict values substitute
             ``missing``.
 
-    Safety checks (``/``, ``\\``, ``..``, leading ``.``) are NOT applied
-    here — they belong to caller code that knows whether a rendered string
-    is a single directory segment (where dots are forbidden) or a file
-    basename (where ``.ext`` is legitimate).
+    Safety checks (``/``, ``\\``, NUL, and a value that is exactly ``.`` or
+    ``..``) are applied to each substituted value only when ``path_safe=True``.
+    Containment and leading-dot checks on the *assembled* path remain in
+    ``join_within``. Callers that render a filesystem path pass it; callers
+    that render a free-form string (Slicer script arguments, which may
+    legitimately be absolute paths) do not.
     """
 
     def _replace(m: re.Match[str]) -> str:
@@ -248,6 +341,262 @@ def render_template(
             if mode is RenderMode.STRICT:
                 raise KeyError(key)
             return missing
+        # NOTE: outside the try/except above on purpose. In LENIENT mode that
+        # handler swallows ValueError and substitutes `missing`; a guard raising
+        # inside it would silently rewrite every violation to "". UnsafePathError
+        # is not a ValueError, so it escapes regardless — both properties are
+        # pinned by tests in tests/test_path_safety.py.
+        if path_safe:
+            assert_path_safe_value(key, coerced)
         return coerced
 
     return _PLACEHOLDER_RE.sub(_replace, template)
+
+
+def _reject_data_placeholders(pattern: str) -> None:
+    """Reject ``{data}`` / ``{data.FIELD}`` placeholders in a file pattern.
+
+    TEMPORARY — tracked by issue #552, which will reintroduce the placeholder
+    once the non-traversal corner cases are settled (length limits,
+    Windows-reserved basenames, unicode normalization, PHI in filenames, and
+    the fact that ``record.data`` is mutable, so a value-derived path changes
+    on every submit and orphans the file already written).
+
+    Un-banning is: delete this function and its one call in
+    ``validate_file_pattern``. The literal-text rules in that function are
+    permanent and stay.
+    """
+    # extract_placeholders (Formatter().parse()) and _PLACEHOLDER_RE disagree on
+    # escaped braces: `{{data.side}}` is a literal to Formatter (no field name),
+    # but the regex has no concept of `{{` escaping and matches the inner
+    # `{data.side}` anyway — and render_template substitutes with that same
+    # regex, so it really does interpolate record data there. Union both
+    # parsers' view so the ban covers everything the renderer can reach, not
+    # just what Formatter considers a "real" field.
+    names = extract_placeholders(pattern) | set(_PLACEHOLDER_RE.findall(pattern))
+    offenders = sorted(name for name in names if name == "data" or name.startswith("data."))
+    if offenders:
+        raise ValueError(
+            f"file pattern may not interpolate record data: {', '.join(offenders)}. "
+            f"Use {{id}}, {{parent_id}} or {{user_id}} instead, or declare one "
+            f"FileDefinition per variant. This restriction is temporary — see "
+            f"https://github.com/radionest/clarinet/issues/552"
+        )
+
+
+# Every name `fields_from` (files/_patterns.py) can resolve — the renderer's
+# whole vocabulary for a file pattern. Nested Mappings are spelled out by their
+# reachable leaf (`record_type.name`), because a bare `{record_type}` is a
+# Mapping, which `coerce_field_value` refuses and LENIENT then substitutes away
+# to "". `data` / `data.*` is deliberately absent: it is banned outright by
+# `_reject_data_placeholders` (issue #552), whose message carries the migration
+# note and must keep winning. Kept honest by a drift test in
+# tests/test_path_safety.py that rebuilds this set from `fields_from` itself.
+#
+# One known limit: `Files.resolve` renders against `{**self._fields, **overrides}`,
+# so a caller passing an override name outside this set would supply something
+# the renderer *does* resolve but this gate refuses at config load. No in-tree
+# caller does that today; if one ever needs to, its names belong here.
+KNOWN_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "id",
+        "parent_id",
+        "user_id",
+        "patient_id",
+        "study_uid",
+        "series_uid",
+        "origin_type",
+        "record_type.name",
+    }
+)
+
+
+def _reject_unknown_placeholders(pattern: str) -> None:
+    """Reject a placeholder the renderer cannot resolve.
+
+    ``render_template`` runs LENIENT for file patterns, so an unrecognised name
+    substitutes ``""`` instead of raising. A typo'd ``{studyuid}`` therefore
+    reached the working-directory join as an empty segment — ``{studyuid}``
+    alone rendered to ``""`` and ``{studyuid}/mask.nrrd`` to ``/mask.nrrd``,
+    both of which ``join_within`` refuses at request time — while
+    ``{studyuid}.nrrd`` was worse still: it rendered to ``.nrrd``, a perfectly
+    joinable hidden file, so the typo produced a wrong-but-working path with no
+    diagnostic anywhere.
+
+    Does NOT apply to collections. ``_patterns.glob_file_paths`` replaces every
+    placeholder with ``*`` regardless of its name, so in a collection pattern
+    the name carries no meaning at all — only the position does, and
+    ``slice_{n}.dcm`` → ``slice_*.dcm`` is a deliberate idiom, not a typo. A
+    misspelling there is harmless for the same reason: ``{study_uid}`` and
+    ``{studyuid}`` both glob to ``*``.
+    """
+    # _PLACEHOLDER_RE alone — deliberately NOT the two-parser union that
+    # _reject_data_placeholders uses. There the union is safe because the rule
+    # is a *denylist*: over-matching only catches more bad patterns. Here the
+    # same set drives an *allowlist*, where over-matching rejects good ones —
+    # `Formatter().parse()` reports numeric fields like `{1}`, which the regex
+    # (first char `[a-zA-Z_]`) never matches and the renderer therefore never
+    # substitutes. `set{1}.nrrd` renders literally and produces a file actually
+    # named that; refusing it at config load would demand a migration that
+    # changes the resolved filename and orphans what is on disk.
+    #
+    # No coverage is lost: the regex has no concept of `{{` escaping, so it
+    # matches the inner `{studyuid}` of `{{studyuid}}` anyway — which is exactly
+    # what render_template substitutes with.
+    names = set(_PLACEHOLDER_RE.findall(pattern))
+    # `data.*` is skipped rather than reported: `_reject_data_placeholders` runs
+    # first and owns that message today, and once #552 deletes it this exclusion
+    # is what lets `{data.FIELD}` through instead of silently keeping the ban
+    # alive as an "unknown placeholder". Bare `{data}` stays rejected either way
+    # — it is a Mapping, which the renderer substitutes away to "".
+    offenders = sorted(
+        name for name in names if name not in KNOWN_PLACEHOLDERS and not name.startswith("data.")
+    )
+    if offenders:
+        raise ValueError(
+            f"file pattern references unknown placeholder(s) "
+            f"{', '.join(repr(name) for name in offenders)}; "
+            f"supported: {sorted(KNOWN_PLACEHOLDERS)}"
+        )
+
+
+# Placeholders a perfectly well-formed record can legitimately lack, so that
+# `fields_from` (files/_patterns.py) hands them to the LENIENT renderer as None
+# and they substitute to "". Every other placeholder the renderer knows
+# (`{id}`, `{patient_id}`, `{record_type.name}`, `{origin_type}`) is populated
+# for any record that exists, so a pattern may rely on it being non-empty.
+# A strict subset of KNOWN_PLACEHOLDERS above.
+OPTIONAL_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "parent_id",  # a parentless record
+        "user_id",  # a record nobody is assigned to
+        "study_uid",  # a patient-level record
+        "series_uid",  # a patient- or study-level record
+    }
+)
+
+
+def _reject_vanishing_placeholder_shapes(pattern: str) -> None:
+    """Reject a pattern that degenerates when an optional placeholder is absent.
+
+    The renderer runs LENIENT: an absent ``{parent_id}`` / ``{user_id}`` /
+    ``{study_uid}`` / ``{series_uid}`` substitutes ``""`` rather than raising.
+    So ``{parent_id}.txt`` renders to ``.txt`` for a parentless record and
+    ``{study_uid}/mask.nrrd`` renders to ``/mask.nrrd`` for a patient-level one
+    — neither is a name the working-directory join can accept, and the failure
+    lands on whoever happens to touch that record rather than on the
+    administrator who wrote the pattern.
+
+    Checked on the *worst case*: every optional placeholder erased, every other
+    one masked to a non-empty sentinel (so ``{id}.nrrd`` and
+    ``{record_type.name}.nrrd`` stay legal — those always render to something).
+    A literal prefix on the affected segment is the fix in every case.
+    """
+    worst = _PLACEHOLDER_RE.sub(
+        lambda m: "" if m.group(1) in OPTIONAL_PLACEHOLDERS else "\x01", pattern
+    )
+    if not worst.strip():
+        reason = "an empty name"
+    elif any(not segment.strip() for segment in worst.split("/")):
+        reason = "a path with an empty segment"
+    elif worst.split("/")[-1] == ".":
+        # Only the LAST segment, and checked on the raw string rather than via
+        # PurePosixPath. Two separate reasons:
+        #
+        # Raw, because pathlib collapses a "." component away, and
+        # `PurePosixPath(".").name` is "" — which does NOT start with a dot, so
+        # the branch below never fires for a render of ".".
+        # (`PurePosixPath("..").name` is ".."; only the single dot is asymmetric.)
+        # Such a pattern loaded fine and then raised at join_within's
+        # equals-the-base branch on every resolve.
+        #
+        # Last only, because an *interior* "." is harmless — normpath collapses
+        # it, so "./mask.nrrd" joins to `<base>/mask.nrrd` exactly as it always
+        # did. Rejecting every "." segment refused patterns that resolve
+        # correctly today, turning an upgrade into a startup abort.
+        reason = "a bare directory reference ('.')"
+    elif PurePosixPath(worst).name.startswith("."):
+        reason = "a dot-leading basename"
+    else:
+        return
+    shown = worst.replace("\x01", "…")
+    absent = sorted(OPTIONAL_PLACEHOLDERS & set(_PLACEHOLDER_RE.findall(pattern)))
+    when = (
+        f"for a record that legitimately has no {', '.join('{' + name + '}' for name in absent)}"
+        if absent
+        else "even with every placeholder populated"
+    )
+    raise ValueError(
+        f"file pattern {pattern!r} would render to {shown!r} — {reason} — {when}. "
+        f"Give the affected path segment some literal text "
+        f"(e.g. 'report_{{parent_id}}.pdf', not '{{parent_id}}.pdf')."
+    )
+
+
+def validate_file_pattern(pattern: str, *, is_collection: bool = False) -> str:
+    """Validate a ``FileDefinition.pattern`` at configuration-load time.
+
+    *is_collection* mirrors ``FileDefinition.multiple``. A collection's pattern
+    is meant to be globbed, not rendered — ``_patterns.glob_file_paths``
+    substitutes every placeholder with ``*`` — so neither render-time rule
+    applies to it: ``{parent_id}.nrrd`` globs to ``*.nrrd``, a perfectly good collection
+    pattern rather than a degenerate name, and ``slice_{n}.dcm`` globs to
+    ``slice_*.dcm``, where ``{n}`` is a positional wildcard rather than an
+    unknown placeholder. The literal-text rules and the ``{data.*}`` ban still
+    apply, because those judge the pattern itself rather than what it renders
+    to.
+
+    Three families of rule, matching the ``file-registry.md`` rule files:
+
+    1. The pattern's own *literal* text must be a safe relative name
+       (placeholders masked out first, so a ``.`` inside a placeholder name
+       cannot trip the basename check).
+    2. Every placeholder *name* must be one the renderer can resolve — see
+       ``_reject_unknown_placeholders``.
+    3. The pattern must still render to a well-formed relative name when every
+       optional placeholder is absent — see
+       ``_reject_vanishing_placeholder_shapes``.
+
+    Families 2 and 3 are what keep ``join_within`` from having to reject an
+    empty or dot-leading rendered name at request time; both are skipped for
+    collections.
+
+    Raises ``ValueError`` (not ``UnsafePathError``) to match
+    ``validate_name_is_identifier`` on the same models: Pydantic turns it into
+    a 422 on the API path. At config load it aborts startup, but not via a
+    curated ``ConfigLoadError`` banner — TOML mode wraps it into
+    ``ConfigurationError`` (the parent class, uncaught by the lifespan's
+    ``except ConfigLoadError``); Python mode lets the raw
+    ``pydantic.ValidationError`` escape uncaught.
+    """
+    _reject_data_placeholders(pattern)
+
+    # Mask placeholders out — only admin-authored literal text is checked here.
+    literal = _PLACEHOLDER_RE.sub("\x01", pattern)
+    if not literal.strip() and not pattern.strip():
+        raise ValueError("file pattern must not be empty")
+    if pattern.startswith(("/", "\\")):
+        raise ValueError(f"file pattern must be relative, got {pattern!r}")
+    if "\\" in literal:
+        raise ValueError(f"file pattern must not contain a backslash, got {pattern!r}")
+    if "\x00" in literal:
+        raise ValueError("file pattern must not contain a NUL byte")
+    if pattern.endswith(("/", "\\")):
+        raise ValueError(f"file pattern must not end in a separator, got {pattern!r}")
+    if ".." in PurePosixPath(literal).parts:
+        raise ValueError(f"file pattern must not contain a '..' component, got {pattern!r}")
+    basename = PurePosixPath(literal).name
+    if basename.startswith("."):
+        raise ValueError(f"file pattern basename must not start with a dot, got {pattern!r}")
+
+    # Last: the rules above judge the pattern's literal text, these two judge
+    # what the pattern *renders to*. Running them after the literal rules keeps
+    # the more specific literal message for a pattern that trips both. Both are
+    # skipped for collections, which glob rather than render (see the
+    # is_collection note above) — a collection substitutes `*` for every
+    # placeholder whatever its name, so neither an unknown name nor a
+    # degenerate worst-case render can arise there.
+    if not is_collection:
+        _reject_unknown_placeholders(pattern)
+        _reject_vanishing_placeholder_shapes(pattern)
+    return pattern

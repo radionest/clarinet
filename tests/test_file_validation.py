@@ -6,10 +6,12 @@ functions for checking file existence against patterns.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from clarinet.exceptions.domain import UnsafePathError
+from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.services.file_validation import (
@@ -288,20 +290,20 @@ class TestFileValidatorEdgeCases:
         input_defs = [
             FileDefinitionRead(
                 name="birads_file",
-                pattern="birads_{data.BIRADS_R}.txt",
+                pattern="birads_{id}.txt",  # was {data.BIRADS_R}; see #552
                 required=True,
                 role=FileRole.INPUT,
             ),
         ]
 
         # Create file with resolved name
-        (tmp_path / "birads_4.txt").touch()
+        (tmp_path / "birads_42.txt").touch()
 
         validator = FileValidator(input_defs)
         result = validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
-        assert result.matched_files["birads_file"] == "birads_4.txt"
+        assert result.matched_files["birads_file"] == "birads_42.txt"
 
 
 class TestFileValidatorCrossLevel:
@@ -475,3 +477,130 @@ class TestFileValidatorCrossLevel:
         assert result.valid is True
         assert result.matched_files["master_model"] == "master_model.seg.nrrd"
         assert result.matched_files["scan"] == "scan.nrrd"
+
+
+class TestFileValidatorPathSafety:
+    """Tests for the join-containment guard on the existence probe.
+
+    ``FileDefinitionRead.pattern`` can't carry an escaping literal — its own
+    ``@model_validator(mode="after")`` rejects a ``..`` component at
+    construction time, and ``RecordType.file_registry`` runs that same
+    validator on every stored row when it is read, skipping (with a WARNING)
+    any legacy row that fails. So no in-tree producer hands ``FileValidator``
+    an escaping definition; the join is a backstop. ``model_construct``
+    bypasses the validator to reach it at all.
+    """
+
+    def test_escaping_literal_pattern_raises_instead_of_probing_outside(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A literal (no-placeholder) escaping pattern must raise
+        ``UnsafePathError`` rather than letting ``.is_file()`` probe outside
+        *target_dir*. No placeholder means the value guard
+        (``Files.render_for``'s ``path_safe=True``) never runs — this
+        exercises the join guard alone.
+        """
+        escaping_def = FileDefinitionRead.model_construct(
+            name="escape",
+            pattern="../escape.nrrd",
+            required=True,
+            role=FileRole.INPUT,
+        )
+
+        validator = FileValidator([escaping_def])
+        with pytest.raises(UnsafePathError):
+            validator.validate(mock_record, tmp_path)
+
+
+class TestFileValidatorCollections:
+    """A collection (``multiple=True``) is never rendered.
+
+    Its placeholders are wildcards, and ``validate_file_pattern`` skips both
+    render-time rules for a collection on exactly that premise — so
+    ``{study_uid}/slice_{n}.dcm`` is a *legal* collection pattern which,
+    rendered for a patient-level record, becomes ``/slice_.dcm`` and fails the
+    working-directory join. Matching a collection by glob is issue #562; until
+    then the validator reports a required one as missing without touching the
+    disk, the verdict rendering already reached (a wildcard renders to nothing,
+    so the probe never found a file).
+    """
+
+    @pytest.mark.parametrize(
+        ("pattern", "absent_attr"),
+        [
+            ("{study_uid}/slice_{n}.dcm", "study_uid"),
+            ("{parent_id}/slice_{n}.dcm", "parent_record_id"),
+            ("{user_id}/slice_{n}.dcm", "user_id"),
+        ],
+    )
+    def test_vanishing_leading_placeholder_is_reported_missing_not_raised(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+        pattern: str,
+        absent_attr: str,
+    ) -> None:
+        """Regression: rendering the collection produced an absolute name and an
+        ``UnsafePathError`` out of a config-load-legal definition — a 500 on
+        record create (after the row was committed), submit, check-files and
+        the preparing→pending exit."""
+        setattr(mock_record, absent_attr, None)
+        collection = FileDefinitionRead(
+            name="slices", pattern=pattern, required=True, role=FileRole.INPUT, multiple=True
+        )
+
+        result = FileValidator([collection]).validate(mock_record, tmp_path)
+
+        assert result.valid is False
+        assert [e.error_type for e in result.errors] == ["missing"]
+        assert "collection" in result.errors[0].message
+        assert "slices" not in result.matched_files
+
+    def test_optional_collection_is_skipped(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        mock_record.study_uid = None
+        collection = FileDefinitionRead(
+            name="slices",
+            pattern="{study_uid}/slice_{n}.dcm",
+            required=False,
+            role=FileRole.INPUT,
+            multiple=True,
+        )
+
+        result = FileValidator([collection]).validate(mock_record, tmp_path)
+
+        assert result.valid is True
+        assert result.errors == []
+        assert result.matched_files == {}
+
+    def test_collection_is_not_rendered_while_a_singular_sibling_still_is(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Pins the mechanism, not just the verdict: the collection never reaches
+        ``Files.render_for``, while the singular definition beside it still
+        does — this is a skip of one definition, not of validation."""
+        (tmp_path / "ct_scan.nrrd").touch()
+        singular = FileDefinitionRead(
+            name="ct_scan", pattern="ct_scan.nrrd", required=True, role=FileRole.INPUT
+        )
+        collection = FileDefinitionRead(
+            name="slices",
+            pattern="slice_{n}.dcm",
+            required=False,
+            role=FileRole.INPUT,
+            multiple=True,
+        )
+
+        with patch.object(Files, "render_for", wraps=Files.render_for) as render_for:
+            result = FileValidator([singular, collection]).validate(mock_record, tmp_path)
+
+        assert result.valid is True
+        assert result.matched_files == {"ct_scan": "ct_scan.nrrd"}
+        assert [call.args[1] for call in render_for.call_args_list] == ["ct_scan.nrrd"]
