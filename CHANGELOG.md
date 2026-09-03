@@ -456,6 +456,12 @@
   deliberately neither, so `POST /slicer/records/{id}/open` failed uncaught for
   every user of that record instead of degrading to `unresolved`. It now raises
   `ValueError` naming the definition and pointing at `Files.glob()`.
+  **Downstream note:** project code that called `ctx.files.resolve(name)` on a
+  `multiple=True` definition previously received a meaningless path (every
+  placeholder substituted, e.g. `slice_.dcm`) and now gets a `ValueError`. Such
+  a call was already broken — it can only have resolved to a file that does not
+  exist — but it fails loudly now rather than silently. Use `ctx.files.glob()`
+  for collections.
 - The demo's anonymization wrapper (`examples/demo`) no longer shadows the built-in
   task. It was named `anonymize_study_pipeline`, and `@pipeline_task` derives
   `task_name` as `{namespace}:{function_name}` — not module-qualified — so it
