@@ -238,11 +238,13 @@ routing collections into it would fail the Slicer endpoint for every record
 type that declares one. The registry loop therefore filters on `multiple`;
 `Files.exists` branches to `glob`; `RecordQuery.file_path` converts the
 `ValueError` into a `PipelineStepError` so a worker failure stays classified.
-One violation is still open: `FileValidator.validate` renders collections too
-(issue #562). Any new consumer of a pattern must branch on `multiple` the way
-`Files.checksums` does. The
-literal-text rules and the `{data.*}` ban still apply to collections, because
-those judge the pattern itself rather than what it renders to.
+`FileValidator.validate` no longer renders one either: it reports a required
+collection as missing without touching the disk, because a collection has no
+single filename to record — matching one by glob is issue #562. Any new
+consumer of a pattern must branch on `multiple` the way `Files.checksums`
+does. The literal-text rules and the `{data.*}` ban still apply to
+collections, because those judge the pattern itself rather than what it
+renders to.
 
 This is the rule that **replaced** two runtime checks. `join_within` used to
 reject an empty and a dot-leading *rendered* name, which turned an absent
@@ -262,7 +264,13 @@ JSON-Schema validated, never with filesystem safety in mind. The ban is
 reversible in one commit once the non-traversal corner cases it defers
 (length limits, Windows-reserved basenames, unicode normalization,
 `record.data`'s mutability) are settled; `{id}`, `{parent_id}` and
-`{user_id}` are safe replacements today.
+`{user_id}` are safe replacements today. The ban lives in
+`FileDefinitionRead`'s validator and nowhere else: a `FileDef` handed straight
+to `ctx.files.resolve()` or `Files.checksums(defs=…)` is never converted to one
+(`fileref_to_file_definition` is the sole conversion, and it runs at config
+load), so such a definition bypasses every config-load rule. That loses scope
+reduction, not containment — the value guard and `join_within` still hold at
+render time, which is what lets the ban be temporary at all.
 
 Because a `FileDefinition` row is never re-validated once stored (`table=True`
 skips Pydantic), a row written before this validator existed can still carry
@@ -495,7 +503,7 @@ constructed for a `RecordRead` — and requires the value to be absolute and
 already normalized, raising `UnsafePathError` otherwise; this is what keeps
 `join_within`'s containment proof non-vacuous. The Slicer context builder
 reads `record.clarinet_storage_path` **raw**, twice
-(`services/slicer/context.py:60,282`) — it is protected only by ordering,
+(`services/slicer/context.py:60,294`) — it is protected only by ordering,
 not by a guard of its own: both raw reads happen after `build_slicer_context`
 already constructs `Files(record, ..., fallback=True)` (`context.py:170`),
 which raises first if the value is malformed. Reordering that construction

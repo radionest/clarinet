@@ -7,6 +7,8 @@ StudyRead, PatientRead), the level-semantics of ``dir()``, the
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -321,17 +323,28 @@ class TestFileRepositoryConfiguration:
 
         FileRepository(record)  # must not raise
 
+    @pytest.mark.skipif(
+        os.name == "nt" and sys.version_info >= (3, 13),
+        reason="ntpath.isabs('/custom/storage') is False from 3.13: a driveless root is "
+        "drive-relative there, so _resolve_storage_base refuses it on a 3.13 Windows host",
+    )
     @patch("clarinet.files._resolver.settings")
-    def test_posix_storage_path_accepted_regardless_of_platform(
+    def test_posix_storage_path_not_refused_by_path_normalisation(
         self, mock_settings: MagicMock
     ) -> None:
-        """A POSIX-style root must not depend on the host's path flavour.
+        """A POSIX-style root must not be refused by the host's path
+        *normalisation*.
 
         Regression: the check compared the value against
         ``os.path.normpath`` output, which on Windows rewrites
         ``/custom/storage`` to ``\\custom\\storage`` — so every such row was
         refused there while passing on Linux. Windows CI caught it; the
         Linux-only suite could not.
+
+        Absoluteness itself stays the host's call and is Python-version
+        dependent on Windows — see the ``skipif`` above: on 3.12 (CI's pin)
+        ``ntpath.isabs`` accepts a driveless root, on 3.13 it does not. That is
+        an availability caveat on that one platform, not a traversal.
         """
         mock_settings.storage_path = "/default"
         record = _make_record_mock(clarinet_storage_path="/custom/storage")

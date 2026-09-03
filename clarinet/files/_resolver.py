@@ -87,6 +87,14 @@ def _resolve_storage_base(clarinet_storage_path: str | None) -> Path:
     # collapsed harmlessly, would raise on every Files construction for a row
     # already in the database. Neither enables traversal; only the two checks
     # below do.
+    #
+    # os.path.isabs is the host's own rule, and on Windows it changed in
+    # Python 3.13: ntpath.isabs("/custom/storage") is True on 3.12 (the version
+    # CI pins) and False on 3.13, where a driveless root counts as
+    # drive-relative. So a POSIX-style row is refused on a 3.13 Windows host —
+    # an availability caveat there, not a traversal (a driveless root is still
+    # rooted). The Windows-CI regression above was normpath's rewriting, not
+    # isabs.
     if not os.path.isabs(clarinet_storage_path) or ".." in Path(clarinet_storage_path).parts:
         raise UnsafePathError(
             "clarinet_storage_path must be absolute and free of '..' components",

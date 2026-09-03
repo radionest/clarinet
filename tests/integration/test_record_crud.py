@@ -15,7 +15,7 @@ from tests.conftest import (
     create_mock_superuser,
     create_mock_user_with_role,
 )
-from tests.utils.urls import RECORDS_BASE
+from tests.utils.urls import RECORD_TYPES, RECORDS_BASE
 
 
 @pytest.mark.asyncio
@@ -854,3 +854,36 @@ class TestCreateRecordStoragePathPermission:
             },
         )
         assert resp.status_code == 201
+
+
+# ── {data.*} file-pattern ban — the API path ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_record_type_rejects_data_placeholder_pattern(client):
+    """POST /api/records/types — a ``{data.*}`` file pattern is a 422 naming the placeholder.
+
+    The ban lives in ``FileDefinitionRead``'s validator; this pins that the
+    request-body path reaches it (``RecordTypeCreate.file_registry`` is a list
+    of that model) and that the response carries the offending name, which is
+    what an operator needs to find the definition to change.
+    """
+    resp = await client.post(
+        RECORD_TYPES,
+        json={
+            "name": "banned-pattern-type",
+            "description": "file pattern interpolating record data",
+            "level": "SERIES",
+            "file_registry": [
+                {
+                    "name": "report",
+                    "pattern": "report_{data.timepoint}.pdf",
+                    "role": "output",
+                    "required": False,
+                    "multiple": False,
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert "data.timepoint" in resp.text

@@ -225,7 +225,8 @@ class TestRecordServiceTriggers:
     ) -> None:
         """Regression for the pre-check over-catching relative to the guard it
         fronts: Files.checksums() globs a multiple=True definition (wildcards
-        replace placeholders, facade.py:203-205) -- it never renders the
+        replace placeholders -- the ``fd.multiple`` branch of Files.checksums
+        in files/facade.py) -- it never renders the
         pattern's values at all, so a stored identity value that would fail
         the value guard IF rendered (patient_id="..", legal per
         PATIENT_ID_REGEX but rejected by assert_path_safe_value) must not

@@ -316,8 +316,9 @@ class TestRejectsVanishingPlaceholderShapes:
         aborted startup for configs that work fine.
 
         "Meant to be", not "never is": the invariant is enforced by consumers
-        (``Files.resolve`` refuses one, the Slicer context loop skips them),
-        and ``FileValidator.validate`` still violates it — issue #562.
+        (``Files.resolve`` refuses one, the Slicer context loop and
+        ``FileValidator.validate`` skip them), not by the renderer itself.
+        Matching a collection by glob in the validator is issue #562.
         """
         assert validate_file_pattern(pattern, is_collection=True) == pattern
 

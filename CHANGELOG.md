@@ -244,8 +244,11 @@
   `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. `Files.resolve` now
   refuses a collection outright (`ValueError`) instead of rendering one, and
   the consumers that walk a whole registry skip collections before reaching it
-  — see Fixed. One renderer of collections remains, `FileValidator.validate`
-  (issue #562), so the exemption is enforced rather than absolute. A *stored*
+  — see Fixed. `FileValidator.validate` no longer renders one either: a
+  required collection INPUT is reported missing without rendering it (the
+  verdict it already reached by rendering a wildcard to nothing), so the
+  exemption is enforced by every in-tree consumer; matching collections by
+  glob is issue #562. A *stored*
   row that violates the rule is
   skipped from `RecordType.file_registry` with a WARNING rather than being
   fatal (see Security below).
