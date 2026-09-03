@@ -40,7 +40,7 @@ master_model = FileDef(
 | `{origin_type}` | `record.record_type_name` — lets you name files after the originating record type |
 | `{data.FIELD}` | A field from `record.data` — temporarily rejected, see [#552](https://github.com/radionest/clarinet/issues/552) |
 
-`{parent_id}`, `{user_id}`, `{study_uid}` and `{series_uid}` are **optional** — a parentless, unassigned, patient-level or study-level record has none, and they render to `""`. A pattern that leans on one for a whole path segment (`{parent_id}.txt`, `{user_id}`, `{study_uid}/mask.nrrd`) is rejected at config load; give the segment literal text (`report_{parent_id}.txt`, `study_{study_uid}/mask.nrrd`).
+`{parent_id}`, `{user_id}`, `{study_uid}` and `{series_uid}` are **optional** — a parentless, unassigned, patient-level or study-level record has none, and they render to `""`. A pattern that leans on one for a whole path segment (`{parent_id}.txt`, `{user_id}`, `{study_uid}/mask.nrrd`, `{parent_id}.`) is rejected at config load; give the segment literal text (`report_{parent_id}.txt`, `study_{study_uid}/mask.nrrd`). **Collections (`multiple=True`) are exempt** — they glob rather than render, so `{parent_id}.nrrd` becomes `*.nrrd` and stays legal. Separately, a **non-collection** pattern may only use placeholder names the renderer knows (`{id}`, `{parent_id}`, `{user_id}`, `{patient_id}`, `{study_uid}`, `{series_uid}`, `{origin_type}`, `{record_type.name}`) — a typo like `{studyuid}` is refused at config load instead of silently rendering to `""`. Collections are exempt here too: they glob, so `slice_{n}.dcm` → `slice_*.dcm` is a positional wildcard, not a typo.
 
 Pattern-resolution details are in `{{CLARINET_DOCS}}/file-registry.md`.
 

@@ -234,9 +234,9 @@
   `{series_uid}` are legitimately empty for a parentless, unassigned,
   patient-level or study-level record, so a pattern that leans on one of them
   for a whole path segment degenerates: `{parent_id}.txt` → `.txt`,
-  `{user_id}` → `""`, `{study_uid}/mask.nrrd` → `/mask.nrrd`. All three are
-  now rejected when the configuration loads. Migration: give the affected
-  segment some literal text — `report_{parent_id}.txt`,
+  `{user_id}` → `""`, `{study_uid}/mask.nrrd` → `/mask.nrrd`, `{parent_id}.` →
+  `.`. All four are now rejected when the configuration loads. Migration: give
+  the affected segment some literal text — `report_{parent_id}.txt`,
   `seg_{user_id}.nrrd`, `study_{study_uid}/mask.nrrd`. Patterns resting on
   `{id}`, `{patient_id}`, `{record_type.name}` or `{origin_type}` need no
   change; those are never absent. **Collections (`multiple=True`) are exempt** —
@@ -244,11 +244,25 @@
   `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. A *stored* row that violates the rule is
   skipped from `RecordType.file_registry` with a WARNING rather than being
   fatal (see Security below).
+- **A file pattern may only use placeholders the renderer knows.** Every
+  `{name}` in a `FileDefinition.pattern` must be one of `{id}`, `{parent_id}`,
+  `{user_id}`, `{patient_id}`, `{study_uid}`, `{series_uid}`, `{origin_type}`
+  or `{record_type.name}`; anything else is rejected when the configuration
+  loads. Previously an unrecognised name silently substituted `""`, so a typo
+  like `{studyuid}` either failed later at the working-directory join — a 500
+  on every read of that record, including the Slicer open endpoint — or, in
+  `{studyuid}.nrrd`, quietly resolved to the hidden file `.nrrd` and kept
+  working against the wrong path. Migration: fix the spelling. **Collections
+  (`multiple=True`) are exempt**, as they are from the rule above: a collection
+  globs rather than renders and substitutes `*` for every placeholder whatever
+  it is named, so `slice_{n}.dcm` → `slice_*.dcm` remains a legal
+  positional-wildcard idiom.
 - **Setting `Record.clarinet_storage_path` on record creation is now
   admin-only.** A non-admin supplying a non-`None` value is rejected (403) at
-  the `POST /api/records` route; a second, defensive check in the demo-records
-  helper is currently a no-op (that path never sets the field itself).
-  Creating a record without the field is unaffected.
+  the `POST /api/records` route — the only client-facing path that accepts the
+  field. Creating a record without the field is unaffected. Both admitted
+  caller kinds are covered: a superuser, and a non-superuser holding the
+  built-in `admin` role.
 - **Finishing a record now returns 422 when an OUTPUT file pattern cannot be
   safely resolved.** `POST /api/records/{id}/data` and
   `POST /api/records/{id}/submit` reject the submission with 422 when a
@@ -259,7 +273,15 @@
   check during the post-submit checksum scan can also reject, after the
   record's own data has committed. Neither PATCH variant is affected — they
   update data without re-running the output-path checks. The detail names the
-  offending file definition.
+  offending file definition and the reason; it does **not** echo the value
+  that tripped the guard, which with `{data.*}` banned can only be a stored
+  identity field the caller may not be entitled to see.
+- **A record whose `patient_id` is exactly `.` or `..` can no longer finish.**
+  Both are legal under `PATIENT_ID_REGEX` (`^[A-Za-z0-9._\-^]{1,64}$`) but
+  render to a bare directory reference, so a submit against a pattern
+  interpolating `{patient_id}` now returns 422 where it previously succeeded
+  with a logged warning. No known deployment holds such a patient id; rename
+  it if one does.
 
 ### Security
 
@@ -274,12 +296,33 @@
   is now refused at read time instead of being followed. No migration is needed —
   the guard is the remediation.
 - A legacy `FileDefinition.pattern` that fails the path-safety validator is now
-  skipped from `RecordType.file_registry` (logged as a WARNING) instead of
-  nulling the entire registry for that record type. Residual: if the skipped
-  definition was `required=True` with `role=INPUT`, its "required file
-  missing" check is no longer enforced — file validation only inspects
-  definitions present in `file_registry`, so a record can no longer be marked
-  `blocked` for that file until the row's pattern is fixed.
+  skipped from `RecordType.file_registry` (logged as a WARNING, once per
+  process per definition rather than once per request) instead of nulling the
+  entire registry for that record type. **Residual — read this before
+  upgrading:** everything that reads `file_registry` simply stops seeing the
+  definition, so the affected file loses six behaviours at once, not just the
+  one previously listed here:
+  1. the `required=True, role=INPUT` "missing file" gate stops firing, so a
+     record can no longer be marked `blocked` for it;
+  2. it is never checksummed, so its `RecordFileLink` is never created and the
+     file stays untracked;
+  3. file-change triggers stop firing — a RecordFlow
+     `file(x).on_update().invalidate_all_records(...)` silently dies;
+  4. `clear_output_files` and `delete_record_cascade` no longer collect it, so
+     the file is **left on disk** after the record is deleted;
+  5. `ctx.files.resolve("name")` in a pipeline task raises `KeyError`, which
+     retries and lands in the DLQ;
+  6. the single-file download endpoint 404s for it.
+
+  A WARNING is therefore not cosmetic — run the `{data.%` scan below before
+  release and migrate every hit.
+- A rendered name containing a NUL byte is now refused by the containment
+  check itself. `os.path.normpath` and `Path.is_relative_to` are pure string
+  operations and passed it through, so the failure previously surfaced as an
+  untyped `ValueError: embedded null byte` from whichever syscall touched the
+  path first — inside a `except ValueError` that the lenient renderer uses to
+  swallow routine coercion failures. Reachable from the persisted-filename
+  path, which has no value guard upstream of the join.
 - A `clarinet_storage_path` that is not absolute, or that carries a `..`
   component, is now refused at path-resolution time. A trailing slash or a
   doubled separator stays legal — neither enables traversal, and a stored row

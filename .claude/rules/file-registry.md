@@ -37,18 +37,36 @@ File definitions are stored in a normalized schema with M2M relationship.
 **`RecordFileLinkRead`** (DTO): per-file link with `name`, `filename`, `checksum`.
 
 **Pattern rules** (`validate_file_pattern`, `clarinet/files/_template.py`, wired
-as a validator on `FileDefinitionRead` only — `FileDefinition` is `table=True`,
-where SQLModel skips Pydantic validation). Besides the literal-text rules (no
-absolute prefix, backslash, NUL, `..`, trailing separator, dot-leading
-basename), a pattern must still render to a well-formed relative name when
-every **optional** placeholder is absent. Optional = `{parent_id}`,
-`{user_id}`, `{study_uid}`, `{series_uid}` — a parentless, unassigned,
-patient-level or study-level record legitimately has none. So `{parent_id}.txt`
-(→ `.txt`), `{user_id}` (→ `""`) and `{study_uid}/mask.nrrd` (→ `/mask.nrrd`)
-are rejected; give the segment literal text (`report_{parent_id}.txt`). `{id}`,
-`{patient_id}`, `{record_type.name}` and `{origin_type}` are never absent and
-need no prefix. Full rationale: the "Path-safety guards" section of the
-framework's `docs/kb/files-and-anonymization.md`.
+as a `@model_validator(mode="after")` on `FileDefinitionRead` only —
+`FileDefinition` is `table=True`, where SQLModel skips Pydantic validation).
+Three families:
+
+1. **Literal text** — no absolute prefix, backslash, NUL, `..`, trailing
+   separator, dot-leading basename.
+2. **Placeholder names** — every `{name}` must be one the renderer can resolve:
+   `{id}`, `{parent_id}`, `{user_id}`, `{patient_id}`, `{study_uid}`,
+   `{series_uid}`, `{origin_type}`, `{record_type.name}`. A typo such as
+   `{studyuid}` rendered to `""` under LENIENT and then either failed at the
+   join or — in `{studyuid}.nrrd` — silently produced the hidden file `.nrrd`.
+   `{data.*}` is rejected by its own rule, see
+   [#552](https://github.com/radionest/clarinet/issues/552).
+3. **Worst-case render** — the pattern must still be a well-formed relative
+   name when every **optional** placeholder is absent. Optional =
+   `{parent_id}`, `{user_id}`, `{study_uid}`, `{series_uid}` — a parentless,
+   unassigned, patient-level or study-level record legitimately has none. So
+   `{parent_id}.txt` (→ `.txt`), `{user_id}` (→ `""`), `{study_uid}/mask.nrrd`
+   (→ `/mask.nrrd`) and `{parent_id}.` (→ `.`) are rejected; give the segment
+   literal text (`report_{parent_id}.txt`). `{id}`, `{patient_id}`,
+   `{record_type.name}` and `{origin_type}` are never absent and need no prefix.
+
+**Collections (`multiple=True`) are exempt from families 2 and 3** — they glob
+rather than render (`{parent_id}.nrrd` → `*.nrrd`), which is exactly why the
+check is a *model* validator: it must read `multiple` alongside `pattern`. In a
+collection the placeholder's *name* is meaningless — `glob_file_paths`
+substitutes `*` for every one of them — so `slice_{n}.dcm` → `slice_*.dcm` is a
+positional-wildcard idiom, not a typo. Family 1 judges the literal text and
+still applies, as does the `{data.*}` ban. Full rationale: the "Path-safety
+guards" section of the framework's `docs/kb/files-and-anonymization.md`.
 
 - `FileDefinition` and `FileDefinitionRead` both define identical `validate_name_is_identifier` — update both when changing.
 - `RecordRead.file_links`: `list[RecordFileLinkRead]` — structured M2M data, preferred over dict fields.

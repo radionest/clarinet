@@ -143,7 +143,7 @@ pattern segment contributes.
 ### Config-load pattern validation
 
 `validate_file_pattern` (`clarinet/files/_template.py`, attached as a
-`@field_validator("pattern")` on `FileDefinitionRead` — **not** on
+`@model_validator(mode="after")` on `FileDefinitionRead` — **not** on
 `FileDefinition`, which is `table=True` and skips Pydantic validation)
 rejects an unsafe pattern before any record ever renders it: empty or
 whitespace-only, a backslash, NUL, a `..` component, or a dot-leading
@@ -153,6 +153,31 @@ the *full* pattern regardless of placeholders: an absolute prefix and a
 trailing separator. This rule is permanent, and a rejection here — unlike
 the stored-row case below — aborts startup: the process does not come up
 with the offending definition simply skipped.
+
+It is a *model* validator rather than a field one because the render-time
+rule below needs to read `multiple` alongside `pattern`; a field validator
+cannot see a sibling field, and as one it was aborting startup for valid
+collection configs.
+
+Two further rules concern placeholder *names*:
+
+- **Unknown placeholders** (`_reject_unknown_placeholders`) — in a
+  non-collection pattern every name must be one `fields_from` can resolve:
+  `{id}`, `{parent_id}`, `{user_id}`, `{patient_id}`, `{study_uid}`,
+  `{series_uid}`, `{origin_type}`, `{record_type.name}`. The renderer runs
+  LENIENT, so an unrecognised name substituted `""` instead of raising: a
+  typo'd `{studyuid}` rendered to `""` (rejected at the join, 500ing every
+  read of the record) or, in `{studyuid}.nrrd`, to the perfectly joinable
+  hidden file `.nrrd` — a wrong-but-working path with no diagnostic anywhere.
+  The catalogue is kept in step with `fields_from` by a drift test that
+  rebuilds it from the renderer's own output. **Collections are exempt**: a
+  collection globs rather than renders, and `glob_file_paths` substitutes `*`
+  for every placeholder whatever it is called, so the name carries no meaning
+  at all — `slice_{n}.dcm` → `slice_*.dcm` is a positional-wildcard idiom, and
+  a misspelling there is harmless because `{study_uid}` and `{studyuid}` both
+  glob to `*`.
+- **`{data.*}`** (`_reject_data_placeholders`) — banned outright, temporarily,
+  for collections too; see below.
 
 #### Patterns that vanish when a placeholder is absent
 
@@ -166,17 +191,36 @@ else the renderer knows (`{id}`, `{patient_id}`, `{record_type.name}`,
 So `validate_file_pattern` also checks the pattern's **worst-case render** —
 every optional placeholder erased, every other one masked to a non-empty
 sentinel — and rejects it unless the result is still a well-formed relative
-name. Three shapes fail:
+name. Four shapes fail:
 
 | Pattern | Worst-case render | Why it fails | Fix |
 |---|---|---|---|
 | `{user_id}` | `""` | an empty name | `seg_{user_id}.nrrd` |
 | `{parent_id}.txt` | `.txt` | dot-leading basename | `report_{parent_id}.txt` |
 | `{study_uid}/mask.nrrd` | `/mask.nrrd` | empty path segment | `study_{study_uid}/mask.nrrd` |
+| `{parent_id}.` | `.` | bare directory reference | `report_{parent_id}.` |
 
 A literal prefix on the affected segment is the fix in every case;
 `{id}.nrrd` and `{record_type.name}.nrrd` need none, because neither
 placeholder is ever absent.
+
+The last row is checked on the raw `/`-separated segments rather than through
+`PurePosixPath`, because pathlib collapses a `.` component away:
+`PurePosixPath(".").name` is `""`, which does *not* start with a dot, so the
+dot-leading rule never fired for it. (`PurePosixPath("..").name` is `".."` —
+only the single dot has this asymmetry.) Such a pattern therefore loaded
+cleanly and then raised at `join_within`'s equals-the-base branch on every
+resolve, including inside the `build_slicer_context` loop, which 500s the
+Slicer open endpoint for the whole record.
+
+**Collections are exempt from this rule**, as from the unknown-placeholder
+rule above. A `multiple=True` definition is never rendered —
+`_patterns.glob_file_paths` substitutes every placeholder with `*` and globs —
+so `{parent_id}.nrrd` becomes `*.nrrd`, a perfectly good collection pattern
+rather than a degenerate name. This exemption is why `validate_file_pattern`
+needs to see `multiple`, and hence why it is a model validator. The
+literal-text rules and the `{data.*}` ban still apply to collections, because
+those judge the pattern itself rather than what it renders to.
 
 This is the rule that **replaced** two runtime checks. `join_within` used to
 reject an empty and a dot-leading *rendered* name, which turned an absent
@@ -204,11 +248,28 @@ an unsafe pattern. `RecordType.file_registry` catches that at read time: a
 stored definition that fails `FileDefinitionRead` construction is skipped
 from the registry — logged as a WARNING naming the record type and
 definition — rather than raising and nulling the entire registry for every
-other file on that record type. The trade-off: if the skipped definition was
-`required=True` with `role=INPUT`, its "required file missing" check
-silently stops firing, because `services/file_validation.py` only inspects
-definitions present in `file_registry` — a record can no longer be marked
-`blocked` for that file until an operator fixes the row's pattern.
+other file on that record type. The WARNING is emitted **once per process**
+per `(record type, definition)` pair: `file_registry` is a property
+re-evaluated on every record-type read, so logging it unconditionally meant
+one line per request, for ever, for a fact that cannot change while the
+process runs.
+
+**The trade-off is larger than the missing-file check.** Everything that
+reads `file_registry` simply does not see the definition, so for a deployment
+holding one un-migrated row the affected file quietly loses:
+
+| Consequence | Site |
+|---|---|
+| the `required=True, role=INPUT` "missing file" gate stops firing — the record can no longer be `blocked` for it | `services/file_validation.py` |
+| it is never checksummed, so its `RecordFileLink` is never created and the file stays untracked | `record_service._sync_output_files` |
+| file-change triggers stop firing — a RecordFlow `file(x).on_update().invalidate_all_records(...)` silently dies | `record_service.check_files` |
+| it is skipped by output-path collection, so `clear_output_files` and `delete_record_cascade` **leave the file on disk** | `record_service._collect_output_file_paths` |
+| `ctx.files.resolve("name")` in a pipeline task raises `KeyError` → retry → DLQ | `files/facade.py` |
+| the single-file download endpoint 404s for it | `record_service.resolve_output_file` |
+
+This is why the pre-release `SELECT name, pattern FROM filedefinition WHERE
+pattern LIKE '%{data.%'` scan matters: a hit is not a cosmetic warning, it is
+a file definition that has stopped working in six distinct ways.
 
 ### The substituted value
 
@@ -216,8 +277,10 @@ definitions present in `file_registry` — a record can no longer be marked
 every *coerced* placeholder value (so a list that flattens to `"a/b"` is
 still caught). It rejects a value containing `/`, `\` or NUL, and separately
 rejects a value that is exactly `.` or `..` — it does not reject a leading
-dot in general (`mask.seg.nrrd` stays fine; that check lives at the join,
-below, and is basename-level). `Files.resolve`, `Files.render`,
+dot in general (`mask.seg.nrrd` stays fine, and a dot-leading *rendered* name
+is accepted at the join too; the pattern that could produce one is refused at
+config load instead — see "Patterns that vanish when a placeholder is absent"
+above). `Files.resolve`, `Files.render`,
 `Files.render_for` and `Files.checksums` all render with `path_safe=True`.
 `Files.render_template` — the static renderer feeding Slicer script
 arguments (`services/slicer/context.py`) — deliberately does **not**: those
@@ -270,11 +333,17 @@ round trip.
 
 - **Record submit** (`RecordService._validate_output_paths`, run before the
   submission persists, and `_sync_output_files`'s post-scan reconciliation
-  backstop): translated to `422` — a user's own submitted data produced the
-  unsafe value, so on the principle that a violation surfaces according to
-  who caused it, it is that user's problem to fix. The 422 detail
-  deliberately **does** include the offending value (`exc.value!r`) — the
-  submitter already has it, they produced it — but it never reaches a log.
+  backstop): translated to `422` — the submission is the request that cannot
+  be completed, so on the principle that a violation surfaces according to
+  who caused it, it is answered to that caller rather than as a server error.
+  The detail names the **file definition** and the reason (`str(exc)`); it
+  does **not** include `exc.value`, and neither does any log. The value was
+  briefly echoed on the grounds that the submitter had produced it — with
+  `{data.*}` banned they had not. `fields_from` can only supply stored
+  identity fields (`patient_id`, `study_uid`, `series_uid`), which
+  `api/masking.py` withholds from a non-superuser once the patient is
+  anonymized, while the render runs against the raw value; and this same
+  helper serves check-files, where nothing was submitted at all.
 - **Everywhere else a router lets it propagate** (the Slicer context
   builder, `resolve_output_file`, …): `500`, via `UnsafePathError`'s own
   dedicated handler (`handle_unsafe_path_error`, `exception_handlers.py`)

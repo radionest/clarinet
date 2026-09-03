@@ -482,8 +482,9 @@ class TestFileValidatorPathSafety:
     """Tests for the join-containment guard on the existence probe.
 
     ``FileDefinitionRead.pattern`` normally can't carry an escaping literal —
-    its own ``@field_validator`` (D7/D8) rejects a ``..`` component at
-    construction time. But D7 also means a *legacy* ``filedefinition`` row
+    its own ``@model_validator(mode="after")`` (D7/D8) rejects a ``..``
+    component at construction time. But D7 also means a *legacy*
+    ``filedefinition`` row
     that predates that guard is never re-validated on load, so it can still
     reach here with an escaping pattern. ``model_construct`` bypasses
     ``FileDefinitionRead``'s validator to simulate exactly that row.
