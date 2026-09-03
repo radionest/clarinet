@@ -6,10 +6,12 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import Record, RecordStatus, RecordType
+from clarinet.models.user import User, UserRole, UserRolesLink
 from tests.conftest import create_authenticated_client, create_mock_superuser
 from tests.utils.urls import RECORDS_BASE
 
@@ -756,6 +758,33 @@ async def regular_user_client(test_session, test_settings) -> AsyncGenerator[Asy
 
 
 @pytest_asyncio.fixture
+async def admin_role_client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
+    """A client authenticated as a non-superuser holding the built-in 'admin' role.
+
+    The gate admits two distinct kinds of caller and only the superuser one was
+    covered. Without this the whole ``"admin" in get_user_role_names(user)``
+    branch could be deleted and every test would stay green.
+    """
+    user = await create_mock_superuser(test_session, email="storage-path-admin-role@test.com")
+
+    if await test_session.get(UserRole, "admin") is None:
+        test_session.add(UserRole(name="admin"))
+        await test_session.commit()
+    test_session.add(UserRolesLink(user_id=user.id, role_name="admin"))
+    await test_session.commit()
+
+    # Reload so `roles` is populated, THEN downgrade: setting is_superuser on
+    # the pre-reload instance is silently undone here, which would leave the
+    # caller a superuser and the role branch untested.
+    stmt = select(User).where(User.id == user.id).options(selectinload(User.roles))
+    user = (await test_session.execute(stmt)).scalars().first()
+    user.is_superuser = False
+
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        yield ac
+
+
+@pytest_asyncio.fixture
 async def storage_path_perm_type(test_session):
     """PATIENT-level RecordType for the clarinet_storage_path permission tests."""
     rt = RecordType(
@@ -792,6 +821,23 @@ class TestCreateRecordStoragePathPermission:
         self, client, test_patient, storage_path_perm_type
     ):
         resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "record_type_name": storage_path_perm_type.name,
+                "status": "pending",
+                "clarinet_storage_path": "/custom/storage/root",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["clarinet_storage_path"] == "/custom/storage/root"
+
+    @pytest.mark.asyncio
+    async def test_admin_role_without_superuser_may_set_storage_path(
+        self, admin_role_client, test_patient, storage_path_perm_type
+    ):
+        """The 'admin' role is the gate's second admitted caller, not just superuser."""
+        resp = await admin_role_client.post(
             f"{RECORDS_BASE}/",
             json={
                 "patient_id": test_patient.id,
