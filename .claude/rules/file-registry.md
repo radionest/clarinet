@@ -117,12 +117,23 @@ run). An INPUT referencing an OUTPUT of the same RecordType passes with a
 `WARNING` — legal, but the record stays `blocked` until that OUTPUT exists.
 
 The declaration is a property of the *file*, not of a `RecordTypeFileLink`
-binding — every RecordType binding a file inherits it, so all RecordTypes
-binding the same `FileDefinition` must agree on its
-`grid_conform_to`/`on_grid_mismatch`. Reconciliation is last-write-wins per
-definition, so disagreeing types flip the shared row back and forth on every
-reconcile pass and can 409 each other at runtime. Only INPUT and OUTPUT
-bindings are enforced at runtime; an INTERMEDIATE file may still declare
+binding — every RecordType binding a file inherits it, so every RecordType
+binding the same `FileDefinition` must declare its row-level fields
+(`FILE_DEFINITION_FIELDS`: `pattern`, `description`, `multiple`, `level`,
+`grid_conform_to`, `on_grid_mismatch`) identically. Config load enforces
+that: `validate_shared_file_definitions` (`config/reconciler.py`) runs before
+any DB write and rejects a config in which two RecordTypes disagree, naming
+the file, the fields and both types — without it the shared row would end up
+in whichever state reconciled last and flip on every restart. Through the
+API, `POST`/`PATCH /types` first fill the row-level fields a file entry
+omits from the stored row (`RecordTypeService._merge_with_stored`) and
+validate the merged entries, so one type cannot silently clear another's
+guard, and a type that binds a guarded file without its reference gets a
+409. An *explicit* change through one type still rewrites the shared row for
+every binder and, in TOML mode, re-exports only the edited type; the next
+startup then rejects the disagreement until the other types' TOML files match
+(re-validating and re-exporting sibling types is a follow-up). Only INPUT and
+OUTPUT bindings are enforced at runtime; an INTERMEDIATE file may still declare
 `grid_conform_to` (config load applies no role filter) but nothing ever
 checks it — a silent no-op, not a rejection. INPUT mismatches are never
 auto-repaired or deleted (an input may be shared with sibling records). They

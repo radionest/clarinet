@@ -82,10 +82,10 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/records/types` | GET | 200 | List types |
-| `/api/records/types` | POST | 201 | Create type |
+| `/api/records/types` | POST | 201 | Create type. **409**: name taken, or a `file_registry` entry that — merged with the row-level fields of the stored `FileDefinition` it names — declares something this type cannot satisfy (e.g. binds a guarded file without its `grid_conform_to` reference) |
 | `/api/records/types/find` | POST | 200 | Search types |
 | `/api/records/types/{name}` | GET | 200 | Get type |
-| `/api/records/types/{name}` | PATCH | 200 | Update type |
+| `/api/records/types/{name}` | PATCH | 200 | Update type. **409**: the merged effective state violates a declaration constraint (output-path uniqueness, grid conformance); `file_registry` entries are merged with their stored rows first, as on POST |
 | `/api/records/types/{name}` | DELETE | 204 | Delete type |
 
 ### Patients, Studies, Series (`/api`)

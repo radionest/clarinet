@@ -622,6 +622,23 @@
   `grid_conform_to` (the action could never run). An INPUT file referencing an
   OUTPUT of the same RecordType is legal but now logs a `WARNING` — the record
   stays blocked until that OUTPUT exists.
+- Two RecordTypes can no longer disagree about a shared file. A
+  `FileDefinition` row is shared by every type binding it and was upserted
+  once per type in config order, so a type that bound `seg` without the
+  `grid_conform_to` another type declared left the row in whichever state
+  reconciled last, flipped it on every restart and silently switched the
+  guard off — the #499 hole in config form (the same last-write-wins already
+  applied to `pattern`, `description`, `multiple` and `level`). Config load
+  now rejects the disagreement before any DB write, naming the file, the
+  fields and both types. `POST`/`PATCH /types` fill the row-level fields a
+  file entry omits from the stored row before validating and writing, so a
+  partial entry from one type can no longer null another type's declaration,
+  and a type binding a guarded file without its reference is rejected with a
+  409 instead of blocking its records at runtime. An explicit change through
+  one type still rewrites the shared row for every binder; in TOML mode only
+  the edited type is re-exported, so the next startup rejects the
+  disagreement until the other types' TOML files match (follow-up:
+  re-validate and re-export sibling types).
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

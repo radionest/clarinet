@@ -145,6 +145,13 @@ async def find_record_type(
     response_model=RecordTypeRead,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_mutable_config)],
+    responses={
+        409: {
+            "description": "Name already taken, or a file entry — merged with the "
+            "stored definition it names — declares something this type cannot "
+            "satisfy (e.g. binds a guarded file without its grid reference)"
+        }
+    },
 )
 async def add_record_type(
     record_type: RecordTypeCreate,
@@ -173,6 +180,14 @@ async def add_record_type(
     "/types/{record_type_id}",
     response_model=RecordTypeRead,
     dependencies=[Depends(require_mutable_config)],
+    responses={
+        409: {
+            "description": "The merged effective state violates a declaration "
+            "constraint (output-path uniqueness, grid conformance — including a "
+            "file entry that, merged with its stored definition, binds a guarded "
+            "file without its reference)"
+        }
+    },
 )
 async def update_record_type(
     record_type_id: str,

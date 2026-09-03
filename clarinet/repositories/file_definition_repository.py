@@ -1,11 +1,11 @@
 """Repository for FileDefinition database operations."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
+from sqlmodel import col, select
 
-from clarinet.models.file_schema import FileDefinition, FileDefinitionRead
+from clarinet.models.file_schema import FILE_DEFINITION_FIELDS, FileDefinition, FileDefinitionRead
 from clarinet.repositories.base import BaseRepository
 
 
@@ -37,14 +37,7 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
         if existing is not None:
             # Update mutable fields if they changed
             changed = False
-            for field_name in (
-                "pattern",
-                "description",
-                "multiple",
-                "level",
-                "grid_conform_to",
-                "on_grid_mismatch",
-            ):
+            for field_name in FILE_DEFINITION_FIELDS:
                 if field_name in kwargs and getattr(existing, field_name) != kwargs[field_name]:
                     setattr(existing, field_name, kwargs[field_name])
                     changed = True
@@ -56,6 +49,15 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
         self.session.add(fd)
         await self.session.flush()
         return fd
+
+    async def get_by_names(self, names: Iterable[str]) -> dict[str, FileDefinition]:
+        """Fetch the existing definitions among *names* in one query, keyed by name."""
+        wanted = list(dict.fromkeys(names))
+        if not wanted:
+            return {}
+        stmt = select(FileDefinition).where(col(FileDefinition.name).in_(wanted))
+        result = await self.session.execute(stmt)
+        return {fd.name: fd for fd in result.scalars().all()}
 
     async def bulk_upsert(
         self,
