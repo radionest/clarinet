@@ -47,8 +47,13 @@ Async SQLAlchemy cannot lazy-load, so a missed `selectinload()` surfaces as
   load relationships. Pass `options=[selectinload(Model.rel)]` when the caller
   will touch a relationship afterwards, or re-fetch through a `get()` that
   already eager-loads.
-- Updating an M2M set: delete existing links → `flush()` → add new link objects →
-  `commit()` → re-fetch the parent with `selectinload`.
+- Updating an M2M set goes through the loaded collection: `parent.links = []` →
+  `flush()` (the `delete-orphan` cascade deletes the rows) → `parent.links.append(link)`
+  per new link → `commit()` → re-fetch the parent with `selectinload`. Never
+  `session.delete()` / `session.add()` the links directly: the deleted objects stay
+  in the collection, and their remove events — through pydantic's value-based
+  `__eq__` on link models — strip the freshly added links from it (#567; details
+  in `clarinet/repositories/CLAUDE.md`).
 - For aggregates, batch-fetch instead of looping:
   `select(RecordType).where(RecordType.name.in_(names))` → build a dict.
 

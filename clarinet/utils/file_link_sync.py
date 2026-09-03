@@ -25,8 +25,20 @@ async def sync_file_links(
 
     Upserts ``FileDefinition`` rows and creates ``RecordTypeFileLink`` entries.
 
+    Links are removed and added through ``record_type.file_links`` only — never
+    via ``session.delete()`` / ``session.add()`` on the link. The relationship
+    carries ``delete-orphan``, so the collection is the source of truth: a link
+    dropped from it is deleted at the next flush, one appended is inserted with
+    its parent set. Deleting the rows directly left the deleted links inside
+    the loaded collection; assigning the new list then fired a remove event per
+    stale link, whose backref cascade ran ``list.remove()`` against the *new*
+    collection — and pydantic's value-based ``__eq__`` on ``RecordTypeFileLink``
+    matched the freshly inserted link with the same columns, dropping it. The
+    DB was right while ``record_type.file_links`` (hence every response served
+    from the identity map) came back empty (#567).
+
     Args:
-        record_type: RecordType to sync links for.
+        record_type: RecordType to sync links for; ``file_links`` must be loaded.
         file_defs: File definitions to link.
         fd_repo: Repository for upserting FileDefinitions.
         session: Database session.
@@ -36,8 +48,9 @@ async def sync_file_links(
         List of newly created ``RecordTypeFileLink`` instances.
     """
     if clear_existing:
-        for link in list(record_type.file_links or []):
-            await session.delete(link)
+        # Orphaned links are deleted by this flush; the later INSERT of a link
+        # with the same (record_type_name, file_definition_id) needs them gone.
+        record_type.file_links = []
         await session.flush()
 
     if not file_defs:
@@ -59,9 +72,8 @@ async def sync_file_links(
             required=fd.required,
             allow_path_collision=fd.allow_path_collision,
         )
-        session.add(link)
+        record_type.file_links.append(link)
         new_links.append(link)
 
     await session.flush()
-    record_type.file_links = new_links
     return new_links

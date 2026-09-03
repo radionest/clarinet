@@ -266,6 +266,86 @@ class TestUpdateRecordType:
         # Original slicer_script_args should still be present
         assert data["slicer_script_args"] == {"arg1": "val1"}
 
+    @pytest.mark.asyncio
+    async def test_update_file_registry_returns_synced_files(
+        self, client: AsyncClient, auth_headers, test_session
+    ):
+        """PATCH with a file_registry answers with the files it just synced (#567).
+
+        Regression: after ``sync_file_links(clear_existing=True)`` the in-memory
+        ``file_links`` collection was empty, and the final ``repo.get`` served
+        that same identity-mapped object, so the response carried
+        ``"file_registry": []`` while the DB held the correct rows.
+        """
+        seg_input = {
+            "name": "seg_input",
+            "pattern": "seg_{id}.nrrd",
+            "role": "input",
+            "required": True,
+            "multiple": False,
+        }
+        mask_output = {
+            "name": "mask_output",
+            "pattern": "mask_{id}.nrrd",
+            "role": "output",
+            "required": True,
+            "multiple": False,
+        }
+        report_output = {
+            "name": "report_output",
+            "pattern": "report_{id}.json",
+            "role": "output",
+            "required": False,
+            "multiple": False,
+        }
+        response = await client.post(
+            f"{BASE}/types",
+            json={
+                "name": "registry-patch-type",
+                "level": "SERIES",
+                "file_registry": [seg_input, mask_output],
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "seg_input",
+            "mask_output",
+        }
+
+        # The reported case: the same registry sent back unchanged.
+        response = await client.patch(
+            f"{BASE}/types/registry-patch-type",
+            json={"file_registry": [seg_input, mask_output]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "seg_input",
+            "mask_output",
+        }
+
+        # A changed registry: one file dropped, one added.
+        response = await client.patch(
+            f"{BASE}/types/registry-patch-type",
+            json={"file_registry": [mask_output, report_output]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "mask_output",
+            "report_output",
+        }
+
+        # The response must match what a fresh read sees.
+        test_session.expire_all()
+        response = await client.get(f"{BASE}/types/registry-patch-type", headers=auth_headers)
+        assert response.status_code == 200
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "mask_output",
+            "report_output",
+        }
+
 
 class TestUiSchemaField:
     """Tests for the ui_schema field on RecordType (formosh presentation hints)."""
