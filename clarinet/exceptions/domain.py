@@ -512,9 +512,13 @@ class UnsafePathError(ConfigurationError):
     ``Files``; the one built-in hydrator does not, so this is unverified
     in this repo — same status as the handler's ``RecordFlowEngine.fire``
     residual. The raw value lives only on ``exc.value`` (``exc.metadata()``
-    is a thin, currently-unused wrapper around it); the 422 submit path's
-    response detail reads ``exc.value`` directly and deliberately, since
-    the submitter produced it — no log statement reads either.
+    is a thin, currently-unused wrapper around it), and **nothing reads it**
+    — not a log statement, and not the 422 response detail either. It was
+    briefly echoed to the submitter on the grounds that they had produced
+    it; with ``{data.*}`` banned they had not, since the only fields a file
+    pattern can still interpolate are stored identity fields that
+    ``api/masking.py`` withholds from a non-superuser (see
+    ``record_service._render_output_path``).
     """
 
     def __init__(self, message: str, *, value: str | None = None) -> None:

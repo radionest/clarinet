@@ -305,7 +305,8 @@ class TestRecordServiceTriggers:
                 await service._sync_output_files(record_mock)
 
         assert exc_info.value.status_code == 422
-        assert "../../etc" in exc_info.value.detail
+        assert "boom" in exc_info.value.detail  # str(exc): the reason, not the value
+        assert "../../etc" not in exc_info.value.detail  # exc.value is never echoed
         repo_mock.update_checksums.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1490,8 +1491,8 @@ class TestMissingOutputLinks:
         assert _missing_output_links(record, {}) == {}
 
     def test_unsafe_placeholder_value_returns_422(self) -> None:
-        """A user's own bad data yields a 422, not a 500 — the one place an
-        UnsafePathError becomes an HTTPException is the record-submit path.
+        """An unsafely-rendering OUTPUT pattern yields a 422, not a 500 — the one
+        place an UnsafePathError becomes an HTTPException is the record-submit path.
         {patient_id} is used (not {data.*}) because FileDefinitionRead's own
         pattern validator now rejects {data.*} patterns at construction time;
         the duck-typed stub still lets patient_id carry an unsafe value the
@@ -1509,9 +1510,29 @@ class TestMissingOutputLinks:
             _missing_output_links(record, {"seg": "abc123"})
 
         assert exc_info.value.status_code == 422
-        # The submitter is the only audience for the raw value — it belongs in
-        # the 422 body (never in a log; see the warning test below).
-        assert "SECRET_MRN_VALUE" in exc_info.value.detail
+        assert "seg" in exc_info.value.detail  # the file definition is named
+
+    def test_unsafe_placeholder_value_422_omits_the_value(self) -> None:
+        """The 422 body must not echo the offending value back to the caller.
+
+        The echo was justified on the grounds that the submitter produced the
+        value. With {data.*} banned they did not: the only fields a pattern can
+        still interpolate are *stored* identity fields — patient_id, study_uid,
+        series_uid — which api/masking.py withholds from a non-superuser when
+        the patient is anonymized, while the render runs against the raw value.
+        This helper also serves check-files, where nothing was submitted at all.
+        """
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+            id=7,
+            patient_id="SECRET_MRN_VALUE/../escape",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            _missing_output_links(record, {"seg": "abc123"})
+
+        assert "SECRET_MRN_VALUE" not in exc_info.value.detail
 
     def test_unsafe_placeholder_value_warning_omits_the_value(self, captured_records) -> None:
         """record.data may carry PHI — the WARNING must name the record and the

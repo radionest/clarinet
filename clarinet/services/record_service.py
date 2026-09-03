@@ -80,15 +80,21 @@ def _render_output_path(
     Shared by the pre-submit validation pass (``RecordService._validate_output_paths``,
     run before the submission is persisted) and the post-scan reconciliation
     (``_missing_output_links``, run after) — both need the identical PHI-safe
-    shape: the WARNING logs ``str(exc)`` (placeholder key + reason, never the
-    value); the raw value reaches the API caller, via ``exc.value`` in the
-    422 body.
+    shape: neither the WARNING nor the 422 body carries ``exc.value``. The log
+    gets ``str(exc)`` (placeholder key + reason, never the value); the caller
+    gets the file definition's name, which is what they can actually act on.
 
-    Two reasons that last part is NOT "only the submitter": this helper also
-    runs from check-files, where nothing was submitted, and with ``{data.*}``
-    banned ``exc.value`` holds a *stored* identity field rather than anything
-    the caller supplied. Whether the 422 should echo it at all is an open
-    question on this branch — see the PR description.
+    The value is withheld rather than echoed because the caller did not
+    necessarily produce it. With ``{data.*}`` banned, ``fields_from``
+    (``files/_patterns.py``) can only supply *stored* identity fields —
+    ``patient_id``, ``study_uid``, ``series_uid`` — and ``api/masking.py``
+    withholds those from a non-superuser once the patient is anonymized, while
+    the render here runs against the raw value. This helper also serves
+    check-files, where nothing was submitted at all. Today the guard only trips
+    on a degenerate value (``PATIENT_ID_REGEX`` admits ``.`` and ``..`` and
+    nothing else that could escape), so echoing it disclosed nothing in
+    practice — but #552 relaxing the pattern grammar would turn that into a
+    live disclosure with no test standing against it.
 
     Raises a *fresh* ``CustomHTTPException`` rather than the shared
     ``UNPROCESSABLE_ENTITY`` singleton — that singleton's ``.with_context()``
@@ -107,10 +113,7 @@ def _render_output_path(
             # Endpoint-neutral wording on purpose: this helper also runs from
             # check-files, where nothing was submitted, so "from the submitted
             # data" would be a lie there.
-            detail=(
-                f"File '{fd.name}' cannot be safely resolved for this record: "
-                f"{exc} (offending value: {exc.value!r})"
-            ),
+            detail=(f"File '{fd.name}' cannot be safely resolved for this record: {exc}"),
         ) from exc
 
 
@@ -1403,10 +1406,8 @@ class RecordService:
             logger.warning(f"unsafe output path rejected for record {record.id}: {exc}")
             raise CustomHTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=(
-                    f"Output files cannot be safely resolved for this record: "
-                    f"{exc} (offending value: {exc.value!r})"
-                ),
+                # No exc.value here either — same reasoning as _render_output_path.
+                detail=f"Output files cannot be safely resolved for this record: {exc}",
             ) from exc
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
