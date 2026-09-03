@@ -204,15 +204,21 @@ class RecordTypeService:
         merged: list[FileDefinitionRead] = []
         for fd in file_defs:
             row = stored.get(fd.name)
-            inherited = (
-                {
-                    name: getattr(row, name)
-                    for name in FILE_DEFINITION_FIELDS
-                    if name not in fd.model_fields_set
-                }
-                if row is not None
-                else {}
-            )
+            if row is None:
+                merged.append(fd)
+                continue
+            inherited = {
+                name: getattr(row, name)
+                for name in FILE_DEFINITION_FIELDS
+                if name not in fd.model_fields_set
+            }
+            # An action only means something next to a reference. When the
+            # merged reference is None — the entry removes it explicitly, or
+            # the row never had one — a stored action must not ride along, or
+            # the merged entry fails validation as an action without a
+            # reference (a request the API accepted before the merge existed).
+            if inherited.get("grid_conform_to", fd.grid_conform_to) is None:
+                inherited.pop("on_grid_mismatch", None)
             merged.append(fd.model_copy(update=inherited) if inherited else fd)
         return merged
 

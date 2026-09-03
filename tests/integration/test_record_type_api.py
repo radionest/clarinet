@@ -559,7 +559,7 @@ class TestSharedFileDefinitions:
         shared_volume, which this type does not bind."""
         payload = {"name": "guarded-c", "level": "SERIES", "file_registry": [_SEG_PARTIAL]}
         response = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
-        assert response.status_code in (409, 422)
+        assert response.status_code == 409
         assert "shared_volume" in response.text
 
         missing = await client.get(f"{RECORD_TYPES}/guarded-c", headers=auth_headers)
@@ -607,7 +607,7 @@ class TestSharedFileDefinitions:
             json={"file_registry": [_SEG_PARTIAL]},
             headers=auth_headers,
         )
-        assert response.status_code in (409, 422)
+        assert response.status_code == 409
         assert "shared_volume" in response.text
 
         unchanged = await client.get(f"{RECORD_TYPES}/guarded-b", headers=auth_headers)
@@ -615,3 +615,24 @@ class TestSharedFileDefinitions:
             "shared_volume",
             "shared_seg",
         }
+
+    @pytest.mark.asyncio
+    async def test_patch_explicit_null_reference_removes_the_whole_guard(
+        self, client: AsyncClient, auth_headers, guarded_type, test_session
+    ):
+        """An explicit ``grid_conform_to: null`` drops the guard; the stored
+        ``on_grid_mismatch`` must not be inherited alongside it, or the merged
+        entry is an action without a reference and fails validation."""
+        response = await client.patch(
+            f"{RECORD_TYPES}/{guarded_type}",
+            json={"file_registry": [_VOLUME_PARTIAL, {**_SEG_PARTIAL, "grid_conform_to": None}]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        # The shared test session caches the pre-PATCH link collection of the
+        # patched type (tests/CLAUDE.md, "Identity Map Caching"); reload from DB.
+        test_session.expire_all()
+        seg = await _seg_entry(client, auth_headers, guarded_type)
+        assert seg["grid_conform_to"] is None
+        assert seg["on_grid_mismatch"] is None
