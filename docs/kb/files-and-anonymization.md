@@ -161,7 +161,11 @@ collection configs.
 Two further rules concern placeholder *names*:
 
 - **Unknown placeholders** (`_reject_unknown_placeholders`) — in a
-  non-collection pattern every name must be one `fields_from` can resolve:
+  non-collection pattern every *name-shaped* placeholder must be one
+  `fields_from` can resolve. A brace group the renderer never substitutes —
+  `{1}`, or anything carrying a format spec like `{x:s}` — is not a placeholder
+  as far as `_PLACEHOLDER_RE` is concerned, renders literally, and is
+  unaffected. The names it does check:
   `{id}`, `{parent_id}`, `{user_id}`, `{patient_id}`, `{study_uid}`,
   `{series_uid}`, `{origin_type}`, `{record_type.name}`. The renderer runs
   LENIENT, so an unrecognised name substituted `""` instead of raising: a
@@ -225,8 +229,16 @@ an *enforced* invariant rather than a passive fact. `Files.resolve` raises
 `ValueError` for a `multiple=True` definition instead of rendering it — it used
 to render them, so a legal `{study_uid}/x.dcm` collection resolved to `/x.dcm`
 on a patient-level record and 500'd out of `build_slicer_context`, which
-catches `(KeyError, ValueError)` and so could not see an `UnsafePathError`. One
-violation is still open: `FileValidator.validate` renders collections too
+catches `(KeyError, ValueError)` and so could not see an `UnsafePathError`.
+
+That guard is a contract check, not a recovery point. Consumers must skip
+collections *before* reaching it, because `build_slicer_context`'s `unresolved`
+list is not a fallback — a non-empty one raises `ScriptArgumentError` (422), so
+routing collections into it would fail the Slicer endpoint for every record
+type that declares one. The registry loop therefore filters on `multiple`;
+`Files.exists` branches to `glob`; `RecordQuery.file_path` converts the
+`ValueError` into a `PipelineStepError` so a worker failure stays classified.
+One violation is still open: `FileValidator.validate` renders collections too
 (issue #562). Any new consumer of a pattern must branch on `multiple` the way
 `Files.checksums` does. The
 literal-text rules and the `{data.*}` ban still apply to collections, because

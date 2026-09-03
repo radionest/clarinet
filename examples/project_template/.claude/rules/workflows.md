@@ -102,8 +102,8 @@ Which fields are populated depends on the DSL trigger: `record("X").on_finished(
 #### `ctx.files` — `Files`
 
 ```python
-ctx.files.resolve(file_def) -> Path        # absolute path to the file
-ctx.files.exists(file_def) -> bool         # does the file exist
+ctx.files.resolve(file_def) -> Path        # absolute path; ValueError for a collection
+ctx.files.exists(file_def) -> bool         # does it exist (globs when multiple=True)
 ctx.files.glob(file_def) -> list[Path]     # all files in a glob collection (multiple=True)
 ctx.files.dir() -> Path                    # the record's working folder (at its own level)
 ```

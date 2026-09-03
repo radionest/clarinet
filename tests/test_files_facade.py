@@ -258,11 +258,14 @@ class TestPathSafety:
         collection pattern a request-time failure: `{study_uid}/x.dcm` on a
         patient-level record renders to "/x.dcm", which join_within refuses.
 
-        The error must be a ValueError, not UnsafePathError: build_slicer_context
-        catches (KeyError, ValueError) and degrades to `unresolved`, while
-        UnsafePathError is deliberately outside that net so a real traversal can
-        never be swallowed. Rendering a collection is a caller mistake, not a
-        traversal.
+        A plain ValueError, not UnsafePathError: asking one path of a collection
+        is a caller mistake, not a traversal, and the two must stay
+        distinguishable — UnsafePathError deliberately sits outside every
+        `except ValueError` net so a real traversal can never be swallowed.
+        Note this does NOT make the caller degrade gracefully:
+        build_slicer_context's `unresolved` list hard-raises
+        ScriptArgumentError, so it filters collections out before calling
+        resolve at all (see tests/test_slicer_context.py).
         """
         from clarinet.files.facade import Files
 
@@ -274,25 +277,36 @@ class TestPathSafety:
         record = _record(monkeypatch, registry=[fd])
         record.study_uid = None  # patient-level record: the placeholder vanishes
 
-        with pytest.raises(ValueError, match="collection"):
+        with pytest.raises(ValueError, match="collection") as exc:
             Files(record).resolve("slices")
+        # Exactly ValueError -- the guard runs before any render or join, so no
+        # UnsafePathError is constructed. (Asserting `not isinstance(...,
+        # UnsafePathError)` inside pytest.raises(ValueError) would be vacuous:
+        # UnsafePathError does not derive from ValueError, so such a raise
+        # could never have been bound here in the first place.)
+        assert type(exc.value) is ValueError
 
-    def test_resolve_refuses_a_collection_before_it_can_raise_unsafe_path(self, monkeypatch):
-        """The collection branch must come first, or the 500 is merely relabelled."""
-        from clarinet.exceptions.domain import UnsafePathError
+    def test_exists_answers_a_collection_by_globbing_it(self, monkeypatch):
+        """`exists` must keep working for a collection, not inherit resolve's raise.
+
+        `exists` is `resolve(...).is_file()`, so the collection guard would have
+        made it raise -- and the shipped task docs
+        (`examples/project_template/.claude/CLAUDE.md`) tell every project to
+        call `ctx.files.exists(output_file_def)`. A collection exists when any
+        member matches, which is what `glob` already answers.
+        """
         from clarinet.files.facade import Files
 
         fd = MagicMock()
         fd.name = "slices"
-        fd.pattern = "{study_uid}/x.dcm"
+        fd.pattern = "slice_{n}.dcm"
         fd.level = None
         fd.multiple = True
         record = _record(monkeypatch, registry=[fd])
-        record.study_uid = None
 
-        with pytest.raises(ValueError) as exc:
-            Files(record).resolve("slices")
-        assert not isinstance(exc.value, UnsafePathError)
+        # The working dir does not exist on disk, so nothing matches -> False,
+        # rather than an exception.
+        assert Files(record).exists("slices") is False
 
     def test_resolve_rejects_absolute_value_caught_by_either_layer(self, monkeypatch):
         # See class docstring: "/etc/passwd" contains "/", so the value

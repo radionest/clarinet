@@ -152,12 +152,17 @@ class Files:
         *legal* pattern into a request-time ``UnsafePathError`` (``/x.dcm`` for
         a patient-level record) and a 500 out of ``build_slicer_context``.
 
-        Deliberately a ``ValueError`` and not an ``UnsafePathError``: callers
-        that walk a whole registry (``build_slicer_context``) catch
-        ``(KeyError, ValueError)`` and degrade to "unresolved", while
-        ``UnsafePathError`` stays outside that net so a genuine traversal can
-        never be swallowed. Asking for one path from a collection is a caller
-        mistake, not a traversal. Use ``glob`` instead.
+        Deliberately a ``ValueError`` and not an ``UnsafePathError``: asking one
+        path of a collection is a caller mistake, and the two must stay
+        distinguishable, since ``UnsafePathError`` sits outside every
+        ``except ValueError`` net so a genuine traversal can never be swallowed.
+
+        This raise is a contract guard, **not** something callers are expected
+        to catch and carry on from. ``build_slicer_context`` does catch
+        ``(KeyError, ValueError)``, but its ``unresolved`` list is not a
+        fallback — a non-empty one raises ``ScriptArgumentError`` (422) — so it
+        filters collections out *before* calling this. Use ``glob`` for a
+        collection; ``exists`` already branches on ``multiple`` for you.
         """
         fd = self._lookup(file_def)
         if fd.multiple:
@@ -177,7 +182,18 @@ class Files:
         return path
 
     def exists(self, file_def: FileDefArg, **overrides: Any) -> bool:
-        return self.resolve(file_def, **overrides).is_file()
+        """True when the definition has at least one file on disk.
+
+        Branches on ``multiple`` rather than inheriting ``resolve``'s refusal:
+        a collection exists when any member matches, and the shipped task
+        pattern (``examples/project_template/.claude/CLAUDE.md``) tells every
+        project to call ``ctx.files.exists(output_file_def)`` — including for
+        collections, which would otherwise raise here.
+        """
+        fd = self._lookup(file_def)
+        if fd.multiple:
+            return bool(self.glob(fd))
+        return self.resolve(fd, **overrides).is_file()
 
     def glob(self, file_def: FileDefArg) -> list[Path]:
         fd = self._lookup(file_def)

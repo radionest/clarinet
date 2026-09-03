@@ -185,8 +185,10 @@ class Settings(BaseSettings):
         """Validate the 3-segment disk path template.
 
         Delegates to ``clarinet.files._template.validate_template`` —
-        a stdlib-only helper that the migration CLI also uses, so
-        settings-time and runtime-supplied templates share rules.
+        the same helper the migration CLI uses, so settings-time and
+        runtime-supplied templates share rules. Imported from the private leaf
+        rather than the package, since it is not among the six names
+        ``clarinet.files`` re-exports.
         """
         from clarinet.files._template import validate_template
 

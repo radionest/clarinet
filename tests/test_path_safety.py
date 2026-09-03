@@ -308,12 +308,16 @@ class TestRejectsVanishingPlaceholderShapes:
 
     @pytest.mark.parametrize("pattern", VANISHING_PLACEHOLDER_PATTERNS)
     def test_collection_patterns_are_exempt(self, pattern):
-        """A collection globs, it never renders.
+        """A collection is meant to be globbed, not rendered.
 
         ``glob_file_paths`` substitutes every placeholder with ``*``, so
         ``{parent_id}.nrrd`` becomes ``*.nrrd`` — a legitimate collection
         pattern, not a degenerate name. Applying the rule to collections
         aborted startup for configs that work fine.
+
+        "Meant to be", not "never is": the invariant is enforced by consumers
+        (``Files.resolve`` refuses one, the Slicer context loop skips them),
+        and ``FileValidator.validate`` still violates it — issue #562.
         """
         assert validate_file_pattern(pattern, is_collection=True) == pattern
 

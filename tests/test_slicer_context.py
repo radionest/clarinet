@@ -326,6 +326,71 @@ def test_file_paths_from_registry(mock_settings):
 
 
 @patch("clarinet.services.slicer.context.settings")
+def test_collection_definition_does_not_break_the_context(mock_settings):
+    """A record type declaring a collection must still open in Slicer.
+
+    ``unresolved`` is not a degradation list -- a non-empty one raises
+    ``ScriptArgumentError``, which surfaces as 422. So anything the registry
+    loop cannot resolve fails the whole endpoint, and a collection has no
+    single path to resolve by design. Collections are skipped from this
+    single-path layer (their value was never meaningful: the pattern rendered
+    with every placeholder blanked, e.g. "slice_.dcm") rather than being
+    allowed to fail it.
+    """
+    singular_fd = FileDefinitionRead(
+        name="segmentation_single",
+        pattern="segmentation_single_{user_id}.seg.nrrd",
+        role=FileRole.OUTPUT,
+    )
+    collection_fd = FileDefinitionRead(
+        name="slices",
+        pattern="slice_{n}.dcm",
+        role=FileRole.INPUT,
+        multiple=True,
+    )
+    mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(
+        level=DicomQueryLevel.STUDY,
+        file_registry=[collection_fd, singular_fd],
+    )
+
+    ctx = build_slicer_context(record)
+
+    assert "slices" not in ctx  # no single path exists for a collection
+    assert ctx["segmentation_single"].endswith(f"segmentation_single_{TEST_USER_ID}.seg.nrrd")
+
+
+@patch("clarinet.services.slicer.context.settings")
+def test_vanishing_collection_pattern_does_not_break_the_context(mock_settings):
+    """The shape that caused the original 500, via the same skip.
+
+    ``{study_uid}/x.dcm`` is legal for a collection (collections are exempt
+    from the config-load render rules), but on a patient-level record it
+    renders to "/x.dcm", which join_within refuses with UnsafePathError --
+    which this loop's ``except (KeyError, ValueError)`` cannot catch.
+    """
+    collection_fd = FileDefinitionRead(
+        name="frames",
+        pattern="{study_uid}/x.dcm",
+        role=FileRole.INPUT,
+        multiple=True,
+    )
+    mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(
+        level=DicomQueryLevel.PATIENT,
+        file_registry=[collection_fd],
+    )
+
+    ctx = build_slicer_context(record)
+
+    assert "frames" not in ctx
+
+
+@patch("clarinet.services.slicer.context.settings")
 def test_output_file_alias(mock_settings):
     """First OUTPUT file → output_file convenience alias."""
     mock_settings.storage_path = "/storage"

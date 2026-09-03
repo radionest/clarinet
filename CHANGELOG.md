@@ -242,8 +242,11 @@
   change; those are never absent. **Collections (`multiple=True`) are exempt** —
   their placeholders are replaced with `*` and globbed rather than rendered, so
   `{parent_id}.nrrd` globs to `*.nrrd` and stays legal. `Files.resolve` now
-  refuses a collection outright (`ValueError`) instead of rendering one, which
-  is what makes that exemption safe — see Fixed. A *stored* row that violates the rule is
+  refuses a collection outright (`ValueError`) instead of rendering one, and
+  the consumers that walk a whole registry skip collections before reaching it
+  — see Fixed. One renderer of collections remains, `FileValidator.validate`
+  (issue #562), so the exemption is enforced rather than absolute. A *stored*
+  row that violates the rule is
   skipped from `RecordType.file_registry` with a WARNING rather than being
   fatal (see Security below).
 - **A file pattern may only use placeholders the renderer knows.** Every
@@ -303,7 +306,9 @@
   the guard is the remediation.
 - A legacy `FileDefinition.pattern` that fails the path-safety validator is now
   skipped from `RecordType.file_registry` (logged as a WARNING, once per
-  process per definition rather than once per request) instead of nulling the
+  process per record-type/definition/pattern rather than once per request —
+  the pattern is in the key because `sync_file_links` reassigns it in place)
+  instead of nulling the
   entire registry for that record type. **Residual — read this before
   upgrading:** everything that reads `file_registry` simply stops seeing the
   definition, so the affected file loses six behaviours at once, not just the
@@ -454,8 +459,13 @@
   `UnsafePathError`. `build_slicer_context` loops `resolve` over the whole
   registry catching `(KeyError, ValueError)`, and `UnsafePathError` is
   deliberately neither, so `POST /slicer/records/{id}/open` failed uncaught for
-  every user of that record instead of degrading to `unresolved`. It now raises
-  `ValueError` naming the definition and pointing at `Files.glob()`.
+  every user of that record. `Files.resolve` now raises `ValueError` naming the
+  definition and pointing at `Files.glob()`, and — because that list is not a
+  fallback but a hard `ScriptArgumentError` (422) — the Slicer context loop
+  skips collections before reaching it, so a record type declaring one opens
+  normally. `Files.exists` branches to `glob` for a collection, and
+  `RecordQuery.file_path` reports one as `PipelineStepError` rather than
+  letting a bare `ValueError` escape to TaskIQ.
   **Downstream note:** project code that called `ctx.files.resolve(name)` on a
   `multiple=True` definition previously received a meaningless path (every
   placeholder substituted, e.g. `slice_.dcm`) and now gets a `ValueError`. Such

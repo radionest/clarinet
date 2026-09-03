@@ -116,7 +116,10 @@ class RecordQuery:
             Absolute path to the resolved file.
 
         Raises:
-            PipelineStepError: If no record is found.
+            PipelineStepError: If no record is found, if the record type has no
+                such file definition, or if that definition is a collection —
+                which has no single path. Use ``ctx.files.glob(name)`` for a
+                collection instead.
         """
         records = await self.find(
             type_name,
@@ -151,7 +154,14 @@ class RecordQuery:
                 type_name,
                 f"File definition '{file}' not found in record type '{record.record_type.name}'",
             )
-        return f.resolve(fd_map[file])
+        try:
+            return f.resolve(fd_map[file])
+        except ValueError as exc:
+            # A collection reaches here whenever it has no RecordFileLink to
+            # match above. Files.resolve refuses it with a bare ValueError,
+            # which this method's contract does not declare and which would
+            # escape to TaskIQ as an unclassified failure.
+            raise PipelineStepError(type_name, str(exc)) from exc
 
 
 @dataclass

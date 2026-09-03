@@ -43,7 +43,9 @@ Three families:
 
 1. **Literal text** — no absolute prefix, backslash, NUL, `..`, trailing
    separator, dot-leading basename.
-2. **Placeholder names** — every `{name}` must be one the renderer can resolve:
+2. **Placeholder names** — every *name-shaped* `{name}` must be one the renderer
+   can resolve (a brace group the renderer never substitutes, such as `{1}` or
+   `{x:s}`, renders literally and is unaffected):
    `{id}`, `{parent_id}`, `{user_id}`, `{patient_id}`, `{study_uid}`,
    `{series_uid}`, `{origin_type}`, `{record_type.name}`. A typo such as
    `{studyuid}` rendered to `""` under LENIENT and then either failed at the
