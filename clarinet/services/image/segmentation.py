@@ -41,8 +41,8 @@ from clarinet.services.image.correspondence import (
 from clarinet.services.image.correspondence import (
     SymmetricDifference as _SymmetricDifferenceOp,
 )
-from clarinet.services.image.grid import Grid, RelationKind, grid_relation
-from clarinet.services.image.grid_io import read_grid
+from clarinet.services.image.grid import Grid, RelationKind
+from clarinet.services.image.grid_io import classify_pair
 from clarinet.services.image.image import (
     FileType,
     Image,
@@ -751,20 +751,16 @@ def conform_seg_to_grid(
     else:
         raise ImageError(f"Cannot infer format for {target.name}: expected .nrrd, .nii, or .nii.gz")
 
-    seg_grid = read_grid(seg_path)
-    ref_grid = read_grid(grid_path)
-    # Reference-first, matching the documented grid_relation convention (only
-    # .kind is consumed here, and kind is order-symmetric).
-    rel = grid_relation(ref_grid, seg_grid, atol=atol)
+    verdict = classify_pair(seg_path, grid_path, atol=atol)
+    seg_grid, ref_grid = verdict.subject, verdict.reference
 
-    if rel.kind is RelationKind.SAME:
+    if verdict.kind is RelationKind.SAME:
         return False
-    if rel.kind is RelationKind.FOREIGN and not allow_resample:
+    if verdict.kind is RelationKind.FOREIGN and not allow_resample:
         raise GeometryMismatchError(
             f"{seg_path.name} does not occupy the same or a rearranged grid relative "
-            f"to {grid_path.name} (pass allow_resample=True to resample anyway):\n"
-            f"  {seg_path}: {seg_grid.summary()}\n"
-            f"  {grid_path}: {ref_grid.summary()}"
+            f"to {grid_path.name} (pass allow_resample=True to resample anyway):"
+            + verdict.describe(str(seg_path), str(grid_path))
         )
 
     is_layered = _is_layered_nrrd(seg_path)
