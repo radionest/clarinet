@@ -313,8 +313,9 @@ seam inherits the check automatically:
   the check that catches a reference drifting *after* the record already
   passed creation or check-files while sitting `pending`. Unlike every seam
   above, this one raises instead of recording a verdict: a mismatch here
-  raises the domain `ValidationError`, mapped to **422**
-  (`exception_handlers.py:163-172`), not the 409 the OUTPUT guard produces.
+  raises `InputGridMismatchError` (a `ValidationError`), mapped to **422**
+  with `code: GRID_MISMATCH`, not the 409 the OUTPUT guard produces — a
+  plain missing-input 422 stays a bare `ValidationError` with no code.
   Skipped, like the OUTPUT guard, whenever `skip_validation` is true
   (`clarinet/api/routers/record.py:513`) — i.e. for `POST /data?status=failed`.
   `PATCH /data` and `PATCH /submit` never reach this branch at all
@@ -394,7 +395,10 @@ the repaired bytes rather than the pre-repair ones, and file-change triggers
 fire for the mutation. Every 409 raised on a *classified* mismatch carries
 both grids' `summary()` output; the branches that never got a grid to
 classify (a dangling reference, a reference missing from disk, an unreadable
-file) name the file and the reason instead.
+file) name the file and the reason instead. All of them are an
+`OutputGridMismatchError` (a `BusinessRuleViolationError`) whose body carries
+`code: GRID_MISMATCH` — the same code as the INPUT seam's 422, so a client
+branches on the code and lets the status say which side.
 
 One consequence of that scope is worth stating plainly rather than
 discovering by accident: **`PATCH /records/{id}/data` is a metadata-only edit

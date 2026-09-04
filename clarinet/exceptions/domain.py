@@ -47,6 +47,19 @@ class ValidationError(ClarinetError):
     """Raised when data validation fails."""
 
 
+class InputGridMismatchError(ValidationError):
+    """A declared INPUT grid pair failed the submit-time re-validation.
+
+    Still a ``ValidationError`` (422): the record's prerequisites are invalid,
+    exactly as for a missing required input — but it carries ``error_code``
+    so a client can tell a grid problem from a missing file without parsing
+    the detail. Shares the code with :class:`OutputGridMismatchError`; the
+    status says which side.
+    """
+
+    error_code: ClassVar[str] = "GRID_MISMATCH"
+
+
 @dataclass(slots=True)
 class FieldError:
     """Single field-level validation error for structured 422 responses.
@@ -94,6 +107,18 @@ class RecordDataValidationError(ValidationError):
 
 class BusinessRuleViolationError(ClarinetError):
     """Raised when a business rule is violated."""
+
+
+class OutputGridMismatchError(BusinessRuleViolationError):
+    """The OUTPUT grid guard refused a submission (409).
+
+    Raised for every refusal — a classified mismatch, a file deleted per
+    ``on_grid_mismatch``, an unreadable file, a reference missing from disk
+    or unbound — because the client's next step is the same: fix the pair
+    and re-export. Same ``error_code`` as :class:`InputGridMismatchError`.
+    """
+
+    error_code: ClassVar[str] = "GRID_MISMATCH"
 
 
 # User-specific exceptions

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, assert_never
 
-from clarinet.exceptions.domain import BusinessRuleViolationError, ImageError
+from clarinet.exceptions.domain import ImageError, OutputGridMismatchError
 from clarinet.files import Files
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, GridMismatchAction
 from clarinet.models.record import RecordRead
@@ -120,15 +120,18 @@ class OutputPair:
 
 
 def _warn_and_raise(record_id: int, msg: str, *, cause: ImageError | None = None) -> NoReturn:
-    """Log the guard's refusal and turn it into the 409.
+    """Log the guard's refusal and turn it into the 409 (``code: GRID_MISMATCH``).
 
-    Chains ``from cause`` only when one is given: an unconditional
-    ``from None`` would suppress the context a bare raise keeps.
+    Every refusal — a classified mismatch, a deleted file, an unreadable one,
+    a reference missing or unbound — raises the same class, because the
+    client's next step is the same. Chains ``from cause`` only when one is
+    given: an unconditional ``from None`` would suppress the context a bare
+    raise keeps.
     """
     logger.warning(f"Record {record_id}: OUTPUT grid guard — {msg}")
     if cause is None:
-        raise BusinessRuleViolationError(msg)
-    raise BusinessRuleViolationError(msg) from cause
+        raise OutputGridMismatchError(msg)
+    raise OutputGridMismatchError(msg) from cause
 
 
 async def _repair_and_recheck(pair: OutputPair, tmp: Path, record_id: int) -> PairVerdict:
@@ -230,8 +233,8 @@ async def enforce_output_grids(
         to re-sync stored checksums, which ``submit_data`` does on its own.
 
     Raises:
-        BusinessRuleViolationError: When any declared OUTPUT pair cannot be
-            made to conform, or cannot be read (→ 409).
+        OutputGridMismatchError: When any declared OUTPUT pair cannot be
+            made to conform, or cannot be read (→ 409, ``code: GRID_MISMATCH``).
     """
     registry = record.record_type.file_registry or []
     declared = [fd for fd in registry if fd.role == FileRole.OUTPUT and fd.grid_conform_to]

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from clarinet.exceptions.domain import ImageError, ValidationError
+from clarinet.exceptions.domain import ImageError, InputGridMismatchError, ValidationError
 from clarinet.files import Files, join_within
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
@@ -301,7 +301,10 @@ async def validate_record_files(
 
     Args:
         record: RecordRead instance with all relations populated
-        raise_on_invalid: If True, raise ValidationError on missing files.
+        raise_on_invalid: If True, raise ``ValidationError`` on an invalid set —
+            its ``InputGridMismatchError`` subclass (``code: GRID_MISMATCH``)
+            when any error is a grid mismatch, so a client can tell it
+            from a missing file.
         parent: Optional parent record for fallback pattern resolution.
 
     Returns:
@@ -322,5 +325,7 @@ async def validate_record_files(
     )
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
+        if any(e.error_type == "grid_mismatch" for e in result.errors):
+            raise InputGridMismatchError(f"File validation failed: {errors}")
         raise ValidationError(f"File validation failed: {errors}")
     return result

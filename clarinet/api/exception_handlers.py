@@ -70,8 +70,10 @@ def setup_exception_handlers(app: FastAPI) -> None:
         DatabaseError,
         EntityAlreadyExistsError,
         EntityNotFoundError,
+        InputGridMismatchError,
         InvalidCredentialsError,
         InvalidPatientIdentifierError,
+        OutputGridMismatchError,
         PipelineError,
         QuartoNotInstalledError,
         QuartoRenderNotReadyError,
@@ -229,6 +231,24 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": "Validation failed", "errors": errors_payload},
         )
 
+    @app.exception_handler(InputGridMismatchError)
+    async def handle_input_grid_mismatch(
+        request: Request, exc: InputGridMismatchError
+    ) -> JSONResponse:
+        """422 with a machine-readable code for a submit-time INPUT grid mismatch.
+
+        Subclass of ValidationError — shadows the generic handler above, see
+        the ordering note there. Logged at WARNING without a traceback: an
+        expected verdict on the caller's files, not a server fault.
+        """
+        logger.warning(
+            f"422 {InputGridMismatchError.error_code} on {request.method} {request.url.path}: {exc}"
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": str(exc), "code": InputGridMismatchError.error_code},
+        )
+
     @app.exception_handler(RecordLimitReachedError)
     async def handle_record_limit_reached(_: Request, exc: RecordLimitReachedError) -> JSONResponse:
         """Convert RecordLimitReachedError to 409 with machine-readable code."""
@@ -303,6 +323,18 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc) if str(exc) else "Business rule violation"},
+        )
+
+    @app.exception_handler(OutputGridMismatchError)
+    async def handle_output_grid_mismatch(_: Request, exc: OutputGridMismatchError) -> JSONResponse:
+        """409 with a machine-readable code for an OUTPUT grid-guard refusal.
+
+        The guard logs the refusal at WARNING before raising, so nothing is
+        logged here.
+        """
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": OutputGridMismatchError.error_code},
         )
 
     @app.exception_handler(DatabaseError)

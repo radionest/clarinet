@@ -324,6 +324,13 @@
   nullable columns, `filedefinition.grid_conform_to` and
   `filedefinition.on_grid_mismatch` (both `str`, no backfill needed) — the
   framework ships no migrations of its own.
+- Both grid-mismatch rejections carry a machine-readable `code`:
+  `GRID_MISMATCH` on the submit-time INPUT 422 (`InputGridMismatchError`, a
+  `ValidationError` — a plain missing-input 422 stays code-less) and on
+  every OUTPUT-guard 409 (`OutputGridMismatchError`, a
+  `BusinessRuleViolationError`), so a client branches on the code and lets
+  the status say which side. The INPUT 422 is logged at `WARNING` without a
+  traceback, like the 409s, instead of `ERROR` with one.
 
 ### Security
 

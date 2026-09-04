@@ -292,6 +292,56 @@ async def test_reject_409_includes_both_grid_summaries(
     assert read_grid(volume_path).summary() in detail
 
 
+async def test_output_grid_refusal_carries_a_machine_readable_code(
+    client, test_session, series_dir, make_record
+):
+    """The 409 body carries ``code: GRID_MISMATCH`` so a client can branch on
+    it — the frontend's structured-error path fires on any 4xx body with a
+    ``code`` — instead of parsing the detail text.
+    """
+    _write(series_dir / "volume.nii")
+    _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    record = await make_record(on_grid_mismatch="reject")
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "GRID_MISMATCH"
+
+
+async def test_input_grid_mismatch_at_submit_carries_the_same_code(
+    client, test_session, series_dir, make_record
+):
+    """An INPUT pair that drifted while the record sat pending is caught by the
+    submit-time re-validation as a 422, not by the OUTPUT guard's 409 — the
+    same ``code`` on both lets a client handle them uniformly.
+    """
+    _write(series_dir / "volume.nii")
+    _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    record = await make_record(on_grid_mismatch=None, seg_role=FileRole.INPUT)
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "GRID_MISMATCH"
+
+
+async def test_missing_input_422_carries_no_grid_code(
+    client, test_session, series_dir, make_record
+):
+    """A plain missing required input is not a grid problem: its 422 keeps the
+    bare ``{"detail"}`` shape, so a client branching on the code never
+    mistakes it for a mismatch.
+    """
+    _write(series_dir / "volume.nii")
+    record = await make_record(on_grid_mismatch=None, extra_required_input="report")
+
+    response = await client.post(record_submit_url(record.id), json={})
+
+    assert response.status_code == 422
+    assert "code" not in response.json()
+
+
 async def test_failed_conform_repair_read_preserves_original_bytes(
     client, test_session, series_dir, make_record, monkeypatch
 ):
