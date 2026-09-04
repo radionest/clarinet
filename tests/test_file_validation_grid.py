@@ -97,9 +97,9 @@ def test_no_declaration_reads_no_grid(tmp_path, monkeypatch):
     _write(tmp_path / "seg.nii")
 
     def _boom(*a, **kw):
-        raise AssertionError("read_grid must not be called without a declaration")
+        raise AssertionError("classify_pair must not be called without a declaration")
 
-    monkeypatch.setattr("clarinet.services.file_validation.read_grid", _boom)
+    monkeypatch.setattr("clarinet.services.file_validation.classify_pair", _boom)
     result = FileValidator(_defs()).validate(_Rec(), tmp_path)
     assert result.valid, result.errors
 

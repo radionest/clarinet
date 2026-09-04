@@ -15,8 +15,8 @@ from clarinet.exceptions.domain import ImageError, ValidationError
 from clarinet.files import Files, join_within
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
-from clarinet.services.image.grid import RelationKind, grid_relation
-from clarinet.services.image.grid_io import read_grid
+from clarinet.services.image.grid import RelationKind
+from clarinet.services.image.grid_io import classify_pair
 
 if TYPE_CHECKING:
     from clarinet.models.file_schema import FileDefinitionRead
@@ -168,8 +168,7 @@ class FileValidator:
             )
 
         try:
-            subject_grid = read_grid(subject)
-            reference_grid = read_grid(reference)
+            verdict = classify_pair(subject, reference)
         except ImageError as e:
             return FileValidationError(
                 file_name=file_def.name,
@@ -177,17 +176,14 @@ class FileValidator:
                 message=f"Cannot read grid for '{file_def.name}' or its reference: {e}",
             )
 
-        relation = grid_relation(reference_grid, subject_grid)
-        if relation.kind is RelationKind.SAME:
+        if verdict.kind is RelationKind.SAME:
             return None
         return FileValidationError(
             file_name=file_def.name,
             error_type="grid_mismatch",
             message=(
                 f"'{file_def.name}' does not share '{ref_def.name}'s grid "
-                f"({relation.kind.value}):\n"
-                f"  {file_def.name}: {subject_grid.summary()}\n"
-                f"  {ref_def.name}: {reference_grid.summary()}"
+                f"({verdict.kind.value}):" + verdict.describe(file_def.name, ref_def.name)
             ),
         )
 
