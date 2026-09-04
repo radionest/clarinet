@@ -303,7 +303,8 @@ seam inherits the check automatically:
   record stays `blocked`; it only auto-unblocks to `pending` once the pair is
   repaired.
 - `POST /records/{id}/validate-files` — the mismatch is reported in the
-  response; nothing is mutated.
+  response; nothing is mutated. The same endpoint previews the OUTPUT
+  pairs too — see the OUTPUT seam below.
 - The `preparing → pending` status transition
   (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
   of `pending`.
@@ -409,6 +410,18 @@ changes nothing but JSON data. This is an accepted, deliberate hazard, not a
 bug to "fix" by exempting `PATCH /data` — doing so would reopen the exact
 fail-open hole the four-endpoint scope exists to close. See
 [Adoption order](#adoption-order) below before reaching for `delete`.
+
+**Preview without side effects.** `POST /records/{id}/validate-files`
+(`report_record_files`, `clarinet/services/file_validation.py`) classifies
+the same declared OUTPUT pairs the guard would, for every OUTPUT present on
+disk, and reports each mismatch as a `grid_mismatch` error with the declared
+`on_grid_mismatch` quoted — a client learns about a coming 409 before it
+submits. It never repairs or deletes: the action is quoted, not applied. It
+is also the only non-submission seam that looks at OUTPUT grids at all.
+`check-files` stays INPUT-only by design: its verdict is the prerequisite
+one that drives the `blocked` auto-unblock, and an OUTPUT verdict inside the
+shared `validate_record_files` would 422 a submission before `conform` got
+to repair.
 
 ### What is not guarded
 

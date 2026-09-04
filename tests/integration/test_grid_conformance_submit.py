@@ -38,7 +38,7 @@ from tests.integration.test_grid_conformance_input import (
 )
 from tests.utils.test_helpers import Z_FLIP as _Z_FLIP
 from tests.utils.test_helpers import write_grid_image as _write
-from tests.utils.urls import record_data_url, record_submit_url
+from tests.utils.urls import record_data_url, record_submit_url, record_validate_files_url
 
 # (action, mismatch kind, expected status, file must survive, file must be repaired)
 _ACTION_MATRIX = [
@@ -497,6 +497,50 @@ async def test_unreadable_output_is_a_conflict_not_a_500(
 
     response = await client.post(record_submit_url(record.id), json={})
     assert response.status_code == 409
+
+
+# ===========================================================================
+# Read-only preview: POST /records/{id}/validate-files reports OUTPUT pairs
+# ===========================================================================
+
+
+async def test_validate_files_reports_output_mismatch_without_mutating(
+    client, test_session, series_dir, make_record
+):
+    """validate-files is the read-only preview of the submit guard: it names
+    the OUTPUT pair and quotes the declared action, and touches nothing —
+    even with ``delete`` declared, which a submit would carry out.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    before = seg_path.read_bytes()
+    record = await make_record(on_grid_mismatch="delete")
+
+    response = await client.post(record_validate_files_url(record.id))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is False
+    [error] = [e for e in body["errors"] if e["file_name"] == "seg"]
+    assert error["error_type"] == "grid_mismatch"
+    assert "on_grid_mismatch=delete" in error["message"]
+    assert seg_path.read_bytes() == before
+
+
+async def test_validate_files_does_not_report_an_absent_output(
+    client, test_session, series_dir, make_record
+):
+    """An OUTPUT not written yet is not "missing" — the submit guard skips it
+    too — so the report stays valid.
+    """
+    _write(series_dir / "volume.nii")
+    record = await make_record(on_grid_mismatch="reject")
+
+    response = await client.post(record_validate_files_url(record.id))
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    assert response.json()["errors"] == []
 
 
 # ===========================================================================

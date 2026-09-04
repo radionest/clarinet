@@ -329,3 +329,51 @@ async def validate_record_files(
             raise InputGridMismatchError(f"File validation failed: {errors}")
         raise ValidationError(f"File validation failed: {errors}")
     return result
+
+
+async def report_record_files(
+    record: RecordRead, *, parent: RecordRead | None = None
+) -> FileValidationResult:
+    """The read-only report behind ``POST /records/{id}/validate-files``.
+
+    INPUT verdicts exactly as :func:`validate_record_files` gives them, plus
+    the classification of every declared OUTPUT pair present on disk with its
+    ``on_grid_mismatch`` quoted in the message — a preview of what the submit
+    guard will see, so a client learns about a coming 409 before it submits.
+    Nothing is repaired or deleted here: the action is quoted, not applied.
+
+    Deliberately not folded into ``validate_record_files``: that verdict
+    drives creation-time blocking, the check-files auto-unblock and the
+    submit-time 422, where an OUTPUT verdict would pre-empt ``conform``'s
+    repair.
+    """
+    result = await validate_record_files(record, parent=parent)
+    if result is None:
+        result = FileValidationResult(valid=True)
+    registry = record.record_type.file_registry or []
+    # An OUTPUT not written yet is not "missing" — the guard skips it too.
+    output_defs = [
+        fd.model_copy(update={"required": False})
+        for fd in registry
+        if fd.role == FileRole.OUTPUT and fd.grid_conform_to
+    ]
+    if not output_defs:
+        return result
+
+    f = Files.for_reader(record)
+    validator = FileValidator(output_defs, registry=registry)
+    outputs = cast(
+        FileValidationResult,
+        await Files.in_thread(validator.validate, record, f.dir(), f.dirs(), parent),
+    )
+    actions = {fd.name: fd.on_grid_mismatch or "reject" for fd in output_defs}
+    for error in outputs.errors:
+        result.errors.append(
+            FileValidationError(
+                file_name=error.file_name,
+                error_type=error.error_type,
+                message=f"{error.message} (on_grid_mismatch={actions[error.file_name]})",
+            )
+        )
+    result.valid = not result.errors
+    return result

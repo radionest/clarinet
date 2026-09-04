@@ -71,7 +71,7 @@ you add a resolver call, pick the side first.
 | Strict, and lets it propagate | the writer `AnonymizationService._save_series_to_disk`; `ctx.files` in pipeline tasks |
 | Strict, but catches `AnonPathError` to degrade | `DicomWebCache` (`services/dicomweb/cache.py`) and `prefetch_dicom_web` (`services/pipeline/tasks/cache_dicomweb.py`) — the cache simply misses; `clarinet anon migrate-paths` (`cli/anon.py`) logs, counts the failure and moves to the next record |
 | `Files(record, fallback=True)` | `build_slicer_context` (`services/slicer/context.py`) — Slicer is the UI layer and must open in-flight records |
-| `Files.for_reader(record)` | `validate_record_files` (`services/file_validation.py`); `RecordService.check_files` and its checksum collection (`services/record_service.py`) |
+| `Files.for_reader(record)` | `validate_record_files` and `report_record_files` (`services/file_validation.py`); `RecordService.check_files` and its checksum collection (`services/record_service.py`) |
 
 `Files.for_reader()` is itself implemented as "try strict, catch, rebuild with
 `fallback=True`" (`files/facade.py`), so it is itself the fourth catch site.

@@ -80,7 +80,11 @@ from clarinet.models import (
     User,
 )
 from clarinet.repositories.record_repository import RecordSearchCriteria
-from clarinet.services.file_validation import FileValidationResult, validate_record_files
+from clarinet.services.file_validation import (
+    FileValidationResult,
+    report_record_files,
+    validate_record_files,
+)
 from clarinet.services.grid_policy import enforce_output_grids
 from clarinet.services.record_service import ensure_record_editable
 from clarinet.services.schema_hydration import hydrate_schema
@@ -943,10 +947,11 @@ async def validate_files_endpoint(
     record: AuthorizedRecordDep,
     repo: RecordRepositoryDep,
 ) -> FileValidationResult:
-    """Validate input files for a record without saving the result.
+    """Read-only file report for a record: nothing is saved, repaired or deleted.
 
-    This endpoint checks if the required input files exist in the record's
-    working folder without modifying the record.
+    INPUT files are validated as at creation/check-files; every declared
+    OUTPUT grid pair present on disk is classified too, with its
+    ``on_grid_mismatch`` quoted — a preview of what a submit would 409 on.
 
     Args:
         record_id: ID of the record to validate files for
@@ -959,11 +964,7 @@ async def validate_files_endpoint(
     if record.parent_record_id is not None:
         parent = await repo.get_with_relations(record.parent_record_id)
         parent_read = RecordRead.model_validate(parent)
-    result = await validate_record_files(record_read, parent=parent_read)
-    if result is None:
-        return FileValidationResult(valid=True)
-
-    return result
+    return await report_record_files(record_read, parent=parent_read)
 
 
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)
