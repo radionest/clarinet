@@ -591,6 +591,37 @@ class TestSharedFileDefinitions:
         assert seg["on_grid_mismatch"] == "reject"
 
     @pytest.mark.asyncio
+    async def test_patch_explicit_change_to_a_shared_row_is_logged(
+        self, client: AsyncClient, auth_headers, guarded_type, caplog
+    ):
+        """An explicit value through one binder still rewrites the shared row
+        for every other binder — the merge fills only omitted fields — so the
+        write must at least leave a trace naming the file, the field and the
+        other binders, and not the type that made the change."""
+        caplog.set_level("WARNING")
+        payload = {
+            "name": "guarded-b",
+            "level": "SERIES",
+            "file_registry": [_VOLUME_FULL, _SEG_FULL],
+        }
+        created = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+        assert created.status_code == 201
+
+        response = await client.patch(
+            f"{RECORD_TYPES}/guarded-b",
+            json={"file_registry": [_VOLUME_FULL, {**_SEG_FULL, "on_grid_mismatch": "conform"}]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        traces = [m for m in caplog.messages if "shared_seg" in m]
+        assert len(traces) == 1, traces
+        message = traces[0]
+        assert "on_grid_mismatch" in message
+        assert "guarded-a" in message
+        assert "guarded-b" not in message
+
+    @pytest.mark.asyncio
     async def test_patch_dropping_reference_of_guarded_file_rejected(
         self, client: AsyncClient, auth_headers, guarded_type
     ):

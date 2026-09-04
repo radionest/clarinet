@@ -130,9 +130,11 @@ omits from the stored row (`RecordTypeService._merge_with_stored`) and
 validate the merged entries, so one type cannot silently clear another's
 guard, and a type that binds a guarded file without its reference gets a
 409. An *explicit* change through one type still rewrites the shared row for
-every binder and, in TOML mode, re-exports only the edited type; the next
-startup then rejects the disagreement until the other types' TOML files match
-(re-validating and re-exporting sibling types is a follow-up). Only INPUT and
+every binder — logged as a `WARNING` naming the file, the changed fields and
+the other binders (`FileDefinitionRepository.get_or_create`) — and, in TOML
+mode, re-exports only the edited type; the next startup then rejects the
+disagreement until the other types' TOML files match (re-validating and
+re-exporting sibling types is #564). Only INPUT and
 OUTPUT bindings are enforced at runtime; an INTERMEDIATE file may still declare
 `grid_conform_to` (config load applies no role filter) but nothing ever
 checks it — a silent no-op, not a rejection. INPUT mismatches are never

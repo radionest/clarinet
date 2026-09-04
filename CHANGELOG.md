@@ -652,9 +652,10 @@
   partial entry from one type can no longer null another type's declaration,
   and a type binding a guarded file without its reference is rejected with a
   409 instead of blocking its records at runtime. An explicit change through
-  one type still rewrites the shared row for every binder; in TOML mode only
-  the edited type is re-exported, so the next startup rejects the
-  disagreement until the other types' TOML files match (follow-up:
+  one type still rewrites the shared row for every binder — now logged as a
+  `WARNING` naming the file, the changed fields and the other binders; in
+  TOML mode only the edited type is re-exported, so the next startup rejects
+  the disagreement until the other types' TOML files match (follow-up: #564,
   re-validate and re-export sibling types).
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
