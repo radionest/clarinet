@@ -243,8 +243,9 @@ mutation, for every declaration that reaches the validator. Not all of them
 do: `RecordTypeCreate.file_registry` defaults to `None`, and some call sites
 attach file links separately, so a dangling `grid_conform_to` can still
 arrive at runtime, where both enforcement paths fail closed instead —
-`enforce_output_grids` with a 409 (`grid_policy.py:233-242`), `FileValidator`
-with a `grid_mismatch` error (`file_validation.py:130-138`). Naming the
+`enforce_output_grids` with a 409 (the unbound-reference branch of
+`_resolve_pair`, `grid_policy.py:159-168`), `FileValidator` with a
+`grid_mismatch` error (`file_validation.py:148-158`). Naming the
 RecordType and the declaring file, it rejects:
 
 1. a reference name not bound to *this* RecordType — an unknown name and a
@@ -288,8 +289,8 @@ filters to `FileRole.INPUT`). It is a silent no-op, not a rejected
 declaration.
 
 **INPUT.** `FileValidator.validate`
-(`clarinet/services/file_validation.py:172`) classifies every declared pair
-with `classify_pair` (`file_validation.py:153`) and, on anything but `SAME`,
+(`clarinet/services/file_validation.py:191`) classifies every declared pair
+with `classify_pair` (`file_validation.py:172`) and, on anything but `SAME`,
 emits a `FileValidationError(error_type="grid_mismatch")` — the same error
 shape as a plain missing file. `on_grid_mismatch` is never consulted here.
 Because `validate_record_files` is the single entry point, every existing
@@ -309,7 +310,7 @@ seam inherits the check automatically:
   (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
   of `pending`.
 - `POST /records/{id}/data` and `POST /records/{id}/submit`
-  (`_process_submission`, `clarinet/api/routers/record.py:568-573`) re-validate
+  (`_process_submission`, `clarinet/api/routers/record.py:603-608`) re-validate
   with `raise_on_invalid=True` immediately before the submission is persisted —
   the check that catches a reference drifting *after* the record already
   passed creation or check-files while sitting `pending`. Unlike every seam
@@ -318,26 +319,26 @@ seam inherits the check automatically:
   with `code: GRID_MISMATCH`, not the 409 the OUTPUT guard produces — a
   plain missing-input 422 stays a bare `ValidationError` with no code.
   Skipped, like the OUTPUT guard, whenever `skip_validation` is true
-  (`clarinet/api/routers/record.py:513`) — i.e. for `POST /data?status=failed`.
+  (`clarinet/api/routers/record.py:548`) — i.e. for `POST /data?status=failed`.
   `PATCH /data` and `PATCH /submit` never reach this branch at all
   (`is_update=True` skips it) — they never re-check INPUT files here.
 
 Like the OUTPUT existence rule below, the grid check itself runs only when
-the *subject* file matched on disk (`file_validation.py:205-212`) — a
+the *subject* file matched on disk (`file_validation.py:257-261`) — a
 missing subject falls through to the ordinary missing-file handling
 instead, never a grid check. It is **not** conditional on the reference's
 existence: a subject present while its reference is missing is itself a
-`grid_mismatch` error, not a skip (`file_validation.py:141-150`) — the same
+`grid_mismatch` error, not a skip (`file_validation.py:161-169`) — the same
 asymmetry as OUTPUT, just landing on `blocked`/422 instead of a 409.
 
-**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:196`)
+**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:291`)
 runs pre-commit inside `_process_submission`, after any
 `slicer_result_validator` has written its output and before the record data
 is written — the last point in the submit flow that can still reject (the
 post-commit output-checksum sync never raises, so it cannot serve as a
 guard). For every declared OUTPUT pair it classifies the relation, probes
 whether the subject `is_conform_repairable`, and hands both to `decide()`
-(`grid_policy.py:53`) — the pure function this table transcribes; `_apply`
+(`grid_policy.py:55`) — the pure function this table transcribes; `_apply`
 then carries the verdict out on disk:
 
 | `on_grid_mismatch` | `REARRANGED` | `FOREIGN` |
@@ -413,7 +414,7 @@ fail-open hole the four-endpoint scope exists to close. See
 
 **Preview without side effects.** `POST /records/{id}/validate-files`
 (`report_record_files`, `clarinet/services/file_validation.py`) dry-runs the
-guard through `preview_output_grids` (`grid_policy.py`): the same pairs are
+guard through `preview_output_grids` (`grid_policy.py:364`): the same pairs are
 resolved and classified and the same `decide()` table is consulted, but
 nothing is carried out. A pair the guard would repair (`conform` on an
 exactly-repairable `REARRANGED` subject) passes here as it does there; a
