@@ -1,5 +1,5 @@
 """Tests for clarinet.services.image.grid (Grid + grid_relation) and
-clarinet.services.image.grid_io (read_grid / assert_same_grid_on_disk)."""
+clarinet.services.image.grid_io (read_grid / classify_pair / assert_same_grid_on_disk)."""
 
 import itertools
 from pathlib import Path
@@ -11,7 +11,7 @@ import pytest
 from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
 from clarinet.services.image import FileType, Image, LayeredSegmentation
 from clarinet.services.image.grid import Grid, GridRelation, RelationKind, grid_relation
-from clarinet.services.image.grid_io import assert_same_grid_on_disk, read_grid
+from clarinet.services.image.grid_io import assert_same_grid_on_disk, classify_pair, read_grid
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -509,6 +509,72 @@ class TestReadGrid:
 
         with pytest.raises(ImageReadError):
             read_grid(path)
+
+
+class TestClassifyPair:
+    def test_matching_pair_across_formats_is_same(self, tmp_path: Path) -> None:
+        img = Image()
+        img.spacing = (0.5, 0.6, 0.7)
+        img.origin = (1.0, -2.5, 3.25)
+        img.direction = _OBLIQUE_DIRECTION
+        img.img = np.zeros((10, 9, 8), dtype=np.uint8)
+        nifti_path = img.save_as(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        nrrd_path = img.save_as(tmp_path / "vol.nrrd", FileType.NRRD)
+
+        assert classify_pair(nrrd_path, nifti_path).kind is RelationKind.SAME
+
+    def test_subject_and_reference_grids_are_not_swapped(self, tmp_path: Path) -> None:
+        """Distinct shapes make a swap detectable; a FOREIGN verdict still carries both grids."""
+        subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, shape=(4, 5, 6))
+        reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI, shape=(7, 8, 9))
+
+        verdict = classify_pair(subject, reference)
+
+        assert verdict.kind is RelationKind.FOREIGN
+        assert verdict.subject.shape == (4, 5, 6)
+        assert verdict.reference.shape == (7, 8, 9)
+
+    def test_relation_is_computed_reference_first(self, tmp_path: Path) -> None:
+        """perm/flips describe the subject relative to the reference, never the reverse.
+
+        This is the invariant the four hand-rolled copies had already started to
+        disagree on: one of them passed its first positional argument as `a`.
+        """
+        reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        subject = _write_volume(
+            tmp_path / "seg.nrrd", FileType.NRRD, origin=(0.0, 0.0, 9.0), direction=_Z_FLIP
+        )
+
+        verdict = classify_pair(subject, reference)
+
+        assert verdict.kind is RelationKind.REARRANGED
+        assert verdict.relation == grid_relation(read_grid(reference), read_grid(subject))
+        assert verdict.relation.perm == (0, 1, 2)
+        assert verdict.relation.flips == (False, False, True)
+
+    def test_describe_lists_subject_before_reference(self, tmp_path: Path) -> None:
+        subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, shape=(4, 5, 6))
+        reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI, shape=(7, 8, 9))
+
+        tail = classify_pair(subject, reference).describe("seg", "volume")
+
+        assert tail == (
+            f"\n  seg: {read_grid(subject).summary()}\n  volume: {read_grid(reference).summary()}"
+        )
+
+    def test_atol_is_forwarded(self, tmp_path: Path) -> None:
+        """A rotation small enough to hide under a loosened atol still classifies.
+
+        Disk-level counterpart of test_atol_controls_linear_part_tolerance; the
+        ~1.7e-5 sine term survives both the NRRD and the NIfTI round-trip.
+        """
+        reference = _write_volume(tmp_path / "vol.nrrd", FileType.NRRD)
+        subject = _write_volume(
+            tmp_path / "seg.nrrd", FileType.NRRD, direction=_rotation_matrix(0.0, 0.0, 0.001)
+        )
+
+        assert classify_pair(subject, reference, atol=1e-8).kind is RelationKind.FOREIGN
+        assert classify_pair(subject, reference, atol=1e-3).kind is RelationKind.SAME
 
 
 class TestAssertSameGridOnDisk:
