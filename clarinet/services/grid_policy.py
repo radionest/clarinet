@@ -21,8 +21,8 @@ from clarinet.exceptions.domain import BusinessRuleViolationError, ImageError
 from clarinet.files import Files
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, GridMismatchAction
 from clarinet.models.record import RecordRead
-from clarinet.services.image.grid import Grid, GridRelation, RelationKind, grid_relation
-from clarinet.services.image.grid_io import read_grid
+from clarinet.services.image.grid import RelationKind
+from clarinet.services.image.grid_io import PairVerdict, classify_pair
 from clarinet.services.image.segmentation import conform_seg_to_grid, is_conform_repairable
 from clarinet.utils.logger import logger
 
@@ -80,13 +80,6 @@ def decide(action: GridMismatchAction | None, kind: RelationKind, *, repairable:
             assert_never(kind)
 
 
-def _relate(subject: Path, reference: Path) -> tuple[GridRelation, Grid, Grid]:
-    """Classify *subject* against *reference*, returning both grids for diagnostics."""
-    reference_grid = read_grid(reference)
-    subject_grid = read_grid(subject)
-    return grid_relation(reference_grid, subject_grid), reference_grid, subject_grid
-
-
 def _repair_tmp_path(subject: Path) -> Path:
     """Hidden sibling temp target for a conform repair.
 
@@ -112,10 +105,6 @@ def _delete(subject: Path) -> None:
     subject.unlink(missing_ok=True)
 
 
-def _summaries(subject_name: str, subject_grid: Grid, ref_name: str, ref_grid: Grid) -> str:
-    return f"\n  {subject_name}: {subject_grid.summary()}\n  {ref_name}: {ref_grid.summary()}"
-
-
 @dataclass(frozen=True, slots=True)
 class OutputPair:
     """One declared OUTPUT file resolved on disk and classified against its reference."""
@@ -124,9 +113,7 @@ class OutputPair:
     ref_def: FileDefinitionRead
     subject: Path
     reference: Path
-    relation: GridRelation
-    subject_grid: Grid
-    reference_grid: Grid
+    verdict: PairVerdict
 
 
 def _warn_and_raise(record_id: int, msg: str, *, cause: ImageError | None = None) -> NoReturn:
@@ -154,7 +141,7 @@ async def _repair_verified(pair: OutputPair, record_id: int) -> None:
     tmp = _repair_tmp_path(pair.subject)
     try:
         await Files.in_thread(_repair_to_temp, pair.subject, pair.reference)
-        recheck, recheck_ref, recheck_subj = await Files.in_thread(_relate, tmp, pair.reference)
+        recheck = await Files.in_thread(classify_pair, tmp, pair.reference)
     except ImageError as e:
         await Files.in_thread(_delete, tmp)
         _warn_and_raise(
@@ -164,21 +151,20 @@ async def _repair_verified(pair: OutputPair, record_id: int) -> None:
         await Files.in_thread(os.replace, tmp, pair.subject)
         logger.info(
             f"Record {record_id}: conformed output '{fd.name}' onto "
-            f"'{ref_def.name}' grid ({pair.relation.kind.value})"
+            f"'{ref_def.name}' grid ({pair.verdict.kind.value})"
         )
         return
     await Files.in_thread(_delete, tmp)
     _warn_and_raise(
         record_id,
         f"Output '{fd.name}' still does not match '{ref_def.name}' after "
-        f"conforming ({recheck.kind.value})."
-        + _summaries(fd.name, recheck_subj, ref_def.name, recheck_ref),
+        f"conforming ({recheck.kind.value})." + recheck.describe(fd.name, ref_def.name),
     )
 
 
 async def _apply(decision: Decision, pair: OutputPair, record_id: int) -> bool:
     """Carry *decision* out on disk. Returns True when the subject was repaired."""
-    fd, ref_def, kind = pair.fd, pair.ref_def, pair.relation.kind.value
+    fd, ref_def, kind = pair.fd, pair.ref_def, pair.verdict.kind.value
     verdict = decision.verdict
     match verdict:
         case Verdict.PASS:
@@ -193,7 +179,7 @@ async def _apply(decision: Decision, pair: OutputPair, record_id: int) -> bool:
                 f"Output '{fd.name}' did not match '{ref_def.name}'s grid "
                 f"({kind}) and was deleted per on_grid_mismatch="
                 f"delete. Re-run the task to regenerate it."
-                + _summaries(fd.name, pair.subject_grid, ref_def.name, pair.reference_grid),
+                + pair.verdict.describe(fd.name, ref_def.name),
             )
         case Verdict.REJECT:
             because = f" and cannot be conformed: {decision.reason}" if decision.reason else ""
@@ -201,7 +187,7 @@ async def _apply(decision: Decision, pair: OutputPair, record_id: int) -> bool:
                 record_id,
                 f"Output '{fd.name}' does not share '{ref_def.name}'s grid ({kind}){because}. "
                 f"Re-export it conformed to the reference."
-                + _summaries(fd.name, pair.subject_grid, ref_def.name, pair.reference_grid),
+                + pair.verdict.describe(fd.name, ref_def.name),
             )
         case _:
             assert_never(verdict)
@@ -267,10 +253,8 @@ async def enforce_output_grids(
             )
 
         try:
-            relation, reference_grid, subject_grid = await Files.in_thread(
-                _relate, subject, reference
-            )
-            repairable = relation.kind is not RelationKind.SAME and await Files.in_thread(
+            verdict = await Files.in_thread(classify_pair, subject, reference)
+            repairable = verdict.kind is not RelationKind.SAME and await Files.in_thread(
                 is_conform_repairable, subject
             )
         except ImageError as e:
@@ -286,11 +270,9 @@ async def enforce_output_grids(
             ref_def=ref_def,
             subject=subject,
             reference=reference,
-            relation=relation,
-            subject_grid=subject_grid,
-            reference_grid=reference_grid,
+            verdict=verdict,
         )
-        decision = decide(fd.on_grid_mismatch, relation.kind, repairable=repairable)
+        decision = decide(fd.on_grid_mismatch, verdict.kind, repairable=repairable)
         if await _apply(decision, pair, record.id):
             repaired.append(fd.name)
 
