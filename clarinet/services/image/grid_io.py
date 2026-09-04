@@ -61,10 +61,11 @@ class PairVerdict:
     reference, so a repair step can trust their direction without re-deriving it.
 
     ``eq``/``hash`` are deliberately left at default object identity
-    (``eq=False``), matching :class:`Grid`: an auto-generated ``__eq__`` would
-    fall back to comparing ``subject``/``reference`` by ``==``, and ``Grid``
-    itself forbids that (numpy raises on the affine's ambiguous truth value).
-    Compare ``.relation`` or ``.kind`` instead.
+    (``eq=False``): :class:`Grid` is itself ``eq=False``, so a generated
+    ``__eq__`` would compare its grids by identity and quietly return
+    ``False`` for two verdicts over the same files; ``eq=False`` refuses
+    the comparison instead of answering it wrongly. Compare ``.relation``
+    or ``.kind`` instead.
     """
 
     relation: GridRelation

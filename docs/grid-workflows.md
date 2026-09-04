@@ -192,7 +192,7 @@ cannot see the mirror at all. It is also fail-open by construction: an unresolve
 reference volume skips the check, and a segmentation loaded from disk carries no
 recorded reference geometry, so the guard returns early either way. **Only a
 disk-level read can catch the mirror** — `assert_same_grid_on_disk`
-(`clarinet/services/image/grid_io.py:101`) server-side, `_read_grid_on_disk`
+(`clarinet/services/image/grid_io.py:108`) server-side, `_read_grid_on_disk`
 (`helper.py:244`) inside Slicer. `_assert_segmentation_matches_volume` remains,
 narrowed, as a best-effort load-time diagnostic (`load_segmentation`) and as the
 correspondence-engine set-ops' own pre-regrid check
@@ -288,7 +288,7 @@ filters to `FileRole.INPUT`). It is a silent no-op, not a rejected
 declaration.
 
 **INPUT.** `FileValidator.validate`
-(`clarinet/services/file_validation.py:176`) classifies every declared pair
+(`clarinet/services/file_validation.py:172`) classifies every declared pair
 with `read_grid` + `grid_relation` and, on anything but `SAME`, emits a
 `FileValidationError(error_type="grid_mismatch")` — the same error shape as a
 plain missing file. `on_grid_mismatch` is never consulted on this path.
@@ -321,7 +321,7 @@ seam inherits the check automatically:
   skips it) — they never re-check INPUT files here.
 
 Like the OUTPUT existence rule below, the grid check itself runs only when
-the *subject* file matched on disk (`file_validation.py:209-216`) — a
+the *subject* file matched on disk (`file_validation.py:205-212`) — a
 missing subject falls through to the ordinary missing-file handling
 instead, never a grid check. It is **not** conditional on the reference's
 existence: a subject present while its reference is missing is itself a
@@ -348,7 +348,7 @@ then carries the verdict out on disk:
 \* `conform_seg_to_grid`'s non-layered repair path reads the subject through
 `Segmentation`, which forces a uint8 cast — silently quantizing a wider
 format (an int16/float32 intensity volume, say) if the file isn't already an
-8-bit mask. `is_conform_repairable` (`segmentation.py:797`) is that rule as a
+8-bit mask. `is_conform_repairable` (`segmentation.py:793`) is that rule as a
 header-only probe, and both sides call it: the writer's own guard refuses the
 repair with `ImageError`, and the submit policy asks it *before* deciding, so
 a wider file gets a REJECT verdict whose 409 states the dtype reason instead
@@ -469,8 +469,8 @@ once the painting effort is already spent.
 | `Grid` / `Grid.from_components` | `grid.py:86`, `:132` | You have raw shape/spacing/origin/direction (not a file) and need a value object to classify or summarize | `eq=False` — never `==` two grids |
 | `grid_relation(a, b, *, atol=1e-4)` | `grid.py:191` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
 | `read_grid(path)` | `clarinet/services/image/grid_io.py:21` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
-| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:80` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
-| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:101` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
+| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:87` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
+| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:108` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
 | `Image.same_grid` / `Image.assert_same_grid` | `image.py:384`, `:410` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
 | `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:426`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
@@ -585,7 +585,7 @@ rearrangement (nearest-neighbour resampling lands precisely on voxel centers for
 a signed-permutation transform — no interpolation blur), and `FOREIGN` raises
 `GeometryMismatchError` unless the caller explicitly opts in with
 `allow_resample=True`. The 4-D layered path
-(`_conform_layered_seg`, `segmentation.py:834`) preserves the original NRRD header
+(`_conform_layered_seg`, `segmentation.py:830`) preserves the original NRRD header
 verbatim — every `Segment{i}_Name`/`LabelValue`/`Layer`/`Color` and the layer
 count — deliberately *not* by round-tripping through
 `LayeredSegmentation.from_layers` (`layered_segmentation.py:92`), which forces one
