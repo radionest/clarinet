@@ -4,7 +4,12 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from clarinet.models.file_schema import FileDefinitionRead
 from clarinet.models.record import RecordType
+from clarinet.repositories.file_definition_repository import FileDefinitionRepository
+from clarinet.utils.file_link_sync import sync_file_links
+from tests.utils.factories import make_record_type
+from tests.utils.urls import RECORD_TYPES
 
 # Base URL prefix for record endpoints
 BASE = "/api/records"
@@ -265,6 +270,115 @@ class TestUpdateRecordType:
         assert "field1" in data["data_schema"].get("properties", {})
         # Original slicer_script_args should still be present
         assert data["slicer_script_args"] == {"arg1": "val1"}
+
+    @pytest.mark.asyncio
+    async def test_update_file_registry_returns_synced_files(
+        self, client: AsyncClient, auth_headers, test_session
+    ):
+        """PATCH with a file_registry answers with the files it just synced (#567).
+
+        Regression: after ``sync_file_links(clear_existing=True)`` the in-memory
+        ``file_links`` collection was empty, and the final ``repo.get`` served
+        that same identity-mapped object, so the response carried
+        ``"file_registry": []`` while the DB held the correct rows.
+        """
+        seg_input = {
+            "name": "seg_input",
+            "pattern": "seg_{id}.nrrd",
+            "role": "input",
+            "required": True,
+            "multiple": False,
+        }
+        mask_output = {
+            "name": "mask_output",
+            "pattern": "mask_{id}.nrrd",
+            "role": "output",
+            "required": True,
+            "multiple": False,
+        }
+        report_output = {
+            "name": "report_output",
+            "pattern": "report_{id}.json",
+            "role": "output",
+            "required": False,
+            "multiple": False,
+        }
+        response = await client.post(
+            RECORD_TYPES,
+            json={
+                "name": "registry-patch-type",
+                "level": "SERIES",
+                "file_registry": [seg_input, mask_output],
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "seg_input",
+            "mask_output",
+        }
+
+        # The reported case: the same registry sent back unchanged.
+        response = await client.patch(
+            f"{RECORD_TYPES}/registry-patch-type",
+            json={"file_registry": [seg_input, mask_output]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "seg_input",
+            "mask_output",
+        }
+
+        # A changed registry: one file dropped, one added.
+        response = await client.patch(
+            f"{RECORD_TYPES}/registry-patch-type",
+            json={"file_registry": [mask_output, report_output]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "mask_output",
+            "report_output",
+        }
+
+        # The response must match what a fresh read sees.
+        test_session.expire_all()
+        response = await client.get(f"{RECORD_TYPES}/registry-patch-type", headers=auth_headers)
+        assert response.status_code == 200
+        assert {f["name"] for f in response.json()["file_registry"]} == {
+            "mask_output",
+            "report_output",
+        }
+
+    @pytest.mark.asyncio
+    async def test_sync_file_links_keeps_file_definition_loaded(self, test_session):
+        """Links from ``sync_file_links`` carry the ``FileDefinition`` object, not only its id.
+
+        The identity map holds ``FileDefinition`` rows only weakly, so a link that
+        knows its definition by FK alone lazy-loads it on the next ``file_registry``
+        read — a ``MissingGreenlet`` inside a request. A warm test session masks
+        that; expunging turns the same lazy load into a deterministic
+        ``DetachedInstanceError`` instead (#567 follow-up).
+        """
+        record_type = make_record_type(name="sync-fd-loaded")
+        record_type.file_links = []
+        test_session.add(record_type)
+        await test_session.flush()
+
+        await sync_file_links(
+            record_type,
+            [
+                FileDefinitionRead(name="seg_input", pattern="seg_{id}.nrrd", role="input"),
+                FileDefinitionRead(name="mask_output", pattern="mask_{id}.nrrd", role="output"),
+            ],
+            FileDefinitionRepository(test_session),
+            test_session,
+        )
+        await test_session.commit()
+        test_session.expunge_all()
+
+        assert [fd.name for fd in record_type.file_registry] == ["seg_input", "mask_output"]
 
 
 class TestUiSchemaField:

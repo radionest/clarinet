@@ -25,8 +25,15 @@ async def sync_file_links(
 
     Upserts ``FileDefinition`` rows and creates ``RecordTypeFileLink`` entries.
 
+    Every link change goes through ``record_type.file_links``: the collection is
+    the source of truth, and its ``delete-orphan`` cascade turns a removal into
+    the DELETE at the next flush. Never ``session.delete()`` a link that is still
+    inside the loaded collection — the stale object's remove events strip the
+    freshly added links from it, and the caller reads back ``[]`` (#567;
+    mechanism in ``clarinet/repositories/CLAUDE.md``, "M2M Link Lifecycle").
+
     Args:
-        record_type: RecordType to sync links for.
+        record_type: RecordType to sync links for; ``file_links`` must be loaded.
         file_defs: File definitions to link.
         fd_repo: Repository for upserting FileDefinitions.
         session: Database session.
@@ -36,12 +43,13 @@ async def sync_file_links(
         List of newly created ``RecordTypeFileLink`` instances.
     """
     if clear_existing:
-        for link in list(record_type.file_links or []):
-            await session.delete(link)
+        # Flush the orphan DELETEs on their own: a same-PK delete + insert
+        # inside one flush is "row-switched" into an UPDATE of the old row,
+        # and the point here is a clean DELETE, then a fresh INSERT.
+        record_type.file_links = []
         await session.flush()
 
     if not file_defs:
-        record_type.file_links = []
         return []
 
     # Bulk upsert FileDefinitions
@@ -55,13 +63,13 @@ async def sync_file_links(
         link = RecordTypeFileLink(
             record_type_name=record_type.name,
             file_definition_id=file_def.id,
+            file_definition=file_def,
             role=role,
             required=fd.required,
             allow_path_collision=fd.allow_path_collision,
         )
-        session.add(link)
+        record_type.file_links.append(link)
         new_links.append(link)
 
     await session.flush()
-    record_type.file_links = new_links
     return new_links
