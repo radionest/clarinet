@@ -332,11 +332,13 @@
   the status say which side. The INPUT 422 is logged at `WARNING` without a
   traceback, like the 409s, instead of `ERROR` with one.
 - `POST /records/{id}/validate-files` previews the OUTPUT side of the guard
-  read-only: every declared OUTPUT grid pair present on disk is classified
-  and reported as a `grid_mismatch` error with its `on_grid_mismatch`
-  quoted, so a client learns about a coming 409 before it submits; nothing
-  is repaired or deleted. `check-files` stays INPUT-only by design — its
-  verdict drives the `blocked` auto-unblock.
+  read-only: every declared OUTPUT grid pair present on disk is run through
+  the same `decide()` table, and each pair a submission would reject or
+  delete is reported as a `grid_mismatch` error naming the action and the
+  reason, so a client learns about a coming 409 before it submits; a pair
+  `conform` would repair passes, and nothing is repaired or deleted.
+  `check-files` stays INPUT-only by design — its verdict drives the
+  `blocked` auto-unblock.
 
 ### Security
 

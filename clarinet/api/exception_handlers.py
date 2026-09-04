@@ -156,13 +156,13 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Invalid pagination cursor"},
         )
 
-    # NOTE: ``RecordDataValidationError`` is registered immediately below.
-    # Starlette dispatches handlers by walking the **exception's own MRO** —
-    # ``for cls in type(exc).__mro__: if cls in registered: return ...`` — so
-    # the subclass handler shadows this generic one whenever the exception is
-    # a ``RecordDataValidationError`` instance, regardless of registration
-    # order. Both handlers must remain registered: removing this one would
-    # break legacy ``raise ValidationError("text")`` call sites.
+    # NOTE: two subclasses are registered below — ``RecordDataValidationError``
+    # and ``InputGridMismatchError``. Starlette dispatches handlers by walking
+    # the **exception's own MRO** — ``for cls in type(exc).__mro__: if cls in
+    # registered: return ...`` — so a subclass handler shadows this generic one
+    # whenever the exception is an instance of it, regardless of registration
+    # order. All three must remain registered: removing this one would break
+    # legacy ``raise ValidationError("text")`` call sites.
     @app.exception_handler(ValidationError)
     async def handle_validation_error(request: Request, exc: ValidationError) -> JSONResponse:
         """Convert ValidationError to 422 response."""

@@ -15,6 +15,7 @@ from clarinet.exceptions.domain import ImageError, InputGridMismatchError, Valid
 from clarinet.files import Files, join_within
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
+from clarinet.services.grid_policy import preview_output_grids
 from clarinet.services.image.grid import RelationKind
 from clarinet.services.image.grid_io import classify_pair
 
@@ -29,7 +30,7 @@ class FileValidationError:
 
     Attributes:
         file_name: Name of the file definition that failed validation
-        error_type: Type of error ("missing", "pattern_mismatch")
+        error_type: Type of error ("missing", "grid_mismatch")
         message: Human-readable error message
     """
 
@@ -336,11 +337,14 @@ async def report_record_files(
 ) -> FileValidationResult:
     """The read-only report behind ``POST /records/{id}/validate-files``.
 
-    INPUT verdicts exactly as :func:`validate_record_files` gives them, plus
-    the classification of every declared OUTPUT pair present on disk with its
-    ``on_grid_mismatch`` quoted in the message — a preview of what the submit
-    guard will see, so a client learns about a coming 409 before it submits.
-    Nothing is repaired or deleted here: the action is quoted, not applied.
+    INPUT verdicts exactly as :func:`validate_record_files` gives them, plus a
+    dry run of the OUTPUT guard (:func:`preview_output_grids`): every declared
+    OUTPUT pair present on disk that a submission would refuse — rejected or
+    deleted per ``on_grid_mismatch`` — is reported as a ``grid_mismatch``
+    error naming the action and, for a reject, the reason, so a client learns
+    about a coming 409 before it submits. A pair the guard would repair
+    (``conform`` on an exactly-repairable subject) passes here as it does
+    there. Nothing is repaired or deleted.
 
     Deliberately not folded into ``validate_record_files``: that verdict
     drives creation-time blocking, the check-files auto-unblock and the
@@ -350,29 +354,10 @@ async def report_record_files(
     result = await validate_record_files(record, parent=parent)
     if result is None:
         result = FileValidationResult(valid=True)
-    registry = record.record_type.file_registry or []
-    # An OUTPUT not written yet is not "missing" — the guard skips it too.
-    output_defs = [
-        fd.model_copy(update={"required": False})
-        for fd in registry
-        if fd.role == FileRole.OUTPUT and fd.grid_conform_to
-    ]
-    if not output_defs:
-        return result
-
-    f = Files.for_reader(record)
-    validator = FileValidator(output_defs, registry=registry)
-    outputs = cast(
-        FileValidationResult,
-        await Files.in_thread(validator.validate, record, f.dir(), f.dirs(), parent),
-    )
-    actions = {fd.name: fd.on_grid_mismatch or "reject" for fd in output_defs}
-    for error in outputs.errors:
+    for entry in await preview_output_grids(record, parent=parent):
         result.errors.append(
             FileValidationError(
-                file_name=error.file_name,
-                error_type=error.error_type,
-                message=f"{error.message} (on_grid_mismatch={actions[error.file_name]})",
+                file_name=entry.file_name, error_type="grid_mismatch", message=entry.message
             )
         )
     result.valid = not result.errors

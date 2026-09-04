@@ -296,8 +296,8 @@ async def test_output_grid_refusal_carries_a_machine_readable_code(
     client, test_session, series_dir, make_record
 ):
     """The 409 body carries ``code: GRID_MISMATCH`` so a client can branch on
-    it — the frontend's structured-error path fires on any 4xx body with a
-    ``code`` — instead of parsing the detail text.
+    it instead of parsing the detail text. (The Gleam client reads ``code`` on
+    its 409 path; its 422 arm does not yet — #573.)
     """
     _write(series_dir / "volume.nii")
     _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
@@ -541,6 +541,46 @@ async def test_validate_files_does_not_report_an_absent_output(
     assert response.status_code == 200
     assert response.json()["valid"] is True
     assert response.json()["errors"] == []
+
+
+async def test_validate_files_does_not_report_a_repairable_conform_pair(
+    client, test_session, series_dir, make_record
+):
+    """A REARRANGED uint8 pair under ``conform`` is repaired at submit and
+    passes (matrix row ``("conform", "rearranged", 200, ...)``), so the preview
+    must not announce a 409 for it: the report follows ``decide()``, not the
+    raw mismatch — and previews without repairing.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    before = seg_path.read_bytes()
+    record = await make_record(on_grid_mismatch="conform")
+
+    response = await client.post(record_validate_files_url(record.id))
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    assert response.json()["errors"] == []
+    assert seg_path.read_bytes() == before
+
+
+async def test_validate_files_reports_an_unrepairable_conform_pair_with_its_reason(
+    client, test_session, series_dir, make_record
+):
+    """``conform`` on a wider-than-8-bit subject is a REJECT at submit; the
+    preview says so and names the dtype rule, as the 409 would.
+    """
+    _write(series_dir / "volume.nii")
+    _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0), dtype=np.int16)
+    record = await make_record(on_grid_mismatch="conform")
+
+    response = await client.post(record_validate_files_url(record.id))
+
+    body = response.json()
+    assert body["valid"] is False
+    [error] = [e for e in body["errors"] if e["file_name"] == "seg"]
+    assert "8-bit" in error["message"]
+    assert "on_grid_mismatch=conform" in error["message"]
 
 
 # ===========================================================================

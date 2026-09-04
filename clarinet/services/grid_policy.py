@@ -14,6 +14,7 @@ verdict out.
 import enum
 import os
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, assert_never
@@ -117,6 +118,83 @@ class OutputPair:
     subject: Path
     reference: Path
     verdict: PairVerdict
+    repairable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Unclassifiable:
+    """Why a declared pair could not even be classified.
+
+    The guard turns it into the 409, the preview reports it — same message.
+    """
+
+    message: str
+    cause: ImageError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewEntry:
+    """One declared OUTPUT pair the submit guard would refuse, as the preview reports it."""
+
+    file_name: str
+    message: str
+
+
+def _declared(registry: Sequence[FileDefinitionRead]) -> list[FileDefinitionRead]:
+    """The OUTPUT definitions that declare a grid reference."""
+    return [fd for fd in registry if fd.role == FileRole.OUTPUT and fd.grid_conform_to]
+
+
+async def _resolve_pair(
+    fd: FileDefinitionRead, by_name: Mapping[str, FileDefinitionRead], files: Files
+) -> OutputPair | Unclassifiable | None:
+    """Resolve one declared OUTPUT pair on disk and classify it.
+
+    ``None`` when the subject is absent — conformance is conditional on the
+    declaring file's existence. :class:`Unclassifiable` when the pair cannot
+    be classified at all: the reference is unbound or not on disk, or a grid
+    cannot be read. Shared by :func:`enforce_output_grids` and
+    :func:`preview_output_grids`, so both see exactly the same pairs.
+    """
+    ref_def = by_name.get(fd.grid_conform_to or "")
+    if ref_def is None:
+        # Reachable: RecordTypeCreate.file_registry defaults to None and many
+        # call sites attach file links separately, so validate_grid_conformance
+        # is a documented no-op for those — a dangling grid_conform_to can and
+        # does reach runtime.
+        return Unclassifiable(
+            f"Grid reference '{fd.grid_conform_to}' for '{fd.name}' is not "
+            f"bound to this record type"
+        )
+
+    subject = files.resolve(fd)
+    reference = files.resolve(ref_def)
+    if not await Files.in_thread(subject.is_file):
+        return None
+    if not await Files.in_thread(reference.is_file):
+        return Unclassifiable(
+            f"Grid reference '{ref_def.name}' for output '{fd.name}' is not "
+            f"on disk — cannot verify the output's grid"
+        )
+
+    try:
+        verdict: PairVerdict = await Files.in_thread(classify_pair, subject, reference)
+        repairable = verdict.kind is not RelationKind.SAME and await Files.in_thread(
+            is_conform_repairable, subject
+        )
+    except ImageError as e:
+        return Unclassifiable(
+            f"Cannot read the grid of output '{fd.name}' or its reference '{ref_def.name}': {e}",
+            cause=e,
+        )
+    return OutputPair(
+        fd=fd,
+        ref_def=ref_def,
+        subject=subject,
+        reference=reference,
+        verdict=verdict,
+        repairable=bool(repairable),
+    )
 
 
 def _warn_and_raise(record_id: int, msg: str, *, cause: ImageError | None = None) -> NoReturn:
@@ -237,7 +315,7 @@ async def enforce_output_grids(
             made to conform, or cannot be read (→ 409, ``code: GRID_MISMATCH``).
     """
     registry = record.record_type.file_registry or []
-    declared = [fd for fd in registry if fd.role == FileRole.OUTPUT and fd.grid_conform_to]
+    declared = _declared(registry)
     if not declared:
         return []
 
@@ -246,51 +324,76 @@ async def enforce_output_grids(
     repaired: list[str] = []
 
     for fd in declared:
-        ref_def = by_name.get(fd.grid_conform_to or "")
-        if ref_def is None:
-            # Reachable: RecordTypeCreate.file_registry defaults to None and many
-            # call sites attach file links separately, so validate_grid_conformance
-            # is a documented no-op for those — a dangling grid_conform_to can and
-            # does reach runtime.
-            _warn_and_raise(
-                record.id,
-                f"Grid reference '{fd.grid_conform_to}' for '{fd.name}' is not "
-                f"bound to this record type",
-            )
-
-        subject = files.resolve(fd)
-        reference = files.resolve(ref_def)
-        if not await Files.in_thread(subject.is_file):
+        pair = await _resolve_pair(fd, by_name, files)
+        if pair is None:
             continue  # conformance is conditional on existence
-        if not await Files.in_thread(reference.is_file):
-            _warn_and_raise(
-                record.id,
-                f"Grid reference '{ref_def.name}' for output '{fd.name}' is not "
-                f"on disk — cannot verify the output's grid",
-            )
-
-        try:
-            verdict = await Files.in_thread(classify_pair, subject, reference)
-            repairable = verdict.kind is not RelationKind.SAME and await Files.in_thread(
-                is_conform_repairable, subject
-            )
-        except ImageError as e:
-            _warn_and_raise(
-                record.id,
-                f"Cannot read the grid of output '{fd.name}' or its reference "
-                f"'{ref_def.name}': {e}",
-                cause=e,
-            )
-
-        pair = OutputPair(
-            fd=fd,
-            ref_def=ref_def,
-            subject=subject,
-            reference=reference,
-            verdict=verdict,
-        )
-        decision = decide(fd.on_grid_mismatch, verdict.kind, repairable=repairable)
+        if isinstance(pair, Unclassifiable):
+            _warn_and_raise(record.id, pair.message, cause=pair.cause)
+        decision = decide(fd.on_grid_mismatch, pair.verdict.kind, repairable=pair.repairable)
         if await _apply(decision, pair, record.id):
             repaired.append(fd.name)
 
     return repaired
+
+
+def _preview_message(decision: Decision, pair: OutputPair) -> str | None:
+    """The preview's wording for a verdict the guard would refuse; None for PASS and REPAIR."""
+    fd, ref_def, kind = pair.fd, pair.ref_def, pair.verdict.kind.value
+    action = fd.on_grid_mismatch or "reject"
+    outcome = decision.verdict
+    match outcome:
+        case Verdict.PASS | Verdict.REPAIR:
+            return None
+        case Verdict.DELETE:
+            return (
+                f"Output '{fd.name}' does not share '{ref_def.name}'s grid ({kind}); "
+                f"on_grid_mismatch={action} deletes it at submission (409)."
+                + pair.verdict.describe(fd.name, ref_def.name)
+            )
+        case Verdict.REJECT:
+            because = f" and cannot be conformed: {decision.reason}" if decision.reason else ""
+            return (
+                f"Output '{fd.name}' does not share '{ref_def.name}'s grid ({kind}){because}; "
+                f"on_grid_mismatch={action} rejects the submission (409)."
+                + pair.verdict.describe(fd.name, ref_def.name)
+            )
+        case _:
+            assert_never(outcome)
+
+
+async def preview_output_grids(
+    record: RecordRead, *, parent: RecordRead | None = None
+) -> list[PreviewEntry]:
+    """Dry run of :func:`enforce_output_grids`: what it would refuse, touching nothing.
+
+    Resolves and classifies the same pairs and consults the same
+    :func:`decide` table, but carries nothing out. A pair the guard would
+    repair (``conform`` on an exactly-repairable REARRANGED subject) passes
+    here as it does there; a pair it would reject or delete is reported with
+    the declared action and, for a reject, the reason; a pair that cannot be
+    classified — unbound or missing reference, unreadable grid — is reported
+    with the message its 409 would carry. Backs the read-only
+    ``validate-files`` report (``report_record_files``).
+    """
+    registry = record.record_type.file_registry or []
+    declared = _declared(registry)
+    if not declared:
+        return []
+
+    by_name = {fd.name: fd for fd in registry}
+    files = Files.for_reader(record, parent=parent)
+    entries: list[PreviewEntry] = []
+
+    for fd in declared:
+        pair = await _resolve_pair(fd, by_name, files)
+        if pair is None:
+            continue
+        if isinstance(pair, Unclassifiable):
+            entries.append(PreviewEntry(fd.name, pair.message))
+            continue
+        decision = decide(fd.on_grid_mismatch, pair.verdict.kind, repairable=pair.repairable)
+        message = _preview_message(decision, pair)
+        if message is not None:
+            entries.append(PreviewEntry(fd.name, message))
+
+    return entries

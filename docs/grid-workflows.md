@@ -412,12 +412,15 @@ fail-open hole the four-endpoint scope exists to close. See
 [Adoption order](#adoption-order) below before reaching for `delete`.
 
 **Preview without side effects.** `POST /records/{id}/validate-files`
-(`report_record_files`, `clarinet/services/file_validation.py`) classifies
-the same declared OUTPUT pairs the guard would, for every OUTPUT present on
-disk, and reports each mismatch as a `grid_mismatch` error with the declared
-`on_grid_mismatch` quoted — a client learns about a coming 409 before it
-submits. It never repairs or deletes: the action is quoted, not applied. It
-is also the only non-submission seam that looks at OUTPUT grids at all.
+(`report_record_files`, `clarinet/services/file_validation.py`) dry-runs the
+guard through `preview_output_grids` (`grid_policy.py`): the same pairs are
+resolved and classified and the same `decide()` table is consulted, but
+nothing is carried out. A pair the guard would repair (`conform` on an
+exactly-repairable `REARRANGED` subject) passes here as it does there; a
+pair it would reject or delete is reported as a `grid_mismatch` error naming
+the action and, for a reject, the reason — so a client learns about a coming
+409 before it submits. It is also the only non-submission seam that looks at
+OUTPUT grids at all.
 `check-files` stays INPUT-only by design: its verdict is the prerequisite
 one that drives the `blocked` auto-unblock, and an OUTPUT verdict inside the
 shared `validate_record_files` would 422 a submission before `conform` got
