@@ -1,5 +1,9 @@
 # Update Log
 
+## 2026-09-04
+
+* **Update**: [Files and anonymization](./files-and-anonymization.md) — `report_record_files` joins `validate_record_files` as a `Files.for_reader` caller: it backs the read-only `validate-files` report, which now also classifies every declared OUTPUT grid pair present on disk without repairing or deleting anything.
+
 ## 2026-09-03
 
 * **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — the fail-fast contract now lists the cross-type shared-file check: two record types declaring the same file with different row-level fields abort reconcile before any DB write, because the `FileDefinition` row is shared by every type binding it.
