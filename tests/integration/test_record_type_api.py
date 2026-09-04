@@ -4,7 +4,11 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from clarinet.models.file_schema import FileDefinitionRead
 from clarinet.models.record import RecordType
+from clarinet.repositories.file_definition_repository import FileDefinitionRepository
+from clarinet.utils.file_link_sync import sync_file_links
+from tests.utils.factories import make_record_type
 from tests.utils.urls import RECORD_TYPES
 
 # Base URL prefix for record endpoints
@@ -346,6 +350,35 @@ class TestUpdateRecordType:
             "mask_output",
             "report_output",
         }
+
+    @pytest.mark.asyncio
+    async def test_sync_file_links_keeps_file_definition_loaded(self, test_session):
+        """Links from ``sync_file_links`` carry the ``FileDefinition`` object, not only its id.
+
+        The identity map holds ``FileDefinition`` rows only weakly, so a link that
+        knows its definition by FK alone lazy-loads it on the next ``file_registry``
+        read — a ``MissingGreenlet`` inside a request. A warm test session masks
+        that; expunging turns the same lazy load into a deterministic
+        ``DetachedInstanceError`` instead (#567 follow-up).
+        """
+        record_type = make_record_type(name="sync-fd-loaded")
+        record_type.file_links = []
+        test_session.add(record_type)
+        await test_session.flush()
+
+        await sync_file_links(
+            record_type,
+            [
+                FileDefinitionRead(name="seg_input", pattern="seg_{id}.nrrd", role="input"),
+                FileDefinitionRead(name="mask_output", pattern="mask_{id}.nrrd", role="output"),
+            ],
+            FileDefinitionRepository(test_session),
+            test_session,
+        )
+        await test_session.commit()
+        test_session.expunge_all()
+
+        assert [fd.name for fd in record_type.file_registry] == ["seg_input", "mask_output"]
 
 
 class TestUiSchemaField:
