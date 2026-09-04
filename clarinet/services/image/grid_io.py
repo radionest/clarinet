@@ -51,7 +51,7 @@ def read_grid(path: Path | str) -> Grid:
     return Grid.from_components(shape, img.spacing, img.origin, img.direction)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class PairVerdict:
     """How a subject file's on-disk grid relates to its reference's, both grids kept.
 
@@ -59,6 +59,12 @@ class PairVerdict:
     the :func:`grid_relation` argument order and the ``atol`` of every on-disk
     pair comparison. ``relation.perm``/``flips`` are always subject-relative-to-
     reference, so a repair step can trust their direction without re-deriving it.
+
+    ``eq``/``hash`` are deliberately left at default object identity
+    (``eq=False``), matching :class:`Grid`: an auto-generated ``__eq__`` would
+    fall back to comparing ``subject``/``reference`` by ``==``, and ``Grid``
+    itself forbids that (numpy raises on the affine's ambiguous truth value).
+    Compare ``.relation`` or ``.kind`` instead.
     """
 
     relation: GridRelation

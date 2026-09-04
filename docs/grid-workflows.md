@@ -243,7 +243,7 @@ mutation, for every declaration that reaches the validator. Not all of them
 do: `RecordTypeCreate.file_registry` defaults to `None`, and some call sites
 attach file links separately, so a dangling `grid_conform_to` can still
 arrive at runtime, where both enforcement paths fail closed instead —
-`enforce_output_grids` with a 409 (`grid_policy.py:247-256`), `FileValidator`
+`enforce_output_grids` with a 409 (`grid_policy.py:233-242`), `FileValidator`
 with a `grid_mismatch` error (`file_validation.py:130-138`). Naming the
 RecordType and the declaring file, it rejects:
 
@@ -328,7 +328,7 @@ existence: a subject present while its reference is missing is itself a
 `grid_mismatch` error, not a skip (`file_validation.py:141-150`) — the same
 asymmetry as OUTPUT, just landing on `blocked`/422 instead of a 409.
 
-**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:210`)
+**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:196`)
 runs pre-commit inside `_process_submission`, after any
 `slicer_result_validator` has written its output and before the record data
 is written — the last point in the submit flow that can still reject (the

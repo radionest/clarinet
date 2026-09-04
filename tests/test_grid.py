@@ -610,9 +610,11 @@ class TestAssertSameGridOnDisk:
         with pytest.raises(GeometryMismatchError) as exc_info:
             assert_same_grid_on_disk(vol_path, seg_path)
 
-        message = str(exc_info.value)
-        assert read_grid(vol_path).summary() in message
-        assert read_grid(seg_path).summary() in message
+        assert str(exc_info.value) == (
+            "Files do not occupy the same physical grid:"
+            f"\n  {vol_path}: {read_grid(vol_path).summary()}"
+            f"\n  {seg_path}: {read_grid(seg_path).summary()}"
+        )
 
     def test_disk_assert_catches_mismatch_in_memory_same_grid_cannot_see(
         self, tmp_path: Path
