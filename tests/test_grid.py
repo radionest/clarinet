@@ -541,10 +541,15 @@ class TestClassifyPair:
         disagree on: one of them passed its first positional argument as `a`. The
         fixture must be a relation that is *not* its own inverse — a mirror (its
         own inverse) would pass identically whether or not `classify_pair` swapped
-        the read order, since `grid_relation(reference, subject)` and
-        `grid_relation(subject, reference)` would be byte-equal. A 3-axis cyclic
-        permutation's inverse is a different permutation, so a swapped read order
-        is caught by the final assertion below instead of passing silently.
+        the `grid_relation` argument order, since `grid_relation(reference, subject)`
+        and `grid_relation(subject, reference)` would be byte-equal. A 3-axis cyclic
+        permutation's inverse is a different permutation, so a swapped *argument*
+        order is caught by the final assertion below instead of passing silently.
+
+        Note this pins argument order only, not the disk-open order: both grids are
+        read before `grid_relation` runs, so swapping the two `read_grid` calls
+        leaves every assertion here green. That contract is pinned separately by
+        `test_reference_is_opened_before_the_subject`.
         """
         reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
         cyclic_perm = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
@@ -561,6 +566,27 @@ class TestClassifyPair:
         # (e.g. a plain mirror), this line starts failing.
         assert verdict.relation != grid_relation(read_grid(subject), read_grid(reference))
 
+    def test_reference_is_opened_before_the_subject(self, tmp_path: Path) -> None:
+        """When both files are unreadable, the reference's read error is the one raised.
+
+        `classify_pair` documents this disk-open order in its Raises section, and
+        three call sites (`grid_io.assert_same_grid_on_disk`,
+        `segmentation.conform_seg_to_grid`, `FileValidator._grid_error`) inherit
+        which path a caller sees named in an unreadable-pair error. Nothing else
+        detects a swap of the two `read_grid` calls: every relation-level
+        assertion is computed after both reads have completed.
+        """
+        subject = tmp_path / "seg.nrrd"
+        reference = tmp_path / "vol.nrrd"
+        subject.write_bytes(b"not a volume")
+        reference.write_bytes(b"not a volume")
+
+        with pytest.raises(ImageReadError) as excinfo:
+            classify_pair(subject, reference)
+
+        assert "vol.nrrd" in str(excinfo.value)
+        assert "seg.nrrd" not in str(excinfo.value)
+
     def test_describe_lists_subject_before_reference(self, tmp_path: Path) -> None:
         subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, shape=(4, 5, 6))
         reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI, shape=(7, 8, 9))
@@ -575,7 +601,8 @@ class TestClassifyPair:
         """A rotation small enough to hide under a loosened atol still classifies.
 
         Disk-level counterpart of test_atol_controls_linear_part_tolerance; the
-        ~1.7e-5 sine term survives both the NRRD and the NIfTI round-trip.
+        ~1.7e-5 sine term survives the NRRD round-trip (both fixtures here are
+        NRRD — cross-format survival is covered by TestAssertSameGridOnDisk).
         """
         reference = _write_volume(tmp_path / "vol.nrrd", FileType.NRRD)
         subject = _write_volume(
