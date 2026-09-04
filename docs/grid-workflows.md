@@ -99,7 +99,7 @@ deliberately do not share an implementation — see the
    in-plane basis in DICOM's own IOP order end-to-end — array, spacing, and
    direction move together, with no internal row/column swap
    (`dicom_volume.py:68-86`), verified by a save+`read_grid` round-trip test
-   (`tests/test_image.py:1224`,
+   (`tests/test_image.py:1225`,
    `test_read_dicom_series_roundtrips_through_save_and_read_grid`).
 2. **The slice axis comes from `ImagePositionPatient` (IPP) progression, not
    IOP.** SimpleITK/GDCM can derive an internally-inconsistent slice-axis sign on
@@ -212,7 +212,7 @@ covered yet — see [What is not guarded](#what-is-not-guarded) below.
 
 ### Declaring a pair
 
-Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:88-89`)
+Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:90-91`)
 — a property of the *file*, not of a `RecordTypeFileLink` binding, so every
 RecordType binding that file inherits the declaration, and the reference must
 be bound to that same RecordType:
@@ -220,11 +220,11 @@ be bound to that same RecordType:
 - **`grid_conform_to: str | None`** — the name of another `FileDefinition`
   bound to the same RecordType whose on-disk grid this file must match.
   `None` (the default) disables the check entirely. Python config's `FileDef`
-  (`clarinet/config/primitives.py:65`) accepts either the referenced `FileDef`
+  (`clarinet/config/primitives.py:75`) accepts either the referenced `FileDef`
   object — preferred: a typo becomes a `NameError` at import time, and the
   reference survives a variable rename — or its plain name string; the object
   form is reduced to a name at config-resolution time
-  (`fileref_to_file_definition`, `clarinet/config/primitives.py:229`), since a
+  (`fileref_to_file_definition`, `clarinet/config/primitives.py:285`), since a
   `FileDef`'s own name isn't assigned until after its module imports. TOML
   supplies the name string directly. The DB column always stores the resolved
   name.
@@ -235,7 +235,7 @@ be bound to that same RecordType:
 
 ### Config-load fail-fast
 
-`validate_grid_conformance` (`clarinet/config/grid_conformance.py:36`) runs
+`validate_grid_conformance` (`clarinet/config/grid_conformance.py:38`) runs
 inside the same `RecordTypeCreate` model validator as
 `validate_output_path_uniqueness` — so Python config load, TOML load, and
 RecordType `POST`/`PATCH` reject a broken declaration at the point of the
@@ -289,9 +289,9 @@ declaration.
 
 **INPUT.** `FileValidator.validate`
 (`clarinet/services/file_validation.py:172`) classifies every declared pair
-with `read_grid` + `grid_relation` and, on anything but `SAME`, emits a
-`FileValidationError(error_type="grid_mismatch")` — the same error shape as a
-plain missing file. `on_grid_mismatch` is never consulted on this path.
+with `classify_pair` (`file_validation.py:153`) and, on anything but `SAME`,
+emits a `FileValidationError(error_type="grid_mismatch")` — the same error
+shape as a plain missing file. `on_grid_mismatch` is never consulted here.
 Because `validate_record_files` is the single entry point, every existing
 seam inherits the check automatically:
 
@@ -308,17 +308,17 @@ seam inherits the check automatically:
   (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
   of `pending`.
 - `POST /records/{id}/data` and `POST /records/{id}/submit`
-  (`_process_submission`, `record.py:552-558`) re-validate with
-  `raise_on_invalid=True` immediately before the submission is persisted —
+  (`_process_submission`, `clarinet/api/routers/record.py:568-573`) re-validate
+  with `raise_on_invalid=True` immediately before the submission is persisted —
   the check that catches a reference drifting *after* the record already
   passed creation or check-files while sitting `pending`. Unlike every seam
   above, this one raises instead of recording a verdict: a mismatch here
   raises the domain `ValidationError`, mapped to **422**
   (`exception_handlers.py:163-172`), not the 409 the OUTPUT guard produces.
   Skipped, like the OUTPUT guard, whenever `skip_validation` is true
-  (`record.py:498`) — i.e. for `POST /data?status=failed`. `PATCH /data`
-  and `PATCH /submit` never reach this branch at all (`is_update=True`
-  skips it) — they never re-check INPUT files here.
+  (`clarinet/api/routers/record.py:513`) — i.e. for `POST /data?status=failed`.
+  `PATCH /data` and `PATCH /submit` never reach this branch at all
+  (`is_update=True` skips it) — they never re-check INPUT files here.
 
 Like the OUTPUT existence rule below, the grid check itself runs only when
 the *subject* file matched on disk (`file_validation.py:205-212`) — a
@@ -476,7 +476,7 @@ once the painting effort is already spent.
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
 | `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:524` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
-| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:39,88-89` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
+| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:39,90-91` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
@@ -796,12 +796,12 @@ route through `_read_grid_on_disk` for every grid read.
   including a deliberately negative-dominant-normal series, GDCM's own file sort
   already puts `dot(slice_dir, n) > 0` **before any canonicalization runs at
   all** — see `test_negative_dominant_normal_series_already_canonical`
-  (`tests/test_image.py:853`). This means the epoch's *visible* on-disk change
+  (`tests/test_image.py:854`). This means the epoch's *visible* on-disk change
   for most real series is almost always just the in-plane transpose (dropping
   the row/column swap), not a slice-order reversal; the slice-sense flip
   condition mostly fires for the degenerate-fallback and hand-constructed/
   synthetic cases exercised directly against `_canonicalize_slice_axis`
-  (`tests/test_image.py:1042`,
+  (`tests/test_image.py:1043`,
   `test_canonicalize_negative_dominant_normal_flips_when_old_rule_would_not`).
   This is an empirical characteristic of GDCM's current sort implementation, not
   a documented DICOM or ITK contract — treat it as a debugging heuristic
