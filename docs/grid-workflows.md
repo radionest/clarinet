@@ -192,7 +192,7 @@ cannot see the mirror at all. It is also fail-open by construction: an unresolve
 reference volume skips the check, and a segmentation loaded from disk carries no
 recorded reference geometry, so the guard returns early either way. **Only a
 disk-level read can catch the mirror** — `assert_same_grid_on_disk`
-(`clarinet/services/image/grid_io.py:103`) server-side, `_read_grid_on_disk`
+(`clarinet/services/image/grid_io.py:101`) server-side, `_read_grid_on_disk`
 (`helper.py:244`) inside Slicer. `_assert_segmentation_matches_volume` remains,
 narrowed, as a best-effort load-time diagnostic (`load_segmentation`) and as the
 correspondence-engine set-ops' own pre-regrid check
@@ -470,7 +470,7 @@ once the painting effort is already spent.
 | `grid_relation(a, b, *, atol=1e-4)` | `grid.py:191` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
 | `read_grid(path)` | `clarinet/services/image/grid_io.py:21` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
 | `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:80` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
-| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:103` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
+| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:101` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
 | `Image.same_grid` / `Image.assert_same_grid` | `image.py:384`, `:410` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
 | `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:426`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |

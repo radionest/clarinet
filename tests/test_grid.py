@@ -538,19 +538,28 @@ class TestClassifyPair:
         """perm/flips describe the subject relative to the reference, never the reverse.
 
         This is the invariant the four hand-rolled copies had already started to
-        disagree on: one of them passed its first positional argument as `a`.
+        disagree on: one of them passed its first positional argument as `a`. The
+        fixture must be a relation that is *not* its own inverse — a mirror (its
+        own inverse) would pass identically whether or not `classify_pair` swapped
+        the read order, since `grid_relation(reference, subject)` and
+        `grid_relation(subject, reference)` would be byte-equal. A 3-axis cyclic
+        permutation's inverse is a different permutation, so a swapped read order
+        is caught by the final assertion below instead of passing silently.
         """
         reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
-        subject = _write_volume(
-            tmp_path / "seg.nrrd", FileType.NRRD, origin=(0.0, 0.0, 9.0), direction=_Z_FLIP
-        )
+        cyclic_perm = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
+        subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, direction=cyclic_perm)
 
         verdict = classify_pair(subject, reference)
 
         assert verdict.kind is RelationKind.REARRANGED
         assert verdict.relation == grid_relation(read_grid(reference), read_grid(subject))
-        assert verdict.relation.perm == (0, 1, 2)
-        assert verdict.relation.flips == (False, False, True)
+        assert verdict.relation.perm == (1, 2, 0)
+        assert verdict.relation.flips == (False, False, False)
+        # Asymmetry check: proves the fixture itself can't pass under a swapped
+        # read order — if a future edit swaps the fixture back to an involution
+        # (e.g. a plain mirror), this line starts failing.
+        assert verdict.relation != grid_relation(read_grid(subject), read_grid(reference))
 
     def test_describe_lists_subject_before_reference(self, tmp_path: Path) -> None:
         subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, shape=(4, 5, 6))
