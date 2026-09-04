@@ -89,7 +89,10 @@ result = await session.execute(
 )
 ```
 
-This only affects tests — production endpoints get a fresh session per request.
+Production endpoints get a fresh session per request, but the same rule holds
+*within* one request: a mutation that leaves a loaded collection stale is served
+as-is by a later `repo.get()` in that session — #567 was exactly that (see
+`clarinet/repositories/CLAUDE.md` → "M2M Link Lifecycle").
 
 **Reconciler tests:** calling `reconcile_record_types()` twice in a row (create
 then update) leaves stale cached `FileDefinition` attributes — call

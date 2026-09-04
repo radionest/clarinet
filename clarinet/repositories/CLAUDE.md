@@ -94,12 +94,17 @@ Pattern for updating M2M relationships (e.g. `file_links` on RecordType) —
 reference implementation `clarinet/utils/file_link_sync.py`:
 1. Clear the loaded collection → `parent.links = []` → `session.flush()`. The
    relationship carries `delete-orphan` (SQLModel `Relationship(cascade_delete=True)`
-   = `cascade="all, delete-orphan"`), so the flush deletes the orphaned rows — and
-   they must be gone before a link with the same PK is inserted
+   = `cascade="all, delete-orphan"`), so the flush deletes the orphaned rows.
+   Flush them on their own: a same-PK delete + insert inside one flush is
+   "row-switched" into an UPDATE of the old row
 2. Build new link objects → `parent.links.append(link)` each (save-update cascade
-   adds them to the session with the parent set)
+   adds them to the session with the parent set); pass the related object too
+   (`file_definition=fd`) so the in-memory graph is complete without a lazy load
 3. `session.commit()`
-4. Re-fetch parent with `selectinload` (via `repo.get()` or `update(options=...)`)
+4. Re-fetch parent with `selectinload` (via `repo.get()` or `update(options=...)`).
+   This fills only attributes that are unloaded or expired — a collection the
+   session already holds comes back as-is, which is why steps 1–2 must leave it
+   correct
 
 Never `session.delete(link)` + `session.add(new_link)` around a loaded collection:
 the deleted links stay in the collection, so assigning the new list fires their

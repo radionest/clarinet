@@ -462,9 +462,15 @@
   `__eq__` on link models — knocked the freshly inserted links out of the new
   collection. The rows were right, but the response was served from that same
   identity-mapped object and carried `"file_registry": []` until the next
-  request. Links now go through the relationship itself (`delete-orphan`
-  cascade), so the response lists the files just synced. `POST /types` was
-  never affected (#567).
+  request. In TOML mode the same stale object fed the background
+  `export_record_type_to_toml`, so every such PATCH also rewrote `{name}.toml`
+  without its `[[file_registry]]` tables. Links now go through the relationship
+  itself (`delete-orphan` cascade), so the response and the export list the
+  files just synced. `POST /types` was never affected (#567).
+  **Operator note (TOML mode):** re-save (PATCH) any record type whose
+  registry was edited through the API while this bug was live. The DB links
+  survived restarts — an absent `file_registry` key leaves them untouched — but
+  a fresh bootstrap from those TOML files would create the types without links.
 - **`Files.resolve` no longer renders a collection**, which turned a *legal*
   `multiple=True` pattern into a 500. Collections are exempt from the
   config-load render rules on the grounds that they glob rather than render —

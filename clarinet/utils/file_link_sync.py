@@ -25,17 +25,12 @@ async def sync_file_links(
 
     Upserts ``FileDefinition`` rows and creates ``RecordTypeFileLink`` entries.
 
-    Links are removed and added through ``record_type.file_links`` only — never
-    via ``session.delete()`` / ``session.add()`` on the link. The relationship
-    carries ``delete-orphan``, so the collection is the source of truth: a link
-    dropped from it is deleted at the next flush, one appended is inserted with
-    its parent set. Deleting the rows directly left the deleted links inside
-    the loaded collection; assigning the new list then fired a remove event per
-    stale link, whose backref cascade ran ``list.remove()`` against the *new*
-    collection — and pydantic's value-based ``__eq__`` on ``RecordTypeFileLink``
-    matched the freshly inserted link with the same columns, dropping it. The
-    DB was right while ``record_type.file_links`` (hence every response served
-    from the identity map) came back empty (#567).
+    Every link change goes through ``record_type.file_links``: the collection is
+    the source of truth, and its ``delete-orphan`` cascade turns a removal into
+    the DELETE at the next flush. Never ``session.delete()`` a link that is still
+    inside the loaded collection — the stale object's remove events strip the
+    freshly added links from it, and the caller reads back ``[]`` (#567;
+    mechanism in ``clarinet/repositories/CLAUDE.md``, "M2M Link Lifecycle").
 
     Args:
         record_type: RecordType to sync links for; ``file_links`` must be loaded.
@@ -48,13 +43,13 @@ async def sync_file_links(
         List of newly created ``RecordTypeFileLink`` instances.
     """
     if clear_existing:
-        # Orphaned links are deleted by this flush; the later INSERT of a link
-        # with the same (record_type_name, file_definition_id) needs them gone.
+        # Flush the orphan DELETEs on their own: a same-PK delete + insert
+        # inside one flush is "row-switched" into an UPDATE of the old row,
+        # and the point here is a clean DELETE, then a fresh INSERT.
         record_type.file_links = []
         await session.flush()
 
     if not file_defs:
-        record_type.file_links = []
         return []
 
     # Bulk upsert FileDefinitions
@@ -68,6 +63,7 @@ async def sync_file_links(
         link = RecordTypeFileLink(
             record_type_name=record_type.name,
             file_definition_id=file_def.id,
+            file_definition=file_def,
             role=role,
             required=fd.required,
             allow_path_collision=fd.allow_path_collision,
