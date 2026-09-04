@@ -61,11 +61,12 @@ class PairVerdict:
     reference, so a repair step can trust their direction without re-deriving it.
 
     ``eq``/``hash`` are deliberately left at default object identity
-    (``eq=False``): :class:`Grid` is itself ``eq=False``, so a generated
-    ``__eq__`` would compare its grids by identity and quietly return
-    ``False`` for two verdicts over the same files; ``eq=False`` refuses
-    the comparison instead of answering it wrongly. Compare ``.relation``
-    or ``.kind`` instead.
+    (``eq=False``). A generated ``__eq__`` would compare the two :class:`Grid`
+    fields, and :class:`Grid` is itself ``eq=False`` — so it would advertise
+    value semantics while comparing grids by identity, returning ``False``
+    for two verdicts over the same files. Identity comparison gives that same
+    answer without the false promise; neither form raises. Compare
+    ``.relation`` or ``.kind`` instead.
     """
 
     relation: GridRelation

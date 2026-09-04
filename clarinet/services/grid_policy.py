@@ -165,8 +165,8 @@ async def _repair_verified(pair: OutputPair, record_id: int) -> None:
 async def _apply(decision: Decision, pair: OutputPair, record_id: int) -> bool:
     """Carry *decision* out on disk. Returns True when the subject was repaired."""
     fd, ref_def, kind = pair.fd, pair.ref_def, pair.verdict.kind.value
-    verdict = decision.verdict
-    match verdict:
+    outcome = decision.verdict
+    match outcome:
         case Verdict.PASS:
             return False
         case Verdict.REPAIR:
@@ -190,7 +190,7 @@ async def _apply(decision: Decision, pair: OutputPair, record_id: int) -> bool:
                 + pair.verdict.describe(fd.name, ref_def.name),
             )
         case _:
-            assert_never(verdict)
+            assert_never(outcome)
 
 
 async def enforce_output_grids(
