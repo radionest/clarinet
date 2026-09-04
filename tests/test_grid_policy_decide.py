@@ -1,11 +1,13 @@
-"""The pure OUTPUT grid policy — every kind x action x repairable cell, no filesystem."""
+"""The pure OUTPUT grid policy — every kind x action x repairable cell — and the
+repair temp-path contract. No filesystem."""
 
 from itertools import product
+from pathlib import Path
 
 import pytest
 
 from clarinet.models.file_schema import GridMismatchAction
-from clarinet.services.grid_policy import Verdict, decide
+from clarinet.services.grid_policy import Verdict, _repair_tmp_path, decide
 from clarinet.services.image.grid import RelationKind
 
 SAME, REARRANGED, FOREIGN = RelationKind.SAME, RelationKind.REARRANGED, RelationKind.FOREIGN
@@ -61,3 +63,19 @@ def test_reason_names_the_8bit_rule_only_for_the_unrepairable_conform() -> None:
             assert "8-bit" in reason
         else:
             assert reason == "", (action, kind, repairable)
+
+
+@pytest.mark.parametrize("name", ["seg.nii", "seg.nii.gz", "lesion.seg.nrrd"])
+def test_repair_tmp_path_is_unique_per_call_and_keeps_the_format_suffixes(name: str) -> None:
+    """Two concurrent repairs of one record must not share a temp file — one
+    request's re-check/replace window would otherwise pick up the other's
+    partial rewrite — and the format probes test suffix membership, so the
+    token has to sit before the original name, never after it.
+    """
+    subject = Path("/data/rec") / name
+    first, second = _repair_tmp_path(subject), _repair_tmp_path(subject)
+    assert first != second
+    for tmp in (first, second):
+        assert tmp.parent == subject.parent
+        assert tmp.name.startswith(".repair.")
+        assert tmp.suffixes[-len(subject.suffixes) :] == subject.suffixes

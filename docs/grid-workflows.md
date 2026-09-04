@@ -364,13 +364,17 @@ today, so deleting the file outright is a clean way past this entire guard —
 deliberately out of scope here. It is **not** conditional on the reference's
 existence — an OUTPUT present while its reference is missing is itself a
 409 ("cannot verify the output's grid"). A `conform` repair is written to a
-hidden sibling temp file (`.repair.<name>`) and re-verified by re-reading
+hidden sibling temp file (`.repair.<token>.<name>`, unique per repair so two
+concurrent repairs of one record never share it) and re-verified by re-reading
 that temp file and the reference from disk and re-classifying from scratch,
 never trusting `conform_seg_to_grid`'s return value; only a `SAME` verdict
 atomically replaces the original, so a failed repair or a failed re-check
-409s with the original bytes untouched and the temp file removed. A `delete`
-unlinks (tolerating a concurrent delete that already won the race) before
-raising.
+409s with the original bytes untouched. The temp file is removed on every
+exit, not only on an `ImageError` — a writer failure outside it (an unwrapped
+reader error, a `MemoryError`) is still a 500, but an orphaned dotfile would
+be matched by `Path.glob` in any overlapping collection pattern for good. A
+`delete` unlinks (tolerating a concurrent delete that already won the race)
+before raising.
 
 **Scope: four submission endpoints, not two.** `enforce_output_grids` lives in
 `_process_submission`, which backs `POST`/`PATCH /records/{id}/submit`

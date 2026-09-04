@@ -607,6 +607,10 @@
   re-classified from disk, and only then atomically moved over the original —
   a repair that fails, or lands on a still-mismatched grid, now 409s with the
   original bytes intact instead of having already overwritten them in place.
+  The temp file is unique per repair — two concurrent repairs of one record
+  no longer share it — and is removed on any failure, not only an
+  `ImageError`: an orphaned dotfile would otherwise be matched by `Path.glob`
+  in any overlapping collection pattern on every check-files run.
 - A `conform` repair on the update paths (`PATCH /records/{id}/data`,
   `PATCH /records/{id}/submit`) now syncs stored output checksums and fires
   file-change triggers. Only the POST paths ran the post-commit output sync,

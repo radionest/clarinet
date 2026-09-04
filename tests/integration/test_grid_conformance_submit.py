@@ -340,6 +340,34 @@ async def test_failed_conform_recheck_preserves_original_bytes(
     assert not list(series_dir.glob(".repair.*"))
 
 
+async def test_crashed_conform_repair_leaves_no_temp_file(
+    client, test_session, series_dir, make_record, monkeypatch
+):
+    """A writer failure outside ``ImageError`` — an unwrapped reader error, a
+    ``MemoryError`` on a large volume — is still a server fault (500), but it
+    must not strand the hidden temp file: ``Path.glob`` matches dotfiles, so
+    an orphan is counted by any overlapping collection pattern on every
+    check-files run. The ASGI test transport re-raises what the 500 handler
+    wrapped, hence ``pytest.raises`` rather than a status assertion.
+    """
+    _write(series_dir / "volume.nii")
+    seg_path = _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
+    before = seg_path.read_bytes()
+
+    def _crashing_repair(seg, grid, *, out_path=None, **kwargs):
+        Path(out_path).write_bytes(b"partial")
+        raise RuntimeError("writer died mid-write")
+
+    monkeypatch.setattr("clarinet.services.grid_policy.conform_seg_to_grid", _crashing_repair)
+    record = await make_record(on_grid_mismatch="conform")
+
+    with pytest.raises(RuntimeError, match="mid-write"):
+        await client.post(record_submit_url(record.id), json={})
+
+    assert seg_path.read_bytes() == before
+    assert not list(series_dir.glob(".repair.*"))
+
+
 async def test_missing_required_input_takes_priority_over_output_delete(
     client, test_session, series_dir, make_record
 ):

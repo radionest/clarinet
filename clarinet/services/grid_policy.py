@@ -13,6 +13,7 @@ verdict out.
 
 import enum
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, assert_never
@@ -81,23 +82,25 @@ def decide(action: GridMismatchAction | None, kind: RelationKind, *, repairable:
 
 
 def _repair_tmp_path(subject: Path) -> Path:
-    """Hidden sibling temp target for a conform repair.
+    """Hidden sibling temp target for a conform repair, unique per call.
 
-    The dot-prefix keeps the extension chain intact (``.repair.seg.nii``), so
-    format detection by suffix still works.
+    The dot-prefix and the token both sit *before* the original name
+    (``.repair.<token>.seg.nii``): ``Path.suffixes`` drops a leading dot and
+    every format probe tests suffix membership, so detection is unchanged.
+    Unique because two concurrent repairs of one record must not share a
+    file — one request's re-check/replace window would otherwise pick up
+    the other's partial rewrite and install it over the original.
     """
-    return subject.with_name(".repair." + subject.name)
+    return subject.with_name(f".repair.{uuid.uuid4().hex[:12]}.{subject.name}")
 
 
-def _repair_to_temp(subject: Path, reference: Path) -> Path:
-    """Conform *subject* onto *reference*'s grid into a hidden sibling temp file.
+def _repair_to_temp(subject: Path, reference: Path, tmp: Path) -> None:
+    """Conform *subject* onto *reference*'s grid into *tmp*.
 
-    The caller must verify the result and ``os.replace`` it over *subject* —
+    The caller verifies the result and ``os.replace``s it over *subject* —
     a failed repair never touches the original bytes.
     """
-    tmp = _repair_tmp_path(subject)
     conform_seg_to_grid(subject, reference, out_path=tmp)
-    return tmp
 
 
 def _delete(subject: Path) -> None:
@@ -128,37 +131,48 @@ def _warn_and_raise(record_id: int, msg: str, *, cause: ImageError | None = None
     raise BusinessRuleViolationError(msg) from cause
 
 
+async def _repair_and_recheck(pair: OutputPair, tmp: Path, record_id: int) -> PairVerdict:
+    """Write the repair to *tmp* and classify it from disk, never trusting the writer."""
+    try:
+        await Files.in_thread(_repair_to_temp, pair.subject, pair.reference, tmp)
+        recheck: PairVerdict = await Files.in_thread(classify_pair, tmp, pair.reference)
+        return recheck
+    except ImageError as e:
+        _warn_and_raise(
+            record_id,
+            f"Failed to conform output '{pair.fd.name}' onto '{pair.ref_def.name}': {e}",
+            cause=e,
+        )
+
+
 async def _repair_verified(pair: OutputPair, record_id: int) -> None:
     """Conform the subject onto its reference through a hidden sibling temp file.
 
     The result is re-verified from disk and only then atomically moved over
     the original — a failed repair or re-check leaves the original bytes
-    untouched.
+    untouched. The temp file is removed whatever happens: a ``finally``
+    rather than per-branch deletes, because a writer failure outside
+    ``ImageError`` (an unwrapped reader error, a ``MemoryError``) is a 500
+    either way, but an orphaned dotfile would be matched by ``Path.glob`` in
+    any overlapping collection pattern for good.
     """
     fd, ref_def = pair.fd, pair.ref_def
-    # Computed up front so the cleanup below also catches a repair
-    # that raised after partially writing the temp file.
     tmp = _repair_tmp_path(pair.subject)
     try:
-        await Files.in_thread(_repair_to_temp, pair.subject, pair.reference)
-        recheck = await Files.in_thread(classify_pair, tmp, pair.reference)
-    except ImageError as e:
-        await Files.in_thread(_delete, tmp)
-        _warn_and_raise(
-            record_id, f"Failed to conform output '{fd.name}' onto '{ref_def.name}': {e}", cause=e
-        )
-    if recheck.kind is RelationKind.SAME:
+        recheck = await _repair_and_recheck(pair, tmp, record_id)
+        if recheck.kind is not RelationKind.SAME:
+            _warn_and_raise(
+                record_id,
+                f"Output '{fd.name}' still does not match '{ref_def.name}' after "
+                f"conforming ({recheck.kind.value})." + recheck.describe(fd.name, ref_def.name),
+            )
         await Files.in_thread(os.replace, tmp, pair.subject)
-        logger.info(
-            f"Record {record_id}: conformed output '{fd.name}' onto "
-            f"'{ref_def.name}' grid ({pair.verdict.kind.value})"
-        )
-        return
-    await Files.in_thread(_delete, tmp)
-    _warn_and_raise(
-        record_id,
-        f"Output '{fd.name}' still does not match '{ref_def.name}' after "
-        f"conforming ({recheck.kind.value})." + recheck.describe(fd.name, ref_def.name),
+    finally:
+        # A no-op once os.replace has moved the file away.
+        await Files.in_thread(_delete, tmp)
+    logger.info(
+        f"Record {record_id}: conformed output '{fd.name}' onto "
+        f"'{ref_def.name}' grid ({pair.verdict.kind.value})"
     )
 
 
