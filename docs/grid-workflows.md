@@ -600,7 +600,7 @@ guard reads the on-disk dtype header-only (`Image.on_disk_dtype`) before that
 cast can happen and raises `ImageError` if it isn't already uint8, rather
 than quantizing first and letting the caller find out from corrupted voxel
 values. The same check is exposed as `is_conform_repairable`
-(`segmentation.py:797`), so the submit-time policy can rule a repair out
+(`segmentation.py:793`), so the submit-time policy can rule a repair out
 without attempting it. The 4-D layered path needs no such guard — it never
 routes through `Segmentation` and preserves whatever dtype it read (proven by
 `test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2652`).
