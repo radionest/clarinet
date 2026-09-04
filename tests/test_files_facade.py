@@ -414,7 +414,7 @@ class TestPathSafety:
     async def test_checksums_names_the_file_definition(self, monkeypatch):
         # checksums() loops internally, so a caller catching UnsafePathError
         # here has no `fd` of its own in scope (unlike render_for's callers) --
-        # record_service.py's _sync_output_files relies on this message to
+        # record_service.py's sync_output_files relies on this message to
         # name the file definition in its WARNING (the WARNING is expected to
         # name the record, the file definition, the placeholder key and the
         # reason). The value itself must still travel only on .value, never

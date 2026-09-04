@@ -293,7 +293,7 @@ holding one un-migrated row the affected file quietly loses:
 | Consequence | Site |
 |---|---|
 | the `required=True, role=INPUT` "missing file" gate stops firing — the record can no longer be `blocked` for it | `services/file_validation.py` |
-| it is never checksummed, so its `RecordFileLink` is never created and the file stays untracked | `record_service._sync_output_files` |
+| it is never checksummed, so its `RecordFileLink` is never created and the file stays untracked | `record_service.sync_output_files` |
 | file-change triggers stop firing — a RecordFlow `file(x).on_update().invalidate_all_records(...)` silently dies | `record_service.check_files` |
 | it is skipped by output-path collection, so `clear_output_files` and `delete_record_cascade` **leave the file on disk** | `record_service._collect_output_file_paths` |
 | `ctx.files.resolve("name")` in a pipeline task raises `KeyError` → retry → DLQ | `files/facade.py` |
@@ -385,7 +385,7 @@ round trip.
 ### Where `UnsafePathError` surfaces
 
 - **Record submit** (`RecordService._validate_output_paths`, run before the
-  submission persists, and `_sync_output_files`'s post-scan reconciliation
+  submission persists, and `sync_output_files`'s post-scan reconciliation
   backstop): translated to `422` — the submission is the request that cannot
   be completed, so on the principle that a violation surfaces according to
   who caused it, it is answered to that caller rather than as a server error.
