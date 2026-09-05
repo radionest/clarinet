@@ -28,6 +28,7 @@ from clarinet.services.image import (
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
 from clarinet.services.image.orientation import ground_truth_slice_geometry
+from clarinet.services.image.segmentation import is_conform_repairable
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -202,6 +203,40 @@ class TestImage:
             assert img.has_data is True
         assert img.has_data is False
         assert img._nifti_image is None
+
+    def test_on_disk_dtype_reports_nifti_header_dtype(self, tmp_path: Path) -> None:
+        path = tmp_path / "vol.nii.gz"
+        img = Image()
+        img.img = np.zeros((4, 4, 4), dtype=np.int16)
+        img.save_as(path, FileType.NIFTI)
+
+        probe = Image()
+        probe.read(path, load_data=False)
+        assert probe.on_disk_dtype == np.dtype(np.int16)
+
+    def test_on_disk_dtype_recognizes_nrrd_uint8(self, tmp_path: Path) -> None:
+        path = tmp_path / "mask.nrrd"
+        img = Image()
+        img.img = np.zeros((4, 4, 4), dtype=np.uint8)
+        img.save_as(path, FileType.NRRD)
+
+        probe = Image()
+        probe.read(path, load_data=False)
+        assert probe.on_disk_dtype == np.dtype(np.uint8)
+
+    def test_on_disk_dtype_none_for_other_nrrd_types(self, tmp_path: Path) -> None:
+        path = tmp_path / "wide.nrrd"
+        img = Image()
+        img.img = np.zeros((4, 4, 4), dtype=np.int16)
+        img.save_as(path, FileType.NRRD)
+
+        probe = Image()
+        probe.read(path, load_data=False)
+        assert probe.on_disk_dtype is None
+
+    def test_on_disk_dtype_raises_before_any_read(self) -> None:
+        with pytest.raises(ImageError, match="no header read"):
+            _ = Image().on_disk_dtype
 
     def test_unsupported_extension(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "test.xyz"
@@ -2252,6 +2287,54 @@ class TestConformSegToGrid:
         assert np.sum(fixed.img[3:6, 3:6, 7:10]) == 0
         assert set(np.unique(fixed.img)) == {0, 4}  # labels preserved (NN)
 
+    def test_conform_refuses_a_non_uint8_subject(self, tmp_path: Path) -> None:
+        """A wider-than-uint8 subject must be refused, not silently quantized.
+
+        The non-layered repair path reads the subject through Segmentation,
+        which forces a uint8 cast — this guard must catch it before that read
+        happens, leaving the file byte-identical.
+        """
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.int16)
+        seg_data[3:6, 3:6, 7:10] = 4
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        seg_path = tmp_path / "seg.nii.gz"
+        wide = Image()
+        wide._direction = flipped
+        wide._origin = (0.0, 0.0, 9.0)
+        wide._spacing = (1.0, 1.0, 1.0)
+        wide.img = seg_data
+        wide.save_as(seg_path, FileType.NIFTI)
+        before = seg_path.read_bytes()
+
+        with pytest.raises(ImageError, match="not an 8-bit mask"):
+            conform_seg_to_grid(seg_path, vol_path)
+
+        assert seg_path.read_bytes() == before
+
+    def test_is_conform_repairable_for_a_uint8_subject(self, tmp_path: Path) -> None:
+        seg_path = tmp_path / "seg.nii.gz"
+        self._write_volume(seg_path, (10, 10, 10))
+
+        assert is_conform_repairable(seg_path) is True
+
+    def test_is_conform_repairable_refuses_a_wider_dtype(self, tmp_path: Path) -> None:
+        """The header-only probe the submit policy consults before choosing to
+        repair — the same rule the writer enforces, without the ImageError
+        round-trip."""
+        seg_path = tmp_path / "seg.nii.gz"
+        wide = Image()
+        wide._direction = np.eye(3)
+        wide._origin = (0.0, 0.0, 0.0)
+        wide._spacing = (1.0, 1.0, 1.0)
+        wide.img = np.zeros((10, 10, 10), dtype=np.int16)
+        wide.save_as(seg_path, FileType.NIFTI)
+
+        assert is_conform_repairable(seg_path) is False
+
     def test_conform_noop_when_same_grid(self, tmp_path: Path) -> None:
         shape = (8, 8, 8)
         vol_path = tmp_path / "volume.nii.gz"
@@ -2489,6 +2572,32 @@ class TestConformLayeredSegToGrid:
         # round-trips through the public reader too, not just the raw header dict
         seg_meta = LayeredSegmentation.read_header(seg_path)
         assert seg_meta.segments == [("cortex", 0, 1), ("lesion", 1, 2)]
+
+    def test_is_conform_repairable_for_any_4d_layered_dtype(self, tmp_path: Path) -> None:
+        """A layered file is repairable whatever its dtype: the 4-D path never
+        routes through Segmentation's forced-uint8 read, so a uint16 layer stack
+        must not trip the 8-bit rule that governs 3-D subjects."""
+        shape = (6, 7, 5)
+        seg_path = tmp_path / "layered.seg.nrrd"
+        nrrd.write(
+            str(seg_path),
+            np.zeros((2, *shape), dtype=np.uint16),
+            {
+                "space": "left-posterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "space directions": np.vstack([np.full(3, np.nan), np.eye(3)]),
+                "space origin": np.array([0.0, 0.0, 0.0]),
+                "encoding": "raw",
+                "Segment0_Name": "cortex",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+                "Segment1_Name": "lesion",
+                "Segment1_LabelValue": "2",
+                "Segment1_Layer": "1",
+            },
+        )
+
+        assert is_conform_repairable(seg_path) is True
 
     def test_conform_4d_layered_relabels_space_to_lps(self, tmp_path: Path) -> None:
         """A layered source whose header carries a foreign `space` (RAS) must still

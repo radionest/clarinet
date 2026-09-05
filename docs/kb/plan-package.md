@@ -3,7 +3,7 @@ type: Subsystem
 title: Project configuration and the clarinet_plan package
 description: How a downstream project declares record types and custom Python code, how those files are imported through the single clarinet_plan anchor, and why loading fails fast.
 tags: [config, plan, importlib, reconciler, startup, vendoring]
-timestamp: 2026-07-27T05:48:17Z
+timestamp: 2026-09-03T20:51:55Z
 ---
 
 Clarinet is a framework: the interesting declarations live in the *project*, not
@@ -88,6 +88,33 @@ disk.
 `RecordTypeDef` are backward-compatible aliases for `FileDef` and `RecordDef` —
 when grepping for usages, search for both spellings. If no `files_catalog.py`
 exists, FileDef names are derived from the variable names in `record_types.py`.
+
+### Grid-conformance declarations must be resolvable
+
+A `FileDef`/`FileDefinitionRead` may declare `grid_conform_to`: another
+bound file whose on-disk voxel grid this one must match, plus
+`on_grid_mismatch` (`"conform"`/`"delete"`/`"reject"`, default `"reject"`)
+saying what to do about an OUTPUT mismatch — an INPUT mismatch instead never
+repairs or deletes the file, since a record does not own its inputs (it
+blocks the record, or raises a 422 if a submission's own re-check catches it
+first). In Python config, `grid_conform_to` accepts the referenced `FileDef`
+object itself (preferred — typo-proof, and survives a variable rename) or
+its plain name string; the object form is reduced to a name at
+config-resolution time, once file names have been assigned from module
+variables. TOML supplies the name string directly.
+
+`validate_grid_conformance` (`clarinet/config/grid_conformance.py`) runs in
+the same `RecordTypeCreate` validator as `validate_output_path_uniqueness`
+above and rejects a declaration the runtime could not resolve — unresolvable
+reference, self-reference, level inversion, a collection on either side, or
+a pattern that isn't grid-readable — naming the RecordType and the declaring
+file. The exact rule list lives with the rest of the behaviour.
+
+Full runtime behavior — the two enforcement seams, the OUTPUT decision
+table, the four-endpoint submission scope, and the recommended adoption
+order — lives in
+[`docs/grid-workflows.md`](../grid-workflows.md#runtime-grid-conformance-enforcement),
+the narrative home for the framework's voxel-grid model.
 
 ## Reconciliation
 
@@ -191,6 +218,11 @@ A broken plan file must crash startup, never degrade silently.
   `ConfigurationError` on unknown names. The guard covers config-defined record
   types only; types mutated through the API in TOML mode and orphaned DB rows are
   caught by runtime logs alone.
+- `reconcile_record_types` rejects, before any DB write, a config in which two
+  record types declare the same file with different row-level fields (pattern,
+  description, multiple, level, `grid_conform_to`, `on_grid_mismatch`) — a
+  `FileDefinition` row is shared by every type binding it, so the types must
+  agree or the row would flip to whichever type reconciled last.
 - `app.py` converts `ConfigLoadError` → `StartupError`; `run_worker` converts it
   → `SystemExit(1)`.
 

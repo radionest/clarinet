@@ -80,7 +80,12 @@ from clarinet.models import (
     User,
 )
 from clarinet.repositories.record_repository import RecordSearchCriteria
-from clarinet.services.file_validation import FileValidationResult, validate_record_files
+from clarinet.services.file_validation import (
+    FileValidationResult,
+    report_record_files,
+    validate_record_files,
+)
+from clarinet.services.grid_policy import enforce_output_grids
 from clarinet.services.record_service import ensure_record_editable
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
@@ -144,6 +149,13 @@ async def find_record_type(
     response_model=RecordTypeRead,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_mutable_config)],
+    responses={
+        409: {
+            "description": "Name already taken, or a file entry — merged with the "
+            "stored definition it names — declares something this type cannot "
+            "satisfy (e.g. binds a guarded file without its grid reference)"
+        }
+    },
 )
 async def add_record_type(
     record_type: RecordTypeCreate,
@@ -172,6 +184,14 @@ async def add_record_type(
     "/types/{record_type_id}",
     response_model=RecordTypeRead,
     dependencies=[Depends(require_mutable_config)],
+    responses={
+        409: {
+            "description": "The merged effective state violates a declaration "
+            "constraint (output-path uniqueness, grid conformance — including a "
+            "file entry that, merged with its stored definition, binds a guarded "
+            "file without its reference)"
+        }
+    },
 )
 async def update_record_type(
     record_type_id: str,
@@ -572,20 +592,40 @@ async def _process_submission(
             record, validated_data, exec_result
         )
 
+    # Inputs first, on the POST path only: validate_record_files never repairs
+    # or deletes anything, so running it ahead of the OUTPUT guard below cannot
+    # mangle anything — the risk there is one-directional. This also fixes the
+    # diagnosis when both are invalid: a missing required input answers with
+    # 422, not a destructive OUTPUT action followed by a 409 that doesn't name
+    # the actual problem. PATCH never re-validates inputs here (is_update
+    # skips this block), matching its pre-existing behavior.
+    file_result: FileValidationResult | None = None
+    if not is_update and not skip_validation:
+        file_result = await validate_record_files(
+            record_read,
+            raise_on_invalid=True,
+            parent=parent_read,
+        )
+
+    # Output grids are enforced pre-commit: the post-commit output sync
+    # never raises, so this is the only point that can still reject.
+    repaired: list[str] = []
+    if not skip_validation:
+        repaired = await enforce_output_grids(record_read, parent=parent_read)
+
     if is_update:
         updated, _ = await service.update_data(
             record_id, validated_data, acting_user=user, actor_id=actor_id
         )
+        # A conform repair rewrote OUTPUT bytes; only submit_data runs the
+        # post-commit output sync, so the update path must sync explicitly or
+        # RecordFileLink.checksum keeps describing the pre-repair bytes and
+        # downstream file triggers never fire for the mutation.
+        if repaired:
+            await service.sync_output_files(updated)
     else:
-        if not skip_validation:
-            # Validate input files (raise on missing required files)
-            file_result = await validate_record_files(
-                record_read,
-                raise_on_invalid=True,
-                parent=parent_read,
-            )
-            if file_result and file_result.matched_files:
-                await repo.set_files(record, file_result.matched_files)
+        if file_result and file_result.matched_files:
+            await repo.set_files(record, file_result.matched_files)
 
         updated, _ = await service.submit_data(
             record_id,
@@ -601,7 +641,11 @@ async def _process_submission(
 _SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 
 
-@router.post("/{record_id}/data", response_model=RecordRead)
+@router.post(
+    "/{record_id}/data",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def submit_record_data(
     record_id: int,
     authorized_record: MutableRecordDep,
@@ -627,7 +671,9 @@ async def submit_record_data(
         )
 
     if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+        raise CONFLICT.with_context(
+            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
+        )
 
     if record.status == RecordStatus.preparing:
         raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
@@ -649,7 +695,11 @@ async def submit_record_data(
     )
 
 
-@router.patch("/{record_id}/data", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/data",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def update_record_data(
     record_id: int,
     authorized_record: MutableRecordDep,
@@ -751,7 +801,11 @@ async def prefill_record_data_patch(
     return await _do_prefill(record_id, authorized_record, merged, user, service, rt_service)
 
 
-@router.post("/{record_id}/submit", response_model=RecordRead)
+@router.post(
+    "/{record_id}/submit",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def submit_record_with_validation(
     record_id: int,
     authorized_record: MutableRecordDep,
@@ -786,7 +840,9 @@ async def submit_record_with_validation(
     record = authorized_record
 
     if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+        raise CONFLICT.with_context(
+            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
+        )
 
     if record.status == RecordStatus.preparing:
         raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
@@ -811,7 +867,11 @@ async def submit_record_with_validation(
     )
 
 
-@router.patch("/{record_id}/submit", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/submit",
+    response_model=RecordRead,
+    responses={409: {"description": "Output file grid does not match its declared reference"}},
+)
 async def resubmit_record_with_validation(
     record_id: int,
     authorized_record: MutableRecordDep,
@@ -887,10 +947,11 @@ async def validate_files_endpoint(
     record: AuthorizedRecordDep,
     repo: RecordRepositoryDep,
 ) -> FileValidationResult:
-    """Validate input files for a record without saving the result.
+    """Read-only file report for a record: nothing is saved, repaired or deleted.
 
-    This endpoint checks if the required input files exist in the record's
-    working folder without modifying the record.
+    INPUT files are validated as at creation/check-files; every declared
+    OUTPUT grid pair present on disk is classified too, with its
+    ``on_grid_mismatch`` quoted — a preview of what a submit would 409 on.
 
     Args:
         record_id: ID of the record to validate files for
@@ -903,11 +964,7 @@ async def validate_files_endpoint(
     if record.parent_record_id is not None:
         parent = await repo.get_with_relations(record.parent_record_id)
         parent_read = RecordRead.model_validate(parent)
-    result = await validate_record_files(record_read, parent=parent_read)
-    if result is None:
-        return FileValidationResult(valid=True)
-
-    return result
+    return await report_record_files(record_read, parent=parent_read)
 
 
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)

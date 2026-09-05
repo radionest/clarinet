@@ -115,6 +115,10 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
                 file_entry["level"] = fd["level"]
             if fd.get("allow_path_collision"):
                 file_entry["allow_path_collision"] = True
+            if fd.get("grid_conform_to"):
+                file_entry["grid_conform_to"] = fd["grid_conform_to"]
+            if fd.get("on_grid_mismatch"):
+                file_entry["on_grid_mismatch"] = fd["on_grid_mismatch"]
             files.append(file_entry)
         if files:
             data["file_registry"] = files

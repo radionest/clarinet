@@ -1,5 +1,5 @@
 """Tests for clarinet.services.image.grid (Grid + grid_relation) and
-clarinet.services.image.grid_io (read_grid / assert_same_grid_on_disk)."""
+clarinet.services.image.grid_io (read_grid / classify_pair / assert_same_grid_on_disk)."""
 
 import itertools
 from pathlib import Path
@@ -11,7 +11,7 @@ import pytest
 from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
 from clarinet.services.image import FileType, Image, LayeredSegmentation
 from clarinet.services.image.grid import Grid, GridRelation, RelationKind, grid_relation
-from clarinet.services.image.grid_io import assert_same_grid_on_disk, read_grid
+from clarinet.services.image.grid_io import assert_same_grid_on_disk, classify_pair, read_grid
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -511,6 +511,108 @@ class TestReadGrid:
             read_grid(path)
 
 
+class TestClassifyPair:
+    def test_matching_pair_across_formats_is_same(self, tmp_path: Path) -> None:
+        img = Image()
+        img.spacing = (0.5, 0.6, 0.7)
+        img.origin = (1.0, -2.5, 3.25)
+        img.direction = _OBLIQUE_DIRECTION
+        img.img = np.zeros((10, 9, 8), dtype=np.uint8)
+        nifti_path = img.save_as(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        nrrd_path = img.save_as(tmp_path / "vol.nrrd", FileType.NRRD)
+
+        assert classify_pair(nrrd_path, nifti_path).kind is RelationKind.SAME
+
+    def test_subject_and_reference_grids_are_not_swapped(self, tmp_path: Path) -> None:
+        """Distinct shapes make a swap detectable; a FOREIGN verdict still carries both grids."""
+        subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, shape=(4, 5, 6))
+        reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI, shape=(7, 8, 9))
+
+        verdict = classify_pair(subject, reference)
+
+        assert verdict.kind is RelationKind.FOREIGN
+        assert verdict.subject.shape == (4, 5, 6)
+        assert verdict.reference.shape == (7, 8, 9)
+
+    def test_relation_is_computed_reference_first(self, tmp_path: Path) -> None:
+        """perm/flips describe the subject relative to the reference, never the reverse.
+
+        This is the invariant the four hand-rolled copies had already started to
+        disagree on: one of them passed its first positional argument as `a`. The
+        fixture must be a relation that is *not* its own inverse — a mirror (its
+        own inverse) would pass identically whether or not `classify_pair` swapped
+        the `grid_relation` argument order, since `grid_relation(reference, subject)`
+        and `grid_relation(subject, reference)` would be byte-equal. A 3-axis cyclic
+        permutation's inverse is a different permutation, so a swapped *argument*
+        order is caught by the final assertion below instead of passing silently.
+
+        Note this pins argument order only, not the disk-open order: both grids are
+        read before `grid_relation` runs, so swapping the two `read_grid` calls
+        leaves every assertion here green. That contract is pinned separately by
+        `test_reference_is_opened_before_the_subject`.
+        """
+        reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI)
+        cyclic_perm = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
+        subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, direction=cyclic_perm)
+
+        verdict = classify_pair(subject, reference)
+
+        assert verdict.kind is RelationKind.REARRANGED
+        assert verdict.relation == grid_relation(read_grid(reference), read_grid(subject))
+        assert verdict.relation.perm == (1, 2, 0)
+        assert verdict.relation.flips == (False, False, False)
+        # Asymmetry check: proves the fixture itself can't pass under a swapped
+        # read order — if a future edit swaps the fixture back to an involution
+        # (e.g. a plain mirror), this line starts failing.
+        assert verdict.relation != grid_relation(read_grid(subject), read_grid(reference))
+
+    def test_reference_is_opened_before_the_subject(self, tmp_path: Path) -> None:
+        """When both files are unreadable, the reference's read error is the one raised.
+
+        `classify_pair` documents this disk-open order in its Raises section, and
+        three call sites (`grid_io.assert_same_grid_on_disk`,
+        `segmentation.conform_seg_to_grid`, `FileValidator._grid_error`) inherit
+        which path a caller sees named in an unreadable-pair error. Nothing else
+        detects a swap of the two `read_grid` calls: every relation-level
+        assertion is computed after both reads have completed.
+        """
+        subject = tmp_path / "seg.nrrd"
+        reference = tmp_path / "vol.nrrd"
+        subject.write_bytes(b"not a volume")
+        reference.write_bytes(b"not a volume")
+
+        with pytest.raises(ImageReadError) as excinfo:
+            classify_pair(subject, reference)
+
+        assert "vol.nrrd" in str(excinfo.value)
+        assert "seg.nrrd" not in str(excinfo.value)
+
+    def test_describe_lists_subject_before_reference(self, tmp_path: Path) -> None:
+        subject = _write_volume(tmp_path / "seg.nrrd", FileType.NRRD, shape=(4, 5, 6))
+        reference = _write_volume(tmp_path / "vol.nii.gz", FileType.NIFTI, shape=(7, 8, 9))
+
+        tail = classify_pair(subject, reference).describe("seg", "volume")
+
+        assert tail == (
+            f"\n  seg: {read_grid(subject).summary()}\n  volume: {read_grid(reference).summary()}"
+        )
+
+    def test_atol_is_forwarded(self, tmp_path: Path) -> None:
+        """A rotation small enough to hide under a loosened atol still classifies.
+
+        Disk-level counterpart of test_atol_controls_linear_part_tolerance; the
+        ~1.7e-5 sine term survives the NRRD round-trip (both fixtures here are
+        NRRD — cross-format survival is covered by TestAssertSameGridOnDisk).
+        """
+        reference = _write_volume(tmp_path / "vol.nrrd", FileType.NRRD)
+        subject = _write_volume(
+            tmp_path / "seg.nrrd", FileType.NRRD, direction=_rotation_matrix(0.0, 0.0, 0.001)
+        )
+
+        assert classify_pair(subject, reference, atol=1e-8).kind is RelationKind.FOREIGN
+        assert classify_pair(subject, reference, atol=1e-3).kind is RelationKind.SAME
+
+
 class TestAssertSameGridOnDisk:
     def test_matching_grids_across_formats_pass(self, tmp_path: Path) -> None:
         img = Image()
@@ -535,9 +637,11 @@ class TestAssertSameGridOnDisk:
         with pytest.raises(GeometryMismatchError) as exc_info:
             assert_same_grid_on_disk(vol_path, seg_path)
 
-        message = str(exc_info.value)
-        assert read_grid(vol_path).summary() in message
-        assert read_grid(seg_path).summary() in message
+        assert str(exc_info.value) == (
+            "Files do not occupy the same physical grid:"
+            f"\n  {vol_path}: {read_grid(vol_path).summary()}"
+            f"\n  {seg_path}: {read_grid(seg_path).summary()}"
+        )
 
     def test_disk_assert_catches_mismatch_in_memory_same_grid_cannot_see(
         self, tmp_path: Path

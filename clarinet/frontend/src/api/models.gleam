@@ -51,6 +51,9 @@ pub type FileDefinition {
     multiple: Bool,
     role: FileRole,
     level: Option(String),
+    allow_path_collision: Bool,
+    grid_conform_to: Option(String),
+    on_grid_mismatch: Option(String),
   )
 }
 

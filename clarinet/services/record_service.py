@@ -569,7 +569,7 @@ class RecordService:
 
         # Register output files that appeared on disk and emit file events
         if new_status == RecordStatus.finished:
-            await self._sync_output_files(record)
+            await self.sync_output_files(record)
 
         return record, old_status
 
@@ -577,11 +577,11 @@ class RecordService:
         """Reject an unsafe OUTPUT pattern before ``submit_data`` persists anything.
 
         ``submit_data`` commits the new data/status via ``update_data`` before
-        ``_sync_output_files`` ever runs a path-safety check — without this,
+        ``sync_output_files`` ever runs a path-safety check — without this,
         a rejected submission would already be durably stored by the time the
-        rejection happens (see ``_sync_output_files``'s docstring). Pure
+        rejection happens (see ``sync_output_files``'s docstring). Pure
         rendering only (``Files.render_for``, no filesystem I/O — unlike
-        ``_sync_output_files``'s ``checksums()`` scan), so it is cheap to run
+        ``sync_output_files``'s ``checksums()`` scan), so it is cheap to run
         up front, before the record's current state changes.
 
         Checked against the record's identity fields (``patient_id`` etc.) as
@@ -1363,7 +1363,7 @@ class RecordService:
                 f"Record {record_id}: registered {created} output file link(s): {sorted(new_links)}"
             )
 
-    async def _sync_output_files(self, record: Record) -> None:
+    async def sync_output_files(self, record: Record) -> None:
         """Reconcile OUTPUT file state on disk with the DB after a submission.
 
         Computes checksums on disk for OUTPUT files, registers files that

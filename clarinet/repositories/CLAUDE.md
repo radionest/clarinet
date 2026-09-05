@@ -72,7 +72,7 @@ selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definit
 - `RecordTypeRepository`: `_file_links_eager_load()` helper, applied to `get()`, `get_all()`, `list_all()`, `find()`
 - `RecordRepository`: `_record_type_with_files()` helper chains through `Record.record_type`
 - `RecordRepository`: `_record_file_links_eager_load()` helper for `Record.file_links → FileDefinition`
-- `FileDefinitionRepository`: `get_or_create()`, `bulk_upsert()` for M2M link management
+- `FileDefinitionRepository`: `get_or_create()`, `bulk_upsert()` for M2M link management; `get_by_names()` for the API's partial-entry merge (`RecordTypeService._merge_with_stored`)
 
 ### BaseRepository.update() and Relationships
 

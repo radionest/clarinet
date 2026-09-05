@@ -12,13 +12,14 @@ FileDefinitionRead is a flat DTO merging identity + binding for API responses.
 
 import re
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
 
 from pydantic import StringConstraints, field_validator, model_validator
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 from clarinet.models.base import DicomQueryLevel
+from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models.record import Record
@@ -33,6 +34,28 @@ class FileRole(str, Enum):
     INTERMEDIATE = "intermediate"
 
 
+# DB column stays a plain string (additive downstream migrations); config and
+# API payloads are constrained to these values.
+type GridMismatchAction = Literal["conform", "delete", "reject"]
+"""What to do with an OUTPUT file whose grid does not match its reference.
+
+Consulted for OUTPUT files on every submission/update endpoint
+(``POST``/``PATCH /data``, ``POST``/``PATCH /submit``), including the
+destructive ``delete`` action on the metadata-only ``PATCH /data`` — an INPUT
+mismatch never repairs or deletes a file the record does not own; it blocks
+the record, or raises a 422 if a submission's own re-check catches it first.
+``conform`` repairs an exactly-repairable (``REARRANGED``) pair and still
+rejects a ``FOREIGN`` one; ``delete`` removes the offending file for either
+verdict; ``reject`` leaves it untouched. An unset action on a file that
+declares ``grid_conform_to`` means ``reject`` — declaring a reference must
+never fail open. ``conform``'s repair additionally requires the file to
+already be 8-bit (uint8) on disk — the segmentation read it uses would
+otherwise silently quantize a wider format (e.g. an int16/float32 intensity
+volume) — and fails closed (409, file untouched) the same as a ``FOREIGN``
+pair when it isn't.
+"""
+
+
 class FileDefinition(SQLModel, table=True):
     """Persistent file definition stored in DB.
 
@@ -45,6 +68,10 @@ class FileDefinition(SQLModel, table=True):
             https://github.com/radionest/clarinet/issues/552), {record_type.FIELD}
         description: Optional description of the file purpose.
         multiple: Whether this is a collection (glob) vs singular file.
+        grid_conform_to: Name of another FileDefinition whose on-disk voxel
+            grid this file must match. ``None`` disables the check.
+        on_grid_mismatch: What to do with a mismatched OUTPUT file —
+            ``conform`` / ``delete`` / ``reject``. ``None`` means ``reject``.
     """
 
     __tablename__ = "filedefinition"
@@ -61,6 +88,8 @@ class FileDefinition(SQLModel, table=True):
     description: str | None = None
     multiple: bool = Field(default=False)
     level: DicomQueryLevel | None = None
+    grid_conform_to: str | None = Field(default=None, max_length=100)
+    on_grid_mismatch: str | None = Field(default=None, max_length=20)
 
     record_type_links: list["RecordTypeFileLink"] = Relationship(
         back_populates="file_definition",
@@ -76,6 +105,23 @@ class FileDefinition(SQLModel, table=True):
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v):
             raise ValueError(f"File definition name must be a valid Python identifier, got: {v!r}")
         return v
+
+
+# Row-level fields of ``FileDefinition`` — shared by every RecordType binding
+# the file (``RecordTypeFileLink`` carries the per-binding ones: role, required,
+# allow_path_collision). The upsert (``FileDefinitionRepository``), the
+# config-load cross-type check (``validate_shared_file_definitions``) and the
+# API merge (``RecordTypeService._merge_with_stored``) iterate this tuple;
+# ``tests/test_shared_file_definitions.py`` pins it to the model's columns.
+# The reconciler's link diff (``_file_links_differ``) compares a subset — #565.
+FILE_DEFINITION_FIELDS: tuple[str, ...] = (
+    "pattern",
+    "description",
+    "multiple",
+    "level",
+    "grid_conform_to",
+    "on_grid_mismatch",
+)
 
 
 class RecordTypeFileLink(SQLModel, table=True):
@@ -169,6 +215,8 @@ class FileDefinitionRead(SQLModel):
     role: FileRole = FileRole.OUTPUT
     level: DicomQueryLevel | None = None
     allow_path_collision: bool = False
+    grid_conform_to: str | None = None
+    on_grid_mismatch: GridMismatchAction | None = None
 
     @field_validator("name")
     @classmethod
@@ -200,6 +248,45 @@ class FileDefinitionRead(SQLModel):
 
         validate_file_pattern(self.pattern, is_collection=bool(self.multiple))
         return self
+
+    @field_validator("grid_conform_to", mode="before")
+    @classmethod
+    def _reference_to_name(cls, v: Any) -> Any:
+        """Accept a file definition object in place of its name.
+
+        Runs eagerly because every construction site of this DTO builds it from
+        an already-named source. ``FileDef`` in the config layer cannot do this
+        (its names are assigned after module import) — see Task 2.
+
+        Raises rather than returning an empty name: declaring a reference must
+        never fail open, and an empty string is falsy — every downstream check
+        would silently read it as "no declaration".
+        """
+        name = getattr(v, "name", None)
+        if not isinstance(name, str):
+            return v
+        if not name:
+            raise ValueError(
+                "grid_conform_to reference has an empty name — declaring a "
+                "reference must never fail open"
+            )
+        return name
+
+    @field_validator("on_grid_mismatch", mode="before")
+    @classmethod
+    def _coerce_unknown_mismatch_action(cls, v: Any) -> Any:
+        """Fail closed on an out-of-vocabulary value instead of raising.
+
+        ``FileDefinition.on_grid_mismatch`` is a plain ``str`` DB column (kept
+        additive for downstream migrations); an out-of-vocabulary value there
+        (direct SQL, a downstream backfill, version skew) would otherwise raise
+        a pydantic ``ValidationError`` for every read of the owning RecordType,
+        not just the grid check. ``None`` means ``reject``.
+        """
+        if v is None or v in get_args(GridMismatchAction.__value__):
+            return v
+        logger.warning(f"Unknown on_grid_mismatch value {v!r}; treating as reject (None)")
+        return None
 
 
 class RecordFileLinkRead(SQLModel):

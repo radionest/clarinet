@@ -47,6 +47,18 @@ def record_events_url(record_id: int) -> str:
     return f"{RECORDS_BASE}/{record_id}/events"
 
 
+def record_validate_files_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/validate-files"
+
+
+def record_submit_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/submit"
+
+
+def record_data_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/data"
+
+
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"
 RECORD_TYPES_FIND = "/api/records/types/find"

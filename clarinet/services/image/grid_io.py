@@ -7,12 +7,13 @@ this module is clarinet-side only and freely imports :class:`Image`,
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import nrrd
 
 from clarinet.exceptions.domain import GeometryMismatchError, ImageReadError
-from clarinet.services.image.grid import Grid, RelationKind, grid_relation
+from clarinet.services.image.grid import Grid, GridRelation, RelationKind, grid_relation
 from clarinet.services.image.image import Image
 from clarinet.services.image.layered_segmentation import LayeredSegmentation
 
@@ -50,6 +51,61 @@ def read_grid(path: Path | str) -> Grid:
     return Grid.from_components(shape, img.spacing, img.origin, img.direction)
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class PairVerdict:
+    """How a subject file's on-disk grid relates to its reference's, both grids kept.
+
+    Produced by :func:`classify_pair`, the single authority for the read order,
+    the :func:`grid_relation` argument order and the ``atol`` of every on-disk
+    pair comparison. ``relation.perm``/``flips`` are always subject-relative-to-
+    reference, so a repair step can trust their direction without re-deriving it.
+
+    ``eq``/``hash`` are deliberately left at default object identity
+    (``eq=False``). A generated ``__eq__`` would compare the two :class:`Grid`
+    fields, and :class:`Grid` is itself ``eq=False`` — so it would advertise
+    value semantics while comparing grids by identity, returning ``False``
+    for two verdicts over the same files. Identity comparison gives that same
+    answer without the false promise; neither form raises. Compare
+    ``.relation`` or ``.kind`` instead.
+    """
+
+    relation: GridRelation
+    subject: Grid
+    reference: Grid
+
+    @property
+    def kind(self) -> RelationKind:
+        return self.relation.kind
+
+    def describe(self, subject_name: str, reference_name: str) -> str:
+        """Message tail: two indented ``name: summary()`` lines, subject first."""
+        return (
+            f"\n  {subject_name}: {self.subject.summary()}"
+            f"\n  {reference_name}: {self.reference.summary()}"
+        )
+
+
+def classify_pair(subject: Path | str, reference: Path | str, *, atol: float = 1e-4) -> PairVerdict:
+    """Read both grids off disk and classify *subject* against *reference*.
+
+    The reference is read first, then the subject, and the pair goes into
+    :func:`grid_relation` reference-first. Every framework-side on-disk pair
+    comparison routes through here so that read order, argument order and
+    ``atol`` cannot drift apart between call sites — a drift that would let one
+    endpoint call a file conformant while another blocks it.
+
+    Raises:
+        ImageError: either file cannot be read (the reference is read first).
+    """
+    reference_grid = read_grid(reference)
+    subject_grid = read_grid(subject)
+    return PairVerdict(
+        relation=grid_relation(reference_grid, subject_grid, atol=atol),
+        subject=subject_grid,
+        reference=reference_grid,
+    )
+
+
 def assert_same_grid_on_disk(path_a: Path | str, path_b: Path | str, *, atol: float = 1e-4) -> None:
     """Raise :class:`GeometryMismatchError` unless the two files share one grid.
 
@@ -68,11 +124,9 @@ def assert_same_grid_on_disk(path_a: Path | str, path_b: Path | str, *, atol: fl
         GeometryMismatchError: the two grids classify as ``REARRANGED`` or
             ``FOREIGN`` (message includes both grids' ``summary()``).
     """
-    grid_a = read_grid(path_a)
-    grid_b = read_grid(path_b)
-    if grid_relation(grid_a, grid_b, atol=atol).kind is not RelationKind.SAME:
+    verdict = classify_pair(path_a, path_b, atol=atol)
+    if verdict.kind is not RelationKind.SAME:
         raise GeometryMismatchError(
-            "Files do not occupy the same physical grid:\n"
-            f"  {path_a}: {grid_a.summary()}\n"
-            f"  {path_b}: {grid_b.summary()}"
+            "Files do not occupy the same physical grid:"
+            + verdict.describe(str(path_a), str(path_b))
         )

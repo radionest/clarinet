@@ -490,3 +490,180 @@ class TestDeleteRecordType:
         """Should return 404 when deleting a non-existent record type."""
         response = await client.delete(f"{BASE}/types/nonexistent_type_xyz", headers=auth_headers)
         assert response.status_code == 404
+
+
+# A FileDefinition row is shared by every RecordType binding it. A file entry
+# that omits row-level fields must inherit the stored ones, not reset them.
+_VOLUME_FULL = {
+    "name": "shared_volume",
+    "pattern": "volume.nii.gz",
+    "role": "input",
+    "required": True,
+    "multiple": False,
+}
+_SEG_FULL = {
+    "name": "shared_seg",
+    "pattern": "seg_{id}.nrrd",
+    "role": "output",
+    "required": True,
+    "multiple": False,
+    "grid_conform_to": "shared_volume",
+    "on_grid_mismatch": "reject",
+}
+_VOLUME_PARTIAL = {"name": "shared_volume", "pattern": "volume.nii.gz", "role": "input"}
+_SEG_PARTIAL = {"name": "shared_seg", "pattern": "seg_{id}.nrrd", "role": "output"}
+
+
+@pytest_asyncio.fixture
+async def guarded_type(client: AsyncClient, auth_headers) -> str:
+    """'guarded-a' binds shared_volume and shared_seg, seg conforming to volume."""
+    payload = {"name": "guarded-a", "level": "SERIES", "file_registry": [_VOLUME_FULL, _SEG_FULL]}
+    response = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+    assert response.status_code == 201
+    return "guarded-a"
+
+
+async def _seg_entry(client: AsyncClient, auth_headers, type_name: str) -> dict:
+    response = await client.get(f"{RECORD_TYPES}/{type_name}", headers=auth_headers)
+    assert response.status_code == 200
+    return next(f for f in response.json()["file_registry"] if f["name"] == "shared_seg")
+
+
+class TestSharedFileDefinitions:
+    """POST/PATCH /types with file entries naming files other types already bind."""
+
+    @pytest.mark.asyncio
+    async def test_post_partial_entry_inherits_stored_grid_declaration(
+        self, client: AsyncClient, auth_headers, guarded_type
+    ):
+        """A second binder that omits the grid fields must neither clear them on
+        the shared row nor end up without the guard itself."""
+        payload = {
+            "name": "guarded-b",
+            "level": "SERIES",
+            "file_registry": [_VOLUME_PARTIAL, _SEG_PARTIAL],
+        }
+        response = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+        assert response.status_code == 201
+
+        for type_name in (guarded_type, "guarded-b"):
+            seg = await _seg_entry(client, auth_headers, type_name)
+            assert seg["grid_conform_to"] == "shared_volume"
+            assert seg["on_grid_mismatch"] == "reject"
+
+    @pytest.mark.asyncio
+    async def test_post_binding_guarded_file_without_its_reference_rejected(
+        self, client: AsyncClient, auth_headers, guarded_type
+    ):
+        """Binding shared_seg alone is rejected: its stored declaration references
+        shared_volume, which this type does not bind."""
+        payload = {"name": "guarded-c", "level": "SERIES", "file_registry": [_SEG_PARTIAL]}
+        response = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+        assert response.status_code == 409
+        assert "shared_volume" in response.text
+
+        missing = await client.get(f"{RECORD_TYPES}/guarded-c", headers=auth_headers)
+        assert missing.status_code == 404
+        seg = await _seg_entry(client, auth_headers, guarded_type)
+        assert seg["grid_conform_to"] == "shared_volume"
+
+    @pytest.mark.asyncio
+    async def test_patch_partial_entry_keeps_stored_grid_declaration(
+        self, client: AsyncClient, auth_headers, guarded_type
+    ):
+        payload = {
+            "name": "guarded-b",
+            "level": "SERIES",
+            "file_registry": [_VOLUME_FULL, _SEG_FULL],
+        }
+        created = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+        assert created.status_code == 201
+
+        response = await client.patch(
+            f"{RECORD_TYPES}/guarded-b",
+            json={"file_registry": [_VOLUME_PARTIAL, _SEG_PARTIAL]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        seg = await _seg_entry(client, auth_headers, guarded_type)
+        assert seg["grid_conform_to"] == "shared_volume"
+        assert seg["on_grid_mismatch"] == "reject"
+
+    @pytest.mark.asyncio
+    async def test_patch_explicit_change_to_a_shared_row_is_logged(
+        self, client: AsyncClient, auth_headers, guarded_type, caplog
+    ):
+        """An explicit value through one binder still rewrites the shared row
+        for every other binder — the merge fills only omitted fields — so the
+        write must at least leave a trace naming the file, the field and the
+        other binders, and not the type that made the change."""
+        caplog.set_level("WARNING")
+        payload = {
+            "name": "guarded-b",
+            "level": "SERIES",
+            "file_registry": [_VOLUME_FULL, _SEG_FULL],
+        }
+        created = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+        assert created.status_code == 201
+
+        response = await client.patch(
+            f"{RECORD_TYPES}/guarded-b",
+            json={"file_registry": [_VOLUME_FULL, {**_SEG_FULL, "on_grid_mismatch": "conform"}]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        traces = [m for m in caplog.messages if "shared_seg" in m]
+        assert len(traces) == 1, traces
+        message = traces[0]
+        assert "on_grid_mismatch" in message
+        assert "guarded-a" in message
+        assert "guarded-b" not in message
+
+    @pytest.mark.asyncio
+    async def test_patch_dropping_reference_of_guarded_file_rejected(
+        self, client: AsyncClient, auth_headers, guarded_type
+    ):
+        payload = {
+            "name": "guarded-b",
+            "level": "SERIES",
+            "file_registry": [_VOLUME_FULL, _SEG_FULL],
+        }
+        created = await client.post(RECORD_TYPES, json=payload, headers=auth_headers)
+        assert created.status_code == 201
+
+        response = await client.patch(
+            f"{RECORD_TYPES}/guarded-b",
+            json={"file_registry": [_SEG_PARTIAL]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 409
+        assert "shared_volume" in response.text
+
+        unchanged = await client.get(f"{RECORD_TYPES}/guarded-b", headers=auth_headers)
+        assert {f["name"] for f in unchanged.json()["file_registry"]} == {
+            "shared_volume",
+            "shared_seg",
+        }
+
+    @pytest.mark.asyncio
+    async def test_patch_explicit_null_reference_removes_the_whole_guard(
+        self, client: AsyncClient, auth_headers, guarded_type, test_session
+    ):
+        """An explicit ``grid_conform_to: null`` drops the guard; the stored
+        ``on_grid_mismatch`` must not be inherited alongside it, or the merged
+        entry is an action without a reference and fails validation."""
+        response = await client.patch(
+            f"{RECORD_TYPES}/{guarded_type}",
+            json={"file_registry": [_VOLUME_PARTIAL, {**_SEG_PARTIAL, "grid_conform_to": None}]},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        # The shared test session caches the pre-PATCH link collection of the
+        # patched type (tests/CLAUDE.md, "Identity Map Caching"); reload from DB.
+        test_session.expire_all()
+        seg = await _seg_entry(client, auth_headers, guarded_type)
+        assert seg["grid_conform_to"] is None
+        assert seg["on_grid_mismatch"] is None

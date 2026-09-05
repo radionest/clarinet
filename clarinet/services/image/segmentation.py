@@ -41,8 +41,8 @@ from clarinet.services.image.correspondence import (
 from clarinet.services.image.correspondence import (
     SymmetricDifference as _SymmetricDifferenceOp,
 )
-from clarinet.services.image.grid import Grid, RelationKind, grid_relation
-from clarinet.services.image.grid_io import read_grid
+from clarinet.services.image.grid import Grid, RelationKind
+from clarinet.services.image.grid_io import classify_pair
 from clarinet.services.image.image import (
     FileType,
     Image,
@@ -727,8 +727,15 @@ def conform_seg_to_grid(
         True if the file was (re)written, False if the grids already matched.
 
     Raises:
-        ImageError: *out_path* has an unsupported extension, or a 4-D layered input
-            targets a non-NRRD extension (the layered format has no NIfTI equivalent).
+        ImageError: *out_path* has an unsupported extension, a 4-D layered input
+            targets a non-NRRD extension (the layered format has no NIfTI
+            equivalent), or a non-layered *seg_path* is not already 8-bit (uint8)
+            on disk — the forced-uint8 segmentation read this function's 3-D path
+            uses would otherwise silently quantize a wider format (e.g. an
+            int16/float32 intensity volume). The 4-D layered path is unaffected:
+            it never routes through :class:`Segmentation` and always preserves the
+            source dtype (see :func:`_conform_layered_seg`). The same rule is
+            available up front as :func:`is_conform_repairable`.
         GeometryMismatchError: the grids are ``FOREIGN`` and *allow_resample* is False.
     """
     seg_path = Path(seg_path)
@@ -744,23 +751,19 @@ def conform_seg_to_grid(
     else:
         raise ImageError(f"Cannot infer format for {target.name}: expected .nrrd, .nii, or .nii.gz")
 
-    seg_grid = read_grid(seg_path)
-    ref_grid = read_grid(grid_path)
-    # Reference-first, matching the documented grid_relation convention (only
-    # .kind is consumed here, and kind is order-symmetric).
-    rel = grid_relation(ref_grid, seg_grid, atol=atol)
+    verdict = classify_pair(seg_path, grid_path, atol=atol)
+    seg_grid, ref_grid = verdict.subject, verdict.reference
 
-    if rel.kind is RelationKind.SAME:
+    if verdict.kind is RelationKind.SAME:
         return False
-    if rel.kind is RelationKind.FOREIGN and not allow_resample:
+    if verdict.kind is RelationKind.FOREIGN and not allow_resample:
         raise GeometryMismatchError(
             f"{seg_path.name} does not occupy the same or a rearranged grid relative "
-            f"to {grid_path.name} (pass allow_resample=True to resample anyway):\n"
-            f"  {seg_path}: {seg_grid.summary()}\n"
-            f"  {grid_path}: {ref_grid.summary()}"
+            f"to {grid_path.name} (pass allow_resample=True to resample anyway):"
+            + verdict.describe(str(seg_path), str(grid_path))
         )
 
-    is_layered = ".nrrd" in seg_path.suffixes and len(nrrd.read_header(str(seg_path))["sizes"]) == 4
+    is_layered = _is_layered_nrrd(seg_path)
     if is_layered and filetype is not FileType.NRRD:
         raise ImageError(
             f"Cannot write a 4-D layered segmentation to {target.name}: the layered "
@@ -770,6 +773,14 @@ def conform_seg_to_grid(
     if is_layered:
         _conform_layered_seg(seg_path, target, seg_grid=seg_grid, ref_grid=ref_grid)
     else:
+        if not is_conform_repairable(seg_path):
+            raise ImageError(
+                f"{seg_path.name} is not an 8-bit mask on disk (dtype="
+                f"{_on_disk_dtype(seg_path)}); the segmentation read this function uses "
+                "forces uint8 and would silently quantize a wider format. Use "
+                "on_grid_mismatch='reject' and re-export this file already "
+                "conformed to its reference instead."
+            )
         seg = Segmentation(autolabel=False)
         seg.read(seg_path)
         conformed = seg.reindex_to(_grid_template(ref_grid), order=0)
@@ -777,6 +788,28 @@ def conform_seg_to_grid(
 
     logger.info(f"Conformed segmentation {seg_path.name} onto grid of {grid_path.name}")
     return True
+
+
+def is_conform_repairable(seg_path: Path) -> bool:
+    """Can :func:`conform_seg_to_grid` rearrange *seg_path* without quantizing it?
+
+    Header-only — no voxel data is read. A 4-D layered NRRD always qualifies
+    (the layered path preserves the source dtype); a 3-D file only when it is
+    uint8 on disk, because the :class:`Segmentation` read the 3-D path uses
+    forces uint8. This is the writer's own guard exposed as a probe, so a
+    caller can decide against a repair without first attempting one.
+    """
+    return _is_layered_nrrd(seg_path) or _on_disk_dtype(seg_path) == np.uint8
+
+
+def _is_layered_nrrd(path: Path) -> bool:
+    return ".nrrd" in path.suffixes and len(nrrd.read_header(str(path))["sizes"]) == 4
+
+
+def _on_disk_dtype(path: Path) -> np.dtype | None:
+    probe = Image()
+    probe.read(path, load_data=False)
+    return probe.on_disk_dtype
 
 
 def _grid_template(grid: Grid) -> Image:

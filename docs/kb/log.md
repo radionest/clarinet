@@ -1,8 +1,22 @@
 # Update Log
 
+## 2026-09-04
+
+* **Update**: [Files and anonymization](./files-and-anonymization.md) — `report_record_files` joins `validate_record_files` as a `Files.for_reader` caller: it backs the read-only `validate-files` report, which now also classifies every declared OUTPUT grid pair present on disk without repairing or deleting anything.
+
+## 2026-09-03
+
+* **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — the fail-fast contract now lists the cross-type shared-file check: two record types declaring the same file with different row-level fields abort reconcile before any DB write, because the `FileDefinition` row is shared by every type binding it.
+
+## 2026-08-20
+
+* **Update**: [Domain model](./domain-model.md) — corrected the status-diagram edge into `blocked`: a record is blocked at creation or at the `preparing` exit, never demoted from `pending` (check-files only withholds an existing block's auto-unblock).
+
 ## 2026-07-27
 
 * **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — added the vendored-code convention: third-party/generated code goes in `plan/lib/`, both configurations installed by `clarinet quality init` exclude it from checking, and fixes go upstream and are re-vendored rather than patched locally.
+* **Update**: [Domain model](./domain-model.md) — the `blocked` status table now names a declared INPUT grid mismatch as a second prerequisite failure, alongside missing required input files.
+* **Update**: [Project configuration and the clarinet_plan package](./plan-package.md) — added a "Grid-conformance declarations must be resolvable" section covering `grid_conform_to`/`on_grid_mismatch` in Python config and what `validate_grid_conformance` rejects at config-load time.
 
 ## 2026-07-24
 

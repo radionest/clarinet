@@ -22,6 +22,8 @@ File definitions are stored in a normalized schema with M2M relationship.
 | `description` | `str \| None` | Purpose description |
 | `multiple` | `bool` | `True` = glob collection, `False` = singular |
 | `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |
+| `grid_conform_to` | `str \| None` | Name of another bound `FileDefinition` whose on-disk voxel grid this file must match. `None` = no check (see below) |
+| `on_grid_mismatch` | `str \| None` | `GridMismatchAction`: `conform` \| `delete` \| `reject`. Consulted for OUTPUT files on every submission/update endpoint (`POST`/`PATCH /data`, `POST`/`PATCH /submit`), including the destructive `delete` action on the metadata-only `PATCH /data`; `None` = `reject`. An out-of-vocabulary stored value is logged and read as `reject` by `FileDefinitionRead._coerce_unknown_mismatch_action` (`file_schema.py:232-246`) — read-DTO leniency only, since `FileDef`/`FileRegistryEntry` still reject such a value outright |
 
 **`RecordTypeFileLink`** (table) — M2M: RecordType ↔ FileDefinition:
 
@@ -93,6 +95,56 @@ type whose records nevertheless receive a `parent_record_id` (e.g. a flow's
 `create_record(parent_record_id=…)`) is not forced to carry `{parent_id}`, so
 two such records under different parents can still collide on disk. The
 validator demands a parent discriminator only when `parent_required=True`.
+
+## Grid Conformance (`config/grid_conformance.py`)
+
+Fail-fast, config-load-time check (Python/TOML load and RecordType
+`POST`/PATCH — same `RecordTypeCreate` validator as Output-Path Uniqueness
+above): a file that sets `grid_conform_to` must name a reference the runtime
+can actually resolve and check, or `RecordConstraintViolationError` is
+raised, naming the RecordType and the declaring file: the reference isn't
+bound to *this* RecordType (an unknown name and a name bound to a different
+RecordType raise the identical "unknown" error — lookup is scoped to this
+RecordType's own registry); it's a self-reference; either side's *effective*
+level (own `level`, or the RecordType's when unset) is finer than the
+RecordType's own level, or the reference's finer than the declaring file's;
+either side has `multiple=True` (singular files only); either
+pattern isn't a grid-readable format (`.nii`, `.nii.gz`, `.nrrd` —
+`.seg.nrrd` is covered by the `.nrrd` check); the reference itself declares
+`grid_conform_to` (chained declarations and cycles are unsupported); or
+`on_grid_mismatch` is set without `grid_conform_to` (the action could never
+run). An INPUT referencing an OUTPUT of the same RecordType passes with a
+`WARNING` — legal, but the record stays `blocked` until that OUTPUT exists.
+
+The declaration is a property of the *file*, not of a `RecordTypeFileLink`
+binding — every RecordType binding a file inherits it, so every RecordType
+binding the same `FileDefinition` must declare its row-level fields
+(`FILE_DEFINITION_FIELDS`: `pattern`, `description`, `multiple`, `level`,
+`grid_conform_to`, `on_grid_mismatch`) identically. Config load enforces
+that: `validate_shared_file_definitions` (`config/reconciler.py`) runs before
+any DB write and rejects a config in which two RecordTypes disagree, naming
+the file, the fields and both types — without it the shared row would end up
+in whichever state reconciled last and flip on every restart. Through the
+API, `POST`/`PATCH /types` first fill the row-level fields a file entry
+omits from the stored row (`RecordTypeService._merge_with_stored`) and
+validate the merged entries, so one type cannot silently clear another's
+guard, and a type that binds a guarded file without its reference gets a
+409. An *explicit* change through one type still rewrites the shared row for
+every binder — logged as a `WARNING` naming the file, the changed fields and
+the other binders (`FileDefinitionRepository.get_or_create`) — and, in TOML
+mode, re-exports only the edited type; the next startup then rejects the
+disagreement until the other types' TOML files match (re-validating and
+re-exporting sibling types is #564). Only INPUT and
+OUTPUT bindings are enforced at runtime; an INTERMEDIATE file may still declare
+`grid_conform_to` (config load applies no role filter) but nothing ever
+checks it — a silent no-op, not a rejection. INPUT mismatches are never
+auto-repaired or deleted (an input may be shared with sibling records). They
+land the record in `blocked` at creation or the `preparing`→`pending` exit
+(check-files only withholds an existing block's auto-unblock, never causes
+one), or raise a 422 if a submission's own re-check catches one first;
+OUTPUT mismatches are enforced pre-commit on submit per `on_grid_mismatch`.
+Full runtime behavior, the decision table, and the adoption order:
+[`docs/grid-workflows.md`](../../docs/grid-workflows.md#runtime-grid-conformance-enforcement).
 
 ## ORM vs DTO: file_links vs file_registry
 

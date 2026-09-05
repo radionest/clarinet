@@ -32,6 +32,10 @@ _NRRD_SPACE_LPS = frozenset({"left-posterior-superior", "lps"})
 _NRRD_SPACE_RAS = frozenset({"right-anterior-superior", "ras"})
 _NRRD_SPACE_LAS = frozenset({"left-anterior-superior", "las"})
 
+# NRRD spec keywords for unsigned 8-bit — enough to answer "already uint8 on
+# disk" (Image.on_disk_dtype); not a full NRRD type table.
+_NRRD_UINT8_TYPES = frozenset({"uchar", "unsigned char", "uint8", "uint8_t"})
+
 
 def nrrd_space_transform(space: str | None) -> np.ndarray:
     """3x3 world-coordinate transform taking the header's ``space`` into LPS.
@@ -313,6 +317,32 @@ class Image:
     def has_data(self) -> bool:
         """True when voxel data is resident (as opposed to a metadata-only read)."""
         return self._img is not None
+
+    @property
+    def on_disk_dtype(self) -> np.dtype | None:
+        """The voxel dtype declared in the file's header, independent of any load.
+
+        Available after any ``read``/``read_nifti``/``read_nrrd`` call, including a
+        header-only one (``load_data=False``) — reflects what is actually stored on
+        disk, never a ``dtype=``/``force_dtype`` cast a full load would apply on top.
+        NIfTI reports the header's declared datatype directly; NRRD recognizes only
+        the unsigned-8-bit spec keywords (the one distinction
+        :func:`~clarinet.services.image.segmentation.conform_seg_to_grid`'s dtype
+        guard needs) and returns ``None`` for every other NRRD type rather than
+        reproducing pynrrd's full type table.
+
+        Raises:
+            ImageError: No header has been read yet.
+        """
+        if self._filetype == FileType.NIFTI and self._nifti_image is not None:
+            # nibabel ships no type stubs — get_data_dtype() resolves to Any;
+            # the annotation below is what actually narrows it for mypy.
+            nifti_dtype: np.dtype = np.dtype(self._nifti_image.header.get_data_dtype())
+            return nifti_dtype
+        if self._filetype == FileType.NRRD and self._nrrd_header is not None:
+            type_str = self._nrrd_header["type"]
+            return np.dtype(np.uint8) if type_str in _NRRD_UINT8_TYPES else None
+        raise ImageError("Image dtype is unavailable: no header read")
 
     @property
     def dataobj(self) -> Any:

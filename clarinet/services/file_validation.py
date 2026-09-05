@@ -11,10 +11,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from clarinet.exceptions.domain import ValidationError
+from clarinet.exceptions.domain import ImageError, InputGridMismatchError, ValidationError
 from clarinet.files import Files, join_within
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
+from clarinet.services.grid_policy import preview_output_grids
+from clarinet.services.image.grid import RelationKind
+from clarinet.services.image.grid_io import classify_pair
 
 if TYPE_CHECKING:
     from clarinet.models.file_schema import FileDefinitionRead
@@ -27,7 +30,7 @@ class FileValidationError:
 
     Attributes:
         file_name: Name of the file definition that failed validation
-        error_type: Type of error ("missing", "pattern_mismatch")
+        error_type: Type of error ("missing", "grid_mismatch")
         message: Human-readable error message
     """
 
@@ -59,6 +62,13 @@ class FileValidator:
 
     Args:
         file_definitions: List of FileDefinitionRead objects to validate against
+        registry: Full file registry used to resolve ``grid_conform_to``
+            references. Defaults to *file_definitions* when omitted. Reference
+            lookup spans every role, not just the validated set: a caller may
+            pass only the INPUT subset to validate while a declared reference
+            is bound as OUTPUT or INTERMEDIATE on the same record type —
+            Task 3's config-load validator accepts any role pairing, so
+            runtime resolution must too.
 
     Examples:
         >>> validator = FileValidator(input_file_defs)
@@ -68,8 +78,115 @@ class FileValidator:
         ...         print(f"Error: {error.message}")
     """
 
-    def __init__(self, file_definitions: list[FileDefinitionRead]):
+    def __init__(
+        self,
+        file_definitions: list[FileDefinitionRead],
+        registry: list[FileDefinitionRead] | None = None,
+    ):
         self._file_definitions = file_definitions
+        # Reference lookup spans every role — the validated set stays as passed.
+        self._by_name = {
+            fd.name: fd for fd in (registry if registry is not None else file_definitions)
+        }
+
+    def _target_path(
+        self,
+        file_def: FileDefinitionRead,
+        record: RecordBase,
+        directory: Path,
+        working_dirs: dict[DicomQueryLevel, Path] | None,
+        parent: RecordBase | None,
+    ) -> tuple[str, Path]:
+        """Resolve one file definition to its rendered filename and absolute path.
+
+        Returns both halves — not just the path — because the rendered
+        filename (as opposed to ``path.name``) is what ``matched_files``
+        must carry: a pattern is free to render a subdirectory-bearing
+        string (nothing constrains it to a bare basename), and that value
+        round-trips through ``RecordFileLink.filename`` into a later
+        ``working_dir / filename`` join elsewhere. Reducing it to ``.name``
+        here would silently drop the subdirectory for such a pattern.
+
+        join_within raises UnsafePathError uncaught rather than being folded
+        into the caller's ``errors``. It enforces containment only, and both
+        halves that could feed it a non-contained name are covered upstream:
+        Files.render_for guards every substituted *value* (path_safe=True
+        rejects "/", "\\", NUL and a bare "."/"..", and raises UnsafePathError
+        itself for a degenerate stored identity value — a patient_id of ".." is
+        legal per PATIENT_ID_REGEX), and validate_file_pattern guards the
+        pattern's literal text and its worst-case render. That validator also
+        runs on every stored row when RecordType.file_registry is read — a
+        failing legacy row is skipped with a WARNING, never handed on — so a
+        definition that arrives here through validate_record_files has passed
+        it. The join is a backstop for a caller that hands FileValidator an
+        unvalidated definition directly (none in-tree). Either way the
+        violation is a server-side fact — a stored value or a definition —
+        never data the current caller submitted. On the principle that a
+        violation surfaces according to who caused it, that makes it a
+        server-side failure, not a per-record 422.
+        """
+        resolved = Files.render_for(record, file_def.pattern, parent=parent)
+        if file_def.level and working_dirs and file_def.level in working_dirs:
+            return resolved, join_within(working_dirs[file_def.level], resolved)
+        return resolved, join_within(directory, resolved)
+
+    def _grid_error(
+        self,
+        file_def: FileDefinitionRead,
+        subject: Path,
+        record: RecordBase,
+        directory: Path,
+        working_dirs: dict[DicomQueryLevel, Path] | None,
+        parent: RecordBase | None,
+    ) -> FileValidationError | None:
+        """Classify *subject* against its declared reference; None when clean.
+
+        Reads both grids off disk — an in-memory or in-scene comparison cannot
+        see a mirror, because a viewer canonicalizes both sides identically at
+        load time.
+        """
+        ref_def = self._by_name.get(file_def.grid_conform_to or "")
+        if ref_def is None:
+            return FileValidationError(
+                file_name=file_def.name,
+                error_type="grid_mismatch",
+                message=(
+                    f"'{file_def.name}' declares grid_conform_to="
+                    f"'{file_def.grid_conform_to}', which is not bound to this "
+                    f"record type"
+                ),
+            )
+
+        _, reference = self._target_path(ref_def, record, directory, working_dirs, parent)
+        if not reference.is_file():
+            return FileValidationError(
+                file_name=file_def.name,
+                error_type="grid_mismatch",
+                message=(
+                    f"Grid reference '{ref_def.name}' for '{file_def.name}' is "
+                    f"not on disk (expected: {reference.name})"
+                ),
+            )
+
+        try:
+            verdict = classify_pair(subject, reference)
+        except ImageError as e:
+            return FileValidationError(
+                file_name=file_def.name,
+                error_type="grid_mismatch",
+                message=f"Cannot read grid for '{file_def.name}' or its reference: {e}",
+            )
+
+        if verdict.kind is RelationKind.SAME:
+            return None
+        return FileValidationError(
+            file_name=file_def.name,
+            error_type="grid_mismatch",
+            message=(
+                f"'{file_def.name}' does not share '{ref_def.name}'s grid "
+                f"({verdict.kind.value}):" + verdict.describe(file_def.name, ref_def.name)
+            ),
+        )
 
     def validate(
         self,
@@ -96,8 +213,8 @@ class FileValidator:
             UnsafePathError: if a singular definition's rendered name would
                 escape *target_dir*, or a substituted value could alter the
                 path (``Files.render_for``'s value guard). Propagates uncaught
-                rather than becoming a ``FileValidationError`` entry — see the
-                comment at the join below.
+                rather than becoming a ``FileValidationError`` entry — see
+                ``_target_path``.
 
         A ``multiple=True`` definition is never rendered here. A required one
         is reported as ``missing`` without touching the disk — matching a
@@ -110,24 +227,18 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in self._file_definitions:
-            # Level-aware directory resolution
-            if file_def.level and working_dirs and file_def.level in working_dirs:
-                target_dir = working_dirs[file_def.level]
-            else:
-                target_dir = directory
-
             if file_def.multiple:
                 # Never rendered. A collection's placeholders are wildcards,
                 # and validate_file_pattern skips both render-time rules for
                 # it on exactly that premise — so `{study_uid}/slice_{n}.dcm`
                 # is a *legal* collection which, rendered for a patient-level
-                # record, is `/slice_.dcm`: join_within below would rightly
-                # refuse it, turning a config-load-legal definition into a
-                # 500. Matching a collection by glob is issue #562; until then
-                # a required one is reported missing without touching the
-                # disk — the verdict rendering reached anyway, since a
-                # wildcard rendered to nothing and the probe never found a
-                # file.
+                # record, is `/slice_.dcm`: join_within in _target_path would
+                # rightly refuse it, turning a config-load-legal definition
+                # into a 500. Matching a collection by glob is issue #562;
+                # until then a required one is reported missing without
+                # touching the disk — the verdict rendering reached anyway,
+                # since a wildcard rendered to nothing and the probe never
+                # found a file.
                 if file_def.required:
                     errors.append(
                         FileValidationError(
@@ -140,30 +251,19 @@ class FileValidator:
                     )
                 continue
 
-            resolved = Files.render_for(record, file_def.pattern, parent=parent)
-
-            # join_within raises UnsafePathError uncaught rather than being
-            # folded into `errors` below. It enforces containment only, and
-            # both halves that could feed it a non-contained name are covered
-            # upstream: Files.render_for guards every substituted *value*
-            # (path_safe=True rejects "/", "\", NUL and a bare "."/"..", and
-            # raises UnsafePathError itself for a degenerate stored identity
-            # value — a patient_id of ".." is legal per PATIENT_ID_REGEX), and
-            # validate_file_pattern guards the pattern's literal text and its
-            # worst-case render. That validator also runs on every stored row
-            # when RecordType.file_registry is read — a failing legacy row is
-            # skipped with a WARNING, never handed on — so a definition that
-            # arrives here through validate_record_files has passed it. The
-            # join is a backstop for a caller that hands FileValidator an
-            # unvalidated definition directly (none in-tree). Either way the
-            # violation is a server-side fact — a stored value or a definition
-            # — never data the current caller submitted. On the principle that
-            # a violation surfaces according to who caused it, that makes it a
-            # server-side failure, not a per-record 422.
-            filename = resolved if join_within(target_dir, resolved).is_file() else None
+            resolved, target_path = self._target_path(
+                file_def, record, directory, working_dirs, parent
+            )
+            filename = resolved if target_path.is_file() else None
 
             if filename:
                 matched[file_def.name] = filename
+                if file_def.grid_conform_to:
+                    error = self._grid_error(
+                        file_def, target_path, record, directory, working_dirs, parent
+                    )
+                    if error is not None:
+                        errors.append(error)
             elif file_def.required:
                 errors.append(
                     FileValidationError(
@@ -202,7 +302,10 @@ async def validate_record_files(
 
     Args:
         record: RecordRead instance with all relations populated
-        raise_on_invalid: If True, raise ValidationError on missing files.
+        raise_on_invalid: If True, raise ``ValidationError`` on an invalid set —
+            its ``InputGridMismatchError`` subclass (``code: GRID_MISMATCH``)
+            when any error is a grid mismatch, so a client can tell it
+            from a missing file.
         parent: Optional parent record for fallback pattern resolution.
 
     Returns:
@@ -216,12 +319,46 @@ async def validate_record_files(
 
     f = Files.for_reader(record)
     working_dirs, directory = f.dirs(), f.dir()
-    validator = FileValidator(input_defs)
+    validator = FileValidator(input_defs, registry=record.record_type.file_registry)
     result = cast(
         FileValidationResult,
         await Files.in_thread(validator.validate, record, directory, working_dirs, parent),
     )
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
+        if any(e.error_type == "grid_mismatch" for e in result.errors):
+            raise InputGridMismatchError(f"File validation failed: {errors}")
         raise ValidationError(f"File validation failed: {errors}")
+    return result
+
+
+async def report_record_files(
+    record: RecordRead, *, parent: RecordRead | None = None
+) -> FileValidationResult:
+    """The read-only report behind ``POST /records/{id}/validate-files``.
+
+    INPUT verdicts exactly as :func:`validate_record_files` gives them, plus a
+    dry run of the OUTPUT guard (:func:`preview_output_grids`): every declared
+    OUTPUT pair present on disk that a submission would refuse — rejected or
+    deleted per ``on_grid_mismatch`` — is reported as a ``grid_mismatch``
+    error naming the action and, for a reject, the reason, so a client learns
+    about a coming 409 before it submits. A pair the guard would repair
+    (``conform`` on an exactly-repairable subject) passes here as it does
+    there. Nothing is repaired or deleted.
+
+    Deliberately not folded into ``validate_record_files``: that verdict
+    drives creation-time blocking, the check-files auto-unblock and the
+    submit-time 422, where an OUTPUT verdict would pre-empt ``conform``'s
+    repair.
+    """
+    result = await validate_record_files(record, parent=parent)
+    if result is None:
+        result = FileValidationResult(valid=True)
+    for entry in await preview_output_grids(record, parent=parent):
+        result.errors.append(
+            FileValidationError(
+                file_name=entry.file_name, error_type="grid_mismatch", message=entry.message
+            )
+        )
+    result.valid = not result.errors
     return result

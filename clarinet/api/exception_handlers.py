@@ -71,8 +71,10 @@ def setup_exception_handlers(app: FastAPI) -> None:
         DatabaseError,
         EntityAlreadyExistsError,
         EntityNotFoundError,
+        InputGridMismatchError,
         InvalidCredentialsError,
         InvalidPatientIdentifierError,
+        OutputGridMismatchError,
         PipelineError,
         QuartoNotInstalledError,
         QuartoRenderNotReadyError,
@@ -155,13 +157,13 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Invalid pagination cursor"},
         )
 
-    # NOTE: ``RecordDataValidationError`` is registered immediately below.
-    # Starlette dispatches handlers by walking the **exception's own MRO** —
-    # ``for cls in type(exc).__mro__: if cls in registered: return ...`` — so
-    # the subclass handler shadows this generic one whenever the exception is
-    # a ``RecordDataValidationError`` instance, regardless of registration
-    # order. Both handlers must remain registered: removing this one would
-    # break legacy ``raise ValidationError("text")`` call sites.
+    # NOTE: two subclasses are registered below — ``RecordDataValidationError``
+    # and ``InputGridMismatchError``. Starlette dispatches handlers by walking
+    # the **exception's own MRO** — ``for cls in type(exc).__mro__: if cls in
+    # registered: return ...`` — so a subclass handler shadows this generic one
+    # whenever the exception is an instance of it, regardless of registration
+    # order. All three must remain registered: removing this one would break
+    # legacy ``raise ValidationError("text")`` call sites.
     @app.exception_handler(ValidationError)
     async def handle_validation_error(request: Request, exc: ValidationError) -> JSONResponse:
         """Convert ValidationError to 422 response."""
@@ -228,6 +230,24 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": "Validation failed", "errors": errors_payload},
+        )
+
+    @app.exception_handler(InputGridMismatchError)
+    async def handle_input_grid_mismatch(
+        request: Request, exc: InputGridMismatchError
+    ) -> JSONResponse:
+        """422 with a machine-readable code for a submit-time INPUT grid mismatch.
+
+        Subclass of ValidationError — shadows the generic handler above, see
+        the ordering note there. Logged at WARNING without a traceback: an
+        expected verdict on the caller's files, not a server fault.
+        """
+        logger.warning(
+            f"422 {InputGridMismatchError.error_code} on {request.method} {request.url.path}: {exc}"
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": str(exc), "code": InputGridMismatchError.error_code},
         )
 
     @app.exception_handler(RecordLimitReachedError)
@@ -304,6 +324,18 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc) if str(exc) else "Business rule violation"},
+        )
+
+    @app.exception_handler(OutputGridMismatchError)
+    async def handle_output_grid_mismatch(_: Request, exc: OutputGridMismatchError) -> JSONResponse:
+        """409 with a machine-readable code for an OUTPUT grid-guard refusal.
+
+        The guard logs the refusal at WARNING before raising, so nothing is
+        logged here.
+        """
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": OutputGridMismatchError.error_code},
         )
 
     @app.exception_handler(DatabaseError)

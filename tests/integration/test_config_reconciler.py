@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import _COMPARED_FIELDS, ReconcileResult, reconcile_record_types
-from clarinet.exceptions.domain import ConfigurationError
+from clarinet.exceptions.domain import ConfigurationError, RecordConstraintViolationError
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
@@ -594,6 +594,94 @@ async def test_allow_path_collision_flip_triggers_update(
     )
     row = (await test_session.execute(stmt)).scalar_one()
     assert row.file_registry[0].allow_path_collision is False
+
+
+@pytest.mark.asyncio
+async def test_grid_conform_to_change_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Changing on_grid_mismatch on a file that declares grid_conform_to must
+    be detected as a diff by _file_links_differ.
+    """
+    volume_def = {
+        "name": "volume",
+        "pattern": "volume.nii.gz",
+        "role": "input",
+        "required": True,
+        "multiple": False,
+    }
+    file_def_v1 = {
+        "name": "seg_file",
+        "pattern": "seg_{id}.nrrd",  # {id} discriminates -> path-uniqueness no-ops
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "grid_conform_to": "volume",
+        "on_grid_mismatch": "reject",
+    }
+    config_v1 = [_make_config("grid-drift-test", file_registry=[volume_def, file_def_v1])]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.created == ["grid-drift-test"]
+
+    test_session.expire_all()
+
+    # Flip on_grid_mismatch reject -> conform -> must be detected as a change
+    file_def_v2 = {**file_def_v1, "on_grid_mismatch": "conform"}
+    config_v2 = [_make_config("grid-drift-test", file_registry=[volume_def, file_def_v2])]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.updated == ["grid-drift-test"]
+
+    test_session.expire_all()
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "grid-drift-test")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    row = (await test_session.execute(stmt)).scalar_one()
+    seg_file = next(f for f in row.file_registry if f.name == "seg_file")
+    assert seg_file.grid_conform_to == "volume"
+    assert seg_file.on_grid_mismatch == "conform"
+
+
+@pytest.mark.asyncio
+async def test_grid_conform_to_identical_second_pass_is_unchanged(
+    test_session: AsyncSession,
+) -> None:
+    """An identical second reconcile pass over a grid_conform_to declaration
+    is a no-op. Proves the widened comparable tuple in _file_links_differ is
+    symmetric — a naive change here could make an identical config look like
+    drift on every restart (perpetual-update loop).
+    """
+    volume_def = {
+        "name": "volume",
+        "pattern": "volume.nii.gz",
+        "role": "input",
+        "required": True,
+        "multiple": False,
+    }
+    file_def = {
+        "name": "seg_file",
+        "pattern": "seg_{id}.nrrd",
+        "role": "output",
+        "required": True,
+        "multiple": False,
+        "grid_conform_to": "volume",
+        "on_grid_mismatch": "conform",
+    }
+    config = [_make_config("grid-stable-test", file_registry=[volume_def, file_def])]
+    result = await reconcile_record_types(config, test_session)
+    assert result.created == ["grid-stable-test"]
+
+    test_session.expire_all()
+
+    # Re-reconcile with an identical config -> no-op
+    result = await reconcile_record_types(config, test_session)
+    assert result.unchanged == ["grid-stable-test"]
+    assert result.updated == []
 
 
 @pytest.mark.asyncio
@@ -1184,7 +1272,7 @@ async def test_toml_config_load_fails_fast_on_output_path_uniqueness(
 
     Mirrors the shared_editing guard above: ``RecordTypeCreate(**props)``
     inside the per-file loop runs ``validate_output_path_uniqueness`` (via the
-    model's ``_validate_output_paths`` model_validator), which raises
+    model's ``_validate_file_registry`` model_validator), which raises
     ``RecordConstraintViolationError`` for a default ``unique_by`` (the
     "user" partition) paired with an OUTPUT pattern missing ``{user_id}``.
     The loop must convert that into a fatal ``ConfigLoadError`` naming the
@@ -1276,3 +1364,25 @@ async def test_reconcile_config_allows_shared_editing_without_unique_per_user(
 
         result = await reconcile_config(folder="/fake/path")
         assert "shared-ok" in result.created
+
+
+@pytest.mark.asyncio
+async def test_reconcile_rejects_disagreeing_shared_file_before_any_write(
+    test_session: AsyncSession,
+) -> None:
+    """Reconcile aborts before creating anything when two types disagree on a
+    shared file — otherwise the row would end up in whichever state reconciled
+    last, silently disabling the other type's guard until the next restart.
+    The check itself is unit-tested in ``tests/test_shared_file_definitions.py``.
+    """
+    volume = {"name": "volume", "pattern": "volume.nii.gz", "role": "input"}
+    seg = {"name": "seg", "pattern": "seg_{id}.nrrd", "role": "output"}
+    config = [
+        _make_config("type-a", file_registry=[volume, {**seg, "grid_conform_to": "volume"}]),
+        _make_config("type-b", file_registry=[volume, seg]),  # omits the guard
+    ]
+    with pytest.raises(RecordConstraintViolationError, match="grid_conform_to"):
+        await reconcile_record_types(config, test_session)
+
+    rows = (await test_session.execute(select(RecordType))).scalars().all()
+    assert rows == []

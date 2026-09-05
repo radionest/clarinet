@@ -137,15 +137,16 @@ Three "record not available for work" statuses with distinct exit conditions:
 | Status | Why unavailable | Who releases it |
 |---|---|---|
 | `preparing` | system is preparing the record (prefill, file/context generation) | flow/pipeline, via explicit status update only |
-| `blocked` | prerequisites not met (currently: required input files) | automatic, via check-files |
+| `blocked` | prerequisites not met (required input files, or a declared INPUT grid mismatch) | automatic, via check-files |
 | `pause` | administrative decision | human |
 
-Lifecycle: `preparing → (blocked if files missing) → pending → inwork → finished/failed`.
+Lifecycle: `preparing → (blocked if inputs invalid) → pending → inwork → finished/failed`.
 
-`blocked` contract: "prerequisites not met". Today the only prerequisite is
-required input files; completed sibling record types may be added later.
-- Records with missing required input files get `blocked` status on creation (instead of raising)
-- `POST /records/{id}/check-files` auto-unblocks when files appear → transitions to `pending`
+`blocked` contract: "prerequisites not met". Today that means required input
+files, or a declared INPUT file whose grid no longer matches its reference
+(`grid_conform_to`); completed sibling record types may be added later.
+- Records with missing required input files, or a grid-mismatched INPUT file, get `blocked` status on creation (instead of raising)
+- `POST /records/{id}/check-files` auto-unblocks when files are present and grid-matched → transitions to `pending`
 
 `preparing` contract: "the system is actively preparing the record".
 - Set via `RecordCreate(status="preparing")` or `update_status` / RecordFlow `update_record(status='preparing')`

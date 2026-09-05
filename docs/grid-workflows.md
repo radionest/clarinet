@@ -29,14 +29,14 @@ NIfTI is RAS on disk — converted at the read/write boundary
 (`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:27-29`). NRRD honors
 its own `space` header field: LPS passes through as-is, RAS/LAS are converted, and
 anything else raises `ImageReadError` (`nrrd_space_to_lps`,
-`clarinet/services/image/image.py:57`) — Slicer itself always writes LPS (Probe P6
+`clarinet/services/image/image.py:64`) — Slicer itself always writes LPS (Probe P6
 below), so this only affects third-party NRRD files.
 
 **The voxel-to-physical affine** (`affine_4x4`) is a 4×4 matrix: the 3×3 linear
 part is `direction` scaled per-column by `spacing` (each `direction` column is a
 unit vector for that array axis), and the translation column is `origin`.
-`Image.affine_4x4` (`clarinet/services/image/image.py:328`) and
-`Grid.from_components` (`clarinet/services/image/grid.py:85`) build this matrix by
+`Image.affine_4x4` (`clarinet/services/image/image.py:361`) and
+`Grid.from_components` (`clarinet/services/image/grid.py:132`) build this matrix by
 the identical formula — the two are meant to be interchangeable representations of
 the same grid.
 
@@ -47,19 +47,19 @@ is the condition ITK viewers (including Slicer) silently "fix" at load time by
 flipping the slice axis (Probe P1). This determinant is the central quantity in
 the [design rationale](#design-rationale) below.
 
-**`Grid`** (`clarinet/services/image/grid.py:65`) is the shared value object: a
+**`Grid`** (`clarinet/services/image/grid.py:86`) is the shared value object: a
 frozen dataclass `(shape: tuple[int, int, int], affine: np.ndarray)`. Equality is
 deliberately left at default object identity (`eq=False`) — a dataclass-generated
 `__eq__` would compare `affine` with `==`, and numpy raises on the resulting
 array's ambiguous truth value. **Never compare two `Grid`s with `==`; always go
 through `grid_relation`.** Derived read-only properties `.origin` / `.spacing` /
-`.direction` (`grid.py:114`, `:120`, `:126`) and a diagnostic `.summary()`
-(`grid.py:133`) round out the type.
+`.direction` (`grid.py:157`, `:163`, `:169`) and a diagnostic `.summary()`
+(`grid.py:176`) round out the type.
 
 **`RelationKind`** (`clarinet/services/image/grid.py:42`) is the three-way
 taxonomy enum: `SAME | REARRANGED | FOREIGN`. **`GridRelation`**
 (`clarinet/services/image/grid.py:51`) is the verdict returned by
-`grid_relation(a, b, *, atol=1e-4) -> GridRelation` (`grid.py:148`): always a
+`grid_relation(a, b, *, atol=1e-4) -> GridRelation` (`grid.py:191`): always a
 `.kind`, plus — only when `.kind is RelationKind.REARRANGED` — `.perm` and
 `.flips`, the per-axis correspondence between the two grids' index spaces. These
 two names are easy to conflate; the enum is `RelationKind`, the verdict object is
@@ -77,7 +77,7 @@ verdict tolerates translation error up to **half a voxel** (in index-space units
 via `_OFFSET_TOL_VOXELS = 0.5`, `grid.py:39`) — wide enough to absorb on-disk float
 rounding, narrow enough that a real one-voxel-or-more misalignment (a mirror, a
 transpose) can never be mistaken for identity. `Image.same_grid` /
-`Image.assert_same_grid` (`clarinet/services/image/image.py:336`, `:362`) are a
+`Image.assert_same_grid` (`clarinet/services/image/image.py:384`, `:410`) are a
 **different, tighter** check: a near-exact `atol`-only (default `1e-4` mm)
 comparison of the full affine with **no** permutation tolerance at all, used as
 the in-memory pre-overlay guard for two already-loaded objects. The two
@@ -99,7 +99,7 @@ deliberately do not share an implementation — see the
    in-plane basis in DICOM's own IOP order end-to-end — array, spacing, and
    direction move together, with no internal row/column swap
    (`dicom_volume.py:68-86`), verified by a save+`read_grid` round-trip test
-   (`tests/test_image.py:1130`,
+   (`tests/test_image.py:1225`,
    `test_read_dicom_series_roundtrips_through_save_and_read_grid`).
 2. **The slice axis comes from `ImagePositionPatient` (IPP) progression, not
    IOP.** SimpleITK/GDCM can derive an internally-inconsistent slice-axis sign on
@@ -121,8 +121,8 @@ The flip is always **geometry-preserving**: array, origin, and direction reverse
 (mirroring the data through the origin plane) is a different, forbidden operation
 (the #247/#453 bug class; see the [design rationale](#design-rationale) and
 [traps](#traps) below). `Image.read_dicom_series`
-(`clarinet/services/image/image.py:553`) stores the result verbatim;
-`Image.save_as` → `_save_nifti` (`image.py:685`, `:715`, LPS→RAS at the write
+(`clarinet/services/image/image.py:608`) stores the result verbatim;
+`Image.save_as` → `_save_nifti` (`image.py:740`, `:770`, LPS→RAS at the write
 boundary) writes `volume.nii.gz`. The framework's only production entry point is
 the conversion pipeline task
 (`clarinet/services/pipeline/tasks/convert_series.py:107,115`), a plain
@@ -144,7 +144,7 @@ explain actually happens:
   it exports mirrored relative to the on-disk volume file, even though it looked
   correctly aligned to the user on screen the whole time.
 - `export_segmentation(name, output_path, *, conform_to=None)`
-  (`clarinet/services/slicer/helper.py:510`) is the write-boundary guard.
+  (`clarinet/services/slicer/helper.py:524`) is the write-boundary guard.
   `conform_to=<reference file path>` reads the reference's **on-disk** grid
   (`_read_grid_on_disk`, `helper.py:244` — via `sitk.ImageFileReader`, never a
   loaded node, never `loadVolume` — Probe P2), classifies the segmentation node's
@@ -192,7 +192,7 @@ cannot see the mirror at all. It is also fail-open by construction: an unresolve
 reference volume skips the check, and a segmentation loaded from disk carries no
 recorded reference geometry, so the guard returns early either way. **Only a
 disk-level read can catch the mirror** — `assert_same_grid_on_disk`
-(`clarinet/services/image/grid_io.py:53`) server-side, `_read_grid_on_disk`
+(`clarinet/services/image/grid_io.py:108`) server-side, `_read_grid_on_disk`
 (`helper.py:244`) inside Slicer. `_assert_segmentation_matches_volume` remains,
 narrowed, as a best-effort load-time diagnostic (`load_segmentation`) and as the
 correspondence-engine set-ops' own pre-regrid check
@@ -200,19 +200,308 @@ correspondence-engine set-ops' own pre-regrid check
 
 ---
 
+## Runtime grid-conformance enforcement
+
+Everything above this line is a primitive some script or guard calls by hand.
+This section is different: a `FileDefinition` can declare, once, that its
+on-disk grid must always match another file's — and, for INPUT and OUTPUT
+bindings, the framework enforces that declaration automatically at the
+seams that validate files today, with no script author ever writing a
+`grid_relation` call. Not every seam that could let the pair drift is
+covered yet — see [What is not guarded](#what-is-not-guarded) below.
+
+### Declaring a pair
+
+Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:90-91`)
+— a property of the *file*, not of a `RecordTypeFileLink` binding, so every
+RecordType binding that file inherits the declaration, and the reference must
+be bound to that same RecordType:
+
+- **`grid_conform_to: str | None`** — the name of another `FileDefinition`
+  bound to the same RecordType whose on-disk grid this file must match.
+  `None` (the default) disables the check entirely. Python config's `FileDef`
+  (`clarinet/config/primitives.py:75`) accepts either the referenced `FileDef`
+  object — preferred: a typo becomes a `NameError` at import time, and the
+  reference survives a variable rename — or its plain name string; the object
+  form is reduced to a name at config-resolution time
+  (`fileref_to_file_definition`, `clarinet/config/primitives.py:285`), since a
+  `FileDef`'s own name isn't assigned until after its module imports. TOML
+  supplies the name string directly. The DB column always stores the resolved
+  name.
+- **`on_grid_mismatch: str | None`** — `"conform"` / `"delete"` / `"reject"`,
+  the PEP 695 alias `GridMismatchAction` (`clarinet/models/file_schema.py:39`).
+  `None` (the default) means `"reject"` — declaring a reference must never
+  fail open.
+
+### Config-load fail-fast
+
+`validate_grid_conformance` (`clarinet/config/grid_conformance.py:38`) runs
+inside the same `RecordTypeCreate` model validator as
+`validate_output_path_uniqueness` — so Python config load, TOML load, and
+RecordType `POST`/`PATCH` reject a broken declaration at the point of the
+mutation, for every declaration that reaches the validator. Not all of them
+do: `RecordTypeCreate.file_registry` defaults to `None`, and some call sites
+attach file links separately, so a dangling `grid_conform_to` can still
+arrive at runtime, where both enforcement paths fail closed instead —
+`enforce_output_grids` with a 409 (the unbound-reference branch of
+`_resolve_pair`, `grid_policy.py:159-168`), `FileValidator` with a
+`grid_mismatch` error (`file_validation.py:148-158`). Naming the
+RecordType and the declaring file, it rejects:
+
+1. a reference name not bound to *this* RecordType — an unknown name and a
+   name bound to some other RecordType raise the identical error, since
+   lookup is scoped to this RecordType's own registry and cannot tell the two
+   apart;
+2. a self-reference;
+3. either side's *effective* level (its own `level`, or the RecordType's
+   when unset) finer than the RecordType's own level, or the reference's
+   finer than the declaring file's — resolved per RecordType because a file
+   that leaves `level` unset inherits the RecordType's own level, so its
+   *effective* level differs between types;
+4. `multiple=True` on either side — grid conformance is defined for singular
+   files only;
+5. either pattern extension `read_grid` cannot classify — anything other than
+   `.nii`, `.nii.gz`, `.nrrd` (`.seg.nrrd` is covered by the `.nrrd` check);
+6. a reference that itself declares `grid_conform_to` — chained declarations
+   (and therefore cycles) are unsupported: enforcement order is undefined, and
+   a repaired reference would silently invalidate its dependents; point both
+   files at the same reference instead;
+7. `on_grid_mismatch` set on a file with no `grid_conform_to` — the action
+   could never run.
+
+One shape passes with a `WARNING` instead of a rejection: an INPUT file
+referencing an OUTPUT of the same RecordType. It is legal — a pipeline may
+write the OUTPUT before check-files runs — but the record stays `blocked`
+until that OUTPUT exists.
+
+### The two enforcement seams
+
+An INPUT file and an OUTPUT file are owned differently, so `grid_conform_to`
+is read at two structurally different points. A record does not own its
+inputs — they may be shared with sibling records — so an input mismatch can
+only ever be reported, never repaired or deleted. An OUTPUT is the record's own
+artifact, so `on_grid_mismatch` gets to decide its fate. **INTERMEDIATE is
+neither**: config-load validation applies no role filter, so a
+`multiple=False`, grid-readable INTERMEDIATE file can declare
+`grid_conform_to` and pass — but no runtime path enforces it
+(`enforce_output_grids` filters to `FileRole.OUTPUT`, `validate_record_files`
+filters to `FileRole.INPUT`). It is a silent no-op, not a rejected
+declaration.
+
+**INPUT.** `FileValidator.validate`
+(`clarinet/services/file_validation.py:191`) classifies every declared pair
+with `classify_pair` (`file_validation.py:172`) and, on anything but `SAME`,
+emits a `FileValidationError(error_type="grid_mismatch")` — the same error
+shape as a plain missing file. `on_grid_mismatch` is never consulted here.
+Because `validate_record_files` is the single entry point, every existing
+seam inherits the check automatically:
+
+- Record creation (`RecordService.create_record`) — an invalid pair sends the
+  new record straight to `blocked`, unless the record is created already
+  `preparing` — that case is caught only at its `preparing → pending` exit
+  instead (below).
+- `POST /records/{id}/check-files` (`RecordService.check_files`) — a blocked
+  record stays `blocked`; it only auto-unblocks to `pending` once the pair is
+  repaired.
+- `POST /records/{id}/validate-files` — the mismatch is reported in the
+  response; nothing is mutated. The same endpoint previews the OUTPUT
+  pairs too — see the OUTPUT seam below.
+- The `preparing → pending` status transition
+  (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
+  of `pending`.
+- `POST /records/{id}/data` and `POST /records/{id}/submit`
+  (`_process_submission`, `clarinet/api/routers/record.py:603-608`) re-validate
+  with `raise_on_invalid=True` immediately before the submission is persisted —
+  the check that catches a reference drifting *after* the record already
+  passed creation or check-files while sitting `pending`. Unlike every seam
+  above, this one raises instead of recording a verdict: a mismatch here
+  raises `InputGridMismatchError` (a `ValidationError`), mapped to **422**
+  with `code: GRID_MISMATCH`, not the 409 the OUTPUT guard produces — a
+  plain missing-input 422 stays a bare `ValidationError` with no code.
+  Skipped, like the OUTPUT guard, whenever `skip_validation` is true
+  (`clarinet/api/routers/record.py:548`) — i.e. for `POST /data?status=failed`.
+  `PATCH /data` and `PATCH /submit` never reach this branch at all
+  (`is_update=True` skips it) — they never re-check INPUT files here.
+
+Like the OUTPUT existence rule below, the grid check itself runs only when
+the *subject* file matched on disk (`file_validation.py:257-261`) — a
+missing subject falls through to the ordinary missing-file handling
+instead, never a grid check. It is **not** conditional on the reference's
+existence: a subject present while its reference is missing is itself a
+`grid_mismatch` error, not a skip (`file_validation.py:161-169`) — the same
+asymmetry as OUTPUT, just landing on `blocked`/422 instead of a 409.
+
+**OUTPUT.** `enforce_output_grids` (`clarinet/services/grid_policy.py:291`)
+runs pre-commit inside `_process_submission`, after any
+`slicer_result_validator` has written its output and before the record data
+is written — the last point in the submit flow that can still reject (the
+post-commit output-checksum sync never raises, so it cannot serve as a
+guard). For every declared OUTPUT pair it classifies the relation, probes
+whether the subject `is_conform_repairable`, and hands both to `decide()`
+(`grid_policy.py:55`) — the pure function this table transcribes; `_apply`
+then carries the verdict out on disk:
+
+| `on_grid_mismatch` | `REARRANGED` | `FOREIGN` |
+|---|---|---|
+| `reject` (also the default when unset) | 409, file untouched | 409, file untouched |
+| `conform`, subject `is_conform_repairable` (8-bit or 4-D layered) | repaired exactly via `conform_seg_to_grid`\* | 409, file untouched |
+| `conform`, wider dtype | 409, file untouched — the 409 names the dtype rule | 409, file untouched |
+| `delete` | file deleted, then 409 | file deleted, then 409 |
+
+\* `conform_seg_to_grid`'s non-layered repair path reads the subject through
+`Segmentation`, which forces a uint8 cast — silently quantizing a wider
+format (an int16/float32 intensity volume, say) if the file isn't already an
+8-bit mask. `is_conform_repairable` (`segmentation.py:793`) is that rule as a
+header-only probe, and both sides call it: the writer's own guard refuses the
+repair with `ImageError`, and the submit policy asks it *before* deciding, so
+a wider file gets a REJECT verdict whose 409 states the dtype reason instead
+of a failed repair attempt. The 4-D layered path is unaffected — it always
+preserves the source dtype (see "Why guarded repair" in the
+[design rationale](#design-rationale) below).
+
+Enforcement is conditional on the *declaring* OUTPUT file's own existence: if
+it isn't on disk yet, its declaration is skipped and the submission proceeds
+on its other merits. Nothing enforces that declaring file's *existence* in
+the first place, though: `required=True` on an OUTPUT binding is decorative
+today, so deleting the file outright is a clean way past this entire guard —
+deliberately out of scope here. It is **not** conditional on the reference's
+existence — an OUTPUT present while its reference is missing is itself a
+409 ("cannot verify the output's grid"). A `conform` repair is written to a
+hidden sibling temp file (`.repair.<token>.<name>`, unique per repair so two
+concurrent repairs of one record never share it) and re-verified by re-reading
+that temp file and the reference from disk and re-classifying from scratch,
+never trusting `conform_seg_to_grid`'s return value; only a `SAME` verdict
+atomically replaces the original, so a failed repair or a failed re-check
+409s with the original bytes untouched. The temp file is removed on every
+exit, not only on an `ImageError` — a writer failure outside it (an unwrapped
+reader error, a `MemoryError`) is still a 500, but an orphaned dotfile would
+be matched by `Path.glob` in any overlapping collection pattern for good. A
+`delete` unlinks (tolerating a concurrent delete that already won the race)
+before raising.
+
+**Scope: four submission endpoints, not two.** `enforce_output_grids` lives in
+`_process_submission`, which backs `POST`/`PATCH /records/{id}/submit`
+**and** `POST`/`PATCH /records/{id}/data`. This is deliberate: `POST /data`
+defaults to `status=finished` and is functionally a submission, so leaving it
+unguarded would be a fail-open hole. The guard is skipped only when
+`skip_validation` is true, reachable exclusively via
+`POST /data?status=failed` (marking a record failed, where output files may
+legitimately not exist yet).
+
+**A successful `conform` repair is followed through on all four.** Each
+endpoint re-runs the post-commit output sync afterwards — `POST /data` and
+`POST /submit` through `submit_data`'s own sync, `PATCH /data` and
+`PATCH /submit` through an explicit `sync_output_files` call the router makes
+only when a repair actually happened — so `RecordFileLink.checksum` describes
+the repaired bytes rather than the pre-repair ones, and file-change triggers
+fire for the mutation. Every 409 raised on a *classified* mismatch carries
+both grids' `summary()` output; the branches that never got a grid to
+classify (a dangling reference, a reference missing from disk, an unreadable
+file) name the file and the reason instead. All of them are an
+`OutputGridMismatchError` (a `BusinessRuleViolationError`) whose body carries
+`code: GRID_MISMATCH` — the same code as the INPUT seam's 422, so a client
+branches on the code and lets the status say which side.
+
+One consequence of that scope is worth stating plainly rather than
+discovering by accident: **`PATCH /records/{id}/data` is a metadata-only edit
+endpoint, and it still runs this guard.** A finished record whose declared
+OUTPUT has drifted to `REARRANGED`, on a file definition with
+`on_grid_mismatch="delete"`, has its output file deleted by a `PATCH` that
+changes nothing but JSON data. This is an accepted, deliberate hazard, not a
+bug to "fix" by exempting `PATCH /data` — doing so would reopen the exact
+fail-open hole the four-endpoint scope exists to close. See
+[Adoption order](#adoption-order) below before reaching for `delete`.
+
+**Preview without side effects.** `POST /records/{id}/validate-files`
+(`report_record_files`, `clarinet/services/file_validation.py`) dry-runs the
+guard through `preview_output_grids` (`grid_policy.py:364`): the same pairs are
+resolved and classified and the same `decide()` table is consulted, but
+nothing is carried out. A pair the guard would repair (`conform` on an
+exactly-repairable `REARRANGED` subject) passes here as it does there; a
+pair it would reject or delete is reported as a `grid_mismatch` error naming
+the action and, for a reject, the reason — so a client learns about a coming
+409 before it submits. It is also the only non-submission seam that looks at
+OUTPUT grids at all.
+`check-files` stays INPUT-only by design: its verdict is the prerequisite
+one that drives the `blocked` auto-unblock, and an OUTPUT verdict inside the
+shared `validate_record_files` would 422 a submission before `conform` got
+to repair.
+
+### What is not guarded
+
+The four submission endpoints above are the only pre-commit enforcement
+points for OUTPUT grids — a record can still reach `finished` carrying a
+mismatched OUTPUT through a status-only route that never passes through
+`_process_submission`. `PATCH /records/{id}/status` and
+`PATCH /admin/records/{id}/status` call `RecordService.update_status`
+directly; RecordFlow's `update_record(status='finished')` reaches the same
+endpoint over HTTP; `PATCH /records/bulk/status` calls
+`RecordService.bulk_update_status`, which reuses `update_status` only for
+records still `preparing` and otherwise updates status through the
+repository directly. None of these call `enforce_output_grids`.
+
+`enforce_output_grids` itself takes no acting user, so this is not a
+human-vs-machine split. A pipeline task's auto-submit
+(`clarinet/services/pipeline/task.py:102`) calls
+`ClarinetClient.submit_record_data`, which issues `POST /records/{id}/data`
+(`client.py:874`); the DICOM anonymization orchestrator's re-submission of
+an already-finished record (`clarinet/services/dicom/orchestrator.py:239-243`)
+calls `update_record_data`, which issues `PATCH /records/{id}/data`
+(`client.py:743`). Both run through the same `_process_submission` →
+`enforce_output_grids` path a human submission would. What escapes the
+guard is any route — whoever or whatever triggers it — that reaches
+`update_status`/`bulk_update_status` directly instead of going through
+submission: the routes named above.
+
+The optional pre-open guard proposed in #499 was not built either: opening a
+record in Slicer never re-checks its declared INPUT pairs. An INPUT that
+drifts while the record sits `pending` — after creation and check-files have
+already passed it — therefore surfaces only at submit time, as a 422 raised
+once the painting effort is already spent.
+
+### Adoption order
+
+`delete` is irreversible. Adopt in stages, not all at once:
+
+1. **Backfill out-of-band first.** Before declaring anything, bring existing
+   artifacts into conformance with `conform_seg_to_grid`
+   (`clarinet/services/image/segmentation.py:673`) run as a one-time repair
+   script. Declaring a reference does not retroactively fix files already on
+   disk — the first submit or check-files call after declaring is
+   enforcement, not migration.
+2. **Declare with `on_grid_mismatch="reject"` and watch.** This is also the
+   default when the field is left unset, so it is the safe starting point:
+   nothing is ever silently repaired or removed, and every mismatch surfaces
+   as a 409 or 422 (submit) or a `blocked` record (creation / preparing
+   exit) for a human to investigate.
+3. **Escalate to `conform` only once `reject` has run clean for a while**,
+   and only if runtime self-healing is actually wanted. `conform` still
+   409s a `FOREIGN` pair untouched — it narrows the reject surface, it
+   doesn't remove it.
+4. **Reach for `delete` last, and rarely.** It removes the file outright on
+   *any* mismatch, including a `REARRANGED` pair that `conform` would have
+   repaired losslessly. Use it only when a mismatched output is genuinely
+   disposable (cheap to regenerate, e.g. by re-running the task), and only
+   after internalizing that it is armed on the metadata-only `PATCH /data`
+   endpoint above too.
+
+---
+
 ## Choosing the right primitive
 
 | API | Where | Use when | Notes |
 |---|---|---|---|
-| `Grid` / `Grid.from_components` | `grid.py:65`, `:85` | You have raw shape/spacing/origin/direction (not a file) and need a value object to classify or summarize | `eq=False` — never `==` two grids |
-| `grid_relation(a, b, *, atol=1e-4)` | `grid.py:148` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
-| `read_grid(path)` | `clarinet/services/image/grid_io.py:20` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
-| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:53` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
-| `Image.same_grid` / `Image.assert_same_grid` | `image.py:336`, `:362` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
-| `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:378`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
+| `Grid` / `Grid.from_components` | `grid.py:86`, `:132` | You have raw shape/spacing/origin/direction (not a file) and need a value object to classify or summarize | `eq=False` — never `==` two grids |
+| `grid_relation(a, b, *, atol=1e-4)` | `grid.py:191` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
+| `read_grid(path)` | `clarinet/services/image/grid_io.py:21` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
+| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:87` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
+| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:108` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
+| `Image.same_grid` / `Image.assert_same_grid` | `image.py:384`, `:410` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
+| `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:426`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
-| `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:416` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
+| `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:524` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
+| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:39,90-91` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
@@ -236,7 +525,7 @@ flowchart TD
 ```
 
 This mirrors `grid_relation`'s actual implementation
-(`grid.py:178-211`) exactly: compose `M = inv(a.affine) @ b.affine`, then check
+(`grid.py:231-270`) exactly: compose `M = inv(a.affine) @ b.affine`, then check
 whether `M`'s linear part is a signed permutation (each row/column exactly one
 entry ≈ ±1, rest ≈ 0, within `atol`) with every per-axis translation within half a
 voxel of its exact target. `REARRANGED` carries `(perm, flips)` — the source axis
@@ -266,7 +555,7 @@ mass-produces** that exact relation for every legacy segmentation against its
 re-converted volume, so "other must fail" directly contradicted the plan's own
 migration step ("conform legacy pairs"). A bespoke axis-aligned mirror predicate
 (matching only a `z₀ + (n−1)·spacing`-style flip) was also unsafe for an oblique
-acquisition. The signed-permutation form (`grid_relation`, `grid.py:148`) handles
+acquisition. The signed-permutation form (`grid_relation`, `grid.py:191`) handles
 oblique grids automatically — it operates purely on the index-space transform
 `M = inv(a.affine) @ b.affine`, never on world-axis labels — and gives the
 half-voxel tolerance a principled meaning: the widest window that cannot straddle
@@ -287,7 +576,7 @@ imports (`grid.py:1-19`) — is appended to `correspondence_bundle.py`'s
 `_MODULES` tuple (`clarinet/services/slicer/correspondence_bundle.py:19`) and
 rides into Slicer alongside the correspondence engine through the same
 `include_correspondence=True` opt-in, injected between the helper source and the
-script runner (`clarinet/services/slicer/service.py:229`). Inside Slicer,
+script runner (`clarinet/services/slicer/service.py:234-235`). Inside Slicer,
 `_read_grid_on_disk` (`helper.py:244`) is the adapter: `sitk.ImageFileReader` +
 `ReadImageInformation()` (metadata-only — no voxel data touched) built into a
 bundled `Grid`.
@@ -321,12 +610,25 @@ rearrangement (nearest-neighbour resampling lands precisely on voxel centers for
 a signed-permutation transform — no interpolation blur), and `FOREIGN` raises
 `GeometryMismatchError` unless the caller explicitly opts in with
 `allow_resample=True`. The 4-D layered path
-(`_conform_layered_seg`, `segmentation.py:779`) preserves the original NRRD header
+(`_conform_layered_seg`, `segmentation.py:830`) preserves the original NRRD header
 verbatim — every `Segment{i}_Name`/`LabelValue`/`Layer`/`Color` and the layer
 count — deliberately *not* by round-tripping through
 `LayeredSegmentation.from_layers` (`layered_segmentation.py:92`), which forces one
 segment per layer at `LabelValue=1` (`layered_segmentation.py:131`) and would
 silently drop any other label value or multi-segment-per-layer structure.
+
+The same refuse-to-guess stance covers dtype, not just grid relation: the
+non-layered branch reads the subject through `Segmentation`, whose `img`
+setter forces a uint8 cast (`segmentation.py:101`) — harmless for an actual
+mask, silently lossy for anything else (a resampled CT, a float volume). A
+guard reads the on-disk dtype header-only (`Image.on_disk_dtype`) before that
+cast can happen and raises `ImageError` if it isn't already uint8, rather
+than quantizing first and letting the caller find out from corrupted voxel
+values. The same check is exposed as `is_conform_repairable`
+(`segmentation.py:793`), so the submit-time policy can rule a repair out
+without attempting it. The 4-D layered path needs no such guard — it never
+routes through `Segmentation` and preserves whatever dtype it read (proven by
+`test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2652`).
 
 ### Why the canonical slice sense is the IOP-normal side, not a fixed dominant axis
 
@@ -448,7 +750,7 @@ this behavior fails loudly instead of silently:
   `conform_to` (`SAME`, layers/names/labels preserved, voxels physically
   coincident with the plain export), plus a `FOREIGN` reference that must raise
   and write nothing.
-- `tests/integration/test_slicer_helper.py:1172`
+- `tests/integration/test_slicer_helper.py:1170`
   (`test_export_segmentation_conform_shared_layer_matrix`, issue #500) covers
   the representation matrix the round-trip test above doesn't: a shared-layer
   source with custom label values, a mixed shared+separate (overlapping)
@@ -463,7 +765,7 @@ this behavior fails loudly instead of silently:
   grid: with no layer to import, the temp node carries no labelmap geometry
   and Slicer's writer emits a degenerate 1×1×1 file, so the re-grid
   materializes the reference extent as an all-zero labelmap.
-- `tests/integration/test_slicer_helper.py:1443`
+- `tests/integration/test_slicer_helper.py:1493`
   (`test_fresh_seg_on_canonical_volume_exports_same_without_conform`) re-exercises
   the `SAME` half of P6 end-to-end through the real converter: a synthetic DICOM
   series → `Image.read_dicom_series` (the canonical converter, emitting
@@ -519,12 +821,12 @@ route through `_read_grid_on_disk` for every grid read.
   including a deliberately negative-dominant-normal series, GDCM's own file sort
   already puts `dot(slice_dir, n) > 0` **before any canonicalization runs at
   all** — see `test_negative_dominant_normal_series_already_canonical`
-  (`tests/test_image.py:759`). This means the epoch's *visible* on-disk change
+  (`tests/test_image.py:854`). This means the epoch's *visible* on-disk change
   for most real series is almost always just the in-plane transpose (dropping
   the row/column swap), not a slice-order reversal; the slice-sense flip
   condition mostly fires for the degenerate-fallback and hand-constructed/
   synthetic cases exercised directly against `_canonicalize_slice_axis`
-  (`tests/test_image.py:948`,
+  (`tests/test_image.py:1043`,
   `test_canonicalize_negative_dominant_normal_flips_when_old_rule_would_not`).
   This is an empirical characteristic of GDCM's current sort implementation, not
   a documented DICOM or ITK contract — treat it as a debugging heuristic
@@ -541,6 +843,12 @@ route through `_read_grid_on_disk` for every grid read.
   still reads such a file under its own default, so `conform_to` classifies
   there. Both behaviors are safe (loud vs. physically-correct LPS), but a
   script comparing verdicts across runtimes must re-save the header first.
+- **`on_grid_mismatch="delete"` destroys a `REARRANGED` file that `conform`
+  would have repaired losslessly — and it is armed on the metadata-only
+  `PATCH /records/{id}/data` endpoint, not only on a real re-submission.**
+  Treat `delete` as a last resort, never a first declaration; see
+  [Runtime grid-conformance enforcement § Adoption order](#adoption-order)
+  before using it.
 
 ---
 
@@ -557,3 +865,8 @@ route through `_read_grid_on_disk` for every grid read.
   full `SlicerHelper` API surface and VTK/Slicer pitfalls, including the
   `export_segmentation`/`conform_to` mechanics and pitfall 7 (`loadVolume`
   canonicalization).
+- [`.claude/rules/file-registry.md`](../.claude/rules/file-registry.md) — the
+  `FileDefinition` field table and the config-load rejection rules for
+  `grid_conform_to`/`on_grid_mismatch`, terser than this document's own
+  [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement)
+  section.

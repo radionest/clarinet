@@ -8,6 +8,7 @@ File definitions are normalized into the ``filedefinition`` table and
 bound to RecordTypes via ``recordtype_file_link`` (M2M).
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,7 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from clarinet.models.file_schema import FileDefinitionRead, RecordTypeFileLink
+from clarinet.exceptions.domain import RecordConstraintViolationError
+from clarinet.models.file_schema import (
+    FILE_DEFINITION_FIELDS,
+    FileDefinitionRead,
+    RecordTypeFileLink,
+)
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.uniqueness import canonical_unique_by
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
@@ -164,8 +170,11 @@ def _file_links_differ(
     if len(existing_links) != len(config_defs):
         return True
 
-    # Build comparable sets (name, role, required, level, allow_path_collision)
-    existing_set: set[tuple[str, str, bool, str | None, bool]] = set()
+    # Build comparable sets (name, role, required, level, allow_path_collision,
+    # grid_conform_to, on_grid_mismatch)
+    ComparableLink = tuple[str, str, bool, str | None, bool, str | None, str | None]
+
+    existing_set: set[ComparableLink] = set()
     for link in existing_links:
         level = link.file_definition.level.value if link.file_definition.level else None
         existing_set.add(
@@ -175,15 +184,68 @@ def _file_links_differ(
                 link.required,
                 level,
                 link.allow_path_collision,
+                link.file_definition.grid_conform_to,
+                link.file_definition.on_grid_mismatch,
             )
         )
 
-    config_set: set[tuple[str, str, bool, str | None, bool]] = set()
+    config_set: set[ComparableLink] = set()
     for fd in config_defs:
         level = fd.level.value if fd.level else None
-        config_set.add((fd.name, fd.role.value, fd.required, level, fd.allow_path_collision))
+        config_set.add(
+            (
+                fd.name,
+                fd.role.value,
+                fd.required,
+                level,
+                fd.allow_path_collision,
+                fd.grid_conform_to,
+                fd.on_grid_mismatch,
+            )
+        )
 
     return existing_set != config_set
+
+
+def validate_shared_file_definitions(config_items: Sequence[RecordTypeCreate]) -> None:
+    """Reject a config in which two RecordTypes declare the same file differently.
+
+    A ``FileDefinition`` row is shared by every RecordType that binds it, and
+    the upsert runs once per type in config order — two types disagreeing on a
+    row-level field (``FILE_DEFINITION_FIELDS``) would leave the row in
+    whichever state reconciled last, flip it on every restart, and silently
+    switch off a ``grid_conform_to`` guard the other type relies on (issue
+    #499's hole in config form). Binding-level fields (role, required,
+    allow_path_collision) live on the link row and may differ freely.
+
+    Runs before any DB access, so a bad config aborts startup without writes.
+
+    Raises:
+        RecordConstraintViolationError: Naming the file, the first two
+            disagreeing RecordTypes and every row-level field they disagree on.
+    """
+    first_seen: dict[str, tuple[str, FileDefinitionRead]] = {}
+    for item in config_items:
+        for fd in item.file_registry or []:
+            if fd.name not in first_seen:
+                first_seen[fd.name] = (item.name, fd)
+                continue
+            prior_type, prior_fd = first_seen[fd.name]
+            diffs = [
+                f"{name}={_normalize(getattr(prior_fd, name))!r} vs "
+                f"{_normalize(getattr(fd, name))!r}"
+                for name in FILE_DEFINITION_FIELDS
+                if _normalize(getattr(prior_fd, name)) != _normalize(getattr(fd, name))
+            ]
+            if diffs:
+                raise RecordConstraintViolationError(
+                    f"File '{fd.name}' is declared differently by RecordType "
+                    f"'{prior_type}' and RecordType '{item.name}': {'; '.join(diffs)}. "
+                    f"A file definition is shared by every RecordType binding it, so "
+                    f"{', '.join(FILE_DEFINITION_FIELDS)} must be identical in each: "
+                    f"share one FileDef object (Python config) or define the file once "
+                    f"in file_registry.toml (TOML config)"
+                )
 
 
 async def reconcile_record_types(
@@ -195,6 +257,7 @@ async def reconcile_record_types(
     """Diff config definitions against DB and apply changes.
 
     Algorithm:
+    0. Reject a config whose types disagree on a shared file (no DB access).
     1. Load all existing RecordTypes from DB with file_links.
     2. For each config entry: CREATE if new, UPDATE if changed, skip if identical.
     3. DB names not in config -> orphans (warn or delete).
@@ -207,7 +270,14 @@ async def reconcile_record_types(
 
     Returns:
         ReconcileResult with counts per category.
+
+    Raises:
+        RecordConstraintViolationError: Two config entries declare the same
+            file with different row-level fields (see
+            ``validate_shared_file_definitions``); nothing has been written.
     """
+    validate_shared_file_definitions(config_items)
+
     result = ReconcileResult()
     fd_repo = FileDefinitionRepository(session)
 

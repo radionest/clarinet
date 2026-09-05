@@ -166,7 +166,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch.object(service, "sync_output_files", new_callable=AsyncMock) as sync_mock,
         ):
             patched.model_validate.return_value = record_read_mock
             result, result_old_status = await service.submit_data(1, data, RecordStatus.finished)
@@ -207,7 +207,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch.object(service, "sync_output_files", new_callable=AsyncMock) as sync_mock,
             patch("clarinet.services.record_service.Files.for_reader", return_value=reader_stub),
         ):
             patched.model_validate.side_effect = lambda r: r
@@ -257,7 +257,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch.object(service, "sync_output_files", new_callable=AsyncMock) as sync_mock,
             patch("clarinet.services.record_service.Files.for_reader", return_value=reader_stub),
             patch(
                 "clarinet.services.record_service.Files.render_for", wraps=Files.render_for
@@ -277,7 +277,7 @@ class TestRecordServiceTriggers:
 
     @pytest.mark.asyncio
     async def test_sync_output_files_does_not_swallow_unsafe_path(self) -> None:
-        """_sync_output_files's checksums() scan is the backstop for a violation
+        """sync_output_files's checksums() scan is the backstop for a violation
         the pre-submit render-only check cannot see (e.g. a literal pattern that
         only the join/containment check catches). It must surface as 422, not
         get caught by the broad `except Exception` meant for routine I/O
@@ -303,7 +303,7 @@ class TestRecordServiceTriggers:
             patched.model_validate.return_value = record_mock
             files_patched.for_reader.return_value = reader_mock
             with pytest.raises(HTTPException) as exc_info:
-                await service._sync_output_files(record_mock)
+                await service.sync_output_files(record_mock)
 
         assert exc_info.value.status_code == 422
         assert "boom" in exc_info.value.detail  # str(exc): the reason, not the value
@@ -312,7 +312,7 @@ class TestRecordServiceTriggers:
 
     @pytest.mark.asyncio
     async def test_sync_output_files_warning_omits_the_value(self, captured_records) -> None:
-        """The backstop's WARNING (_sync_output_files's new except clause) must
+        """The backstop's WARNING (sync_output_files's new except clause) must
         log only str(exc), never exc.value -- the same PHI contract pinned for
         _render_output_path's WARNING by test_unsafe_placeholder_value_warning_
         omits_the_value. Without this pin, a future edit turning `{exc}` into
@@ -342,7 +342,7 @@ class TestRecordServiceTriggers:
             patched.model_validate.return_value = record_mock
             files_patched.for_reader.return_value = reader_mock
             with pytest.raises(HTTPException):
-                await service._sync_output_files(record_mock)
+                await service.sync_output_files(record_mock)
 
         warnings = [r for r in captured_records if r["level"].name == "WARNING"]
         assert len(warnings) == 1
@@ -404,7 +404,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
+            patch.object(service, "sync_output_files", new_callable=AsyncMock) as sync_mock,
         ):
             patched.model_validate.side_effect = lambda r: r
             with pytest.raises(HTTPException) as exc_info:
@@ -547,7 +547,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+            patch.object(service, "sync_output_files", new_callable=AsyncMock),
         ):
             patched.model_validate.return_value = MagicMock()
             await service.submit_data(1, data, RecordStatus.finished, user_id=actor, actor_id=actor)
@@ -601,7 +601,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_sync_output_files", new_callable=AsyncMock),
+            patch.object(service, "sync_output_files", new_callable=AsyncMock),
         ):
             patched.model_validate.return_value = MagicMock()
             await service.submit_data(

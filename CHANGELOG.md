@@ -337,6 +337,52 @@
   interpolating `{patient_id}` now returns 422 where it previously succeeded
   with a logged warning. No known deployment holds such a patient id; rename
   it if one does.
+- **Grid-conformance declarations on `FileDefinition` (`grid_conform_to` /
+  `on_grid_mismatch`).** A file may declare that its on-disk voxel grid must
+  match another file bound to the same RecordType, checked with the same
+  `grid_relation` three-way taxonomy (`SAME`/`REARRANGED`/`FOREIGN`) as the
+  rest of this changelog's grid work. Config load (Python/TOML, and
+  RecordType `POST`/`PATCH`) rejects an unresolvable declaration: a
+  reference not bound to the same RecordType, a reference whose effective
+  DICOM level is finer than the declaring file's, the declaring file's
+  effective DICOM level finer than the RecordType's own, `multiple=True` on
+  either side, a self-reference, or a pattern `read_grid` cannot classify. At
+  runtime an INPUT mismatch is never repaired or deleted, since a record
+  does not own its inputs — it blocks the record at creation or the
+  `preparing`→`pending` exit (check-files only withholds an existing
+  block's auto-unblock, never causes one), or raises a 422 if a
+  submission's own re-validation catches it first; an OUTPUT mismatch is
+  enforced pre-commit, on all four submission endpoints —
+  `POST`/`PATCH /records/{id}/submit` and
+  `POST`/`PATCH /records/{id}/data` (the latter two because `POST /data`
+  defaults to `status=finished` and is functionally a submission) — per
+  `on_grid_mismatch`: `reject` (the default) 409s without touching the
+  file, `conform` repairs an exactly-repairable `REARRANGED` pair via
+  `conform_seg_to_grid` when the subject is already uint8 on disk (else
+  409s untouched — the repair forces a uint8 cast and would otherwise
+  silently quantize a wider format), still 409s a `FOREIGN` one, `delete`
+  removes the file and 409s either verdict. **`delete` is irreversible
+  and is armed even on a metadata-only `PATCH /data`** — an accepted
+  hazard, not a bug; see the adoption order in `docs/grid-workflows.md`.
+  **Downstream migration:** generate an Alembic revision adding two
+  nullable columns, `filedefinition.grid_conform_to` and
+  `filedefinition.on_grid_mismatch` (both `str`, no backfill needed) — the
+  framework ships no migrations of its own.
+- Both grid-mismatch rejections carry a machine-readable `code`:
+  `GRID_MISMATCH` on the submit-time INPUT 422 (`InputGridMismatchError`, a
+  `ValidationError` — a plain missing-input 422 stays code-less) and on
+  every OUTPUT-guard 409 (`OutputGridMismatchError`, a
+  `BusinessRuleViolationError`), so a client branches on the code and lets
+  the status say which side. The INPUT 422 is logged at `WARNING` without a
+  traceback, like the 409s, instead of `ERROR` with one.
+- `POST /records/{id}/validate-files` previews the OUTPUT side of the guard
+  read-only: every declared OUTPUT grid pair present on disk is run through
+  the same `decide()` table, and each pair a submission would reject or
+  delete is reported as a `grid_mismatch` error naming the action and the
+  reason, so a client learns about a coming 409 before it submits; a pair
+  `conform` would repair passes, and nothing is repaired or deleted.
+  `check-files` stays INPUT-only by design — its verdict drives the
+  `blocked` auto-unblock.
 
 ### Security
 
@@ -607,6 +653,56 @@
   voxel-less has no layer to import, so the re-grid materializes the
   reference extent as an all-zero labelmap; without it Slicer's writer emits
   a degenerate 1×1×1 file and the post-write grid check deletes it.
+- The record-type edit UI no longer strips file-definition fields on save. The
+  form round-tripped only part of `FileDefinitionRead`, and the backend treats
+  a submitted `file_registry` as authoritative, so every save nulled
+  `grid_conform_to`, `on_grid_mismatch` and `level` on the global
+  `FileDefinition` row and reset `allow_path_collision` on the binding — in
+  TOML mode the background export then persisted the loss to disk. All ten
+  read fields now round-trip, pinned by a parity test against
+  `FileDefinitionRead.model_fields`.
+- An `on_grid_mismatch="conform"` repair no longer risks the original OUTPUT.
+  The repair is written to a hidden sibling temp file, re-read and
+  re-classified from disk, and only then atomically moved over the original —
+  a repair that fails, or lands on a still-mismatched grid, now 409s with the
+  original bytes intact instead of having already overwritten them in place.
+  The temp file is unique per repair — two concurrent repairs of one record
+  no longer share it — and is removed on any failure, not only an
+  `ImageError`: an orphaned dotfile would otherwise be matched by `Path.glob`
+  in any overlapping collection pattern on every check-files run.
+- A `conform` repair on the update paths (`PATCH /records/{id}/data`,
+  `PATCH /records/{id}/submit`) now syncs stored output checksums and fires
+  file-change triggers. Only the POST paths ran the post-commit output sync,
+  so a PATCH-triggered repair left `RecordFileLink.checksum` describing the
+  pre-repair bytes and no downstream file flow ever saw the mutation.
+- OUTPUT grid-mismatch 409s now carry both grids' summaries (shape, spacing,
+  origin, direction), matching what the INPUT side already reported — the
+  message previously named only the `RelationKind`.
+- Config load now rejects two grid-conformance declarations it used to accept:
+  a `grid_conform_to` pointing at a file that itself declares one (chains and
+  cycles — enforcement order is undefined and a repaired reference silently
+  invalidates its dependents), and an `on_grid_mismatch` set without a
+  `grid_conform_to` (the action could never run). An INPUT file referencing an
+  OUTPUT of the same RecordType is legal but now logs a `WARNING` — the record
+  stays blocked until that OUTPUT exists.
+- Two RecordTypes can no longer disagree about a shared file. A
+  `FileDefinition` row is shared by every type binding it and was upserted
+  once per type in config order, so a type that bound `seg` without the
+  `grid_conform_to` another type declared left the row in whichever state
+  reconciled last, flipped it on every restart and silently switched the
+  guard off — the #499 hole in config form (the same last-write-wins already
+  applied to `pattern`, `description`, `multiple` and `level`). Config load
+  now rejects the disagreement before any DB write, naming the file, the
+  fields and both types. `POST`/`PATCH /types` fill the row-level fields a
+  file entry omits from the stored row before validating and writing, so a
+  partial entry from one type can no longer null another type's declaration,
+  and a type binding a guarded file without its reference is rejected with a
+  409 instead of blocking its records at runtime. An explicit change through
+  one type still rewrites the shared row for every binder — now logged as a
+  `WARNING` naming the file, the changed fields and the other binders; in
+  TOML mode only the edited type is re-exported, so the next startup rejects
+  the disagreement until the other types' TOML files match (follow-up: #564,
+  re-validate and re-export sibling types).
 
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 

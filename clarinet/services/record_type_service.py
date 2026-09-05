@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from jsonschema import Draft202012Validator, SchemaError
 
 from clarinet.exceptions.domain import ValidationError
+from clarinet.models.file_schema import FILE_DEFINITION_FIELDS
 from clarinet.models.record import RecordType, RecordTypeCreate, RecordTypeRead
 from clarinet.services.record_data_validation import run_record_validators
 from clarinet.services.schema_hydration import hydrate_schema
@@ -19,9 +20,12 @@ from clarinet.utils.logger import logger
 from clarinet.utils.validation import validate_json_by_schema, validate_json_by_schema_partial
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from clarinet.models import Record
+    from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.record import RecordTypeOptional
     from clarinet.repositories.file_definition_repository import FileDefinitionRepository
     from clarinet.repositories.record_type_repository import RecordTypeRepository
@@ -68,8 +72,17 @@ class RecordTypeService:
                 field validator.
             RecordTypeAlreadyExistsError: If name already taken.
             RecordTypeNotFoundError: If parent type doesn't exist.
+            RecordConstraintViolationError: A file entry, once merged with the
+                stored row it names, declares something this type cannot
+                satisfy — e.g. it binds a guarded file without its reference.
         """
-        file_defs = record_type.file_registry or []
+        file_defs = await self._merge_with_stored(record_type.file_registry or [])
+        if file_defs:
+            # The request body was validated against the entries as sent; the
+            # merged entries are what will be written, so validate those.
+            RecordTypeCreate(
+                **record_type.model_dump(exclude={"file_registry"}), file_registry=file_defs
+            )
 
         if record_type.data_schema is not None:
             _validate_json_schema(record_type.data_schema)
@@ -115,6 +128,8 @@ class RecordTypeService:
             ``edit_window_days`` and ``unique_by`` are the exceptions: an
             explicit null reaches the column (removes the time limit /
             disables the uniqueness constraint — both real "off" values).
+            A ``file_registry`` entry naming an already-stored file inherits
+            the row-level fields it omits (``_merge_with_stored``).
         """
         record_type = await self.repo.get(record_type_id)
 
@@ -123,6 +138,8 @@ class RecordTypeService:
 
         file_defs_set = "file_registry" in update.model_fields_set
         file_defs = update.file_registry if file_defs_set else None
+        if file_defs:
+            file_defs = await self._merge_with_stored(file_defs)
         update_data: dict[str, Any] = update.model_dump(
             exclude_unset=True,
             exclude_none=True,
@@ -163,6 +180,47 @@ class RecordTypeService:
             await self.session.commit()
 
         return await self.repo.get(record_type_id)
+
+    async def _merge_with_stored(
+        self, file_defs: Sequence[FileDefinitionRead]
+    ) -> list[FileDefinitionRead]:
+        """Fill the row-level fields a file entry did not send from the stored row.
+
+        A ``FileDefinition`` row is shared by every RecordType binding it, and
+        ``sync_file_links`` writes every row-level field it is handed. An entry
+        that names an existing file but omits, say, ``grid_conform_to`` would
+        otherwise reset the shared row to the DTO default and silently switch
+        off another type's guard. Only fields absent from the entry
+        (``model_fields_set``) are filled in — an explicit value, including an
+        explicit ``null``, still writes through. Binding-level fields (role,
+        required, allow_path_collision) are never merged: they belong to this
+        type's own link row.
+
+        Callers validate the merged entries, so a type binding a guarded file
+        without its reference is rejected at the request instead of blocking
+        its records at runtime.
+        """
+        stored = await self.fd_repo.get_by_names(fd.name for fd in file_defs)
+        merged: list[FileDefinitionRead] = []
+        for fd in file_defs:
+            row = stored.get(fd.name)
+            if row is None:
+                merged.append(fd)
+                continue
+            inherited = {
+                name: getattr(row, name)
+                for name in FILE_DEFINITION_FIELDS
+                if name not in fd.model_fields_set
+            }
+            # An action only means something next to a reference. When the
+            # merged reference is None — the entry removes it explicitly, or
+            # the row never had one — a stored action must not ride along, or
+            # the merged entry fails validation as an action without a
+            # reference (a request the API accepted before the merge existed).
+            if inherited.get("grid_conform_to", fd.grid_conform_to) is None:
+                inherited.pop("on_grid_mismatch", None)
+            merged.append(fd.model_copy(update=inherited) if inherited else fd)
+        return merged
 
     async def validate_record_data(self, record: Record, data: RecordData) -> RecordData:
         """Validate record data against schema + registered Python validators.

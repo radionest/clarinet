@@ -322,6 +322,8 @@ class RecordType(RecordTypeBase, table=True):
                         required=link.required,
                         level=link.file_definition.level,
                         allow_path_collision=link.allow_path_collision,
+                        grid_conform_to=link.file_definition.grid_conform_to,
+                        on_grid_mismatch=link.file_definition.on_grid_mismatch,
                     )
                 )
             except ValidationError as exc:
@@ -408,22 +410,25 @@ class RecordTypeCreate(RecordTypeBase):
         return data
 
     @model_validator(mode="after")
-    def _validate_output_paths(self) -> "RecordTypeCreate":
-        """Reject OUTPUT file patterns that cannot discriminate coexisting records.
+    def _validate_file_registry(self) -> "RecordTypeCreate":
+        """Reject OUTPUT patterns that cannot discriminate coexisting records,
+        and grid-conformance declarations that cannot be enforced at runtime.
 
         Runs after ``unique_by`` canonicalization (mode="before" field
         validator already ran) on every construction — API POST/PATCH-merge,
-        TOML load, Python config load — so a broken pattern is caught at the
-        point of the mutation. ``file_registry`` defaults to ``None`` on this
-        model (many call sites attach file links separately), and the
-        predicate treats that as "nothing to check" — safe no-op.
+        TOML load, Python config load — so a broken declaration is caught at
+        the point of the mutation. ``file_registry`` defaults to ``None`` on
+        this model (many call sites attach file links separately), and both
+        predicates treat that as "nothing to check" — safe no-op.
 
         Imported lazily to avoid a config <-> models import cycle
         (``clarinet.config`` imports ``clarinet.models`` at its own top level).
         """
+        from clarinet.config.grid_conformance import validate_grid_conformance
         from clarinet.config.path_uniqueness import validate_output_path_uniqueness
 
         validate_output_path_uniqueness(self)
+        validate_grid_conformance(self)
         return self
 
 
