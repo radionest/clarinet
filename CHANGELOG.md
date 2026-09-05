@@ -2,8 +2,52 @@
 
 ## Unreleased
 
+### Added
+
+- **`dicom_scp_enabled` names which process owns the C-MOVE listener.** A
+  listening port belongs to one process and the PACS routes C-MOVE by
+  destination AET to a host and port it was configured with, so on a c-move
+  deployment every retrieving process needs its own registered `(AET, port)`.
+  `None` (the default) owns a listener in the API when the retrieve mode is a
+  c-move mode; `false` never does; `true` always does. A worker takes one only
+  when asked — `--dicom` or `dicom_scp_enabled=true` — since the API already
+  holds `dicom_aet:dicom_port` on such a deployment.
+  `clarinet worker --dicom AET:PORT` now implies `true` alongside the AET, port
+  and mode it already set, so the flag still works where one shared
+  `EnvironmentFile` says otherwise, and warns when it overrides an explicit
+  `false`. A bind collision in the API lifespan is now a `StartupError` naming
+  the port, the AET and the ways out (the worker still surfaces the same message
+  as an `OSError`). A worker configured for a c-move mode but holding no
+  listener now warns at startup, naming `--dicom AET:PORT`, instead of starting
+  cleanly and failing at its first retrieve.
+
 ### Breaking
 
+- **The DICOM core moved to the `dimsechord` package.** `clarinet.services.dicom`
+  no longer exports `DicomOperations`, `StorageHandler`, `StorageMode`,
+  `StorageConfig`, `AssociationConfig`, `RetrieveRequest` or
+  `QueryRetrieveLevel.PATIENT` — they described the inline SCU/SCP, now deleted.
+  The generic Q/R models (`DicomNode`, `StudyQuery`/`SeriesQuery`/`ImageQuery`,
+  `StudyResult`/`SeriesResult`/`ImageResult`, `RetrieveResult`,
+  `BatchStoreResult`, `QueryRetrieveLevel`) are still importable from
+  `clarinet.services.dicom` and `...dicom.models`, but they are now dimsechord
+  **dataclasses**, not Pydantic models: construction is keyword-only and
+  `.model_dump()` / `.model_validate()` are gone (use `dataclasses.asdict`).
+  `DicomClient` keeps its full method surface and gains `dicom_retrieve_mode`
+  dispatch, so `get_study` / `get_series` / `get_*_to_memory` run C-MOVE-to-self
+  under a c-move mode instead of falling back to C-GET. Two wire-level changes
+  come with the upgrade: Q/R now uses the **Study Root** information model
+  exclusively (Patient-Root-only peers will refuse the context), and the C-GET
+  path — which `dicom_retrieve_mode` still selects by default — negotiates
+  dimsechord's 26 curated storage classes with compressed transfer syntaxes
+  rather than 120 classes uncompressed-only: a peer sending compressed objects
+  now works, while a SOP class outside the curated set (X-Ray Angiographic,
+  Nuclear Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis and
+  the VL family among them) comes back as a short series rather than an
+  error. The C-MOVE path keeps the wider coverage: the Storage SCP accepts
+  pynetdicom's 120 `StoragePresentationContexts` with every transfer syntax,
+  because an acceptor matches the requester's proposals instead of proposing
+  its own, so the 128-context budget never binds.
 - **`RecordType.unique_by` replaces `unique_per_user`.** `unique_by:
   frozenset[str] | None` (subset of `{"user", "parent"}`) replaces the boolean
   `unique_per_user`: at most one record of the type may exist per unique

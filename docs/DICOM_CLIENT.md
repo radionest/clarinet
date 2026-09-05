@@ -15,12 +15,17 @@
 
 ### Компоненты
 
+> **Note:** this page predates the move of the DIMSE core to the `dimsechord`
+> package. The current reference is
+> [`clarinet/services/dicom/CLAUDE.md`](../clarinet/services/dicom/CLAUDE.md)
+> and [`docs/kb/imaging-stack.md`](kb/imaging-stack.md); the `DicomClient`
+> examples below still hold, the internals below do not.
+
 ```
-src/services/dicom/
-├── client.py       # DicomClient - async API
-├── operations.py   # DicomOperations - sync wrappers для pynetdicom
-├── handlers.py     # StorageHandler - обработка C-STORE
-├── models.py       # Pydantic модели
+clarinet/services/dicom/
+├── client.py       # DicomClient - async API + dicom_retrieve_mode dispatch
+├── scp.py          # Storage SCP singleton (dimsechord.StorageSCP)
+├── models.py       # Clarinet models + dimsechord re-exports
 └── __init__.py     # Public API exports
 ```
 

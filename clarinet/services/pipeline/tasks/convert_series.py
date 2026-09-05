@@ -93,10 +93,10 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
         if result.num_completed == 0:
             raise PipelineStepError(
                 "convert_series_to_nifti",
-                f"C-GET returned 0 instances for series {series_uid} (study {msg.study_uid})",
+                f"DICOM retrieve returned 0 instances for series {series_uid} (study {msg.study_uid})",
             )
 
-        logger.info(f"C-GET completed: {result.num_completed} instances for series {series_uid}")
+        logger.info(f"Retrieve completed: {result.num_completed} instances for series {series_uid}")
 
         # 2. Read DICOM series → Image with spacing/origin/direction
         from clarinet.exceptions.domain import ImageReadError, ImageWriteError

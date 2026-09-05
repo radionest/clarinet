@@ -568,8 +568,23 @@ async def _run_pipeline_worker(
         aet, port = dicom_scp
         settings.dicom_aet = aet
         settings.dicom_port = port
-        settings.dicom_retrieve_mode = "c-move"
         settings.have_dicom = True
+        # Switch transport, keeping the level: forcing bare "c-move" would strip
+        # the -study suffix that the Slicer helper reads to batch at study level.
+        if settings.dicom_retrieve_mode == "c-get-study":
+            settings.dicom_retrieve_mode = "c-move-study"
+        elif settings.dicom_retrieve_mode == "c-get":
+            settings.dicom_retrieve_mode = "c-move"
+        # --dicom is an explicit request for a listener on this process; without
+        # this it would silently no-op wherever the config says dicom_scp_enabled
+        # is false, which is exactly the shared-EnvironmentFile deployment where
+        # the flag is the only per-process escape.
+        if settings.dicom_scp_enabled is False:
+            logger.warning(
+                "--dicom overrides dicom_scp_enabled=false: this process will own "
+                f"a Storage SCP on {aet}:{port}"
+            )
+        settings.dicom_scp_enabled = True
 
     if not settings.pipeline_enabled:
         logger.warning(
@@ -577,10 +592,24 @@ async def _run_pipeline_worker(
             "Set CLARINET_PIPELINE_ENABLED=true to enable."
         )
 
+    start_scp = dicom_scp is not None or settings.dicom_scp_enabled is True
+    if not start_scp and settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
+        logger.warning(
+            f"dicom_retrieve_mode={settings.dicom_retrieve_mode!r} but this worker owns no "
+            "Storage SCP, so any DICOM retrieve it runs will fail. Start it with "
+            "--dicom AET:PORT (registered on the PACS) if it retrieves."
+        )
+
     await run_worker(
         queues=queues,
         workers=workers,
-        start_scp=dicom_scp is not None,
+        # A worker takes a listener only when asked. The mode alone must not
+        # imply one: on a c-move deployment the API already owns dicom_aet on
+        # dicom_port, so every worker that inferred ownership from the mode
+        # would race it for the same port and lose. Give a worker its own
+        # identity with --dicom AET:PORT, or dicom_scp_enabled=true where the
+        # AET and port are already per-process.
+        start_scp=start_scp,
         log_file=log_file,
     )
 

@@ -1,9 +1,26 @@
-"""Pydantic models for DICOM client operations."""
+"""Clarinet-specific DICOM models.
 
-from enum import Enum
-from pathlib import Path
-from typing import Any, Literal
+The generic Q/R vocabulary (queries, C-FIND results, ``DicomNode``,
+``RetrieveResult``) lives in ``dimsechord`` and is re-exported here so
+``from clarinet.services.dicom.models import ...`` keeps working. Only models
+that carry Clarinet domain meaning — anonymization results, PACS import
+requests — are defined locally.
+"""
 
+from typing import Literal
+
+from dimsechord import (
+    BatchStoreResult,
+    DicomNode,
+    ImageQuery,
+    ImageResult,
+    QueryRetrieveLevel,
+    RetrieveResult,
+    SeriesQuery,
+    SeriesResult,
+    StudyQuery,
+    StudyResult,
+)
 from pydantic import BaseModel, Field
 
 #: Separator used to join multi-value ``ModalitiesInStudy`` into a single
@@ -13,149 +30,12 @@ from pydantic import BaseModel, Field
 #: representation, so re-serialising to DICOM / DICOMweb is a no-op rather
 #: than a join-then-split round-trip.
 #:
-#: Producers (``operations._ds_modalities``) and consumers
-#: (``files._storage._modalities_string`` for filesystem paths,
-#: ``dicomweb.converter._modalities_to_list`` for DICOM JSON arrays) must
-#: agree on this character. Path rendering converts the joined value to
+#: The producer is dimsechord's C-FIND result mapper, which uses the same
+#: constant; consumers (``files._storage._modalities_string`` for filesystem
+#: paths, ``dicomweb.converter._modalities_to_list`` for DICOM JSON arrays)
+#: must agree on this character. Path rendering converts the joined value to
 #: ``_``-separated for filesystem safety (see ``_modalities_string``).
 MODALITIES_SEPARATOR = "\\"
-
-
-class QueryRetrieveLevel(str, Enum):
-    """DICOM Query/Retrieve levels."""
-
-    PATIENT = "PATIENT"
-    STUDY = "STUDY"
-    SERIES = "SERIES"
-    IMAGE = "IMAGE"
-
-
-class StudyQuery(BaseModel):
-    """Query parameters for C-FIND at study level."""
-
-    patient_id: str | None = None
-    patient_name: str | None = None
-    study_instance_uid: str | None = None
-    study_date: str | None = None
-    study_description: str | None = None
-    accession_number: str | None = None
-    modality: str | None = None
-
-
-class SeriesQuery(BaseModel):
-    """Query parameters for C-FIND at series level."""
-
-    study_instance_uid: str
-    series_instance_uid: str | None = None
-    series_number: str | None = None
-    modality: str | None = None
-    series_description: str | None = None
-
-
-class ImageQuery(BaseModel):
-    """Query parameters for C-FIND at image level."""
-
-    study_instance_uid: str
-    series_instance_uid: str
-    sop_instance_uid: str | None = None
-    instance_number: str | None = None
-
-
-class StudyResult(BaseModel):
-    """Study-level C-FIND result."""
-
-    patient_id: str | None = None
-    patient_name: str | None = None
-    study_instance_uid: str
-    study_date: str | None = None
-    study_time: str | None = None
-    study_description: str | None = None
-    accession_number: str | None = None
-    modalities_in_study: str | None = Field(
-        default=None,
-        description=(
-            "Modalities of the study, DICOM-standard '\\'-joined "
-            "(e.g. 'CT\\SR'). See MODALITIES_SEPARATOR."
-        ),
-    )
-    number_of_study_related_series: int | None = None
-    number_of_study_related_instances: int | None = None
-
-
-class SeriesResult(BaseModel):
-    """Series-level C-FIND result."""
-
-    study_instance_uid: str
-    series_instance_uid: str
-    series_number: int | None = None
-    modality: str | None = None
-    series_description: str | None = None
-    number_of_series_related_instances: int | None = None
-
-
-class ImageResult(BaseModel):
-    """Image-level C-FIND result."""
-
-    study_instance_uid: str
-    series_instance_uid: str
-    sop_instance_uid: str
-    sop_class_uid: str | None = None
-    instance_number: int | None = None
-    rows: int | None = None
-    columns: int | None = None
-
-
-class RetrieveRequest(BaseModel):
-    """Request for C-GET or C-MOVE operation."""
-
-    level: QueryRetrieveLevel
-    patient_id: str | None = None
-    study_instance_uid: str | None = None
-    series_instance_uid: str | None = None
-    sop_instance_uid: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for dataset creation."""
-        data: dict[str, Any] = {"QueryRetrieveLevel": self.level.value}
-        if self.patient_id:
-            data["PatientID"] = self.patient_id
-        if self.study_instance_uid:
-            data["StudyInstanceUID"] = self.study_instance_uid
-        if self.series_instance_uid:
-            data["SeriesInstanceUID"] = self.series_instance_uid
-        if self.sop_instance_uid:
-            data["SOPInstanceUID"] = self.sop_instance_uid
-        return data
-
-
-class StorageMode(str, Enum):
-    """Storage modes for received DICOM instances."""
-
-    DISK = "disk"  # Save to disk
-    MEMORY = "memory"  # Keep in memory
-    FORWARD = "forward"  # Forward to another server
-
-
-class StorageConfig(BaseModel):
-    """Configuration for storage handler."""
-
-    mode: StorageMode
-    output_dir: Path | None = None  # For DISK mode
-    destination_aet: str | None = None  # For FORWARD mode
-    destination_host: str | None = None  # For FORWARD mode
-    destination_port: int | None = None  # For FORWARD mode
-
-
-class RetrieveResult(BaseModel):
-    """Result of C-GET or C-MOVE operation."""
-
-    status: str
-    num_remaining: int = 0
-    num_completed: int = 0
-    num_failed: int = 0
-    num_warning: int = 0
-    failed_sop_instances: list[str] = Field(default_factory=list)
-    instances: dict[str, Any] = Field(default_factory=dict)  # For C-GET with memory mode
 
 
 class SkippedSeriesInfo(BaseModel):
@@ -200,22 +80,6 @@ class BackgroundAnonymizationStatus(BaseModel):
     study_uid: str
 
 
-class BatchStoreResult(BaseModel):
-    """Result of a batch C-STORE operation (one association, multiple datasets)."""
-
-    total_sent: int = 0
-    total_failed: int = 0
-    failed_sop_uids: list[str] = Field(default_factory=list)
-
-
-class DicomNode(BaseModel):
-    """DICOM node configuration."""
-
-    aet: str
-    host: str
-    port: int
-
-
 class PacsStudyWithSeries(BaseModel):
     """StudyResult enriched with series list and local DB existence flag."""
 
@@ -231,12 +95,22 @@ class PacsImportRequest(BaseModel):
     patient_id: str
 
 
-class AssociationConfig(BaseModel):
-    """Configuration for DICOM association."""
-
-    calling_aet: str
-    called_aet: str
-    peer_host: str
-    peer_port: int
-    max_pdu: int = 16384
-    timeout: float = 30.0
+__all__ = [
+    "MODALITIES_SEPARATOR",
+    "AnonymizationResult",
+    "AnonymizeStudyRequest",
+    "BackgroundAnonymizationStatus",
+    "BatchStoreResult",
+    "DicomNode",
+    "ImageQuery",
+    "ImageResult",
+    "PacsImportRequest",
+    "PacsStudyWithSeries",
+    "QueryRetrieveLevel",
+    "RetrieveResult",
+    "SeriesQuery",
+    "SeriesResult",
+    "SkippedSeriesInfo",
+    "StudyQuery",
+    "StudyResult",
+]

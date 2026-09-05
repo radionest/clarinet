@@ -38,7 +38,7 @@ from tests.config import (
     SLICER_HOST,
     SLICER_PORT,
 )
-from tests.utils.dicom import move_with_retry
+from tests.utils.dicom import cmove_storage_scp, move_with_retry
 
 pytestmark = [
     pytest.mark.slicer,
@@ -673,26 +673,21 @@ class TestBackendCmoveThenSlicer:
 
     @pytest.fixture
     def storage_scp(self, _cmove_available: None) -> Any:
-        """Start SCP on free port and register AET in Orthanc for C-MOVE."""
-        from clarinet.services.dicom.scp import StorageSCP
-
-        scp = StorageSCP()
+        """Install a test SCP as the singleton and register its AET in Orthanc."""
         port = _free_port()
-        scp.start(aet=CALLING_AET, port=port)
-
-        local_ip = _get_local_ip()
-        modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
-        resp = requests.put(
-            modality_url,
-            json={"AET": CALLING_AET, "Host": local_ip, "Port": port},
-            timeout=5,
-        )
-        resp.raise_for_status()
-
-        yield scp
-
-        requests.delete(modality_url, timeout=5)
-        scp.stop()
+        with cmove_storage_scp(CALLING_AET, port) as scp:
+            local_ip = _get_local_ip()
+            modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
+            resp = requests.put(
+                modality_url,
+                json={"AET": CALLING_AET, "Host": local_ip, "Port": port},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            try:
+                yield scp
+            finally:
+                requests.delete(modality_url, timeout=5)
 
     async def test_backend_cmove_then_slicer_exec(
         self,
@@ -710,33 +705,16 @@ class TestBackendCmoveThenSlicer:
         ``_slicer_shares_filesystem``) — it loads the C-MOVE'd files by their
         on-disk path.
         """
-        from clarinet.services.dicom.models import (
-            AssociationConfig,
-            QueryRetrieveLevel,
-            RetrieveRequest,
-            StorageConfig,
-            StorageMode,
-        )
-        from clarinet.services.dicom.operations import DicomOperations
+        from clarinet.services.dicom import DicomClient, DicomNode
 
         # 1. Backend C-MOVE: retrieve series to disk
-        config = AssociationConfig(
-            calling_aet=CALLING_AET,
-            called_aet=PACS_AET,
-            peer_host=PACS_HOST,
-            peer_port=PACS_PORT,
-        )
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.SERIES,
-            study_instance_uid=pacs_study_uid,
-            series_instance_uid=pacs_series_uid,
-        )
         output_dir = tmp_path / "cmove_for_slicer"
-        storage = StorageConfig(mode=StorageMode.DISK, output_dir=output_dir)
-
-        ops = DicomOperations(calling_aet=CALLING_AET)
-        result = await asyncio.to_thread(
-            move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+        result = await move_with_retry(
+            DicomClient(calling_aet=CALLING_AET),
+            DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT),
+            pacs_study_uid,
+            pacs_series_uid,
+            output_dir=output_dir,
         )
         assert result.num_completed > 0, "C-MOVE retrieved 0 instances"
         dcm_files = list(output_dir.glob("*.dcm"))

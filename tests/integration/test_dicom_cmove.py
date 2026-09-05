@@ -20,12 +20,12 @@ from pathlib import Path
 
 import pytest
 import requests
+from dimsechord import StorageSCP
 
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyResult
 from clarinet.services.dicom.models import SeriesResult
-from clarinet.services.dicom.scp import StorageSCP
 from tests.config import PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
-from tests.utils.dicom import move_with_retry
+from tests.utils.dicom import cmove_storage_scp, move_with_retry
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
@@ -171,25 +171,21 @@ def cmove_available(pacs_available: None) -> None:
 @pytest.fixture
 def storage_scp(cmove_available: None):
     """Start SCP on free port and register AET in Orthanc for C-MOVE."""
-    scp = StorageSCP()
     port = _free_port()
-    scp.start(aet=CALLING_AET, port=port)
-
-    # Register our AET in Orthanc so C-MOVE knows where to send
-    local_ip = _get_local_ip()
-    modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
-    resp = requests.put(
-        modality_url,
-        json={"AET": CALLING_AET, "Host": local_ip, "Port": port},
-        timeout=5,
-    )
-    resp.raise_for_status()
-
-    yield scp
-
-    # Cleanup: remove modality and stop SCP
-    requests.delete(modality_url, timeout=5)
-    scp.stop()
+    with cmove_storage_scp(CALLING_AET, port) as scp:
+        # Register our AET in Orthanc so C-MOVE knows where to send
+        local_ip = _get_local_ip()
+        modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
+        resp = requests.put(
+            modality_url,
+            json={"AET": CALLING_AET, "Host": local_ip, "Port": port},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        try:
+            yield scp
+        finally:
+            requests.delete(modality_url, timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -207,32 +203,11 @@ async def test_cmove_series_to_memory(
     storage_scp: StorageSCP,
 ) -> None:
     """C-MOVE retrieves a series and SCP collects instances in memory."""
-    from clarinet.services.dicom.models import (
-        AssociationConfig,
-        QueryRetrieveLevel,
-        RetrieveRequest,
-        StorageConfig,
-        StorageMode,
-    )
-
-    config = AssociationConfig(
-        calling_aet=CALLING_AET,
-        called_aet=PACS_AET,
-        peer_host=PACS_HOST,
-        peer_port=PACS_PORT,
-    )
-    request = RetrieveRequest(
-        level=QueryRetrieveLevel.SERIES,
-        study_instance_uid=small_mr_study.study_instance_uid,
-        series_instance_uid=mr_series.series_instance_uid,
-    )
-    storage = StorageConfig(mode=StorageMode.MEMORY)
-
-    from clarinet.services.dicom.operations import DicomOperations
-
-    ops = DicomOperations(calling_aet=CALLING_AET)
-    result = await asyncio.to_thread(
-        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+    result = await move_with_retry(
+        dicom_client,
+        orthanc_node,
+        small_mr_study.study_instance_uid,
+        mr_series.series_instance_uid,
     )
 
     assert result.instances, "No instances received via C-MOVE"
@@ -252,32 +227,12 @@ async def test_cmove_study_to_disk(
     tmp_path: Path,
 ) -> None:
     """C-MOVE retrieves a study and writes .dcm files to disk."""
-    from clarinet.services.dicom.models import (
-        AssociationConfig,
-        QueryRetrieveLevel,
-        RetrieveRequest,
-        StorageConfig,
-        StorageMode,
-    )
-
-    config = AssociationConfig(
-        calling_aet=CALLING_AET,
-        called_aet=PACS_AET,
-        peer_host=PACS_HOST,
-        peer_port=PACS_PORT,
-    )
-    request = RetrieveRequest(
-        level=QueryRetrieveLevel.STUDY,
-        study_instance_uid=small_mr_study.study_instance_uid,
-    )
     output_dir = tmp_path / "cmove_study"
-    storage = StorageConfig(mode=StorageMode.DISK, output_dir=output_dir)
-
-    from clarinet.services.dicom.operations import DicomOperations
-
-    ops = DicomOperations(calling_aet=CALLING_AET)
-    result = await asyncio.to_thread(
-        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+    result = await move_with_retry(
+        dicom_client,
+        orthanc_node,
+        small_mr_study.study_instance_uid,
+        output_dir=output_dir,
     )
 
     assert result.num_completed > 0
@@ -304,31 +259,11 @@ async def test_cmove_matches_cget(
     cget_uids = set(cget_result.instances.keys())
 
     # C-MOVE
-    from clarinet.services.dicom.models import (
-        AssociationConfig,
-        QueryRetrieveLevel,
-        RetrieveRequest,
-        StorageConfig,
-        StorageMode,
-    )
-    from clarinet.services.dicom.operations import DicomOperations
-
-    config = AssociationConfig(
-        calling_aet=CALLING_AET,
-        called_aet=PACS_AET,
-        peer_host=PACS_HOST,
-        peer_port=PACS_PORT,
-    )
-    request = RetrieveRequest(
-        level=QueryRetrieveLevel.SERIES,
-        study_instance_uid=small_mr_study.study_instance_uid,
-        series_instance_uid=mr_series.series_instance_uid,
-    )
-    storage = StorageConfig(mode=StorageMode.MEMORY)
-
-    ops = DicomOperations(calling_aet=CALLING_AET)
-    cmove_result = await asyncio.to_thread(
-        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
+    cmove_result = await move_with_retry(
+        dicom_client,
+        orthanc_node,
+        small_mr_study.study_instance_uid,
+        mr_series.series_instance_uid,
     )
     cmove_uids = set(cmove_result.instances.keys())
 

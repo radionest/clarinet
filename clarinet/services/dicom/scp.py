@@ -1,255 +1,109 @@
-"""Persistent Storage SCP for C-MOVE self-retrieval.
+"""Process-wide Storage SCP singleton for C-MOVE self-retrieval.
 
-When ``dicom_retrieve_mode`` is ``c-move``, the API process starts a
-pynetdicom Storage SCP that listens for incoming C-STORE from the PACS.
-Each C-MOVE request registers a ``MoveSession``; the SCP handler deposits
-received instances into the matching session and signals completion.
+When ``dicom_retrieve_mode`` is a c-move mode, Clarinet asks the PACS to send
+instances to *us*: the C-MOVE destination AET is our own, and a Storage SCP
+must be listening to receive the C-STORE sub-operations. The SCP itself is
+``dimsechord.StorageSCP``; this module owns its lifecycle and the question of
+which process gets to run one.
+
+Ownership: a listening port belongs to exactly one process, and the PACS routes
+C-MOVE by destination AET to a host and port it was configured with. So every
+process that retrieves via C-MOVE needs its own registered ``(AET, port)`` —
+``clarinet worker --dicom AET:PORT`` gives a worker one, and
+``dicom_scp_enabled=false`` marks a process that must not retrieve at all. A
+collision fails at startup rather than at the first retrieve, and deliberately
+does not pick a free port on its own: a port the operator never registered is
+one the PACS cannot route to, so the listener would sit there receiving nothing.
 
 Lifecycle:
-    - Started in ``app.py`` lifespan when ``dicom_retrieve_mode == "c-move"``
-    - Stopped in the ``finally`` shutdown block
-    - Module-level ``get_storage_scp()`` / ``shutdown_storage_scp()`` follow
-      the re-create-after-shutdown pattern (see ``clarinet/files/_fs.py``).
+    - Started in ``app.py`` lifespan when :func:`storage_scp_wanted` says so,
+      and in ``pipeline/worker.py`` only when the worker was asked explicitly
+      (``--dicom AET:PORT`` or ``dicom_scp_enabled=true``) — on a c-move
+      deployment the API already holds the port, so a worker must not infer
+      ownership from the mode
+    - Stopped in the matching shutdown block
+    - ``get_storage_scp()`` / ``shutdown_storage_scp()`` follow the
+      re-create-after-shutdown pattern (see ``clarinet/files/_fs.py``).
+
+Clarinet always registers sessions with ``collect=True``, so the SCP's bounded
+streaming queue (and its backpressure) never applies here — instances are
+accumulated in the session and drained once the C-MOVE completes.
 """
 
-from __future__ import annotations
+from dimsechord import StorageSCP
 
-import threading
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from clarinet.settings import settings
 
-from pynetdicom import AE, StoragePresentationContexts, evt
-from pynetdicom.sop_class import Verification  # type: ignore[attr-defined]
-
-from clarinet.utils.logger import logger
-
-if TYPE_CHECKING:
-    from pydicom import Dataset
-
-
-@dataclass
-class MoveSession:
-    """Tracks instances received for a single C-MOVE request.
-
-    Attributes:
-        instances: SOPInstanceUID → Dataset mapping of received instances.
-        expected_count: Total instances the PACS will send (from C-MOVE pending responses).
-        received_count: Number of C-STORE sub-operations received so far.
-        done: Signalled when ``received_count >= expected_count``.
-    """
-
-    instances: dict[str, Dataset] = field(default_factory=dict)
-    expected_count: int | None = None
-    received_count: int = 0
-    done: threading.Event = field(default_factory=threading.Event)
-
-
-class StorageSCP:
-    """Persistent pynetdicom Storage SCP for receiving C-STORE from PACS.
-
-    Thread safety:
-        ``_sessions`` is protected by ``_lock``.  The SCP handler and the
-        C-MOVE SCU thread access sessions concurrently — the lock serialises
-        all mutations.
-    """
-
-    def __init__(self) -> None:
-        self._server: Any | None = None
-        self._sessions: dict[str, MoveSession] = {}
-        self._lock = threading.Lock()
-
-    @property
-    def is_running(self) -> bool:
-        """Whether the SCP server is currently accepting connections."""
-        return self._server is not None
-
-    # ── Lifecycle ──────────────────────────────────────────────────
-
-    def start(self, aet: str, port: int, ip: str | None = None) -> None:
-        """Start the Storage SCP in a background thread.
-
-        Args:
-            aet: AE title to listen as.
-            port: TCP port to bind.
-            ip: IP address to bind (default: all interfaces).
-
-        Raises:
-            OSError: If the port is already in use.
-        """
-        if self._server is not None:
-            logger.warning("Storage SCP already running, skipping start")
-            return
-
-        ae = AE(ae_title=aet)
-        for ctx in StoragePresentationContexts:
-            if ctx.abstract_syntax is not None:
-                ae.add_supported_context(ctx.abstract_syntax)
-        ae.add_supported_context(Verification)
-
-        handlers = [(evt.EVT_C_STORE, self._handle_store)]
-        bind_address = (ip or "0.0.0.0", port)
-        self._server = ae.start_server(bind_address, evt_handlers=handlers, block=False)  # type: ignore[arg-type]
-        logger.info(f"Storage SCP started on {bind_address[0]}:{port} (AET: {aet})")
-
-    def stop(self) -> None:
-        """Stop the Storage SCP and clear all pending sessions."""
-        if self._server is not None:
-            self._server.shutdown()
-            self._server = None
-        with self._lock:
-            # Signal any waiting threads so they don't hang
-            for session in self._sessions.values():
-                session.done.set()
-            self._sessions.clear()
-        logger.info("Storage SCP stopped")
-
-    # ── Session management ────────────────────────────────────────
-
-    def register_session(self, key: str) -> MoveSession:
-        """Register a new retrieve session before sending C-MOVE.
-
-        Args:
-            key: Correlation key, typically ``"{study_uid}/{series_uid}"``.
-
-        Returns:
-            The new ``MoveSession``.
-
-        Raises:
-            RuntimeError: If a session with this key is already active.
-        """
-        session = MoveSession()
-        with self._lock:
-            if key in self._sessions:
-                raise RuntimeError(f"C-MOVE session already active for key={key}")
-            self._sessions[key] = session
-        logger.debug(f"Registered C-MOVE session: {key}")
-        return session
-
-    def set_expected(self, key: str, count: int) -> None:
-        """Set the expected instance count (from C-MOVE pending responses).
-
-        If enough instances have already been received, signals ``done``
-        immediately.
-
-        Args:
-            key: Session key.
-            count: Total expected instances.
-        """
-        with self._lock:
-            session = self._sessions.get(key)
-            if session is None:
-                return
-            session.expected_count = count
-            if session.received_count >= count:
-                session.done.set()
-
-    def wait_for_completion(self, key: str, timeout: float) -> MoveSession | None:
-        """Block until the session is complete or *timeout* expires.
-
-        Args:
-            key: Session key.
-            timeout: Seconds to wait.
-
-        Returns:
-            The ``MoveSession`` if found, else ``None``.
-        """
-        with self._lock:
-            session = self._sessions.get(key)
-        if session is None:
-            return None
-        session.done.wait(timeout=timeout)
-        return session
-
-    def finish_session(self, key: str) -> MoveSession | None:
-        """Remove and return the session.
-
-        Args:
-            key: Session key.
-
-        Returns:
-            The removed ``MoveSession``, or ``None``.
-        """
-        with self._lock:
-            session = self._sessions.pop(key, None)
-        if session is not None:
-            logger.debug(
-                f"Finished C-MOVE session: {key} (received {session.received_count} instances)"
-            )
-        return session
-
-    # ── SCP event handler ─────────────────────────────────────────
-
-    def _handle_store(self, event: evt.Event) -> int:
-        """Handle incoming C-STORE from PACS during C-MOVE.
-
-        Matches the dataset to an active session by StudyInstanceUID
-        (and optionally SeriesInstanceUID).
-
-        Returns:
-            DICOM status code (0x0000 success, 0xC000 failure).
-        """
-        try:
-            ds = event.dataset
-            ds.file_meta = event.file_meta
-            study_uid = str(getattr(ds, "StudyInstanceUID", ""))
-            series_uid = str(getattr(ds, "SeriesInstanceUID", ""))
-            sop_uid = str(getattr(ds, "SOPInstanceUID", ""))
-
-            with self._lock:
-                session = self._find_session(study_uid, series_uid)
-                if session is None:
-                    logger.warning(
-                        f"SCP received C-STORE for unregistered session: "
-                        f"study={study_uid}, series={series_uid}"
-                    )
-                    return 0x0000  # Accept anyway — don't reject PACS data
-
-                session.instances[sop_uid] = ds
-                session.received_count += 1
-                if (
-                    session.expected_count is not None
-                    and session.received_count >= session.expected_count
-                ):
-                    session.done.set()
-
-            return 0x0000
-
-        except Exception as e:
-            logger.error(f"SCP C-STORE handler error: {e}")
-            return 0xC000
-
-    def _find_session(self, study_uid: str, series_uid: str) -> MoveSession | None:
-        """Find the matching session for an incoming dataset.
-
-        Tries series-level key first, then study-level.
-        Must be called under ``_lock``.
-        """
-        # Series-level key: "{study_uid}/{series_uid}"
-        series_key = f"{study_uid}/{series_uid}"
-        session = self._sessions.get(series_key)
-        if session is not None:
-            return session
-        # Study-level key: "{study_uid}/"
-        study_key = f"{study_uid}/"
-        return self._sessions.get(study_key)
-
-
-# ── Module-level singleton ────────────────────────────────────────
+__all__ = [
+    "StorageSCP",
+    "get_storage_scp",
+    "shutdown_storage_scp",
+    "start_storage_scp",
+    "storage_scp_wanted",
+]
 
 _scp: StorageSCP | None = None
 
 
+def storage_scp_wanted() -> bool:
+    """Whether the API process should own a Storage SCP listener.
+
+    The worker does not use this: it takes one only when asked. On a combined
+    host the API has already bound the port, and on a worker-only host nothing
+    has — but a listener the PACS was never told to route to receives nothing
+    either way, so the AET and port have to be given deliberately.
+
+    ``dicom_scp_enabled`` decides when set; otherwise a c-move retrieve mode
+    implies one, since that mode cannot retrieve anything without it. The mode
+    is the whole test: ``have_dicom`` looks like a guard here but is a worker
+    queue-capability flag (it sits with ``have_gpu`` / ``have_quarto`` and
+    routes queues), and the API retrieves DICOM without ever setting it.
+    """
+    if settings.dicom_scp_enabled is not None:
+        return settings.dicom_scp_enabled
+    return settings.dicom_retrieve_mode in ("c-move", "c-move-study")
+
+
 def get_storage_scp() -> StorageSCP:
-    """Return the module-level StorageSCP singleton, creating if needed."""
+    """Return the module-level StorageSCP singleton, creating it if needed."""
     global _scp
     if _scp is None:
         _scp = StorageSCP()
     return _scp
 
 
+def start_storage_scp() -> StorageSCP:
+    """Start the singleton on the configured local AET/port; no-op if running.
+
+    The API gates this on :func:`storage_scp_wanted`; the worker on an explicit
+    ``--dicom`` / ``dicom_scp_enabled=true``.
+
+    Raises:
+        OSError: If the port is already taken — by another Clarinet process
+            that owns the listener, or by an unrelated service. The message
+            carries the ways out, because there is no safe automatic one.
+    """
+    scp = get_storage_scp()
+    if not scp.is_running:
+        ip = settings.dicom_ip or "0.0.0.0"
+        try:
+            scp.start({settings.dicom_aet: settings.dicom_port}, ip)
+        except OSError as e:
+            raise OSError(
+                f"Storage SCP could not bind {ip}:{settings.dicom_port} for AET "
+                f"{settings.dicom_aet!r}: {e}. One process per host owns a C-MOVE "
+                f"listener on a port. Give this one its own identity, registered on "
+                f"the PACS (a worker takes --dicom AET:PORT); or set "
+                f"dicom_scp_enabled=false if it should not retrieve via C-MOVE; or "
+                f"set dicom_retrieve_mode='c-get' to retrieve over the outbound "
+                f"association instead."
+            ) from e
+    return scp
+
+
 def shutdown_storage_scp() -> None:
-    """Stop and re-create the singleton (lifespan shutdown pattern)."""
+    """Stop the singleton and drop it, so the next lifespan builds a fresh one."""
     global _scp
-    if _scp is not None:
+    if _scp is not None and _scp.is_running:
         _scp.stop()
-    _scp = StorageSCP()
+    _scp = None

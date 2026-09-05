@@ -4,14 +4,18 @@ Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md), [Files and t
 
 Async DICOM client for Query/Retrieve operations against external PACS servers (e.g. Orthanc).
 
+The DIMSE core — SCU, Storage SCP, presentation contexts, C-FIND result
+mapping — is the [`dimsechord`](https://pypi.org/project/dimsechord/) package.
+This directory holds only what is Clarinet's: the retrieve-mode dispatch, the
+SCP lifecycle, anonymization, and the series filter.
+
 ## Architecture
 
 ```
 dicom/
-  models.py         # Pydantic models: DicomNode, queries, results, storage config
-  operations.py     # Synchronous pynetdicom wrapper (C-FIND, C-GET, C-MOVE)
-  handlers.py       # C-STORE event handlers (disk / memory / forward modes)
-  client.py         # Async facade — delegates to operations via asyncio.to_thread()
+  models.py         # Clarinet models (anonymization, PACS import) + dimsechord re-exports
+  client.py         # DicomClient — dimsechord's SCU plus dicom_retrieve_mode dispatch
+  scp.py            # Storage SCP singleton (dimsechord.StorageSCP) lifecycle
   anonymizer.py     # Anonymizer, PACS stubs (planned; not yet exported)
   series_filter.py  # Configurable series filter (modality blocklist, instance count, unknown policy)
   orchestrator.py   # AnonymizationOrchestrator — Record-aware skip-guard + Patient + submit
@@ -21,8 +25,101 @@ dicom/
 ```
 
 - `DicomClient` is the main entry point — all methods are async
-- `DicomOperations` is synchronous; never call it directly from async code
-- `StorageHandler` handles incoming C-STORE events in three modes: `DISK`, `MEMORY`, `FORWARD`
+- Generic Q/R models (`DicomNode`, queries, `*Result`, `RetrieveResult`,
+  `BatchStoreResult`) are dimsechord dataclasses, re-exported from `models.py`
+  so `from clarinet.services.dicom.models import ...` keeps working. They are
+  **not** Pydantic models — no `.model_dump()`, and construction is keyword-only
+
+## Retrieve modes
+
+`dicom_retrieve_mode` — not the call site — picks the transport, so the same
+`get_study` / `get_series` / `get_*_to_memory` calls work against a PACS that
+offers C-GET and one that offers only C-MOVE:
+
+| Mode | Transport | Needs |
+|---|---|---|
+| `c-get` (default), `c-get-study` | dimsechord's C-GET | nothing beyond an outbound association |
+| `c-move`, `c-move-study` | C-MOVE-to-self, delegated to dimsechord's `retrieve_via_move` | a running Storage SCP; the peer must route `dicom_aet` back to `dicom_ip:dicom_port` |
+
+**Which to choose.** An association carries at most 128 presentation contexts,
+and the two paths spend that budget differently. The C-GET SCU has to *propose*
+storage contexts, so it negotiates dimsechord's 26 curated classes — 10 image
+classes, each across the compressed transfer syntaxes, plus 16 non-image ones
+uncompressed — broad on syntax, narrow on SOP class. The Storage SCP only
+*accepts*, matching whatever the peer proposes, so it covers pynetdicom's 120
+`StoragePresentationContexts` with every transfer syntax and never spends the
+budget.
+
+So c-get needs nothing from the network, and c-move never silently drops an
+unusual modality. **On c-get, check your modalities first**: a SOP class outside
+`DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES` gets no
+accepted context, so its instances fail their sub-operations and the retrieve
+returns short — with a partial series, not an error. The curated set covers CT,
+MR, Enhanced CT/MR, PET, CR, DX-for-presentation, SC, US and US multi-frame,
+plus RT, SEG, SR, KO, PR and encapsulated documents. Notably **absent**: X-Ray
+Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA/XRF, Breast
+Tomosynthesis and the VL/endoscopic family, among others. A site with any of those wants
+c-move until dimsechord takes a storage-class argument.
+
+### Listener ownership
+
+A listening port belongs to one process, and the PACS routes C-MOVE by
+destination AET to a host and port it was configured with. Both consequences
+are the operator's to resolve, and the two processes resolve them differently:
+
+| Process | Owns a listener when |
+|---|---|
+| API lifespan | `storage_scp_wanted()` — `dicom_scp_enabled`, else a c-move mode |
+| `clarinet worker` | asked explicitly — `--dicom AET:PORT`, or `dicom_scp_enabled=true` |
+
+The worker must not infer it from the mode: on a c-move deployment the API
+already holds `dicom_aet` on `dicom_port`, so a worker that inferred ownership
+would race it for the same port and lose.
+
+- **One process retrieving** — nothing to configure *if it is the API*. It binds
+  `dicom_aet` on `dicom_port`; register that pair on the PACS. A worker
+  retrieving on its own still needs `--dicom`, or it starts with no listener and
+  raises at its first retrieve.
+- **Several retrieving on one host** — each needs its own registered
+  `(AET, port)`. `clarinet worker --dicom AET:PORT` sets both for a worker, and
+  switches the transport to C-MOVE *keeping the Q/R level* (`c-get-study` →
+  `c-move-study`) plus `dicom_scp_enabled=true`, so the flag still works where
+  one shared `EnvironmentFile` says otherwise.
+- **A process that must not retrieve** — `dicom_scp_enabled=false`. It binds
+  nothing; a C-MOVE retrieve from it then raises a `RuntimeError` naming the
+  AET and port that would have to be registered.
+
+Both `dicom_scp_enabled` values are **per-process**. Setting `true` in a shared
+`EnvironmentFile` — which both deploy templates read — makes the API and every
+worker claim the same port, and whichever starts second crash-loops. Give each
+process its own AET and port instead; for a worker that is what `--dicom` is.
+
+A bind collision raises at startup with the port, the AET and those three ways
+out. `start_storage_scp` deliberately does **not** fall back to a free port: the
+PACS was never told to route there, so the listener would receive nothing and
+every retrieve would time out instead of failing.
+
+`_retrieve_via_move` translates the call and hands it to dimsechord: the Q/R
+level comes from whether a `series_uid` was passed, the storage mode from
+whether an `output_dir` was, the destination from `settings.dicom_aet`, and
+`dicom_cmove_timeout` becomes the arrival budget while the `timeout` argument
+bounds the association. Everything after that — the collect session, driving
+the C-MOVE, the arrival target, the wait, the disk write — is
+`DicomOperations.retrieve_via_move`, which Clarinet used to own and which was
+ported into dimsechord unchanged. **Do not reimplement it here.** The arrival
+target in particular has to be read from the *first* pending response: a final
+Success response may omit the sub-operation counters (PS3.4 C.4.2.1.6), so a
+total summed at the end sees a stale `NumberOfRemainingSuboperations`.
+
+Two known rough edges in that upstream code, both pre-dating the move to the
+package: the target is the peer's *announced* total, so a retrieve with failed
+sub-operations waits out `dicom_cmove_timeout` and reports `status="timeout"`
+with the instances that did arrive; and a peer that omits the counters entirely
+on its first pending response leaves the target unset, with the same effect on
+an otherwise successful retrieve. Both want fixing in dimsechord, not here.
+
+The `-study` suffix does not reach this path at all — it is read by the Slicer
+helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.
 
 ## Settings (`clarinet/settings.py`)
 
@@ -33,6 +130,9 @@ dicom/
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
 | `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
+| `dicom_retrieve_mode` | `c-get` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
+| `dicom_cmove_timeout` | `300.0` | Seconds bounding the C-MOVE *and* the wait for its instances to arrive |
+| `dicom_scp_enabled` | `None` | `None` = the API owns a listener when the mode is c-move (a worker needs `--dicom` or `true`); `false` = never; `true` = always |
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |
@@ -54,7 +154,6 @@ Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 from clarinet.services.dicom import (
     DicomClient, DicomNode, StudyQuery, SeriesQuery,
     PacsImportRequest, PacsStudyWithSeries, RetrieveResult,
-    StorageMode,
 )
 from clarinet.settings import settings
 
@@ -77,14 +176,25 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 
 `store_instances_batch` sends multiple datasets over a single DICOM association (vs `store_instance` which opens one association per dataset).
 
-- **`operations.py`**: `store_instances_batch(config, datasets)` → `BatchStoreResult` (sync, one `ae.associate()`, loops `send_c_store`)
-- **`client.py`**: `store_instances_batch(datasets, peer)` → async wrapper via `asyncio.to_thread()`
-- **`models.py`**: `BatchStoreResult(total_sent, total_failed, failed_sop_uids)`
+- **dimsechord**: `DicomClient.store_instances_batch(datasets, peer)` → `BatchStoreResult` (one `ae.associate()`, loops `send_c_store`, off-loop via `asyncio.to_thread()`)
+- **`BatchStoreResult(total_sent, total_failed, failed_sop_uids)`**, re-exported from `models.py`
 - Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution — sequentially to every node in `self.destinations` (`pacs` + `extra_pacs`); failures are counted per node (`aet@host:port` keys) and one node's failure never aborts the rest
 
 ## Association Semaphore
 
-`DicomOperations._association()` enforces a global `threading.Semaphore` to limit concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in app lifespan via `DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)`. Uses `threading.Semaphore` (not `asyncio.Semaphore`) because `_association()` is synchronous, called via `asyncio.to_thread()`.
+dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in the app lifespan via `DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)`. It is a `threading.Semaphore` (not `asyncio.Semaphore`) because it is acquired inside the `asyncio.to_thread()` worker — size it with the loop's other `to_thread` work in mind.
+
+## Errors
+
+dimsechord raises typed errors. Only `AssociationError` is reachable from the
+code Clarinet runs, and it maps to 409 in `api/exception_handlers.py` —
+preserving the contract the inline layer had, where every association failure
+surfaced as CONFLICT. The rest of the hierarchy is unreachable today and is
+deliberately not mapped: `FindFailedError` comes from `find_iter` /
+`QueryEngine` (the typed `find_studies` / `find_series` log a warning and
+return partial results instead of raising), and `PoolExhaustedError` /
+`RetrieveBusyError`, `ArrivalTimeoutError`, `MoveToSelfError` belong to
+`PullEngine` / `AssociationPool`. Map them when Clarinet adopts those.
 
 ## Anonymization API surface
 

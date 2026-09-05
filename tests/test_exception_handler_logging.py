@@ -121,3 +121,27 @@ def test_no_deprecated_http_422_alias() -> None:
         if "HTTP_422_UNPROCESSABLE_ENTITY" in path.read_text(encoding="utf-8")
     ]
     assert offenders == [], f"deprecated 422 alias still used in: {offenders}"
+
+
+async def test_association_error_maps_to_409():
+    """An unreachable PACS is a 409, as it was before the DIMSE core moved out.
+
+    The client raises dimsechord's ``AssociationError`` now; the CONFLICT status
+    the inline SCU used to raise itself is applied here instead, so the contract
+    the routers and their callers see is unchanged.
+    """
+    from dimsechord import AssociationError
+
+    app = FastAPI()
+    setup_exception_handlers(app)
+
+    @app.get("/trigger/pacs")
+    async def _pacs() -> None:
+        raise AssociationError("Failed to establish DICOM association")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.get("/trigger/pacs")
+
+    assert response.status_code == 409
+    assert "association" in response.json()["detail"].lower()

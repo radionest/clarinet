@@ -401,25 +401,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
 
-    # Initialize DICOM association semaphore
-    from clarinet.services.dicom.operations import DicomOperations
+    # Cap concurrent DICOM associations process-wide
+    from clarinet.services.dicom import DicomClient
 
-    DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)
+    DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
 
-    # Start Storage SCP for C-MOVE mode
-    if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
-        from clarinet.services.dicom.scp import get_storage_scp
+    # Start Storage SCP when this process owns the C-MOVE listener
+    from clarinet.services.dicom.scp import start_storage_scp, storage_scp_wanted
 
-        scp = get_storage_scp()
-        scp.start(
-            aet=settings.dicom_aet,
-            port=settings.dicom_port,
-            ip=settings.dicom_ip,
-        )
-        app.state.storage_scp = scp
+    if storage_scp_wanted():
+        try:
+            app.state.storage_scp = start_storage_scp()
+        except OSError as e:
+            # StartupError, not a bare OSError: only the former reaches the
+            # CRITICAL banner and the JSONL sink, and the remedy is the whole
+            # point of the message.
+            raise StartupError(
+                component="DICOM SCP",
+                reason=str(e),
+                hint=f"Free port {settings.dicom_port} or give this process its own",
+            ) from e
         logger.info(
             f"Storage SCP started on port {settings.dicom_port} "
-            f"(AET: {settings.dicom_aet}, mode: c-move)"
+            f"(AET: {settings.dicom_aet}, mode: {settings.dicom_retrieve_mode})"
         )
 
     # Initialize DICOMweb cache singleton

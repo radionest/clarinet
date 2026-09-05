@@ -11,7 +11,7 @@ Three integrations, each pointing at a different consumer of the same images.
 ```mermaid
 flowchart LR
     PACS["PACS - Orthanc"]
-    DC["DicomClient - pynetdicom"] <--> PACS
+    DC["DicomClient - dimsechord"] <--> PACS
     DW["DICOMweb proxy + cache"] --> DC
     OHIF["OHIF Viewer at /ohif"] --> DW
     SL["3D Slicer on the user's desktop"] <--> PACS
@@ -21,16 +21,47 @@ flowchart LR
 
 ## DICOM client
 
-`clarinet/services/dicom/` — `DicomClient` is the async facade; `DicomOperations`
-is the synchronous pynetdicom layer and must never be called directly from async
-code. Everything crosses over via `asyncio.to_thread()`.
+`clarinet/services/dicom/` — `DicomClient` is the async facade. The DIMSE core
+beneath it (SCU, Storage SCP, presentation contexts, C-FIND result mapping) is
+the [`dimsechord`](https://pypi.org/project/dimsechord/) package, shared with
+other services that speak DICOM; the synchronous pynetdicom work crosses over
+via `asyncio.to_thread()`. What stays in Clarinet is the retrieve-mode
+dispatch, the SCP lifecycle, anonymization and the series filter.
 
-- `StorageHandler` serves incoming C-STORE in three modes: `DISK`, `MEMORY`,
-  `FORWARD`. `stored_instances` is a `dict[str, Dataset]` keyed by SOPInstanceUID.
-- `DicomOperations._association()` holds a global **`threading.Semaphore`**
-  (not asyncio — the function is synchronous) limiting concurrent associations
+- **Retrieve mode is a setting, not a call site.** `dicom_retrieve_mode`
+  selects C-GET (default) or C-MOVE-to-self for every `get_*` call, so the same
+  code works against a PACS that offers only one of them. The c-move path is
+  delegated to dimsechord's `retrieve_via_move`, which registers a collect
+  session on the Storage SCP, moves with `dicom_aet` as the destination, and
+  takes the instance count from what actually arrived.
+- **Which mode.** The 128-context association budget forces a choice. The C-GET
+  SCU has to *propose* storage contexts, so it negotiates 26 curated classes (10
+  image ones across their compressed transfer syntaxes, 16 non-image ones
+  uncompressed); the Storage SCP only *accepts* — matching whatever the peer
+  proposes — so it covers pynetdicom's 120 `StoragePresentationContexts` with
+  every transfer syntax without spending the budget. c-get needs nothing from
+  the network, but a modality outside those 26 — X-Ray Angiographic, Nuclear
+  Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis, the VL
+  family — comes back as a short series rather than an error. c-move needs a
+  route back and drops nothing.
+- `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
+  (`dimsechord.StorageSCP`). It accepts 120 storage classes with every transfer
+  syntax, so a PACS may send compressed objects verbatim instead of failing
+  sub-operations.
+- **Listener ownership.** A port belongs to one process and the PACS routes
+  C-MOVE by destination AET, so each retrieving process needs its own registered
+  `(AET, port)`: `storage_scp_wanted()` decides for the API, a worker takes one
+  only when asked (`clarinet worker --dicom AET:PORT`, or `dicom_scp_enabled=true`
+  per process), and `dicom_scp_enabled=false` opts a process out. A collision
+  names the port and the ways out rather than falling
+  back to a port the PACS cannot route to — as a `StartupError` in the API, and
+  as the same message on an `OSError` in the worker.
+- dimsechord's SCU holds a global **`threading.Semaphore`** (not asyncio — it is
+  acquired inside the `to_thread` worker) limiting concurrent associations
   across DICOMweb, anonymization and import; sized from
   `dicom_max_concurrent_associations` in the app lifespan.
+- `AssociationError` — an unreachable or refusing PACS — maps to 409 in
+  `api/exception_handlers.py`, as it did before. Routers let it propagate.
 - `store_instances_batch` sends many datasets over **one** association, versus
   `store_instance` which opens one per dataset. Anonymization uses it per series,
   fanning out to every destination node sequentially; one node's failure never

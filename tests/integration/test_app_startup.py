@@ -89,6 +89,10 @@ def startup_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "recordflow_enabled", False)
     monkeypatch.setattr(settings, "session_cleanup_enabled", False)
     monkeypatch.setattr(settings, "dicomweb_enabled", False)
+    # No DICOM listener regardless of the configured retrieve mode: the lifespan
+    # runs many times per session, and under xdist several workers run it at
+    # once — all of them on the same dicom_port.
+    monkeypatch.setattr(settings, "dicom_scp_enabled", False)
     monkeypatch.setattr(settings, "frontend_enabled", False)
     monkeypatch.setattr(settings, "ohif_enabled", False)
     monkeypatch.setattr(settings, "admin_password", "TestStartup123!")
