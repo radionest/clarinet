@@ -22,6 +22,7 @@ from clarinet.services.image import (
     Segmentation,
     coco_to_segmentation,
     conform_seg_to_grid,
+    declare_nrrd_space,
     grid_relation,
     read_grid,
 )
@@ -712,10 +713,13 @@ class TestNrrdReaderHardening:
         with pytest.raises(ImageReadError, match="Unsupported NRRD space"):
             Image().read_nrrd(tmp_path / "bad_space_origin_only.nrrd")
 
-    def test_origin_only_header_without_space_kept_raw(
+    def test_origin_only_header_without_space_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No `space` key at all: legacy leniency — origin applied verbatim."""
+        """No `space` key at all: same rule as the directions branch. A `space
+        origin` has no meaning without a declared space, so raise (naming the
+        one-time repair helper) instead of applying it verbatim — the former
+        leniency silently mislabeled a space-less RAS origin as LPS."""
         self._fake_nrrd_read(
             monkeypatch,
             {
@@ -724,9 +728,185 @@ class TestNrrdReaderHardening:
                 "space origin": np.array([-10.0, -20.0, 30.0]),
             },
         )
+        with pytest.raises(ImageReadError, match="declare_nrrd_space"):
+            Image().read_nrrd(tmp_path / "no_space_origin_only.nrrd")
+
+    def test_layered_origin_only_header_without_space_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The 4-D spacings branch mirrors read_nrrd: `space origin` without a
+        `space` key raises rather than keeping the raw origin."""
+        header = {
+            "sizes": [1, 4, 4, 4],
+            "kinds": ["list", "domain", "domain", "domain"],
+            "spacings": [np.nan, 1.0, 1.0, 1.0],
+            "space origin": np.array([-10.0, -20.0, 30.0]),
+        }
+        monkeypatch.setattr(
+            "clarinet.services.image.layered_segmentation.nrrd.read_header",
+            lambda p, *a, **k: header,
+        )
+        with pytest.raises(ImageReadError, match="declare_nrrd_space"):
+            LayeredSegmentation.read_header(tmp_path / "no_space.seg.nrrd")
+
+
+class TestDeclareNrrdSpace:
+    """declare_nrrd_space: one-time `space` stamp for legacy space-less NRRDs."""
+
+    @staticmethod
+    def _write_spaceless(path: Path, dirs: np.ndarray, origin: np.ndarray) -> np.ndarray:
+        """A pre-2026-03-08-style header: geometry present, `space` absent."""
+        data = np.arange(64, dtype=np.int16).reshape(4, 4, 4)
+        nrrd.write(str(path), data, {"space directions": dirs, "space origin": origin})
+        return data
+
+    def test_declare_lps_makes_legacy_file_readable(self, tmp_path: Path) -> None:
+        path = tmp_path / "legacy.nrrd"
+        data = self._write_spaceless(path, np.diag([0.5, 0.6, 0.7]), np.array([10.0, 20.0, 30.0]))
+        with pytest.raises(ImageReadError, match="declare_nrrd_space"):
+            Image().read(path)
+
+        result = declare_nrrd_space(path, "left-posterior-superior")
+
+        assert result == path
+        assert nrrd.read_header(str(path))["space"] == "left-posterior-superior"
         img = Image()
-        img.read_nrrd(tmp_path / "no_space_origin_only.nrrd")
-        assert img.origin == (-10.0, -20.0, 30.0)
+        img.read(path)
+        assert img.origin == (10.0, 20.0, 30.0)
+        assert img.spacing == pytest.approx((0.5, 0.6, 0.7))
+        np.testing.assert_array_equal(img.img, data)
+        assert img.img.dtype == np.int16
+
+    def test_declare_ras_reads_converted_to_lps(self, tmp_path: Path) -> None:
+        """Declaring RAS is the 'explicit conversion' case: the numbers stay, the
+        label is declared, and the strict reader converts on the next read."""
+        zeros = np.zeros((4, 4, 4), dtype=np.int16)
+        lps_path = tmp_path / "lps_ref.nrrd"
+        nrrd.write(
+            str(lps_path),
+            zeros,
+            {
+                "space directions": np.diag([0.5, 0.6, 0.7]),
+                "space origin": np.array([10.0, 20.0, 30.0]),
+                "space": "left-posterior-superior",
+            },
+        )
+        ras_path = tmp_path / "ras_unlabeled.nrrd"
+        self._write_spaceless(ras_path, np.diag([-0.5, -0.6, 0.7]), np.array([-10.0, -20.0, 30.0]))
+
+        declare_nrrd_space(ras_path, "RAS")
+
+        ras = Image()
+        ras.read(ras_path)
+        ref = Image()
+        ref.read(lps_path)
+        assert ras.same_grid(ref)
+
+    def test_declare_is_idempotent_on_equal_existing_space(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An already-stamped file is not rewritten; abbreviation and full name
+        count as the same declaration."""
+        path = tmp_path / "already.nrrd"
+        nrrd.write(
+            str(path),
+            np.zeros((4, 4, 4), dtype=np.int16),
+            {
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+                "space": "left-posterior-superior",
+            },
+        )
+
+        def boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("an equal declaration must not rewrite the file")
+
+        monkeypatch.setattr("clarinet.services.image.image.nrrd.write", boom)
+        assert declare_nrrd_space(path, "LPS") == path
+
+    def test_declare_conflicting_existing_space_raises_and_leaves_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Relabeling a file that already declares a different space would change
+        its geometry's meaning — refuse, and leave the bytes alone."""
+        path = tmp_path / "ras.nrrd"
+        nrrd.write(
+            str(path),
+            np.zeros((4, 4, 4), dtype=np.int16),
+            {
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+                "space": "right-anterior-superior",
+            },
+        )
+        before = path.read_bytes()
+
+        with pytest.raises(ImageError, match="right-anterior-superior"):
+            declare_nrrd_space(path, "left-posterior-superior")
+
+        assert path.read_bytes() == before
+
+    @pytest.mark.parametrize("bad_space", ["scanner-xyz", "", "3D-right-handed"])
+    def test_declare_unsupported_space_argument_raises_and_leaves_file(
+        self, tmp_path: Path, bad_space: str
+    ) -> None:
+        path = tmp_path / "legacy.nrrd"
+        self._write_spaceless(path, np.eye(3), np.zeros(3))
+        before = path.read_bytes()
+
+        with pytest.raises(ImageError):
+            declare_nrrd_space(path, bad_space)
+
+        assert path.read_bytes() == before
+
+    def test_declare_on_layered_seg_preserves_segments_and_layers(self, tmp_path: Path) -> None:
+        """A 4-D .seg.nrrd is stamped without interpreting its geometry: segment
+        metadata, layer voxels and the grid all survive, and read_grid works again."""
+        layer_a = np.zeros((4, 5, 6), dtype=np.uint8)
+        layer_a[1:3, 1:3, 1:3] = 1
+        layer_b = np.zeros((4, 5, 6), dtype=np.uint8)
+        layer_b[2:4, 2:4, 2:4] = 1
+        seg = LayeredSegmentation.from_layers(
+            [("a", layer_a), ("b", layer_b)],
+            spacing=(0.5, 0.6, 0.7),
+            origin=(10.0, 20.0, 30.0),
+            direction=np.eye(3),
+        )
+        path = tmp_path / "legacy.seg.nrrd"
+        seg.save(path)
+        # Strip the label the way a pre-2026-03-08 clarinet left it.
+        data, header = nrrd.read(str(path))
+        del header["space"]
+        nrrd.write(str(path), data, header)
+        with pytest.raises(ImageReadError, match="declare_nrrd_space"):
+            LayeredSegmentation.read_header(path)
+
+        declare_nrrd_space(path, "left-posterior-superior")
+
+        reread = LayeredSegmentation.read_header(path)
+        assert reread.segments == seg.segments
+        assert reread.shape == (4, 5, 6)
+        assert reread.origin == pytest.approx((10.0, 20.0, 30.0))
+        assert reread.spacing == pytest.approx((0.5, 0.6, 0.7))
+        np.testing.assert_array_equal(reread.read_layer(path, "a"), layer_a)
+        np.testing.assert_array_equal(reread.read_layer(path, "b"), layer_b)
+        assert read_grid(path).shape == (4, 5, 6)
+
+    def test_declare_out_path_leaves_source_untouched(self, tmp_path: Path) -> None:
+        src = tmp_path / "legacy.nrrd"
+        self._write_spaceless(src, np.eye(3), np.array([1.0, 2.0, 3.0]))
+        before = src.read_bytes()
+        out = tmp_path / "stamped.nrrd"
+
+        result = declare_nrrd_space(src, "left-posterior-superior", out_path=out)
+
+        assert result == out
+        assert src.read_bytes() == before
+        with pytest.raises(ImageReadError):
+            Image().read(src)
+        img = Image()
+        img.read(out)
+        assert img.origin == (1.0, 2.0, 3.0)
 
 
 # ---------------------------------------------------------------------------

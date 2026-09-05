@@ -226,9 +226,11 @@ class LayeredSegmentation:
         else:
             space_origin = header.get("space origin")
             if space_origin is not None:
-                origin_arr = np.asarray(space_origin[:3], dtype=float)
-                if "space" in header:
-                    origin_arr = nrrd_space_transform(header["space"]) @ origin_arr
+                # Same rule as the directions branch (and as Image.read_nrrd):
+                # a `space origin` without a declared `space` cannot be placed.
+                origin_arr = nrrd_space_transform(header.get("space")) @ np.asarray(
+                    space_origin[:3], dtype=float
+                )
                 self._origin = (float(origin_arr[0]), float(origin_arr[1]), float(origin_arr[2]))
 
     # -- voxel read --

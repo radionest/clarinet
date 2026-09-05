@@ -235,16 +235,22 @@
   for genuinely unrelated grids must add `allow_resample=True`; a same-study
   pair that was always `SAME`/`REARRANGED` needs no change.
 - **`Image.read`/`Image.read_nrrd` raise `ImageReadError` on a 4-D NRRD, and on
-  a 3-D NRRD whose `space directions` are present without a supported `space`
-  field.** A 4-D `.seg.nrrd` previously built a silently-wrong NaN-valued grid
-  instead of raising — read it via `LayeredSegmentation` or `grid_io.read_grid`
-  instead. A NRRD with `space directions` but no (or an unrecognized) `space`
-  was previously treated as LPS regardless, silently misreading third-party
-  RAS/LAS files; `space` is now honored (LPS as-is, RAS/LAS converted, anything
-  else raises). **Downstream migration:** a clarinet-written NRRD from before
-  2026-03-08 that carries `space directions` without a `space` field now fails
-  to read — see `clarinet/docs/migration-orientation-0.10.17.md` for the
-  one-time re-save fix.
+  a 3-D NRRD whose `space directions` or `space origin` are present without a
+  supported `space` field.** A 4-D `.seg.nrrd` previously built a silently-wrong
+  NaN-valued grid instead of raising — read it via `LayeredSegmentation` or
+  `grid_io.read_grid` instead. A NRRD with `space directions` but no (or an
+  unrecognized) `space` was previously treated as LPS regardless, silently
+  misreading third-party RAS/LAS files; `space` is now honored (LPS as-is,
+  RAS/LAS converted, anything else raises). The same rule now covers the
+  `spacings` + `space origin` header shape, which used to keep a space-less
+  origin raw (the last silent-mislabel path); a `spacings`-only header with no
+  `space origin` still reads as-is. `LayeredSegmentation.read_header` applies
+  the identical rule to 4-D headers. **Downstream migration:** a
+  clarinet-written NRRD from before 2026-03-08 that carries `space directions`
+  or `space origin` without a `space` field now fails to read — stamp it once
+  with the new `clarinet.services.image.declare_nrrd_space(path, "LPS")`
+  (idempotent; refuses to relabel a file that already declares a different
+  space); see `clarinet/docs/migration-orientation-0.10.17.md`.
 - **DICOM→NIfTI conversion changes on-disk grid layout for every
   newly-converted volume (grid epoch).** The in-plane axis order now follows
   `ImageOrientationPatient` end-to-end (array, spacing, and direction move

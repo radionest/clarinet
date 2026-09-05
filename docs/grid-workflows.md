@@ -26,10 +26,12 @@ zero overlap, with no exception raised, because the code never checked.
 
 **Internal convention is always LPS** (DICOM-native: Left, Posterior, Superior).
 NIfTI is RAS on disk — converted at the read/write boundary
-(`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:27-29`). NRRD honors
+(`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:29-31`). NRRD honors
 its own `space` header field: LPS passes through as-is, RAS/LAS are converted, and
-anything else raises `ImageReadError` (`nrrd_space_to_lps`,
-`clarinet/services/image/image.py:64`) — Slicer itself always writes LPS (Probe P6
+anything else — including a missing `space` next to `space directions` or `space
+origin` — raises `ImageReadError` (`nrrd_space_to_lps`,
+`clarinet/services/image/image.py:89`); a legacy space-less file is stamped once with
+`declare_nrrd_space` (`image.py:134`). Slicer itself always writes LPS (Probe P6
 below), so this only affects third-party NRRD files.
 
 **The voxel-to-physical affine** (`affine_4x4`) is a 4×4 matrix: the 3×3 linear
@@ -837,12 +839,13 @@ route through `_read_grid_on_disk` for every grid read.
   `_read_grid_on_disk` refuses it (SimpleITK reports `dim=4` — only the 4-D
   layered NRRD collapses to a 3-D vector image, probe P4). Use the 3-D series
   volume as the reference.
-- **A legacy clarinet NRRD (`space directions`, no `space`) has a verdict in
-  one runtime only.** Server-side `read_grid`/`Image` raise `ImageReadError`
-  (see the one-time re-save in the migration guide); SimpleITK inside Slicer
-  still reads such a file under its own default, so `conform_to` classifies
-  there. Both behaviors are safe (loud vs. physically-correct LPS), but a
-  script comparing verdicts across runtimes must re-save the header first.
+- **A legacy clarinet NRRD (`space directions` or `space origin`, no `space`)
+  has a verdict in one runtime only.** Server-side `read_grid`/`Image` raise
+  `ImageReadError` (repair once with `declare_nrrd_space(path, "LPS")` — see
+  the migration guide); SimpleITK inside Slicer still reads such a file under
+  its own default, so `conform_to` classifies there. Both behaviors are safe
+  (loud vs. physically-correct LPS), but a script comparing verdicts across
+  runtimes must stamp the header first.
 - **`on_grid_mismatch="delete"` destroys a `REARRANGED` file that `conform`
   would have repaired losslessly — and it is armed on the metadata-only
   `PATCH /records/{id}/data` endpoint, not only on a real re-submission.**

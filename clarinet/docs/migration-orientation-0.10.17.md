@@ -131,21 +131,27 @@ a `FOREIGN` one. See
 ### Also: pre-2026-03-08 clarinet NRRDs may now fail to read
 
 Independently of the epoch above, a clarinet-written NRRD (including a
-`.seg.nrrd`) saved **before 2026-03-08** can carry `space directions` without a
-`space` field. `Image.read_nrrd`/`LayeredSegmentation.read_header` now honor
-the `space` field strictly and raise `ImageReadError` on that combination
+`.seg.nrrd`) saved **before 2026-03-08** can carry `space directions` (or a
+`space origin`) without a `space` field. `Image.read_nrrd` /
+`LayeredSegmentation.read_header` / `read_grid` now honor the `space` field
+strictly — one rule for both the `space directions` and the `spacings` +
+`space origin` header shapes — and raise `ImageReadError` on a missing label
 instead of silently assuming LPS. Every clarinet/Slicer-authored NRRD has
 always physically been LPS, so the fix is a one-time header patch, not a
-geometry change — read and rewrite the header directly with `pynrrd` (not
-through `Image`, which is exactly what now raises on this file):
+geometry change. Declare the space with the framework helper (it goes through
+`pynrrd` directly, not through `Image`, which is exactly what now raises on
+this file; idempotent; 3-D and 4-D layered files alike, segment metadata kept):
 
 ```python
-import nrrd
+from clarinet.services.image import declare_nrrd_space
 
-data, header = nrrd.read(str(seg_path))
-header.setdefault("space", "left-posterior-superior")
-nrrd.write(str(seg_path), data, header)
+declare_nrrd_space(seg_path, "left-posterior-superior")  # in place; or out_path=... to copy
 ```
+
+It refuses (raises `ImageError`) if the header already declares a *different*
+space — that would be relabeling geometry, not filling in a missing label. For
+a third-party file that is known to be RAS-native, declare `"RAS"` instead: the
+numbers stay, and the strict reader converts them to LPS on the next read.
 
 After this one-time re-save the file reads normally through `Image` /
 `LayeredSegmentation` / `read_grid` again.
