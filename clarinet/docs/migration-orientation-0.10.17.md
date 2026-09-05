@@ -125,8 +125,11 @@ been confirmed intentional.
 Any Slicer script that exports a segmentation against a volume should pass
 `conform_to=<volume file path>` to `export_segmentation` — this both repairs a
 `REARRANGED` node transparently and refuses (rather than silently mis-exports)
-a `FOREIGN` one. See
-[`.claude/rules/slicer-helper-api.md`](../../.claude/rules/slicer-helper-api.md).
+a `FOREIGN` one. The `conform_to` path needs the bundled `grid_relation`, so the
+script must be sent with `execute(..., include_correspondence=True)` (record
+open/validate and the submit validator already do; an ad-hoc `/slicer/exec`
+call must opt in) — otherwise `export_segmentation` raises `SlicerHelperError`.
+See [`.claude/rules/slicer-helper-api.md`](../../.claude/rules/slicer-helper-api.md).
 
 ### Also: pre-2026-03-08 clarinet NRRDs may now fail to read
 

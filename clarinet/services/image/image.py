@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -146,9 +147,14 @@ def declare_nrrd_space(
     ``read_grid``) refuse. The geometry is never touched or interpreted: the caller
     *declares* which coordinate system the numbers already are in, and the next read
     converts from it as usual — so declaring RAS on a RAS-native file is the explicit
-    conversion path. Works on 3-D volumes and 4-D layered ``.seg.nrrd`` alike
-    (segment metadata preserved). Reads and writes through pynrrd directly, since
-    ``Image`` is exactly what raises on such a file.
+    conversion path. Works on 3-D volumes and 4-D layered ``.seg.nrrd`` alike:
+    segment metadata is carried through, with pynrrd's caveat that header values
+    are ASCII-only, so non-ASCII bytes (e.g. a Cyrillic segment name) are dropped
+    on any read/write round-trip (#577). Attached-data files only — a detached
+    ``.nhdr`` header is not supported (pynrrd would rewrite its data file beside
+    the header). Reads and writes through pynrrd directly, since ``Image`` is
+    exactly what raises on such a file; the write is atomic (temp file +
+    ``os.replace``), so a failed in-place stamp leaves the original bytes intact.
 
     Args:
         path: NRRD to repair.
@@ -196,10 +202,19 @@ def declare_nrrd_space(
         raise ImageReadError(f"Failed to read NRRD file: {path}") from e
     header["space"] = canonical
     target = path if out_path is None else Path(out_path)
+    # Write beside the target, then atomically move over it: pynrrd truncates
+    # its destination before writing, and for an in-place stamp the in-memory
+    # `data` is the only other copy of the file — a failed write must never
+    # have been aimed at the original (same convention as grid_policy's
+    # repair). Keeps the real suffix so pynrrd treats the temp file identically.
+    tmp = target.with_name(f".{target.stem}.tmp{target.suffix}")
     try:
-        nrrd.write(str(target), data, header)
+        nrrd.write(str(tmp), data, header)
+        os.replace(tmp, target)
     except Exception as e:
         raise ImageWriteError(f"Failed to write NRRD file: {target}") from e
+    finally:
+        tmp.unlink(missing_ok=True)  # no-op once os.replace has moved it
     logger.info(f"Declared NRRD space {canonical!r}: {target}")
     return target
 

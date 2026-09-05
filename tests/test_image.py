@@ -12,7 +12,12 @@ import pytest
 import SimpleITK as sitk
 from pydicom.dataset import FileDataset
 
-from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
+from clarinet.exceptions.domain import (
+    GeometryMismatchError,
+    ImageError,
+    ImageReadError,
+    ImageWriteError,
+)
 from clarinet.services.image import (
     FileType,
     Grid,
@@ -891,6 +896,29 @@ class TestDeclareNrrdSpace:
         np.testing.assert_array_equal(reread.read_layer(path, "a"), layer_a)
         np.testing.assert_array_equal(reread.read_layer(path, "b"), layer_b)
         assert read_grid(path).shape == (4, 5, 6)
+
+    def test_declare_in_place_failure_leaves_source_intact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In-place stamping must be atomic. pynrrd opens the target with 'wb'
+        (truncating it) before it writes, so a write that fails midway — disk
+        full, interrupt — must never have been aimed at the original: the
+        in-memory copy is the only other one. No temp file may be left behind."""
+        path = tmp_path / "legacy.nrrd"
+        self._write_spaceless(path, np.eye(3), np.zeros(3))
+        before = path.read_bytes()
+
+        def truncating_write(filename: str, *args: object, **kwargs: object) -> None:
+            with open(filename, "wb") as fh:  # what pynrrd does before it can fail
+                fh.write(b"NRRD0005\n")
+            raise OSError("No space left on device")
+
+        monkeypatch.setattr("clarinet.services.image.image.nrrd.write", truncating_write)
+        with pytest.raises(ImageWriteError):
+            declare_nrrd_space(path, "left-posterior-superior")
+
+        assert path.read_bytes() == before
+        assert [p.name for p in tmp_path.iterdir()] == ["legacy.nrrd"]
 
     def test_declare_out_path_leaves_source_untouched(self, tmp_path: Path) -> None:
         src = tmp_path / "legacy.nrrd"
