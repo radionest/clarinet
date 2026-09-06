@@ -214,6 +214,12 @@ class LayeredSegmentation:
         list axis). Honors the header's ``space`` field via the shared
         ``nrrd_space_to_lps`` helper (LPS as-is; RAS/LAS converted; anything else
         raises) — the same conversion :meth:`Image.read_nrrd` applies to 3-D NRRD.
+        A header with no ``space directions`` but a ``space origin`` goes through
+        ``nrrd_space_transform`` (the helper's own space step) under the same rule.
+
+        Raises:
+            ImageReadError: the header carries ``space directions`` or ``space origin``
+                without a supported ``space`` field.
         """
         sizes = [int(s) for s in header["sizes"]]
         self._shape = (sizes[1], sizes[2], sizes[3])

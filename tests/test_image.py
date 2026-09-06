@@ -33,6 +33,7 @@ from clarinet.services.image import (
 )
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
+from clarinet.services.image.image import nrrd_space_transform
 from clarinet.services.image.orientation import ground_truth_slice_geometry
 from clarinet.services.image.segmentation import is_conform_repairable
 
@@ -507,6 +508,15 @@ class TestImage:
 
 class TestNrrdReaderHardening:
     """NRRD `space` honored (LPS/RAS/LAS); read_nrrd raises loudly on non-3-D."""
+
+    @pytest.mark.parametrize("space_value", ["LPS", "RAS", "LAS"])
+    def test_space_transform_is_read_only(self, space_value: str) -> None:
+        """The transform is a shared module constant, so writing into it would
+        corrupt every later call; it is frozen rather than copied per call."""
+        transform = nrrd_space_transform(space_value)
+        assert not transform.flags.writeable
+        with pytest.raises(ValueError, match="read-only"):
+            transform[0, 0] = 99.0
 
     @pytest.mark.parametrize(
         ("space_value", "flip"),

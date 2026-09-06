@@ -31,6 +31,12 @@ from clarinet.utils.logger import logger
 _LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0])
 # LAS differs from LPS only in the y axis (Anterior vs Posterior); also self-inverse.
 _LAS_TO_LPS = np.diag([1.0, -1.0, 1.0])
+_LPS_TO_LPS = np.eye(3)
+# nrrd_space_transform hands these back verbatim, so a caller that wrote into the
+# result would corrupt every later call; freeze them instead of copying per call.
+_LPS_TO_RAS.setflags(write=False)
+_LAS_TO_LPS.setflags(write=False)
+_LPS_TO_LPS.setflags(write=False)
 
 _NRRD_SPACE_LPS = "left-posterior-superior"
 _NRRD_SPACE_RAS = "right-anterior-superior"
@@ -46,7 +52,7 @@ _NRRD_SPACE_CANONICAL: Mapping[str, str] = {
 }
 # Canonical space -> 3x3 world transform into LPS (all three are self-inverse).
 _NRRD_SPACE_TO_LPS: Mapping[str, npt.NDArray[np.float64]] = {
-    _NRRD_SPACE_LPS: np.eye(3),
+    _NRRD_SPACE_LPS: _LPS_TO_LPS,
     _NRRD_SPACE_RAS: _LPS_TO_RAS,
     _NRRD_SPACE_LAS: _LAS_TO_LPS,
 }
