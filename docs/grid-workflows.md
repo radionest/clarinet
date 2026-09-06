@@ -26,12 +26,12 @@ zero overlap, with no exception raised, because the code never checked.
 
 **Internal convention is always LPS** (DICOM-native: Left, Posterior, Superior).
 NIfTI is RAS on disk — converted at the read/write boundary
-(`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:32-34`). NRRD honors
+(`LPS_TO_RAS`/`LAS_TO_LPS`, `clarinet/services/image/grid.py`). NRRD honors
 its own `space` header field: LPS passes through as-is, RAS/LAS are converted, and
 anything else — including a missing `space` next to `space directions` or `space
-origin` — raises `ImageReadError` (`nrrd_space_transform`,
-`clarinet/services/image/image.py:71`, shared by `nrrd_space_to_lps` at `:109`); a
-legacy space-less file is stamped once with `declare_nrrd_space` (`image.py:244`).
+origin` — raises `ImageReadError` (`nrrd_space_transform` and `nrrd_space_to_lps`,
+`clarinet/services/image/nrrd_space.py`); a legacy space-less file is stamped once
+with `declare_nrrd_space` (`clarinet/services/image/nrrd_repair.py`).
 Slicer itself always writes LPS (Probe P6 below), so this only affects third-party
 NRRD files.
 
@@ -39,17 +39,18 @@ The rule covers the axes, not just the origin. A header carrying `spacings` inst
 of `space directions` is implicitly axis-aligned **in its declared space**, so
 identity axes in RAS are `diag(-1, -1, 1)` in LPS — converting only the `space
 origin` would place the volume correctly and leave it X/Y-mirrored. Both readers get
-spacing, direction and origin from one resolver, `_nrrd_grid_from_header`
-(`image.py:184`), which is what stops `Image.read_nrrd` and
-`LayeredSegmentation._apply_grid_from_header` from drifting apart as they previously
-had. The single carve-out: a header with no `space` **and** no `space origin` has
-nothing to place, so its `spacings` are taken verbatim and no `space` is demanded.
+spacing, direction and origin from one resolver, `nrrd_grid_from_header`
+(`nrrd_space.py`, exported from `clarinet.services.image`), which is what stops
+`Image.read_nrrd` and `LayeredSegmentation._apply_grid_from_header` from
+drifting apart as they previously had. The single carve-out: a header with no
+`space` **and** no `space origin` has nothing to place, so its `spacings` are
+taken verbatim and no `space` is demanded.
 
 **The voxel-to-physical affine** (`affine_4x4`) is a 4×4 matrix: the 3×3 linear
 part is `direction` scaled per-column by `spacing` (each `direction` column is a
 unit vector for that array axis), and the translation column is `origin`.
-`Image.affine_4x4` (`clarinet/services/image/image.py:623`) and
-`Grid.from_components` (`clarinet/services/image/grid.py:132`) build this matrix by
+`Image.affine_4x4` (`clarinet/services/image/image.py:283`) and
+`Grid.from_components` (`clarinet/services/image/grid.py:142`) build this matrix by
 the identical formula — the two are meant to be interchangeable representations of
 the same grid.
 
@@ -60,19 +61,19 @@ is the condition ITK viewers (including Slicer) silently "fix" at load time by
 flipping the slice axis (Probe P1). This determinant is the central quantity in
 the [design rationale](#design-rationale) below.
 
-**`Grid`** (`clarinet/services/image/grid.py:86`) is the shared value object: a
+**`Grid`** (`clarinet/services/image/grid.py:96`) is the shared value object: a
 frozen dataclass `(shape: tuple[int, int, int], affine: np.ndarray)`. Equality is
 deliberately left at default object identity (`eq=False`) — a dataclass-generated
 `__eq__` would compare `affine` with `==`, and numpy raises on the resulting
 array's ambiguous truth value. **Never compare two `Grid`s with `==`; always go
 through `grid_relation`.** Derived read-only properties `.origin` / `.spacing` /
-`.direction` (`grid.py:157`, `:163`, `:169`) and a diagnostic `.summary()`
-(`grid.py:176`) round out the type.
+`.direction` (`grid.py:167`, `:173`, `:179`) and a diagnostic `.summary()`
+(`grid.py:186`) round out the type.
 
-**`RelationKind`** (`clarinet/services/image/grid.py:42`) is the three-way
+**`RelationKind`** (`clarinet/services/image/grid.py:52`) is the three-way
 taxonomy enum: `SAME | REARRANGED | FOREIGN`. **`GridRelation`**
-(`clarinet/services/image/grid.py:51`) is the verdict returned by
-`grid_relation(a, b, *, atol=1e-4) -> GridRelation` (`grid.py:191`): always a
+(`clarinet/services/image/grid.py:61`) is the verdict returned by
+`grid_relation(a, b, *, atol=1e-4) -> GridRelation` (`grid.py:201`): always a
 `.kind`, plus — only when `.kind is RelationKind.REARRANGED` — `.perm` and
 `.flips`, the per-axis correspondence between the two grids' index spaces. These
 two names are easy to conflate; the enum is `RelationKind`, the verdict object is
@@ -90,7 +91,7 @@ verdict tolerates translation error up to **half a voxel** (in index-space units
 via `_OFFSET_TOL_VOXELS = 0.5`, `grid.py:39`) — wide enough to absorb on-disk float
 rounding, narrow enough that a real one-voxel-or-more misalignment (a mirror, a
 transpose) can never be mistaken for identity. `Image.same_grid` /
-`Image.assert_same_grid` (`clarinet/services/image/image.py:646`, `:672`) are a
+`Image.assert_same_grid` (`clarinet/services/image/image.py:306`, `:332`) are a
 **different, tighter** check: a near-exact `atol`-only (default `1e-4` mm)
 comparison of the full affine with **no** permutation tolerance at all, used as
 the in-memory pre-overlay guard for two already-loaded objects. The two
@@ -134,8 +135,8 @@ The flip is always **geometry-preserving**: array, origin, and direction reverse
 (mirroring the data through the origin plane) is a different, forbidden operation
 (the #247/#453 bug class; see the [design rationale](#design-rationale) and
 [traps](#traps) below). `Image.read_dicom_series`
-(`clarinet/services/image/image.py:854`) stores the result verbatim;
-`Image.save_as` → `_save_nifti` (`image.py:986`, `:1016`, LPS→RAS at the write
+(`clarinet/services/image/image.py:515`) stores the result verbatim;
+`Image.save_as` → `_save_nifti` (`image.py:647`, `:677`, LPS→RAS at the write
 boundary) writes `volume.nii.gz`. The framework's only production entry point is
 the conversion pipeline task
 (`clarinet/services/pipeline/tasks/convert_series.py:107,115`), a plain
@@ -504,13 +505,13 @@ once the painting effort is already spent.
 
 | API | Where | Use when | Notes |
 |---|---|---|---|
-| `Grid` / `Grid.from_components` | `grid.py:86`, `:132` | You have raw shape/spacing/origin/direction (not a file) and need a value object to classify or summarize | `eq=False` — never `==` two grids |
-| `grid_relation(a, b, *, atol=1e-4)` | `grid.py:191` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
+| `Grid` / `Grid.from_components` | `grid.py:96`, `:142` | You have raw shape/spacing/origin/direction (not a file) and need a value object to classify or summarize | `eq=False` — never `==` two grids |
+| `grid_relation(a, b, *, atol=1e-4)` | `grid.py:201` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
 | `read_grid(path)` | `clarinet/services/image/grid_io.py:21` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
 | `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:88` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
 | `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:109` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
-| `Image.same_grid` / `Image.assert_same_grid` | `image.py:646`, `:672` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
-| `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:688`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
+| `Image.same_grid` / `Image.assert_same_grid` | `image.py:306`, `:332` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
+| `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:348`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
 | `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:524` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
@@ -538,7 +539,7 @@ flowchart TD
 ```
 
 This mirrors `grid_relation`'s actual implementation
-(`grid.py:231-270`) exactly: compose `M = inv(a.affine) @ b.affine`, then check
+(`grid.py:241-280`) exactly: compose `M = inv(a.affine) @ b.affine`, then check
 whether `M`'s linear part is a signed permutation (each row/column exactly one
 entry ≈ ±1, rest ≈ 0, within `atol`) with every per-axis translation within half a
 voxel of its exact target. `REARRANGED` carries `(perm, flips)` — the source axis
@@ -568,7 +569,7 @@ mass-produces** that exact relation for every legacy segmentation against its
 re-converted volume, so "other must fail" directly contradicted the plan's own
 migration step ("conform legacy pairs"). A bespoke axis-aligned mirror predicate
 (matching only a `z₀ + (n−1)·spacing`-style flip) was also unsafe for an oblique
-acquisition. The signed-permutation form (`grid_relation`, `grid.py:191`) handles
+acquisition. The signed-permutation form (`grid_relation`, `grid.py:201`) handles
 oblique grids automatically — it operates purely on the index-space transform
 `M = inv(a.affine) @ b.affine`, never on world-axis labels — and gives the
 half-voxel tolerance a principled meaning: the widest window that cannot straddle

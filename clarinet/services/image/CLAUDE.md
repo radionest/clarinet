@@ -7,6 +7,10 @@ Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md).
 | File | Purpose |
 |---|---|
 | `image.py` | `Image` class — base NIfTI/NRRD/DICOM I/O with spacing/shape |
+| `grid.py` | `Grid` value object, `grid_relation` classifier, and the `LPS_TO_RAS` / `LAS_TO_LPS` frame constants — pure numpy + stdlib, ships in the Slicer bundle |
+| `grid_io.py` | `read_grid`, `classify_pair`, `assert_same_grid_on_disk` — disk-level grid IO over `Image` / `LayeredSegmentation` |
+| `nrrd_space.py` | NRRD `space` resolution: `nrrd_grid_from_header` / `NrrdGrid` (exported) turn header fields into spacing/direction/origin in LPS — pure function of the header, no pynrrd, no disk |
+| `nrrd_repair.py` | `declare_nrrd_space` (exported) — one-time `space` stamp for legacy space-less NRRDs; atomic temp + `os.replace` |
 | `segmentation.py` | `Segmentation(Image)` — labeled masks, morphology, set operations, ROI filtering |
 | `layered_segmentation.py` | `LayeredSegmentation` — 4-D `(L,X,Y,Z)` overlapping-segment NRRD (Slicer format) over one shared 3-D grid |
 | `dicom_volume.py` | DICOM series → 3D numpy volume (used by `Image.read_dicom_series()`) |
@@ -28,7 +32,7 @@ Deep reference: [Imaging stack](../../../docs/kb/imaging-stack.md).
 - **Exceptions**: `ImageError`, `ImageReadError`, `ImageWriteError` from `clarinet.exceptions.domain`; `OrientationUnverifiable` (subclasses `ImageError`) from `orientation.py`
 - **RAM-lean reads (opt-in)**: `read(path, load_data=False)` → grid + `shape`/`has_data` only (the #452 lean path); `read(path, dtype=np.int16|bool|...)` casts once off-disk (no forced float64; `dtype=None` keeps float64). `read_slice(path, i, axis=2)` returns one 2-D slice; `dataobj` is a read-only NIfTI proxy. `unload()`/`close()`/`with Image() as im:` free the volume (and mmap) deterministically.
 - **LayeredSegmentation** (`layered_segmentation.py`): 4-D `(L,X,Y,Z)` overlapping-segment NRRD (Slicer format) over one shared 3-D grid — composition, not a 4-D `Segmentation`. `from_layers().save()` (raw, layer/list-axis-first — Slicer-native, fill-in-place; layers interleaved on disk) + `read_header`/`read_layer`/`read_layer_slice`/`iter_layers`. Default write: one segment per layer, label 1.
-- **NRRD `space` is strict**: `space directions` or `space origin` without a supported `space` (LPS/RAS/LAS) raises `ImageReadError` in `Image.read_nrrd` and `LayeredSegmentation.read_header` alike — never assume LPS in a reader. Both go through the one resolver `_nrrd_grid_from_header` (`image.py`), which converts spacing, **direction** and origin together: a `spacings`-only header is axis-aligned in its *declared* space, so identity axes in RAS are `diag(-1, -1, 1)` in LPS. Carve-out: no `space` and no `space origin` means nothing to place, so `spacings` are read verbatim. A legacy space-less file is repaired once with `declare_nrrd_space(path, "LPS")` (idempotent header stamp; refuses to relabel a different declared space, a detached `.nhdr`, or a header with non-ASCII bytes pynrrd would drop).
+- **NRRD `space` is strict**: `space directions` or `space origin` without a supported `space` (LPS/RAS/LAS) raises `ImageReadError` in `Image.read_nrrd` and `LayeredSegmentation.read_header` alike — never assume LPS in a reader. Both go through the one resolver `nrrd_grid_from_header` (`nrrd_space.py`, exported from `clarinet.services.image`), which converts spacing, **direction** and origin together: a `spacings`-only header is axis-aligned in its *declared* space, so identity axes in RAS are `diag(-1, -1, 1)` in LPS. Carve-out: no `space` and no `space origin` means nothing to place, so `spacings` are read verbatim. A legacy space-less file is repaired once with `declare_nrrd_space(path, "LPS")` (`nrrd_repair.py`) (idempotent header stamp; refuses to relabel a different declared space, a detached `.nhdr`, or a header with non-ASCII bytes pynrrd would drop).
 
 ## Dependencies
 

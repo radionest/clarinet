@@ -258,6 +258,12 @@
   with the new `clarinet.services.image.declare_nrrd_space(path, "LPS")`
   (idempotent; refuses to relabel a file that already declares a different
   space); see `clarinet/docs/migration-orientation-0.10.17.md`.
+  The resolver behind both readers is public:
+  `clarinet.services.image.nrrd_grid_from_header` / `NrrdGrid` (new
+  `nrrd_space.py`); `declare_nrrd_space` lives in `nrrd_repair.py` and stays
+  exported from the facade; the LPS/RAS frame constants are
+  `clarinet.services.image.grid.LPS_TO_RAS` / `LAS_TO_LPS`. Only a direct
+  `from clarinet.services.image.image import declare_nrrd_space` breaks.
 - **DICOM→NIfTI conversion changes on-disk grid layout for every
   newly-converted volume (grid epoch).** The in-plane axis order now follows
   `ImageOrientationPatient` end-to-end (array, spacing, and direction move

@@ -156,7 +156,7 @@ def test_both_readers_share_the_resolver(tmp_path: Path) -> None:
 
 
 class TestModuleBoundaries:
-    """Design decisions D2, D4, D6: what is exported, what imports what."""
+    """What the facade exports, which module owns the resolver, and which modules may import which."""
 
     def test_facade_exports_the_resolver_and_the_repair_only(self) -> None:
         import clarinet.services.image as facade
