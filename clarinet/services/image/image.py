@@ -24,7 +24,7 @@ from clarinet.exceptions.domain import (
     ImageReadError,
     ImageWriteError,
 )
-from clarinet.services.image.grid import Grid
+from clarinet.services.image.grid import LPS_TO_RAS, Grid
 from clarinet.utils.logger import logger
 
 # Internal representation uses LPS (DICOM native). NIfTI uses RAS.
@@ -770,9 +770,9 @@ class Image:
         self.spacing = tuple(zooms[:3])
         # NIfTI affine is in RAS; convert to internal LPS representation
         direction_ras = affine[:3, :3] / zooms[:3]
-        self._direction = _LPS_TO_RAS @ direction_ras
+        self._direction = LPS_TO_RAS @ direction_ras
         origin_ras = np.array([affine[0, 3], affine[1, 3], affine[2, 3]])
-        origin_lps = _LPS_TO_RAS @ origin_ras
+        origin_lps = LPS_TO_RAS @ origin_ras
         self._origin = (float(origin_lps[0]), float(origin_lps[1]), float(origin_lps[2]))
         self._shape = tuple(int(s) for s in self._nifti_image.header.get_data_shape())
         self._filetype = FileType.NIFTI
@@ -1017,10 +1017,10 @@ class Image:
         """Write voxel data to a NIfTI file."""
         try:
             # Convert internal LPS to NIfTI RAS
-            direction_ras = _LPS_TO_RAS @ self._direction
+            direction_ras = LPS_TO_RAS @ self._direction
             affine = np.eye(4)
             affine[:3, :3] = direction_ras * np.array(self.spacing)
-            affine[:3, 3] = _LPS_TO_RAS @ np.array(self._origin)
+            affine[:3, 3] = LPS_TO_RAS @ np.array(self._origin)
             new_image = nibabel.Nifti1Image(self.img, affine, dtype=self.img.dtype)
             nibabel.save(new_image, str(path))
         except Exception as e:

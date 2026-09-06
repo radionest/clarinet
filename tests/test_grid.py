@@ -10,7 +10,14 @@ import pytest
 
 from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
 from clarinet.services.image import FileType, Image, LayeredSegmentation
-from clarinet.services.image.grid import Grid, GridRelation, RelationKind, grid_relation
+from clarinet.services.image.grid import (
+    LAS_TO_LPS,
+    LPS_TO_RAS,
+    Grid,
+    GridRelation,
+    RelationKind,
+    grid_relation,
+)
 from clarinet.services.image.grid_io import assert_same_grid_on_disk, classify_pair, read_grid
 
 # ---------------------------------------------------------------------------
@@ -670,3 +677,30 @@ class TestAssertSameGridOnDisk:
 
         with pytest.raises(GeometryMismatchError):
             assert_same_grid_on_disk(vol_path, seg_path)
+
+
+class TestFrameConstants:
+    """grid.py owns the LPS/RAS and LAS/LPS world-frame transforms."""
+
+    @pytest.mark.parametrize(
+        ("const", "expected"),
+        [(LPS_TO_RAS, [-1.0, -1.0, 1.0]), (LAS_TO_LPS, [1.0, -1.0, 1.0])],
+    )
+    def test_value_read_only_and_self_inverse(
+        self, const: np.ndarray, expected: list[float]
+    ) -> None:
+        np.testing.assert_array_equal(const, np.diag(expected))
+        assert const.dtype == np.float64
+        assert not const.flags.writeable
+        with pytest.raises(ValueError, match="read-only"):
+            const[0, 0] = 99.0
+        np.testing.assert_array_equal(const @ const, np.eye(3))
+
+    def test_nifti_reader_lands_on_the_shared_constant(self, tmp_path: Path) -> None:
+        """An identity RAS affine reads as direction == LPS_TO_RAS (the NIfTI path's flip)."""
+        path = tmp_path / "identity.nii.gz"
+        nibabel.save(nibabel.Nifti1Image(np.zeros((2, 3, 4), dtype=np.int16), np.eye(4)), str(path))
+        img = Image()
+        img.read(path, load_data=False)
+        np.testing.assert_array_equal(img.direction, LPS_TO_RAS)
+        assert img.origin == (0.0, 0.0, 0.0)
