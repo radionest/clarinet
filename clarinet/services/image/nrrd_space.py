@@ -47,7 +47,11 @@ _NRRD_SPACE_TO_LPS: Mapping[str, npt.NDArray[np.float64]] = {
 
 
 def canonical_nrrd_space(space: str | None) -> str | None:
-    """Canonical full name for an accepted ``space`` spelling; ``None`` if unsupported."""
+    """Canonical full name for an accepted ``space`` spelling; ``None`` if unsupported.
+
+    Package-internal: reached through :func:`nrrd_grid_from_header`, the facade's
+    public resolver. Not exported from ``clarinet.services.image``.
+    """
     return _NRRD_SPACE_CANONICAL.get((space or "").strip().lower())
 
 

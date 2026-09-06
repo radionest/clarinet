@@ -47,7 +47,8 @@ def declare_nrrd_space(
 
     One-time repair for legacy files — e.g. clarinet-written NRRDs from before
     2026-03-08 — that carry ``space directions``/``space origin`` without a
-    ``space`` label, which the strict readers (:meth:`Image.read_nrrd`,
+    ``space`` label, which the strict readers
+    (:meth:`~clarinet.services.image.image.Image.read_nrrd`,
     :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation.read_header`,
     ``read_grid``) refuse. The geometry is never touched or interpreted: the caller
     *declares* which coordinate system the numbers already are in, and the next read
