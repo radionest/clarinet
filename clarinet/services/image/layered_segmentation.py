@@ -23,7 +23,7 @@ import numpy as np
 
 from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
 from clarinet.services.image.grid import Grid
-from clarinet.services.image.image import _nrrd_grid_from_header
+from clarinet.services.image.nrrd_space import nrrd_grid_from_header
 from clarinet.utils.logger import logger
 
 
@@ -194,7 +194,7 @@ class LayeredSegmentation:
             ImageReadError: the header cannot be read, or its ``space directions`` /
                 ``space origin`` come without a supported ``space`` field — the same
                 strict rule as :meth:`Image.read_nrrd`; a legacy space-less file is
-                repaired once with :func:`~clarinet.services.image.image.declare_nrrd_space`.
+                repaired once with :func:`~clarinet.services.image.declare_nrrd_space`.
         """
         path = Path(path)
         try:
@@ -213,7 +213,7 @@ class LayeredSegmentation:
         """Populate spacing/origin/direction/shape from a 4-D NRRD header.
 
         Entry 0 of ``space directions``/``spacings`` is the ``none`` list axis, so the
-        spatial ones are 1..3. Delegates to the shared ``_nrrd_grid_from_header``, the
+        spatial ones are 1..3. Delegates to the shared ``nrrd_grid_from_header``, the
         single implementation of the ``space`` rule (LPS as-is; RAS/LAS converted;
         anything else raises) — :meth:`Image.read_nrrd` reads 3-D NRRD through the very
         same helper, which is what keeps the two readers from drifting apart.
@@ -223,7 +223,7 @@ class LayeredSegmentation:
                 or a ``space origin`` — without a supported ``space`` field.
         """
         sizes = [int(s) for s in header["sizes"]]
-        grid = _nrrd_grid_from_header(header, source, spatial=slice(1, 4))
+        grid = nrrd_grid_from_header(header, source, spatial=slice(1, 4))
         self._shape = (sizes[1], sizes[2], sizes[3])
         if grid.spacing is not None:
             self._spacing = grid.spacing

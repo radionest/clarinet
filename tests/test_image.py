@@ -33,7 +33,7 @@ from clarinet.services.image import (
 )
 from clarinet.services.image.correspondence import AbsoluteOverlap, GreedyArgmax
 from clarinet.services.image.dicom_volume import _canonicalize_slice_axis, read_dicom_series
-from clarinet.services.image.image import nrrd_space_transform
+from clarinet.services.image.nrrd_space import nrrd_space_transform
 from clarinet.services.image.orientation import ground_truth_slice_geometry
 from clarinet.services.image.segmentation import is_conform_repairable
 
