@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import types
 from pathlib import Path
 
 import nrrd
@@ -151,3 +153,38 @@ def test_both_readers_share_the_resolver(tmp_path: Path) -> None:
     assert seg.origin == pytest.approx((10.0, 20.0, 30.0))
     np.testing.assert_allclose(img.direction, np.eye(3), atol=1e-9)
     np.testing.assert_allclose(seg.direction, np.eye(3), atol=1e-9)
+
+
+class TestModuleBoundaries:
+    """Design decisions D2, D4, D6: what is exported, what imports what."""
+
+    def test_facade_exports_the_resolver_and_the_repair_only(self) -> None:
+        import clarinet.services.image as facade
+
+        assert facade.nrrd_grid_from_header is nrrd_grid_from_header
+        assert facade.NrrdGrid is NrrdGrid
+        assert facade.declare_nrrd_space.__module__ == "clarinet.services.image.nrrd_repair"
+        assert {"NrrdGrid", "nrrd_grid_from_header", "declare_nrrd_space"} <= set(facade.__all__)
+        internal = {"nrrd_space_transform", "nrrd_space_to_lps", "canonical_nrrd_space"}
+        assert not internal & set(facade.__all__)
+
+    def test_resolver_module_is_disk_free(self) -> None:
+        from clarinet.services.image import nrrd_space
+
+        bound = {v.__name__ for v in vars(nrrd_space).values() if isinstance(v, types.ModuleType)}
+        assert "nrrd" not in bound
+        assert "logger" not in vars(nrrd_space)
+
+    def test_layered_reader_does_not_import_the_3d_reader(self) -> None:
+        from clarinet.services.image import layered_segmentation
+
+        assert "from clarinet.services.image.image import" not in inspect.getsource(
+            layered_segmentation
+        )
+
+    def test_no_private_frame_constant_copies(self) -> None:
+        from clarinet.services.image import image, layered_segmentation, nrrd_repair, nrrd_space
+
+        for mod in (image, layered_segmentation, nrrd_repair, nrrd_space):
+            assert "_LPS_TO_RAS" not in vars(mod), mod.__name__
+            assert "_LAS_TO_LPS" not in vars(mod), mod.__name__
