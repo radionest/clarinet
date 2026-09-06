@@ -8,8 +8,9 @@ from clarinet.services.image.grid_io import (
     classify_pair,
     read_grid,
 )
-from clarinet.services.image.image import FileType, Image, declare_nrrd_space
+from clarinet.services.image.image import FileType, Image
 from clarinet.services.image.layered_segmentation import LayeredSegmentation
+from clarinet.services.image.nrrd_repair import declare_nrrd_space
 from clarinet.services.image.orientation import OrientationUnverifiable, is_volume_misoriented
 from clarinet.services.image.segmentation import (
     PropName,

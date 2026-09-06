@@ -958,7 +958,7 @@ class TestDeclareNrrdSpace:
         def boom(*args: object, **kwargs: object) -> None:
             raise AssertionError("an equal declaration must not rewrite the file")
 
-        monkeypatch.setattr("clarinet.services.image.image.nrrd.write", boom)
+        monkeypatch.setattr("clarinet.services.image.nrrd_repair.nrrd.write", boom)
         assert declare_nrrd_space(path, "LPS") == path
 
     def test_declare_conflicting_existing_space_raises_and_leaves_file(
@@ -1091,7 +1091,7 @@ class TestDeclareNrrdSpace:
                 fh.write(b"NRRD0005\n")
             raise OSError("No space left on device")
 
-        monkeypatch.setattr("clarinet.services.image.image.nrrd.write", truncating_write)
+        monkeypatch.setattr("clarinet.services.image.nrrd_repair.nrrd.write", truncating_write)
         with pytest.raises(ImageWriteError):
             declare_nrrd_space(path, "left-posterior-superior")
 
@@ -1162,7 +1162,7 @@ class TestDeclareNrrdSpace:
             seen.append(filename)
             real_write(filename, *args, **kwargs)
 
-        monkeypatch.setattr("clarinet.services.image.image.nrrd.write", recording_write)
+        monkeypatch.setattr("clarinet.services.image.nrrd_repair.nrrd.write", recording_write)
         declare_nrrd_space(path, "left-posterior-superior")
         data, header = nrrd.read(str(path))
         del header["space"]
