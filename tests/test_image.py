@@ -764,6 +764,128 @@ class TestNrrdReaderHardening:
         with pytest.raises(ImageReadError, match="declare_nrrd_space"):
             LayeredSegmentation.read_header(tmp_path / "no_space.seg.nrrd")
 
+    def test_spacings_branch_converts_axes_not_just_origin(self, tmp_path: Path) -> None:
+        """`spacings` are magnitudes along the array axes *of the declared space*, so
+        a RAS header's implicit axes are not LPS axes. Converting only the origin
+        placed the volume correctly but left it X/Y-mirrored — the same silent
+        wrong-grid class as #488, reachable through declare_nrrd_space(path, "RAS")."""
+        data = np.zeros((4, 4, 4), dtype=np.int16)
+        ras_path = tmp_path / "ras_spacings.nrrd"
+        nrrd.write(
+            str(ras_path),
+            data,
+            {
+                "space": "right-anterior-superior",
+                "spacings": [0.5, 0.6, 0.7],
+                "space origin": [10.0, 20.0, 30.0],
+            },
+        )
+        # The same physical volume, written LPS-native via space directions.
+        lps_path = tmp_path / "lps_dirs.nrrd"
+        nrrd.write(
+            str(lps_path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "space directions": np.diag([-0.5, -0.6, 0.7]),
+                "space origin": [-10.0, -20.0, 30.0],
+            },
+        )
+        ras_img, lps_img = Image(), Image()
+        ras_img.read_nrrd(ras_path)
+        lps_img.read_nrrd(lps_path)
+
+        assert pytest.approx(ras_img.origin, abs=1e-9) == lps_img.origin
+        assert pytest.approx(ras_img.spacing, abs=1e-9) == lps_img.spacing
+        np.testing.assert_allclose(ras_img.direction, lps_img.direction, atol=1e-9)
+        assert ras_img.same_grid(lps_img)
+
+    def test_spacings_branch_converts_axes_without_origin(self, tmp_path: Path) -> None:
+        """No `space origin` to place, but a declared RAS `space` still governs what
+        the implicit axes mean — identity in RAS is diag(-1, -1, 1) in LPS."""
+        path = tmp_path / "ras_no_origin.nrrd"
+        nrrd.write(
+            str(path),
+            np.zeros((4, 4, 4), dtype=np.int16),
+            {"space": "right-anterior-superior", "spacings": [0.5, 0.6, 0.7]},
+        )
+        img = Image()
+        img.read_nrrd(path)
+        assert pytest.approx(img.spacing, abs=1e-9) == (0.5, 0.6, 0.7)
+        np.testing.assert_allclose(img.direction, np.diag([-1.0, -1.0, 1.0]), atol=1e-9)
+
+    def test_spacings_only_without_space_still_reads_as_is(self, tmp_path: Path) -> None:
+        """The documented carve-out: no `space`, no `space origin` — nothing to place,
+        so the axis-aligned spacings are taken verbatim and no `space` is demanded."""
+        path = tmp_path / "bare_spacings.nrrd"
+        nrrd.write(str(path), np.zeros((4, 4, 4), dtype=np.int16), {"spacings": [0.5, 0.6, 0.7]})
+        img = Image()
+        img.read_nrrd(path)
+        assert pytest.approx(img.spacing, abs=1e-9) == (0.5, 0.6, 0.7)
+        np.testing.assert_allclose(img.direction, np.eye(3), atol=1e-9)
+
+    def test_failed_space_read_leaves_no_partial_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same invariant test_read_nrrd_4d_raises asserts for the sibling 4-D guard:
+        a refused read must not leave a reused instance holding a stale header,
+        source path or spacing alongside a null shape."""
+        self._fake_nrrd_read(
+            monkeypatch,
+            {
+                "sizes": [4, 4, 4],
+                "spacings": [0.5, 0.6, 0.7],
+                "space origin": np.array([-10.0, -20.0, 30.0]),
+            },
+        )
+        img = Image()
+        with pytest.raises(ImageReadError, match="declare_nrrd_space"):
+            img.read_nrrd(tmp_path / "no_space.nrrd")
+        assert img._nrrd_header is None
+        assert img._source_path is None
+        assert img._shape is None
+        assert img.spacing == (1.0, 1.0, 1.0)
+
+    def test_strict_space_error_names_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An operator sweeping a storage tree needs the filename in the verdict —
+        the 4-D guard already interpolates it, this path used to not."""
+        self._fake_nrrd_read(
+            monkeypatch,
+            {
+                "sizes": [4, 4, 4],
+                "spacings": [1.0, 1.0, 1.0],
+                "space origin": np.array([-10.0, -20.0, 30.0]),
+            },
+        )
+        path = tmp_path / "legacy_volume.nrrd"
+        with pytest.raises(ImageReadError, match=r"legacy_volume\.nrrd"):
+            Image().read_nrrd(path)
+
+    def test_layered_spacings_branch_honors_declared_space(self, tmp_path: Path) -> None:
+        """The 4-D reader used to ignore `spacings` entirely (issue #578), reporting
+        the (1, 1, 1) default while Image.read_nrrd honored it — and it converted no
+        axes. Both now come from the one shared resolver."""
+        layer = np.zeros((4, 5, 6), dtype=np.uint8)
+        path = tmp_path / "ras_spacings.seg.nrrd"
+        nrrd.write(
+            str(path),
+            layer[np.newaxis, ...],
+            {
+                "dimension": 4,
+                "space": "right-anterior-superior",
+                "kinds": ["list", "domain", "domain", "domain"],
+                "spacings": [np.nan, 0.5, 0.6, 0.7],
+                "space origin": np.array([10.0, 20.0, 30.0]),
+                "encoding": "raw",
+            },
+        )
+        seg = LayeredSegmentation.read_header(path)
+        assert pytest.approx(seg.spacing, abs=1e-9) == (0.5, 0.6, 0.7)
+        assert pytest.approx(seg.origin, abs=1e-9) == (-10.0, -20.0, 30.0)
+        np.testing.assert_allclose(seg.direction, np.diag([-1.0, -1.0, 1.0]), atol=1e-9)
+
 
 class TestDeclareNrrdSpace:
     """declare_nrrd_space: one-time `space` stamp for legacy space-less NRRDs."""
@@ -857,6 +979,52 @@ class TestDeclareNrrdSpace:
         before = path.read_bytes()
 
         with pytest.raises(ImageError, match="right-anterior-superior"):
+            declare_nrrd_space(path, "left-posterior-superior")
+
+        assert path.read_bytes() == before
+
+    def test_declare_refuses_non_ascii_header(self, tmp_path: Path) -> None:
+        """pynrrd decodes header values as ASCII, so stamping a file with a Cyrillic
+        segment name would write that name back as '' (#577). Refuse instead — the
+        same standard the detached-header guard applies, and for the same reason:
+        this helper rewrites the caller's only copy."""
+        path = tmp_path / "cyrillic.nrrd"
+        nrrd.write(
+            str(path),
+            np.arange(64, dtype=np.int16).reshape(4, 4, 4),
+            {
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+                "Segment0_Name": "PLACEHOLDER",
+                "encoding": "raw",
+            },
+        )
+        head, sep, body = path.read_bytes().partition(b"\n\n")
+        path.write_bytes(head.replace(b"PLACEHOLDER", "Печень".encode()) + sep + body)
+        before = path.read_bytes()
+
+        with pytest.raises(ImageError, match="non-ASCII"):
+            declare_nrrd_space(path, "left-posterior-superior")
+
+        assert path.read_bytes() == before
+
+    def test_declare_unsupported_existing_space_explains_itself(self, tmp_path: Path) -> None:
+        """A legal NRRD space clarinet does not support is not a relabel attempt; the
+        refusal used to claim the file 'already declares' a conflicting space, which
+        misreads the case and names no way out."""
+        path = tmp_path / "teem.nrrd"
+        nrrd.write(
+            str(path),
+            np.zeros((4, 4, 4), dtype=np.int16),
+            {
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+                "space": "3D-right-handed",
+            },
+        )
+        before = path.read_bytes()
+
+        with pytest.raises(ImageError, match="does not support"):
             declare_nrrd_space(path, "left-posterior-superior")
 
         assert path.read_bytes() == before

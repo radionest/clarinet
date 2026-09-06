@@ -23,7 +23,7 @@ import numpy as np
 
 from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
 from clarinet.services.image.grid import Grid
-from clarinet.services.image.image import nrrd_space_to_lps, nrrd_space_transform
+from clarinet.services.image.image import _nrrd_grid_from_header
 from clarinet.utils.logger import logger
 
 
@@ -203,48 +203,34 @@ class LayeredSegmentation:
             raise ImageReadError(f"Failed to read layered NRRD header: {path}") from e
         self = cls()
         self._nrrd_header = header
-        self._apply_grid_from_header(header)
+        self._apply_grid_from_header(header, path)
         self._segments = _parse_segments(header)
         return self
 
-    def _apply_grid_from_header(self, header: dict[str, Any]) -> None:
+    def _apply_grid_from_header(
+        self, header: dict[str, Any], source: Path | str | None = None
+    ) -> None:
         """Populate spacing/origin/direction/shape from a 4-D NRRD header.
 
-        Spatial directions are rows 1..3 of ``space directions`` (row 0 is the ``none``
-        list axis). Honors the header's ``space`` field via the shared
-        ``nrrd_space_to_lps`` helper (LPS as-is; RAS/LAS converted; anything else
-        raises) — the same conversion :meth:`Image.read_nrrd` applies to 3-D NRRD.
-        A header with no ``space directions`` but a ``space origin`` goes through
-        ``nrrd_space_transform`` (the helper's own space step) under the same rule.
+        Entry 0 of ``space directions``/``spacings`` is the ``none`` list axis, so the
+        spatial ones are 1..3. Delegates to the shared ``_nrrd_grid_from_header``, the
+        single implementation of the ``space`` rule (LPS as-is; RAS/LAS converted;
+        anything else raises) — :meth:`Image.read_nrrd` reads 3-D NRRD through the very
+        same helper, which is what keeps the two readers from drifting apart.
 
         Raises:
-            ImageReadError: the header carries ``space directions`` or ``space origin``
-                without a supported ``space`` field.
+            ImageReadError: the header carries geometry to place — ``space directions``,
+                or a ``space origin`` — without a supported ``space`` field.
         """
         sizes = [int(s) for s in header["sizes"]]
+        grid = _nrrd_grid_from_header(header, source, spatial=slice(1, 4))
         self._shape = (sizes[1], sizes[2], sizes[3])
-        space_dirs = header.get("space directions")
-        if space_dirs is not None:
-            raw_origin = header.get("space origin")
-            arr, origin = nrrd_space_to_lps(
-                header.get("space"),
-                np.asarray(space_dirs[1:4], dtype=float),  # skip the nan list-axis row
-                np.asarray(raw_origin[:3], dtype=float) if raw_origin is not None else None,
-            )
-            norms = np.linalg.norm(arr, axis=1)
-            self._spacing = (float(norms[0]), float(norms[1]), float(norms[2]))
-            self._direction = (arr / norms[:, np.newaxis]).T
-            if origin is not None:
-                self._origin = (float(origin[0]), float(origin[1]), float(origin[2]))
-        else:
-            space_origin = header.get("space origin")
-            if space_origin is not None:
-                # Same rule as the directions branch (and as Image.read_nrrd):
-                # a `space origin` without a declared `space` cannot be placed.
-                origin_arr = nrrd_space_transform(header.get("space")) @ np.asarray(
-                    space_origin[:3], dtype=float
-                )
-                self._origin = (float(origin_arr[0]), float(origin_arr[1]), float(origin_arr[2]))
+        if grid.spacing is not None:
+            self._spacing = grid.spacing
+        if grid.direction is not None:
+            self._direction = grid.direction
+        if grid.origin is not None:
+            self._origin = grid.origin
 
     # -- voxel read --
 

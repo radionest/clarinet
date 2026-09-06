@@ -244,8 +244,15 @@
   RAS/LAS converted, anything else raises). The same rule now covers the
   `spacings` + `space origin` header shape, which used to keep a space-less
   origin raw (the last silent-mislabel path); a `spacings`-only header with no
-  `space origin` still reads as-is. `LayeredSegmentation.read_header` applies
-  the identical rule to 4-D headers. **Downstream migration:** a
+  `space` **and** no `space origin` still reads as-is.
+  `LayeredSegmentation.read_header` applies the identical rule to 4-D headers —
+  both readers now resolve spacing, direction and origin through one shared
+  helper, so a `spacings` header's implicit axes are converted out of its
+  declared space too (identity in RAS is `diag(-1, -1, 1)` in LPS; converting
+  only the origin left the volume X/Y-mirrored). That shared path also fixes
+  `LayeredSegmentation` ignoring a 4-D header's `spacings` outright (#578),
+  which had it report the `(1, 1, 1)` default while `Image.read_nrrd` honored
+  the real value. **Downstream migration:** a
   clarinet-written NRRD from before 2026-03-08 that carries `space directions`
   or `space origin` without a `space` field now fails to read — stamp it once
   with the new `clarinet.services.image.declare_nrrd_space(path, "LPS")`

@@ -157,7 +157,30 @@ declare_nrrd_space(seg_path, "left-posterior-superior")  # in place; or out_path
 It refuses (raises `ImageError`) if the header already declares a *different*
 space — that would be relabeling geometry, not filling in a missing label. For
 a third-party file that is known to be RAS-native, declare `"RAS"` instead: the
-numbers stay, and the strict reader converts them to LPS on the next read.
+numbers stay, and the strict reader converts them to LPS on the next read —
+axes included, so a `spacings`-only RAS header comes back correctly oriented
+rather than X/Y-mirrored.
+
+Two other refusals, both deliberate — this helper rewrites your only copy:
+
+- **Non-ASCII header bytes.** pynrrd decodes header values as ASCII, so a
+  Cyrillic segment name round-trips to `''` (#577). Rather than silently empty
+  it while stamping `space`, the helper raises and names the offending line.
+  Add the `space` line with a text editor, or rename the segments to ASCII
+  first.
+- **A legal-but-unsupported `space` label** (e.g. `3D-right-handed`, written by
+  teem/`unu`). Clarinet supports LPS/RAS/LAS only, and this helper fills in a
+  *missing* label — it will not reinterpret a declared one. If you know what
+  the geometry is, clear the field first, then stamp it:
+
+  ```python
+  import nrrd
+
+  data, header = nrrd.read(str(path))
+  header.pop("space", None)          # drop the unsupported label
+  nrrd.write(str(path), data, header)
+  declare_nrrd_space(path, "LPS")    # then declare what it really is
+  ```
 
 After this one-time re-save the file reads normally through `Image` /
 `LayeredSegmentation` / `read_grid` again.
