@@ -38,7 +38,9 @@ _NRRD_SPACE_CANONICAL: Mapping[str, str] = {
 }
 # Canonical space -> 3x3 world transform into LPS (all three are self-inverse).
 # The RAS/LAS entries are grid's shared constants, handed out by reference by
-# nrrd_space_transform, which is why they are frozen there.
+# nrrd_space_transform, which is why they are frozen there. Both are self-inverse signed
+# diagonals, so one matrix converts into LPS and back out again — which is why the RAS
+# row of a "to LPS" table is spelled LPS_TO_RAS rather than a separate RAS_TO_LPS.
 _NRRD_SPACE_TO_LPS: Mapping[str, npt.NDArray[np.float64]] = {
     _NRRD_SPACE_LPS: _IDENTITY,
     _NRRD_SPACE_RAS: LPS_TO_RAS,
@@ -55,7 +57,9 @@ def canonical_nrrd_space(space: str | None) -> str | None:
     return _NRRD_SPACE_CANONICAL.get((space or "").strip().lower())
 
 
-def nrrd_space_transform(space: str | None, source: Path | str | None = None) -> np.ndarray:
+def nrrd_space_transform(
+    space: str | None, source: Path | str | None = None
+) -> npt.NDArray[np.float64]:
     """3x3 world-coordinate transform taking the header's ``space`` into LPS.
 
     Identity for LPS; the diagonal X/Y (RAS) or Y (LAS) sign flip otherwise.
@@ -94,10 +98,10 @@ def nrrd_space_transform(space: str | None, source: Path | str | None = None) ->
 
 def nrrd_space_to_lps(
     space: str | None,
-    space_directions: np.ndarray,
-    space_origin: np.ndarray | None,
+    space_directions: npt.NDArray[np.float64],
+    space_origin: npt.NDArray[np.float64] | None,
     source: Path | str | None = None,
-) -> tuple[np.ndarray, np.ndarray | None]:
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64] | None]:
     """Convert NRRD ``space directions``/``space origin`` into clarinet's internal LPS.
 
     Honors the header's ``space`` field (case-insensitive; full name or abbreviation,
@@ -139,7 +143,14 @@ def nrrd_space_to_lps(
 @dataclass(frozen=True, slots=True)
 class NrrdGrid:
     """Grid fields a NRRD header supplies, in LPS. ``None`` = the header omitted that
-    field; the caller supplies its own default."""
+    field; the caller supplies its own default.
+
+    Clarinet's readers default to ``spacing=(1.0, 1.0, 1.0)``, ``origin=(0.0, 0.0, 0.0)``
+    and ``direction=numpy.eye(3)`` (:class:`Image` and :class:`LayeredSegmentation` both
+    set them in ``__init__``). An external caller that picks different defaults places a
+    header-incomplete file differently from ``Image.read_nrrd`` — the reader drift this
+    resolver exists to prevent, so match them unless you mean to diverge.
+    """
 
     spacing: tuple[float, float, float] | None
     direction: npt.NDArray[np.float64] | None
@@ -175,13 +186,21 @@ def nrrd_grid_from_header(
         *spatial* is not validated against the header, and the arity guard lives in the
         callers, not here: ``Image.read_nrrd`` rejects a header whose ``sizes`` is not
         length 3 before it reaches this function. A direct caller has no such guard, and
-        both ways of getting *spatial* wrong fail badly. Resolving a 4-D header with the
+        every way of getting *spatial* wrong fails badly. Resolving a 4-D header with the
         default ``slice(0, 3)`` reads the ``none`` list-axis row (``[nan, nan, nan]``) as
         a spatial direction: the result is a grid with a ``nan`` spacing entry and a
         ``nan`` direction column, returned silently — no exception, no warning. A slice
-        yielding fewer than three axes escapes as a bare ``IndexError`` (or a numpy
+        yielding one or two axes escapes as a bare ``IndexError`` (or a numpy
         ``ValueError`` from the matmul, for a ``spacings`` header in a declared space) —
-        never ``ImageReadError``. Pass the slice that matches the header's ``dimension``.
+        never ``ImageReadError``. A slice yielding *no* axes is quieter and worse: on a
+        ``spacings`` header it hits the unit-spacing fallback below and returns a
+        plausible ``(1.0, 1.0, 1.0)`` grid in the declared space, indistinguishable from
+        a header that really declared unit spacing. Pass the slice that matches the
+        header's ``dimension``.
+
+        *spatial* deliberately does not reach ``space origin``, which carries
+        ``space dimension`` entries rather than ``dimension`` ones and is always read as
+        its first three.
 
     Args:
         header: A pynrrd header mapping (``nrrd.read_header`` / ``nrrd.read``).

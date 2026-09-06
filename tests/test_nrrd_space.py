@@ -112,6 +112,23 @@ class TestNrrdGridFromHeader:
         np.testing.assert_allclose(g.direction, np.eye(3))
         assert g.origin == pytest.approx((10.0, 20.0, 30.0))
 
+    def test_out_of_range_spatial_slice_yields_a_plausible_unit_grid(self) -> None:
+        """Pins the quietest *spatial* footgun, the one the resolver's Warning block names.
+
+        An empty slice leaves `spacings[spatial]` empty, and an empty list is falsy, so the
+        unit-spacing fallback takes over while `keep_spacing` stays True: the result is a
+        well-formed (1, 1, 1) grid in the declared space rather than the error the one- and
+        two-axis cases raise. Behaviour is frozen by design, so this test exists to keep the
+        documented failure modes honest — the docstring claimed an exception here.
+        """
+        header = {"space": "RAS", "spacings": [0.5, 0.6, 0.7]}
+        g = nrrd_grid_from_header(header, spatial=slice(3, 6))
+        assert g.spacing == pytest.approx((1.0, 1.0, 1.0))
+        np.testing.assert_allclose(g.direction, np.diag([-1.0, -1.0, 1.0]))
+        # A partial slice does raise, which is what makes the empty case worth pinning.
+        with pytest.raises((IndexError, ValueError)):
+            nrrd_grid_from_header(header, spatial=slice(0, 2))
+
     def test_geometry_without_space_is_refused_with_repair_hint(self, tmp_path: Path) -> None:
         source = tmp_path / "legacy.nrrd"
         with pytest.raises(ImageReadError, match="declare_nrrd_space") as info:
@@ -251,11 +268,29 @@ class TestModuleBoundaries:
         }, f"unexpected clarinet imports in nrrd_space.py: {sorted(clarinet_imports)}"
 
     def test_layered_reader_does_not_import_the_3d_reader(self) -> None:
+        """The 4-D reader rests on the shared resolver, never on the 3-D reader.
+
+        An AST scan rather than a substring check: `from clarinet.services.image import
+        image` and `import clarinet.services.image.image` both restore the edge this
+        change removed without ever spelling the one string a substring guard watches.
+        """
         from clarinet.services.image import layered_segmentation
 
-        assert "from clarinet.services.image.image import" not in inspect.getsource(
-            layered_segmentation
-        )
+        reader = "clarinet.services.image.image"
+        offenders: list[str] = []
+        for node in ast.walk(ast.parse(inspect.getsource(layered_segmentation))):
+            if isinstance(node, ast.Import):
+                offenders += [alias.name for alias in node.names if alias.name == reader]
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                if node.module == reader:
+                    offenders.append(node.module)
+                elif node.module == "clarinet.services.image":
+                    offenders += [
+                        f"{node.module}.{alias.name}"
+                        for alias in node.names
+                        if alias.name == "image"
+                    ]
+        assert not offenders, f"layered_segmentation.py imports the 3-D reader: {sorted(offenders)}"
 
     def test_no_private_frame_constant_copies(self) -> None:
         from clarinet.services.image import image, layered_segmentation, nrrd_repair, nrrd_space

@@ -4,6 +4,16 @@
 
 ### Added
 
+- **The NRRD header to LPS grid resolver is public.**
+  `clarinet.services.image.nrrd_grid_from_header(header, source=None, *,
+  spatial=slice(0, 3))` and its `NrrdGrid` result place a pynrrd header's
+  `space directions`/`spacings`/`space origin` into spacing, direction and origin
+  in LPS, applying the same `space` rule as `Image.read_nrrd` and
+  `LayeredSegmentation.read_header` — it is the one place that rule lives, so
+  code parsing NRRD headers directly no longer has to reimplement it and assume
+  LPS. Pure function of the header: no pynrrd, no disk. The frame constants it
+  shares with the NIfTI paths are public alongside it as
+  `clarinet.services.image.grid.LPS_TO_RAS` / `LAS_TO_LPS` (frozen, self-inverse).
 - **`dicom_scp_enabled` names which process owns the C-MOVE listener.** A
   listening port belongs to one process and the PACS routes C-MOVE by
   destination AET to a host and port it was configured with, so on a c-move
