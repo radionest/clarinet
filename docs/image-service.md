@@ -25,9 +25,9 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NIfTI reading**: `get_fdata()` returns `float64` by default. Use `dtype=np.int16` to force integer dtype for cross-format comparisons.
 
-**NRRD spacing resolution**: tries `spacings` key first, then `space directions` diagonal. Falls back to default `(1.0, 1.0, 1.0)` if neither is present.
+**NRRD spacing resolution**: prefers `space directions` (row norms — carries orientation too), then the `spacings` key. Falls back to default `(1.0, 1.0, 1.0)` if neither is present.
 
-**NRRD read failures** (breaking): `read`/`read_nrrd` raise `ImageReadError` on a 4-D `.seg.nrrd` — read layered segmentations via `LayeredSegmentation` or `grid_io.read_grid` instead of building a degenerate NaN grid — and on a 3-D NRRD whose `space directions` are present without a supported `space` field. The `space` field is now honored (LPS as-is, RAS/LAS converted, anything else — including missing `space` — raises), so a third-party RAS/LAS file that was previously misread as LPS now fails loudly; this only affects non-Slicer files, since Slicer always writes LPS.
+**NRRD read failures** (breaking): `read`/`read_nrrd` raise `ImageReadError` on a 4-D `.seg.nrrd` — read layered segmentations via `LayeredSegmentation` or `grid_io.read_grid` instead of building a degenerate NaN grid — and on a 3-D NRRD whose `space directions` **or** `space origin` are present without a supported `space` field. The `space` field is honored under one rule for both header shapes (LPS as-is, RAS/LAS converted, anything else — including missing `space` — raises; a `spacings`-only header with no `space origin` has nothing to place and reads as-is), so a third-party RAS/LAS file that was previously misread as LPS now fails loudly; this only affects non-Slicer files, since Slicer always writes LPS. A legacy file that is known to be LPS is repaired once with `declare_nrrd_space(path, "LPS")` (idempotent header stamp; refuses to relabel a file that already declares a different space).
 
 **DICOM slice sorting**: GDCM orders by `ImagePositionPatient` projected onto the slice normal (→ `InstanceNumber` fallback); the reader then canonicalizes the slice axis to a version-stable orientation (see "Slice-Axis Canonicalization" below).
 
@@ -388,7 +388,7 @@ IOP in-plane order, no in-plane row/column swap:
 
 | File | Scope | Count |
 |---|---|---|
-| `tests/test_image.py` | Unit tests — individual methods in isolation | 125 |
+| `tests/test_image.py` | Unit tests — individual methods in isolation | 188 |
 | `tests/test_image_e2e.py` | E2E workflow tests — multi-step pipelines | 17 |
 | `tests/test_orientation.py` | Unit tests — `ground_truth_slice_geometry` / `is_volume_misoriented` | 13 |
 

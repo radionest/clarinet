@@ -125,27 +125,62 @@ been confirmed intentional.
 Any Slicer script that exports a segmentation against a volume should pass
 `conform_to=<volume file path>` to `export_segmentation` — this both repairs a
 `REARRANGED` node transparently and refuses (rather than silently mis-exports)
-a `FOREIGN` one. See
-[`.claude/rules/slicer-helper-api.md`](../../.claude/rules/slicer-helper-api.md).
+a `FOREIGN` one. The `conform_to` path needs the bundled `grid_relation`, so the
+script must be sent with `execute(..., include_correspondence=True)` (record
+open/validate and the submit validator already do; an ad-hoc `/slicer/exec`
+call must opt in) — otherwise `export_segmentation` raises `SlicerHelperError`.
+See [`.claude/rules/slicer-helper-api.md`](../../.claude/rules/slicer-helper-api.md).
 
 ### Also: pre-2026-03-08 clarinet NRRDs may now fail to read
 
 Independently of the epoch above, a clarinet-written NRRD (including a
-`.seg.nrrd`) saved **before 2026-03-08** can carry `space directions` without a
-`space` field. `Image.read_nrrd`/`LayeredSegmentation.read_header` now honor
-the `space` field strictly and raise `ImageReadError` on that combination
+`.seg.nrrd`) saved **before 2026-03-08** can carry `space directions` (or a
+`space origin`) without a `space` field. `Image.read_nrrd` /
+`LayeredSegmentation.read_header` / `read_grid` now honor the `space` field
+strictly — one rule for both the `space directions` and the `spacings` +
+`space origin` header shapes — and raise `ImageReadError` on a missing label
 instead of silently assuming LPS. Every clarinet/Slicer-authored NRRD has
 always physically been LPS, so the fix is a one-time header patch, not a
-geometry change — read and rewrite the header directly with `pynrrd` (not
-through `Image`, which is exactly what now raises on this file):
+geometry change. Declare the space with the framework helper (it goes through
+`pynrrd` directly, not through `Image`, which is exactly what now raises on
+this file; idempotent; atomic in place; 3-D and 4-D layered files alike, with
+segment metadata carried through — ASCII-only, since pynrrd drops non-ASCII
+header bytes on any round-trip, see #577; attached-data `.nrrd` only, a
+detached `.nhdr` is refused before anything is written):
 
 ```python
-import nrrd
+from clarinet.services.image import declare_nrrd_space
 
-data, header = nrrd.read(str(seg_path))
-header.setdefault("space", "left-posterior-superior")
-nrrd.write(str(seg_path), data, header)
+declare_nrrd_space(seg_path, "left-posterior-superior")  # in place; or out_path=... to copy
 ```
+
+It refuses (raises `ImageError`) if the header already declares a *different*
+space — that would be relabeling geometry, not filling in a missing label. For
+a third-party file that is known to be RAS-native, declare `"RAS"` instead: the
+numbers stay, and the strict reader converts them to LPS on the next read —
+axes included, so a `spacings`-only RAS header comes back correctly oriented
+rather than X/Y-mirrored.
+
+Two other refusals, both deliberate — this helper rewrites your only copy:
+
+- **Non-ASCII header bytes.** pynrrd decodes header values as ASCII, so a
+  Cyrillic segment name round-trips to `''` (#577). Rather than silently empty
+  it while stamping `space`, the helper raises and names the offending line.
+  Add the `space` line with a text editor, or rename the segments to ASCII
+  first.
+- **A legal-but-unsupported `space` label** (e.g. `3D-right-handed`, written by
+  teem/`unu`). Clarinet supports LPS/RAS/LAS only, and this helper fills in a
+  *missing* label — it will not reinterpret a declared one. If you know what
+  the geometry is, clear the field first, then stamp it:
+
+  ```python
+  import nrrd
+
+  data, header = nrrd.read(str(path))
+  header.pop("space", None)          # drop the unsupported label
+  nrrd.write(str(path), data, header)
+  declare_nrrd_space(path, "LPS")    # then declare what it really is
+  ```
 
 After this one-time re-save the file reads normally through `Image` /
 `LayeredSegmentation` / `read_grid` again.
