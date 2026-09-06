@@ -75,6 +75,9 @@ def nrrd_space_transform(space: str | None) -> np.ndarray:
     :mod:`layered_segmentation` imports it directly from this module rather
     than via a private cross-module import.
 
+    Returns a shared read-only constant, not a fresh array — matmul it, and
+    copy first if you need to write into the result.
+
     Raises:
         ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
     """
