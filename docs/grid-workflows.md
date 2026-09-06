@@ -26,19 +26,19 @@ zero overlap, with no exception raised, because the code never checked.
 
 **Internal convention is always LPS** (DICOM-native: Left, Posterior, Superior).
 NIfTI is RAS on disk — converted at the read/write boundary
-(`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:30-32`). NRRD honors
+(`_LPS_TO_RAS`/`_LAS_TO_LPS`, `clarinet/services/image/image.py:31-33`). NRRD honors
 its own `space` header field: LPS passes through as-is, RAS/LAS are converted, and
 anything else — including a missing `space` next to `space directions` or `space
 origin` — raises `ImageReadError` (`nrrd_space_transform`,
-`clarinet/services/image/image.py:63`, shared by `nrrd_space_to_lps` at `:90` and by
+`clarinet/services/image/image.py:64`, shared by `nrrd_space_to_lps` at `:91` and by
 the `space origin`-only branches); a legacy space-less file is stamped once with
-`declare_nrrd_space` (`image.py:135`). Slicer itself always writes LPS (Probe P6
+`declare_nrrd_space` (`image.py:136`). Slicer itself always writes LPS (Probe P6
 below), so this only affects third-party NRRD files.
 
 **The voxel-to-physical affine** (`affine_4x4`) is a 4×4 matrix: the 3×3 linear
 part is `direction` scaled per-column by `spacing` (each `direction` column is a
 unit vector for that array axis), and the translation column is `origin`.
-`Image.affine_4x4` (`clarinet/services/image/image.py:474`) and
+`Image.affine_4x4` (`clarinet/services/image/image.py:493`) and
 `Grid.from_components` (`clarinet/services/image/grid.py:132`) build this matrix by
 the identical formula — the two are meant to be interchangeable representations of
 the same grid.
@@ -80,7 +80,7 @@ verdict tolerates translation error up to **half a voxel** (in index-space units
 via `_OFFSET_TOL_VOXELS = 0.5`, `grid.py:39`) — wide enough to absorb on-disk float
 rounding, narrow enough that a real one-voxel-or-more misalignment (a mirror, a
 transpose) can never be mistaken for identity. `Image.same_grid` /
-`Image.assert_same_grid` (`clarinet/services/image/image.py:497`, `:523`) are a
+`Image.assert_same_grid` (`clarinet/services/image/image.py:516`, `:542`) are a
 **different, tighter** check: a near-exact `atol`-only (default `1e-4` mm)
 comparison of the full affine with **no** permutation tolerance at all, used as
 the in-memory pre-overlay guard for two already-loaded objects. The two
@@ -102,7 +102,7 @@ deliberately do not share an implementation — see the
    in-plane basis in DICOM's own IOP order end-to-end — array, spacing, and
    direction move together, with no internal row/column swap
    (`dicom_volume.py:68-86`), verified by a save+`read_grid` round-trip test
-   (`tests/test_image.py:1433`,
+   (`tests/test_image.py:1508`,
    `test_read_dicom_series_roundtrips_through_save_and_read_grid`).
 2. **The slice axis comes from `ImagePositionPatient` (IPP) progression, not
    IOP.** SimpleITK/GDCM can derive an internally-inconsistent slice-axis sign on
@@ -124,8 +124,8 @@ The flip is always **geometry-preserving**: array, origin, and direction reverse
 (mirroring the data through the origin plane) is a different, forbidden operation
 (the #247/#453 bug class; see the [design rationale](#design-rationale) and
 [traps](#traps) below). `Image.read_dicom_series`
-(`clarinet/services/image/image.py:721`) stores the result verbatim;
-`Image.save_as` → `_save_nifti` (`image.py:853`, `:883`, LPS→RAS at the write
+(`clarinet/services/image/image.py:740`) stores the result verbatim;
+`Image.save_as` → `_save_nifti` (`image.py:872`, `:902`, LPS→RAS at the write
 boundary) writes `volume.nii.gz`. The framework's only production entry point is
 the conversion pipeline task
 (`clarinet/services/pipeline/tasks/convert_series.py:107,115`), a plain
@@ -195,7 +195,7 @@ cannot see the mirror at all. It is also fail-open by construction: an unresolve
 reference volume skips the check, and a segmentation loaded from disk carries no
 recorded reference geometry, so the guard returns early either way. **Only a
 disk-level read can catch the mirror** — `assert_same_grid_on_disk`
-(`clarinet/services/image/grid_io.py:108`) server-side, `_read_grid_on_disk`
+(`clarinet/services/image/grid_io.py:109`) server-side, `_read_grid_on_disk`
 (`helper.py:244`) inside Slicer. `_assert_segmentation_matches_volume` remains,
 narrowed, as a best-effort load-time diagnostic (`load_segmentation`) and as the
 correspondence-engine set-ops' own pre-regrid check
@@ -215,7 +215,7 @@ covered yet — see [What is not guarded](#what-is-not-guarded) below.
 
 ### Declaring a pair
 
-Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:90-91`)
+Two nullable fields on `FileDefinition` (`clarinet/models/file_schema.py:91-92`)
 — a property of the *file*, not of a `RecordTypeFileLink` binding, so every
 RecordType binding that file inherits the declaration, and the reference must
 be bound to that same RecordType:
@@ -497,14 +497,14 @@ once the painting effort is already spent.
 | `Grid` / `Grid.from_components` | `grid.py:86`, `:132` | You have raw shape/spacing/origin/direction (not a file) and need a value object to classify or summarize | `eq=False` — never `==` two grids |
 | `grid_relation(a, b, *, atol=1e-4)` | `grid.py:191` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
 | `read_grid(path)` | `clarinet/services/image/grid_io.py:21` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
-| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:87` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
-| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:108` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
-| `Image.same_grid` / `Image.assert_same_grid` | `image.py:497`, `:523` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
-| `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:539`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
+| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:88` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
+| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:109` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
+| `Image.same_grid` / `Image.assert_same_grid` | `image.py:516`, `:542` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
+| `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:558`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
 | `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:524` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
-| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:39,90-91` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
+| `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:39,91-92` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
@@ -631,7 +631,7 @@ values. The same check is exposed as `is_conform_repairable`
 (`segmentation.py:793`), so the submit-time policy can rule a repair out
 without attempting it. The 4-D layered path needs no such guard — it never
 routes through `Segmentation` and preserves whatever dtype it read (proven by
-`test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2860`).
+`test_conform_4d_layered_preserves_wide_dtype`, `tests/test_image.py:2935`).
 
 ### Why the canonical slice sense is the IOP-normal side, not a fixed dominant axis
 
@@ -824,12 +824,12 @@ route through `_read_grid_on_disk` for every grid read.
   including a deliberately negative-dominant-normal series, GDCM's own file sort
   already puts `dot(slice_dir, n) > 0` **before any canonicalization runs at
   all** — see `test_negative_dominant_normal_series_already_canonical`
-  (`tests/test_image.py:1062`). This means the epoch's *visible* on-disk change
+  (`tests/test_image.py:1137`). This means the epoch's *visible* on-disk change
   for most real series is almost always just the in-plane transpose (dropping
   the row/column swap), not a slice-order reversal; the slice-sense flip
   condition mostly fires for the degenerate-fallback and hand-constructed/
   synthetic cases exercised directly against `_canonicalize_slice_axis`
-  (`tests/test_image.py:1251`,
+  (`tests/test_image.py:1326`,
   `test_canonicalize_negative_dominant_normal_flips_when_old_rule_would_not`).
   This is an empirical characteristic of GDCM's current sort implementation, not
   a documented DICOM or ITK contract — treat it as a debugging heuristic

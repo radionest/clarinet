@@ -143,7 +143,10 @@ instead of silently assuming LPS. Every clarinet/Slicer-authored NRRD has
 always physically been LPS, so the fix is a one-time header patch, not a
 geometry change. Declare the space with the framework helper (it goes through
 `pynrrd` directly, not through `Image`, which is exactly what now raises on
-this file; idempotent; 3-D and 4-D layered files alike, segment metadata kept):
+this file; idempotent; atomic in place; 3-D and 4-D layered files alike, with
+segment metadata carried through — ASCII-only, since pynrrd drops non-ASCII
+header bytes on any round-trip, see #577; attached-data `.nrrd` only, a
+detached `.nhdr` is refused before anything is written):
 
 ```python
 from clarinet.services.image import declare_nrrd_space

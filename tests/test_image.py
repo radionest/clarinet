@@ -920,6 +920,81 @@ class TestDeclareNrrdSpace:
         assert path.read_bytes() == before
         assert [p.name for p in tmp_path.iterdir()] == ["legacy.nrrd"]
 
+    def test_declare_rejects_detached_header_without_touching_files(self, tmp_path: Path) -> None:
+        """A detached-header `.nhdr` is refused before anything is written. pynrrd
+        derives the data filename from the header filename it is handed, so a
+        temp-file write would repoint the header at a new data file and orphan
+        the original — enforcing the documented limitation beats corrupting."""
+        nhdr = tmp_path / "legacy.nhdr"
+        nrrd.write(
+            str(nhdr),
+            np.zeros((4, 4, 4), dtype=np.int16),
+            {"space directions": np.eye(3), "space origin": np.zeros(3)},
+            detached_header=True,
+        )
+        before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+        assert len(before) == 2  # header + its data file
+
+        with pytest.raises(ImageError, match="nhdr"):
+            declare_nrrd_space(nhdr, "left-posterior-superior")
+
+        assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+    def test_declare_rejects_detached_out_path(self, tmp_path: Path) -> None:
+        src = tmp_path / "legacy.nrrd"
+        self._write_spaceless(src, np.eye(3), np.zeros(3))
+        before = src.read_bytes()
+
+        with pytest.raises(ImageError, match="nhdr"):
+            declare_nrrd_space(src, "left-posterior-superior", out_path=tmp_path / "out.nhdr")
+
+        assert [p.name for p in tmp_path.iterdir()] == ["legacy.nrrd"]
+        assert src.read_bytes() == before
+
+    def test_declare_blank_space_value_is_treated_as_missing(self, tmp_path: Path) -> None:
+        """A `space:` line with no value reads back as ''. The reader already treats
+        that as missing (and points at this helper), so the helper must stamp it,
+        not refuse it as an existing declaration."""
+        path = tmp_path / "blank_space.nrrd"
+        nrrd.write(
+            str(path),
+            np.zeros((4, 4, 4), dtype=np.int16),
+            {"space directions": np.eye(3), "space origin": np.zeros(3), "space": ""},
+        )
+        with pytest.raises(ImageReadError, match="declare_nrrd_space"):
+            Image().read(path)
+
+        declare_nrrd_space(path, "left-posterior-superior")
+
+        assert nrrd.read_header(str(path))["space"] == "left-posterior-superior"
+        Image().read(path)
+
+    def test_declare_uses_a_fresh_temp_name_per_call(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two stamps of the same file must not share a temp path — a shared name
+        lets one call's os.replace install the other's partial bytes (the same
+        reason grid_policy's repair temp carries a per-call token)."""
+        path = tmp_path / "legacy.nrrd"
+        self._write_spaceless(path, np.eye(3), np.zeros(3))
+        seen: list[str] = []
+        real_write = nrrd.write
+
+        def recording_write(filename: str, *args: object, **kwargs: object) -> None:
+            seen.append(filename)
+            real_write(filename, *args, **kwargs)
+
+        monkeypatch.setattr("clarinet.services.image.image.nrrd.write", recording_write)
+        declare_nrrd_space(path, "left-posterior-superior")
+        data, header = nrrd.read(str(path))
+        del header["space"]
+        real_write(str(path), data, header)
+        declare_nrrd_space(path, "left-posterior-superior")
+
+        assert len(seen) == 2
+        assert seen[0] != seen[1]
+        assert all(Path(name).parent == tmp_path for name in seen)
+
     def test_declare_out_path_leaves_source_untouched(self, tmp_path: Path) -> None:
         src = tmp_path / "legacy.nrrd"
         self._write_spaceless(src, np.eye(3), np.array([1.0, 2.0, 3.0]))

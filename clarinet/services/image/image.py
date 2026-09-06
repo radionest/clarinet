@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import os
 import re
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -151,10 +152,12 @@ def declare_nrrd_space(
     segment metadata is carried through, with pynrrd's caveat that header values
     are ASCII-only, so non-ASCII bytes (e.g. a Cyrillic segment name) are dropped
     on any read/write round-trip (#577). Attached-data files only — a detached
-    ``.nhdr`` header is not supported (pynrrd would rewrite its data file beside
-    the header). Reads and writes through pynrrd directly, since ``Image`` is
-    exactly what raises on such a file; the write is atomic (temp file +
-    ``os.replace``), so a failed in-place stamp leaves the original bytes intact.
+    ``.nhdr`` header (or a header naming a ``data file``) is refused with
+    ``ImageError`` before anything is written, since pynrrd would repoint it at a
+    new data file and orphan the original. Reads and writes through pynrrd
+    directly, since ``Image`` is exactly what raises on such a file; the write is
+    atomic (per-call temp file + ``os.replace``), so a failed in-place stamp
+    leaves the original bytes intact.
 
     Args:
         path: NRRD to repair.
@@ -167,9 +170,11 @@ def declare_nrrd_space(
         file that already declares the same space returns without rewriting.
 
     Raises:
-        ImageError: *space* is not LPS/RAS/LAS, or the header already declares a
-            *different* space — relabeling would change the meaning of the geometry
-            rather than fill in a missing label, so that is refused.
+        ImageError: *space* is not LPS/RAS/LAS; the file is a detached-header NRRD;
+            or the header already declares a *different* space — relabeling would
+            change the meaning of the geometry rather than fill in a missing label,
+            so that is refused. A blank ``space`` value counts as missing, exactly
+            as the readers treat it.
         ImageReadError: the file cannot be read.
         ImageWriteError: the stamped file cannot be written.
     """
@@ -180,13 +185,26 @@ def declare_nrrd_space(
             f"Cannot declare NRRD space {space!r}: expected left-posterior-superior/LPS, "
             "right-anterior-superior/RAS, or left-anterior-superior/LAS"
         )
+    target = path if out_path is None else Path(out_path)
+    if ".nhdr" in (path.suffix.lower(), target.suffix.lower()):
+        raise ImageError(
+            f"{path}: detached-header NRRD (.nhdr) is not supported by declare_nrrd_space — "
+            "pynrrd would repoint the header at a new data file and orphan the original; "
+            "attached-data .nrrd files only"
+        )
     try:
         header = nrrd.read_header(str(path))
     except Exception as e:
         raise ImageReadError(f"Failed to read NRRD header: {path}") from e
+    if header.keys() & {"data file", "datafile"}:
+        raise ImageError(
+            f"{path}: header names a separate data file; detached-header NRRD is not "
+            "supported by declare_nrrd_space — attached-data .nrrd files only"
+        )
 
-    existing = header.get("space")
-    if existing is not None:
+    # A blank `space:` value reads back as '' — missing, as the readers treat it.
+    existing = (header.get("space") or "").strip()
+    if existing:
         if _canonical_nrrd_space(existing) != canonical:
             raise ImageError(
                 f"{path}: header already declares space {existing!r}; refusing to relabel "
@@ -201,13 +219,14 @@ def declare_nrrd_space(
     except Exception as e:
         raise ImageReadError(f"Failed to read NRRD file: {path}") from e
     header["space"] = canonical
-    target = path if out_path is None else Path(out_path)
     # Write beside the target, then atomically move over it: pynrrd truncates
     # its destination before writing, and for an in-place stamp the in-memory
     # `data` is the only other copy of the file — a failed write must never
-    # have been aimed at the original (same convention as grid_policy's
-    # repair). Keeps the real suffix so pynrrd treats the temp file identically.
-    tmp = target.with_name(f".{target.stem}.tmp{target.suffix}")
+    # have been aimed at the original. Same convention as grid_policy's repair
+    # temp: a per-call token, so two concurrent stamps of one file can neither
+    # install each other's partial bytes nor unlink each other's temp. Keeps
+    # the real suffix so pynrrd treats the temp file identically.
+    tmp = target.with_name(f".{target.stem}.tmp-{uuid.uuid4().hex[:12]}{target.suffix}")
     try:
         nrrd.write(str(tmp), data, header)
         os.replace(tmp, target)

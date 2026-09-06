@@ -388,7 +388,7 @@ IOP in-plane order, no in-plane row/column swap:
 
 | File | Scope | Count |
 |---|---|---|
-| `tests/test_image.py` | Unit tests — individual methods in isolation | 125 |
+| `tests/test_image.py` | Unit tests — individual methods in isolation | 179 |
 | `tests/test_image_e2e.py` | E2E workflow tests — multi-step pipelines | 17 |
 | `tests/test_orientation.py` | Unit tests — `ground_truth_slice_geometry` / `is_volume_misoriented` | 13 |
 

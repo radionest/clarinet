@@ -188,7 +188,14 @@ class LayeredSegmentation:
 
     @classmethod
     def read_header(cls, path: Path | str) -> Self:
-        """Read grid + segment metadata (no voxels)."""
+        """Read grid + segment metadata (no voxels).
+
+        Raises:
+            ImageReadError: the header cannot be read, or its ``space directions`` /
+                ``space origin`` come without a supported ``space`` field — the same
+                strict rule as :meth:`Image.read_nrrd`; a legacy space-less file is
+                repaired once with :func:`~clarinet.services.image.image.declare_nrrd_space`.
+        """
         path = Path(path)
         try:
             header = nrrd.read_header(str(path))
