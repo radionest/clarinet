@@ -134,8 +134,8 @@ def nrrd_space_to_lps(
 
 @dataclass(frozen=True, slots=True)
 class NrrdGrid:
-    """Grid fields a NRRD header supplies, in LPS. ``None`` = header said nothing,
-    leave the reader's existing value alone."""
+    """Grid fields a NRRD header supplies, in LPS. ``None`` = the header omitted that
+    field; the caller supplies its own default."""
 
     spacing: tuple[float, float, float] | None
     direction: npt.NDArray[np.float64] | None
@@ -166,6 +166,18 @@ def nrrd_grid_from_header(
     The single exception is a header that declares no ``space`` and has no
     ``space origin``: there is nothing to place, so its ``spacings`` are taken as-is
     and no ``space`` is required.
+
+    Warning:
+        *spatial* is not validated against the header, and the arity guard lives in the
+        callers, not here: ``Image.read_nrrd`` rejects a header whose ``sizes`` is not
+        length 3 before it reaches this function. A direct caller has no such guard, and
+        both ways of getting *spatial* wrong fail badly. Resolving a 4-D header with the
+        default ``slice(0, 3)`` reads the ``none`` list-axis row (``[nan, nan, nan]``) as
+        a spatial direction: the result is a grid with a ``nan`` spacing entry and a
+        ``nan`` direction column, returned silently — no exception, no warning. A slice
+        yielding fewer than three axes escapes as a bare ``IndexError`` (or a numpy
+        ``ValueError`` from the matmul, for a ``spacings`` header in a declared space) —
+        never ``ImageReadError``. Pass the slice that matches the header's ``dimension``.
 
     Args:
         header: A pynrrd header mapping (``nrrd.read_header`` / ``nrrd.read``).

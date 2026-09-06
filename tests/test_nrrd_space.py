@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
-import types
 from pathlib import Path
 
 import nrrd
@@ -44,6 +44,43 @@ class TestNrrdGridFromHeader:
         assert g.spacing == pytest.approx((1.0, 1.0, 1.0))
         np.testing.assert_allclose(g.direction, np.diag([-1.0, -1.0, 1.0]))
         assert g.origin == pytest.approx((-10.0, -20.0, 30.0))
+
+    def test_oblique_ras_directions_negate_world_columns_not_array_rows(self) -> None:
+        """Pins the conversion to ``dirs @ transform``, not ``transform @ dirs``.
+
+        Every other `space directions` in this suite is diagonal, and diagonal matrices
+        commute — only an oblique, non-symmetric one tells the two orders apart. The
+        transform is a signed diagonal, so the row norms (and hence `spacing`) are
+        identical either way: `direction` is the assertion that discriminates.
+        """
+        # NRRD does not require orthogonal rows; Pythagorean triples keep the row norms
+        # exact at 5 / 13 / 10 so the expected direction is checkable by hand.
+        dirs = np.array([[3.0, 0.0, 4.0], [0.0, 5.0, 12.0], [8.0, 6.0, 0.0]])
+        g = nrrd_grid_from_header(
+            {
+                "space": "RAS",
+                "space directions": dirs,
+                "space origin": np.array([-10.0, -20.0, 30.0]),
+            }
+        )
+        assert g.spacing == pytest.approx((5.0, 13.0, 10.0))
+        assert g.origin == pytest.approx((10.0, 20.0, 30.0))
+        # diag(-1, -1, 1) post-multiplied negates the world x/y *columns* of every row:
+        # rows become [-3, 0, 4], [0, -5, 12], [-8, -6, 0]. Row-normalize by 5 / 13 / 10,
+        # then transpose, so column j of `direction` is array axis j's unit vector.
+        expected = np.array(
+            [
+                [-0.6, 0.0, -0.8],
+                [0.0, -5 / 13, -0.6],
+                [0.8, 12 / 13, 0.0],
+            ]
+        )
+        np.testing.assert_allclose(g.direction, expected)
+        # Guard the fixture itself: pre-multiplying negates array *rows* instead, which
+        # must give a different answer or this test proves nothing.
+        flipped_rows = grid.LPS_TO_RAS @ dirs
+        flipped_rows = (flipped_rows / np.linalg.norm(flipped_rows, axis=1)[:, np.newaxis]).T
+        assert not np.allclose(expected, flipped_rows), "fixture is not oblique enough"
 
     def test_las_header_flips_only_y(self) -> None:
         g = nrrd_grid_from_header(
@@ -160,20 +197,58 @@ class TestModuleBoundaries:
 
     def test_facade_exports_the_resolver_and_the_repair_only(self) -> None:
         import clarinet.services.image as facade
+        from clarinet.services.image.nrrd_repair import declare_nrrd_space
 
         assert facade.nrrd_grid_from_header is nrrd_grid_from_header
         assert facade.NrrdGrid is NrrdGrid
-        assert facade.declare_nrrd_space.__module__ == "clarinet.services.image.nrrd_repair"
+        assert facade.declare_nrrd_space is declare_nrrd_space
         assert {"NrrdGrid", "nrrd_grid_from_header", "declare_nrrd_space"} <= set(facade.__all__)
         internal = {"nrrd_space_transform", "nrrd_space_to_lps", "canonical_nrrd_space"}
         assert not internal & set(facade.__all__)
 
-    def test_resolver_module_is_disk_free(self) -> None:
+    def test_resolver_module_imports_are_limited(self) -> None:
+        """nrrd_space.py stays a pure header resolver: numpy + stdlib + two clarinet leaves.
+
+        An AST scan over the source, not the module globals: `from nrrd import read_header`
+        binds a function rather than a module, `import nrrd.reader as r` binds a module named
+        `nrrd.reader`, and a function-local import binds nothing at all — none of which a
+        `vars()` sweep can see. The allowlist is the point: it also refuses a future
+        `from clarinet.services.image.grid_io import read_grid`, which would reintroduce both
+        the import cycle and the disk dependency this module exists to avoid.
+        """
         from clarinet.services.image import nrrd_space
 
-        bound = {v.__name__ for v in vars(nrrd_space).values() if isinstance(v, types.ModuleType)}
-        assert "nrrd" not in bound
-        assert "logger" not in vars(nrrd_space)
+        allowed_roots = {
+            "__future__",
+            "collections",
+            "dataclasses",
+            "pathlib",
+            "typing",
+            "numpy",
+            "clarinet",
+        }
+        imported: set[str] = set()
+        for node in ast.walk(ast.parse(inspect.getsource(nrrd_space))):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                assert node.level == 0, (
+                    f"nrrd_space.py line {node.lineno}: relative import "
+                    f"{'.' * node.level}{node.module or ''} — imports must be absolute"
+                )
+                assert node.module is not None
+                imported.add(node.module)
+
+        roots = {name.split(".")[0] for name in imported}
+        assert roots <= allowed_roots, (
+            f"nrrd_space.py imports outside the allowlist: {sorted(roots - allowed_roots)}"
+        )
+        assert "nrrd" not in roots, "nrrd_space.py must not import pynrrd — it is header-only"
+        clarinet_imports = {name for name in imported if name.split(".")[0] == "clarinet"}
+        assert clarinet_imports == {
+            "clarinet.exceptions.domain",
+            "clarinet.services.image.grid",
+        }, f"unexpected clarinet imports in nrrd_space.py: {sorted(clarinet_imports)}"
 
     def test_layered_reader_does_not_import_the_3d_reader(self) -> None:
         from clarinet.services.image import layered_segmentation

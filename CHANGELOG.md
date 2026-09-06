@@ -263,7 +263,10 @@
   `nrrd_space.py`); `declare_nrrd_space` lives in `nrrd_repair.py` and stays
   exported from the facade; the LPS/RAS frame constants are
   `clarinet.services.image.grid.LPS_TO_RAS` / `LAS_TO_LPS`. Only a direct
-  `from clarinet.services.image.image import declare_nrrd_space` breaks.
+  `from clarinet.services.image.image import ...` breaks, and only for the
+  three module-level names that left `image.py`: `declare_nrrd_space`,
+  `nrrd_space_transform` and `nrrd_space_to_lps` (the last two are now
+  package-internal to `nrrd_space.py`, reached through the resolver).
 - **DICOM→NIfTI conversion changes on-disk grid layout for every
   newly-converted volume (grid epoch).** The in-plane axis order now follows
   `ImageOrientationPatient` end-to-end (array, spacing, and direction move
