@@ -38,6 +38,16 @@ import numpy as np
 # window shrink for a caller who only meant to loosen the permutation check.
 _OFFSET_TOL_VOXELS = 0.5
 
+# World-frame transforms into the internal LPS convention. NIfTI is RAS on
+# disk; NRRD declares its frame in the `space` header field. Each is a
+# diagonal sign flip and therefore its own inverse. Handed out by reference
+# (the NRRD space table maps onto these very objects), so they are frozen:
+# matmul them, and copy first if you need to write into the result.
+LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0])
+LAS_TO_LPS = np.diag([1.0, -1.0, 1.0])
+LPS_TO_RAS.setflags(write=False)
+LAS_TO_LPS.setflags(write=False)
+
 
 class RelationKind(enum.Enum):
     """Taxonomy of how two grids relate, returned by :func:`grid_relation`."""

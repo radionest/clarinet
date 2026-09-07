@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import enum
-import os
 import re
-import uuid
-from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -16,7 +12,6 @@ import nibabel.affines
 import nibabel.loadsave
 import nrrd
 import numpy as np
-import numpy.typing as npt
 
 from clarinet.exceptions.domain import (
     GeometryMismatchError,
@@ -24,348 +19,13 @@ from clarinet.exceptions.domain import (
     ImageReadError,
     ImageWriteError,
 )
-from clarinet.services.image.grid import Grid
+from clarinet.services.image.grid import LPS_TO_RAS, Grid
+from clarinet.services.image.nrrd_space import nrrd_grid_from_header
 from clarinet.utils.logger import logger
-
-# Internal representation uses LPS (DICOM native). NIfTI uses RAS.
-# Flip X and Y to convert between them (the matrix is its own inverse).
-_LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0])
-# LAS differs from LPS only in the y axis (Anterior vs Posterior); also self-inverse.
-_LAS_TO_LPS = np.diag([1.0, -1.0, 1.0])
-_LPS_TO_LPS = np.eye(3)
-# nrrd_space_transform hands these back verbatim, so a caller that wrote into the
-# result would corrupt every later call; freeze them instead of copying per call.
-_LPS_TO_RAS.setflags(write=False)
-_LAS_TO_LPS.setflags(write=False)
-_LPS_TO_LPS.setflags(write=False)
-
-_NRRD_SPACE_LPS = "left-posterior-superior"
-_NRRD_SPACE_RAS = "right-anterior-superior"
-_NRRD_SPACE_LAS = "left-anterior-superior"
-# Accepted (lower-cased) spellings of the NRRD `space` field -> canonical full name.
-_NRRD_SPACE_CANONICAL: Mapping[str, str] = {
-    _NRRD_SPACE_LPS: _NRRD_SPACE_LPS,
-    "lps": _NRRD_SPACE_LPS,
-    _NRRD_SPACE_RAS: _NRRD_SPACE_RAS,
-    "ras": _NRRD_SPACE_RAS,
-    _NRRD_SPACE_LAS: _NRRD_SPACE_LAS,
-    "las": _NRRD_SPACE_LAS,
-}
-# Canonical space -> 3x3 world transform into LPS (all three are self-inverse).
-_NRRD_SPACE_TO_LPS: Mapping[str, npt.NDArray[np.float64]] = {
-    _NRRD_SPACE_LPS: _LPS_TO_LPS,
-    _NRRD_SPACE_RAS: _LPS_TO_RAS,
-    _NRRD_SPACE_LAS: _LAS_TO_LPS,
-}
 
 # NRRD spec keywords for unsigned 8-bit — enough to answer "already uint8 on
 # disk" (Image.on_disk_dtype); not a full NRRD type table.
 _NRRD_UINT8_TYPES = frozenset({"uchar", "unsigned char", "uint8", "uint8_t"})
-
-
-def _canonical_nrrd_space(space: str | None) -> str | None:
-    """Canonical full name for an accepted ``space`` spelling; ``None`` if unsupported."""
-    return _NRRD_SPACE_CANONICAL.get((space or "").strip().lower())
-
-
-def nrrd_space_transform(space: str | None, source: Path | str | None = None) -> np.ndarray:
-    """3x3 world-coordinate transform taking the header's ``space`` into LPS.
-
-    Identity for LPS; the diagonal X/Y (RAS) or Y (LAS) sign flip otherwise.
-    Package-internal-public (not exported from ``clarinet.services.image``):
-    :mod:`layered_segmentation` imports it directly from this module rather
-    than via a private cross-module import.
-
-    Returns a shared read-only constant, not a fresh array — matmul it, and
-    copy first if you need to write into the result.
-
-    Args:
-        space: The header's ``space`` field (``None`` if the header omits it).
-        source: File the header came from, named in the error. Optional only
-            because the transform itself does not need it — pass it whenever a
-            path is in hand, or an operator sweeping a storage tree gets a
-            verdict with no filename.
-
-    Raises:
-        ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
-    """
-    canonical = _canonical_nrrd_space(space)
-    if canonical is not None:
-        return _NRRD_SPACE_TO_LPS[canonical]
-    where = f"{source}: " if source is not None else ""
-    if not (space or "").strip():
-        raise ImageReadError(
-            f"{where}NRRD header has no `space` field, so its `space directions`/`space "
-            "origin` cannot be placed in LPS. If the file is known to be LPS (every "
-            "clarinet- or Slicer-written NRRD is), stamp it once with "
-            "declare_nrrd_space(path, 'left-posterior-superior')"
-        )
-    raise ImageReadError(
-        f"{where}Unsupported NRRD space {space!r}: expected left-posterior-superior/LPS, "
-        "right-anterior-superior/RAS, or left-anterior-superior/LAS"
-    )
-
-
-def nrrd_space_to_lps(
-    space: str | None,
-    space_directions: np.ndarray,
-    space_origin: np.ndarray | None,
-    source: Path | str | None = None,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    """Convert NRRD ``space directions``/``space origin`` into clarinet's internal LPS.
-
-    Honors the header's ``space`` field (case-insensitive; full name or abbreviation,
-    e.g. ``"right-anterior-superior"`` or ``"RAS"``). LPS passes through unchanged;
-    RAS/LAS are converted by negating the affected world components of every direction
-    row and of the origin (same transform for both — they express vectors/points in the
-    same declared coordinate system). Slicer always writes LPS (probe P6) — this only
-    affects third-party files.
-
-    Shared by :meth:`Image.read_nrrd` and
-    :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation._apply_grid_from_header`;
-    callers pre-slice ``space_directions`` to the 3 spatial rows (a 4-D layered header's
-    row 0 is the ``none`` list axis, not a spatial direction). Package-internal-public
-    (not exported from ``clarinet.services.image``): both modules import it directly
-    from this module rather than via a private cross-module import.
-
-    Args:
-        space: The header's ``space`` field (``None`` if the header omits it).
-        space_directions: ``(3, 3)`` array; each row is one axis's world-space
-            direction vector (spacing baked in), expressed in the header's ``space``.
-        space_origin: ``(3,)`` world-space origin in the header's ``space``, or
-            ``None`` if the header has no ``space origin``.
-        source: File the header came from, named in the error.
-
-    Returns:
-        ``(space_directions, space_origin)`` re-expressed in LPS. The second element
-        is ``None`` iff *space_origin* was ``None``.
-
-    Raises:
-        ImageReadError: ``space`` is missing or not one of LPS/RAS/LAS.
-    """
-    transform = nrrd_space_transform(space, source)
-    # Each space_directions row is a per-axis world vector [x, y, z]; post-multiplying
-    # by the (diagonal) transform scales those world x/y/z *columns*, i.e. negates the
-    # same components in every row. space_origin is a single such vector, pre-multiplied
-    # for the conventional matrix-vector form (equivalent for a diagonal transform).
-    dirs_lps = space_directions @ transform
-    origin_lps = None if space_origin is None else transform @ space_origin
-    return dirs_lps, origin_lps
-
-
-def _nrrd_header_non_ascii(path: Path) -> str | None:
-    """First non-ASCII header line of a NRRD, or ``None`` if the header is pure ASCII.
-
-    Reads the raw bytes rather than pynrrd's parsed header, because pynrrd has already
-    replaced the offending values with ``''`` by the time it returns them (#577). The
-    NRRD header ends at the first blank line, so this never touches the voxel data.
-    """
-    with path.open("rb") as fh:
-        for raw in fh:
-            if not raw.strip():
-                break
-            try:
-                raw.decode("ascii")
-            except UnicodeDecodeError:
-                return raw.decode("utf-8", errors="replace").strip()
-    return None
-
-
-@dataclass(frozen=True, slots=True)
-class _NrrdGrid:
-    """Grid fields a NRRD header supplies, in LPS. ``None`` = header said nothing,
-    leave the reader's existing value alone."""
-
-    spacing: tuple[float, float, float] | None
-    direction: npt.NDArray[np.float64] | None
-    origin: tuple[float, float, float] | None
-
-
-def _nrrd_grid_from_header(
-    header: Mapping[str, Any],
-    source: Path | str | None = None,
-    *,
-    spatial: slice = slice(0, 3),
-) -> _NrrdGrid:
-    """Spacing, direction and origin in LPS from a NRRD header.
-
-    The one place the ``space`` rule is applied, shared by :meth:`Image.read_nrrd`
-    (3-D, default *spatial*) and
-    :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation._apply_grid_from_header`
-    (4-D, ``spatial=slice(1, 4)`` — entry 0 is the ``none`` list axis). Keeping both
-    readers on one implementation is the point: the two used to carry separate copies
-    of this logic and drifted, which is how a `spacings` header ended up with its
-    origin converted and its axes left in the declared space.
-
-    ``spacings`` are per-axis magnitudes along the array axes **of the declared
-    space**, so an implicitly axis-aligned header still needs the same conversion as
-    an explicit ``space directions`` one — identity in RAS is not identity in LPS.
-    The single exception is a header that declares no ``space`` and has no
-    ``space origin``: there is nothing to place, so its ``spacings`` are taken as-is
-    and no ``space`` is required.
-
-    Raises:
-        ImageReadError: the header carries geometry to place — ``space directions``,
-            or a ``space origin`` — without a supported ``space`` field.
-    """
-    space = header.get("space")
-    space_origin = header.get("space origin")
-    raw_origin = None if space_origin is None else np.asarray(space_origin[:3], dtype=float)
-
-    def _placed(dirs: npt.NDArray[np.float64], keep_spacing: bool) -> _NrrdGrid:
-        arr, origin = nrrd_space_to_lps(space, dirs, raw_origin, source)
-        norms = np.linalg.norm(arr, axis=1)
-        return _NrrdGrid(
-            spacing=(float(norms[0]), float(norms[1]), float(norms[2])) if keep_spacing else None,
-            direction=(arr / norms[:, np.newaxis]).T,
-            origin=None
-            if origin is None
-            else (float(origin[0]), float(origin[1]), float(origin[2])),
-        )
-
-    space_dirs = header.get("space directions")
-    if space_dirs is not None:
-        return _placed(np.asarray(space_dirs[spatial], dtype=float), keep_spacing=True)
-
-    spacings = header.get("spacings")
-    raw_spacing = None if spacings is None else [float(s) for s in spacings[spatial]]
-    if raw_origin is None and not (space or "").strip():
-        # Nothing to place and no space declared: axis-aligned, read as-is.
-        return _NrrdGrid(
-            spacing=None
-            if raw_spacing is None
-            else (raw_spacing[0], raw_spacing[1], raw_spacing[2]),
-            direction=None,
-            origin=None,
-        )
-    return _placed(np.diag(raw_spacing or [1.0, 1.0, 1.0]), keep_spacing=raw_spacing is not None)
-
-
-def declare_nrrd_space(
-    path: Path | str,
-    space: str,
-    *,
-    out_path: Path | str | None = None,
-) -> Path:
-    """Stamp the NRRD ``space`` field on a file whose header omits it.
-
-    One-time repair for legacy files — e.g. clarinet-written NRRDs from before
-    2026-03-08 — that carry ``space directions``/``space origin`` without a
-    ``space`` label, which the strict readers (:meth:`Image.read_nrrd`,
-    :meth:`~clarinet.services.image.layered_segmentation.LayeredSegmentation.read_header`,
-    ``read_grid``) refuse. The geometry is never touched or interpreted: the caller
-    *declares* which coordinate system the numbers already are in, and the next read
-    converts from it as usual — so declaring RAS on a RAS-native file is the explicit
-    conversion path. Works on 3-D volumes and 4-D layered ``.seg.nrrd`` alike:
-    segment metadata is carried through, with pynrrd's caveat that header values
-    are ASCII-only, so non-ASCII bytes (e.g. a Cyrillic segment name) are dropped
-    on any read/write round-trip (#577). Attached-data files only — a detached
-    ``.nhdr`` header (or a header naming a ``data file``) is refused with
-    ``ImageError`` before anything is written, since pynrrd would repoint it at a
-    new data file and orphan the original. Reads and writes through pynrrd
-    directly, since ``Image`` is exactly what raises on such a file; the write is
-    atomic (per-call temp file + ``os.replace``), so a failed in-place stamp
-    leaves the original bytes intact.
-
-    Args:
-        path: NRRD to repair.
-        space: LPS, RAS or LAS — full name or abbreviation, case-insensitive; the
-            header receives the canonical full spelling.
-        out_path: Write the stamped copy here instead of rewriting *path* in place.
-
-    Returns:
-        The written path (*out_path* if given, else *path*). An in-place call on a
-        file that already declares the same space returns without rewriting.
-
-    Raises:
-        ImageError: *space* is not LPS/RAS/LAS; the file is a detached-header NRRD;
-            or the header already declares a *different* space — relabeling would
-            change the meaning of the geometry rather than fill in a missing label,
-            so that is refused. A blank ``space`` value counts as missing, exactly
-            as the readers treat it.
-        ImageReadError: the file cannot be read.
-        ImageWriteError: the stamped file cannot be written.
-    """
-    path = Path(path)
-    canonical = _canonical_nrrd_space(space)
-    if canonical is None:
-        raise ImageError(
-            f"Cannot declare NRRD space {space!r}: expected left-posterior-superior/LPS, "
-            "right-anterior-superior/RAS, or left-anterior-superior/LAS"
-        )
-    target = path if out_path is None else Path(out_path)
-    if ".nhdr" in (path.suffix.lower(), target.suffix.lower()):
-        raise ImageError(
-            f"{path}: detached-header NRRD (.nhdr) is not supported by declare_nrrd_space — "
-            "pynrrd would repoint the header at a new data file and orphan the original; "
-            "attached-data .nrrd files only"
-        )
-    try:
-        header = nrrd.read_header(str(path))
-    except Exception as e:
-        raise ImageReadError(f"Failed to read NRRD header: {path}") from e
-    if header.keys() & {"data file", "datafile"}:
-        raise ImageError(
-            f"{path}: header names a separate data file; detached-header NRRD is not "
-            "supported by declare_nrrd_space — attached-data .nrrd files only"
-        )
-
-    # A blank `space:` value reads back as '' — missing, as the readers treat it.
-    existing = (header.get("space") or "").strip()
-    if existing:
-        existing_canonical = _canonical_nrrd_space(existing)
-        if existing_canonical is None:
-            raise ImageError(
-                f"{path}: header declares space {existing!r}, which clarinet does not "
-                f"support (LPS/RAS/LAS only). This helper fills in a *missing* label; it "
-                f"will not reinterpret a declared one as {canonical!r}. If you know the "
-                "geometry, clear the `space` field first (see the migration guide), then "
-                "stamp it."
-            )
-        if existing_canonical != canonical:
-            raise ImageError(
-                f"{path}: header already declares space {existing!r}; refusing to relabel "
-                f"it as {canonical!r} — that would change what its geometry means, not "
-                "fill in a missing label"
-            )
-        if out_path is None:
-            return path  # already declared: nothing to rewrite
-
-    # pynrrd decodes header values as ASCII, so a non-ASCII segment name round-trips
-    # to '' (#577). Refusing beats silently emptying it — the same standard the
-    # detached-header guard above applies, and for the same reason: this helper
-    # rewrites the user's only copy.
-    non_ascii = _nrrd_header_non_ascii(path)
-    if non_ascii is not None:
-        raise ImageError(
-            f"{path}: header contains non-ASCII bytes ({non_ascii!r}), which pynrrd drops "
-            "on a read/write round-trip (#577) — declare_nrrd_space would empty them "
-            "(e.g. a Cyrillic segment name) while stamping `space`. Add the `space` line "
-            "with a text editor instead, or rename the segments to ASCII first."
-        )
-
-    try:
-        data, header = nrrd.read(str(path))
-    except Exception as e:
-        raise ImageReadError(f"Failed to read NRRD file: {path}") from e
-    header["space"] = canonical
-    # Write beside the target, then atomically move over it: pynrrd truncates
-    # its destination before writing, and for an in-place stamp the in-memory
-    # `data` is the only other copy of the file — a failed write must never
-    # have been aimed at the original. Same convention as grid_policy's repair
-    # temp: a per-call token, so two concurrent stamps of one file can neither
-    # install each other's partial bytes nor unlink each other's temp. Keeps
-    # the real suffix so pynrrd treats the temp file identically.
-    tmp = target.with_name(f".{target.stem}.tmp-{uuid.uuid4().hex[:12]}{target.suffix}")
-    try:
-        nrrd.write(str(tmp), data, header)
-        os.replace(tmp, target)
-    except Exception as e:
-        raise ImageWriteError(f"Failed to write NRRD file: {target}") from e
-    finally:
-        tmp.unlink(missing_ok=True)  # no-op once os.replace has moved it
-    logger.info(f"Declared NRRD space {canonical!r}: {target}")
-    return target
 
 
 # Matches a per-segment NRRD header key, e.g. "Segment0_Name" -> ("0", "Name").
@@ -770,9 +430,9 @@ class Image:
         self.spacing = tuple(zooms[:3])
         # NIfTI affine is in RAS; convert to internal LPS representation
         direction_ras = affine[:3, :3] / zooms[:3]
-        self._direction = _LPS_TO_RAS @ direction_ras
+        self._direction = LPS_TO_RAS @ direction_ras
         origin_ras = np.array([affine[0, 3], affine[1, 3], affine[2, 3]])
-        origin_lps = _LPS_TO_RAS @ origin_ras
+        origin_lps = LPS_TO_RAS @ origin_ras
         self._origin = (float(origin_lps[0]), float(origin_lps[1]), float(origin_lps[2]))
         self._shape = tuple(int(s) for s in self._nifti_image.header.get_data_shape())
         self._filetype = FileType.NIFTI
@@ -803,7 +463,8 @@ class Image:
                 for a 4-D multi-layer ``.seg.nrrd``); or if ``space directions`` or
                 ``space origin`` is present with an unsupported or missing ``space``
                 field (one rule for both branches — a legacy space-less file is
-                repaired once with :func:`declare_nrrd_space`). A ``spacings``-only
+                repaired once with
+                :func:`clarinet.services.image.declare_nrrd_space`). A ``spacings``-only
                 header with no ``space origin`` has nothing to place and reads as-is.
         """
         file_path = Path(file_path)
@@ -827,7 +488,7 @@ class Image:
         # Resolve the grid into locals first: a header that cannot be placed in LPS
         # raises below, and a half-populated self (stale header, no shape) would
         # outlive the failed read on a reused instance.
-        grid = _nrrd_grid_from_header(header, file_path)
+        grid = nrrd_grid_from_header(header, file_path)
 
         self._nrrd_header = header
         self._source_path = file_path
@@ -1017,10 +678,10 @@ class Image:
         """Write voxel data to a NIfTI file."""
         try:
             # Convert internal LPS to NIfTI RAS
-            direction_ras = _LPS_TO_RAS @ self._direction
+            direction_ras = LPS_TO_RAS @ self._direction
             affine = np.eye(4)
             affine[:3, :3] = direction_ras * np.array(self.spacing)
-            affine[:3, 3] = _LPS_TO_RAS @ np.array(self._origin)
+            affine[:3, 3] = LPS_TO_RAS @ np.array(self._origin)
             new_image = nibabel.Nifti1Image(self.img, affine, dtype=self.img.dtype)
             nibabel.save(new_image, str(path))
         except Exception as e:

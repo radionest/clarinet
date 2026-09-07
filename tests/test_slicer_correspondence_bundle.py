@@ -142,3 +142,13 @@ def test_bundle_derivation_matches_native() -> None:
         assert type(bundled.measure).__name__ == type(native.measure).__name__
         assert bundled.min_score == native.min_score
         assert getattr(bundled.measure, "side", None) == getattr(native.measure, "side", None)
+
+
+def test_bundle_exposes_frame_constants() -> None:
+    """grid.py's LPS_TO_RAS / LAS_TO_LPS ride in the bundle, still read-only."""
+    ns: dict = {"__name__": "_bundle"}
+    exec(build_correspondence_bundle(), ns)
+    for name, expected in (("LPS_TO_RAS", [-1.0, -1.0, 1.0]), ("LAS_TO_LPS", [1.0, -1.0, 1.0])):
+        const = ns[name]
+        np.testing.assert_array_equal(const, np.diag(expected))
+        assert not const.flags.writeable

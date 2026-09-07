@@ -154,7 +154,7 @@ def is_volume_misoriented(volume_nifti: Path, dicom_dir: Path) -> bool:
 
     Idempotent: a corrected/remediated volume returns False, so re-running a
     remediation script is safe. Reconstructs the origin from the NIfTI affine
-    (RAS→LPS, mirroring ``_LPS_TO_RAS`` in ``image.py``) and compares it to the
+    (RAS→LPS, mirroring ``LPS_TO_RAS`` in ``grid.py``) and compares it to the
     expected origin within ``0.5 * slice_spacing``. Under D6 the canonical slice
     sense is the side of the raw (unforced) IOP normal ``n``, so the expected
     origin is the IPP endpoint with the **smaller** projection onto ``n`` — the

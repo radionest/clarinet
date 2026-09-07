@@ -4,6 +4,16 @@
 
 ### Added
 
+- **The NRRD header to LPS grid resolver is public.**
+  `clarinet.services.image.nrrd_grid_from_header(header, source=None, *,
+  spatial=slice(0, 3))` and its `NrrdGrid` result place a pynrrd header's
+  `space directions`/`spacings`/`space origin` into spacing, direction and origin
+  in LPS, applying the same `space` rule as `Image.read_nrrd` and
+  `LayeredSegmentation.read_header` — it is the one place that rule lives, so
+  code parsing NRRD headers directly no longer has to reimplement it and assume
+  LPS. Pure function of the header: no pynrrd, no disk. The frame constants it
+  shares with the NIfTI paths are public alongside it as
+  `clarinet.services.image.grid.LPS_TO_RAS` / `LAS_TO_LPS` (frozen, self-inverse).
 - **`dicom_scp_enabled` names which process owns the C-MOVE listener.** A
   listening port belongs to one process and the PACS routes C-MOVE by
   destination AET to a host and port it was configured with, so on a c-move
@@ -258,6 +268,15 @@
   with the new `clarinet.services.image.declare_nrrd_space(path, "LPS")`
   (idempotent; refuses to relabel a file that already declares a different
   space); see `clarinet/docs/migration-orientation-0.10.17.md`.
+  The resolver behind both readers is public:
+  `clarinet.services.image.nrrd_grid_from_header` / `NrrdGrid` (new
+  `nrrd_space.py`); `declare_nrrd_space` lives in `nrrd_repair.py` and stays
+  exported from the facade; the LPS/RAS frame constants are
+  `clarinet.services.image.grid.LPS_TO_RAS` / `LAS_TO_LPS`. Only a direct
+  `from clarinet.services.image.image import ...` breaks, and only for the
+  three module-level names that left `image.py`: `declare_nrrd_space`,
+  `nrrd_space_transform` and `nrrd_space_to_lps` (the last two are now
+  package-internal to `nrrd_space.py`, reached through the resolver).
 - **DICOM→NIfTI conversion changes on-disk grid layout for every
   newly-converted volume (grid epoch).** The in-plane axis order now follows
   `ImageOrientationPatient` end-to-end (array, spacing, and direction move
