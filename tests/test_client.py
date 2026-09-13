@@ -1098,22 +1098,23 @@ class TestDownloadReport:
 
 
 class TestClientTimeout:
-    """Issue #586: the client must own an explicit httpx timeout.
+    """The client owns an explicit httpx timeout instead of httpx's 5 s default (#586)."""
 
-    httpx defaults to 5 s for every phase, which a single ``iter_records``
-    page at batch=500 exceeds on record types costing >10 ms/record to
-    serialize — and the resulting ``httpx.ReadTimeout`` has an empty ``str``.
-    """
-
-    def test_default_timeout_is_explicit(self) -> None:
+    @pytest.mark.asyncio
+    async def test_default_timeout_is_explicit(self) -> None:
         client = ClarinetClient("http://test", auto_login=False)
+        try:
+            assert client.client.timeout == httpx.Timeout(60.0, connect=5.0)
+        finally:
+            await client.close()
 
-        assert client.client.timeout == httpx.Timeout(60.0, connect=5.0)
-
-    def test_timeout_override_reaches_httpx(self) -> None:
+    @pytest.mark.asyncio
+    async def test_timeout_override_reaches_httpx(self) -> None:
         client = ClarinetClient("http://test", auto_login=False, timeout=300)
-
-        assert client.client.timeout == httpx.Timeout(300)
+        try:
+            assert client.client.timeout == httpx.Timeout(300)
+        finally:
+            await client.close()
 
     @pytest.mark.asyncio
     async def test_transport_error_names_exception_class(self) -> None:

@@ -136,8 +136,10 @@ class ClarinetClient:
                           sent as X-Internal-Token header — no login() needed,
                           no AccessToken created in DB.
             timeout: httpx timeout for every request (default: 60 s read/write,
-                    5 s connect). Raise it for record types that serialize
-                    slowly; ``None`` disables timeouts entirely.
+                    5 s connect). A bare float sets every phase, connect
+                    included — to raise only the read budget for slow record
+                    types pass ``httpx.Timeout(300, connect=5)``. ``None``
+                    disables timeouts entirely.
         """
         self.base_url = base_url.rstrip("/")
         self.username = username
