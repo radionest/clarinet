@@ -576,6 +576,16 @@
 
 ### Fixed
 
+- **Importing `clarinet.settings` no longer mutates the process locale.** The
+  module called `locale.setlocale(LC_TIME, "en-US")` at import time; on
+  Windows that succeeded (the C runtime accepts hyphenated tags) but left
+  `LC_TIME` in a form CPython's `locale.py` cannot parse, so the next
+  `locale.getlocale(LC_TIME)` call anywhere in the process — `_strptime` on
+  `import pandas` inside a pipeline task, for one — raised
+  `ValueError: unknown locale: en-US`. Nothing in clarinet uses
+  locale-sensitive `strftime` codes, so the call is gone on every platform,
+  along with the Windows skip on the pandera codegen test that hid the
+  symptom (#451).
 - **`ClarinetClient` owns an explicit httpx timeout, and transport errors
   name their exception.** The client built its `httpx.AsyncClient` without a
   `timeout`, so httpx's 5 s default governed every phase of every request; one

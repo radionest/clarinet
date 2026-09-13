@@ -5,7 +5,6 @@ This module provides a settings class for Clarinet, with support for loading
 configuration from TOML files and environment variables.
 """
 
-import locale
 import os
 import re
 from enum import Enum
@@ -21,16 +20,6 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 from taskiq.acks import AcknowledgeType
-
-# Set locale for date/time formatting
-try:
-    if os.name == "nt":  # Windows
-        locale.setlocale(locale.LC_TIME, "en-US")
-    else:  # Unix/Linux
-        locale.setlocale(locale.LC_TIME, "en_US.UTF-8")
-except locale.Error:
-    # Fallback if specified locale is not available
-    pass
 
 
 class DatabaseDriver(str, Enum):
