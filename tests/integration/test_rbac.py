@@ -487,6 +487,37 @@ async def test_patch_record_empty_body_masks_patient(
 
 
 @pytest.mark.asyncio
+async def test_patch_record_assigned_to_other_user_forbidden(
+    test_session, role_a_client, record_role_a, superuser
+):
+    """Same-role caller cannot PATCH a record assigned to someone else (MutableRecordDep)."""
+    record_role_a.user_id = superuser.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.patch(f"/api/records/{record_role_a.id}", json={})
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_patch_record_update_masks_patient(
+    test_session, role_a_client, record_role_a, test_patient
+):
+    """Non-empty PATCH /api/records/{id} returns the masked record, not the raw ORM row."""
+    test_patient.auto_id = 123
+    test_session.add(test_patient)
+    await test_session.commit()
+
+    response = await role_a_client.patch(
+        f"/api/records/{record_role_a.id}", json={"viewer_study_uids": ["1.2.3"]}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["viewer_study_uids"] == ["1.2.3"]
+    assert data["patient_id"] == "CLARINET_123"
+
+
+@pytest.mark.asyncio
 async def test_study_date_and_description_masked_for_non_admin(
     test_session, role_a_client, record_role_a, test_patient, test_study
 ):
