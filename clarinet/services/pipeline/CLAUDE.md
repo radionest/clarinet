@@ -136,9 +136,9 @@ uv run clarinet worker --dicom WORKER:4006    # with Storage SCP for C-MOVE
 ## Queue Routing
 
 - Exchange: `settings.rabbitmq_exchange` (direct type)
-- Queue name = `{settings.pipeline_task_namespace}.{kind}` where `kind ∈ {default, gpu, dicom, quarto, dead_letter}`
-- For default `project_name = "Clarinet"`: `clarinet.default`/`.gpu`/`.dicom`/`.quarto`/`.dead_letter` (backward-compatible)
-- For projects with custom `project_name` (e.g. `"Acme Project"`): `acme_project.default`/`.gpu`/`.dicom`/`.quarto`/`.dead_letter`
+- Queue name = `{settings.pipeline_task_namespace}.{fingerprint}.{kind}` where `kind ∈ {default, gpu, dicom, quarto}` and `fingerprint` is the 12-hex `queue_version_segment()` (clarinet version + `plan/` content) — omitted when `pipeline_version_check_enabled=false`. The dead-letter queue is never versioned: `{namespace}.dead_letter`
+- For default `project_name = "Clarinet"`: `clarinet.<12-hex>.default`/`.gpu`/`.dicom`/`.quarto`, `clarinet.dead_letter`
+- For projects with custom `project_name` (e.g. `"Acme Project"`): `acme_project.<12-hex>.default`/`.gpu`/`.dicom`/`.quarto`, `acme_project.dead_letter`
 - **routing_key = full queue name** (not the suffix) — guarantees no cross-project collisions
 - Default queue: `settings.default_queue_name` (all workers)
 - GPU queue: `settings.gpu_queue_name` (workers with `have_gpu=True`)

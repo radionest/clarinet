@@ -40,22 +40,15 @@ Image(template=None, copy_data=False, dtype=None)
 | `save(filename, directory)` | Saves in the original format; appends correct extension. Raises `ImageError` for DICOM. |
 | `save_as(path, filetype)` | Saves at exact path in specified format. Raises `ImageError` for DICOM. |
 
-**NIfTI write (`_save_nifti`)**: uses `_nifti_image.affine` if available, otherwise `np.eye(4)`. This means spacing is only preserved in the NIfTI affine when the source was also NIfTI.
+**NIfTI write (`_save_nifti`)**: always builds the affine from the in-memory spacing/origin/direction (LPS → RAS), whatever the source format.
 
-**NRRD write (`_save_nrrd`)**: passes `_nrrd_header` if available, otherwise empty `{}`. Segment metadata (`Segment{i}_Name`/`_LabelValue`/`_Color`/...) is preserved but **reconciled to the labels actually present** in the voxel data — blocks for absent label values are dropped and survivors renumbered contiguously, and grid-dependent keys (`*_Extent`, `Segmentation_ReferenceImageExtentOffset`) are dropped (readers recompute the effective extent on load). This guarantees a written segmentation never names a label value absent from its data. Spacing is only embedded in NRRD when the source was also NRRD.
+**NRRD write (`_save_nrrd`)**: starts from `_nrrd_header` if available (otherwise `{}`) and always overwrites `space directions`/`space origin`/`space` with the in-memory grid. Segment metadata (`Segment{i}_Name`/`_LabelValue`/`_Color`/...) is preserved but **reconciled to the labels actually present** in the voxel data — blocks for absent label values are dropped and survivors renumbered contiguously, and grid-dependent keys (`*_Extent`, `Segmentation_ReferenceImageExtentOffset`) are dropped (readers recompute the effective extent on load). This guarantees a written segmentation never names a label value absent from its data.
 
 ### Cross-Format Spacing Preservation
 
-| Source → Target | Spacing preserved? | Why |
-|---|---|---|
-| NIfTI → NIfTI | yes | Affine copied from `_nifti_image` |
-| NRRD → NRRD | yes | Header copied from `_nrrd_header` |
-| NIfTI → NRRD | **no** | `_nrrd_header` is None → empty header → no spacing |
-| NRRD → NIfTI | **no** | `_nifti_image` is None → `np.eye(4)` → spacing `(1,1,1)` |
-| DICOM → NIfTI | **no** | `_nifti_image` is None → `np.eye(4)` → spacing `(1,1,1)` |
-| DICOM → NRRD | **no** | `_nrrd_header` is None → empty header → no spacing |
-
-Voxel data is always preserved regardless of format conversion. Spacing loss is a metadata-only issue.
+Spacing, origin and direction survive every source → target conversion (NIfTI, NRRD or
+DICOM → NIfTI/NRRD): both writers emit the canonical in-memory grid instead of copying
+source headers. Asserted by `TestSpatialPreservation` in `tests/test_image_e2e.py`.
 
 ### RAM-Lean Reads (opt-in)
 

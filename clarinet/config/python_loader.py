@@ -170,8 +170,16 @@ async def _to_record_type_create(
     slicer_script = await _resolve_script_field(rt_def.slicer_script, folder)
     slicer_result_validator = await _resolve_script_field(rt_def.slicer_result_validator, folder)
 
-    # Convert FileRef list to file_registry
-    file_registry = [fileref_to_file_definition(ref) for ref in rt_def.files] or None
+    # Convert FileRef list to file_registry. ValueError covers both an unnamed
+    # grid_conform_to reference and pydantic's pattern validation.
+    try:
+        file_registry = [fileref_to_file_definition(ref) for ref in rt_def.files] or None
+    except ValueError as e:
+        raise ConfigLoadError(
+            f"Invalid record type '{rt_def.name}': {e}",
+            path=folder,
+            kind="record type",
+        ) from e
 
     # Build kwargs, only including fields that are explicitly set
     kwargs: dict[str, Any] = {

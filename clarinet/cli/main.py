@@ -233,7 +233,11 @@ secret_key = "change-this-secret-key-in-production"
 
     # Create .env example
     env_example = """# Environment variables (optional)
-# CLARINET_DATABASE_URL=postgresql://user:pass@localhost/dbname
+# CLARINET_DATABASE_DRIVER=postgresql+asyncpg
+# CLARINET_DATABASE_HOST=localhost
+# CLARINET_DATABASE_NAME=dbname
+# CLARINET_DATABASE_USERNAME=user
+# CLARINET_DATABASE_PASSWORD=pass
 # CLARINET_JWT_SECRET_KEY=your-secret-key
 """
 
@@ -1835,7 +1839,7 @@ def main() -> None:
             "  {anon_series_uid}   anonymized series UID (or original if not set)\n"
             "  {patient_id}        original DICOM PatientID\n"
             "  {patient_auto_id}   monotonic per-patient counter\n"
-            "  {anon_id_prefix}    settings.anon_id_prefix (default 'anon')\n"
+            "  {anon_id_prefix}    settings.anon_id_prefix (default 'CLARINET')\n"
             "  {study_uid}         original study UID\n"
             "  {series_uid}        original series UID\n"
             "  {study_date}        YYYYMMDD\n"

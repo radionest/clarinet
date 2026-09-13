@@ -50,14 +50,17 @@ Optional group `pipeline` in `pyproject.toml`:
 ## Queue Namespacing
 
 Queue names are derived from `settings.pipeline_task_namespace` (which is normalized
-from `settings.project_name`):
+from `settings.project_name`) plus, by default, a 12-hex version fingerprint of the
+clarinet version and `plan/` content (`queue_version_segment()`), so workers on stale
+code listen on a different queue. `pipeline_version_check_enabled=false` drops the
+fingerprint segment; the dead-letter queue is never versioned:
 
 | Setting property | Default (`project_name="Clarinet"`) | Custom (`project_name="Acme"`) |
 |---|---|---|
-| `settings.default_queue_name` | `clarinet.default` | `acme.default` |
-| `settings.gpu_queue_name` | `clarinet.gpu` | `acme.gpu` |
-| `settings.dicom_queue_name` | `clarinet.dicom` | `acme.dicom` |
-| `settings.quarto_queue_name` | `clarinet.quarto` | `acme.quarto` |
+| `settings.default_queue_name` | `clarinet.<12-hex>.default` | `acme.<12-hex>.default` |
+| `settings.gpu_queue_name` | `clarinet.<12-hex>.gpu` | `acme.<12-hex>.gpu` |
+| `settings.dicom_queue_name` | `clarinet.<12-hex>.dicom` | `acme.<12-hex>.dicom` |
+| `settings.quarto_queue_name` | `clarinet.<12-hex>.quarto` | `acme.<12-hex>.quarto` |
 | `settings.dlq_queue_name` | `clarinet.dead_letter` | `acme.dead_letter` |
 
 Tasks should use these properties (`settings.dicom_queue_name`) instead of hard-coded
@@ -107,6 +110,6 @@ reader-side tasks use `Files(record, fallback=True)`.
 Registered in `clarinet/services/pipeline/tasks/` and `clarinet/services/dicom/pipeline.py` — imported at broker startup.
 - `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `settings.dicom_queue_name`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
 - `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Queue: `settings.dicom_queue_name`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
-- `anonymize_study_pipeline` — Record-aware DICOM anonymization (skip-guard + Patient anonymize + DICOM anonymize + submit to Record). Queue: `settings.dicom_queue_name`. Requires `msg.record_id`. Payload knobs: `save_to_disk`, `send_to_pacs`. Downstream wraps via `run_anonymization(msg, ctx, extra_record_data=...)` to add project-specific Record fields.
+- `anonymize_study_pipeline` — Record-aware DICOM anonymization (skip-guard + Patient anonymize + DICOM anonymize + submit to Record). Queue: `settings.dicom_queue_name`. Requires `msg.record_id`. Payload knobs: `save_to_disk`, `send_to_pacs`, `per_study_patient_id`. Downstream wraps via `run_anonymization(msg, ctx, extra_record_data=...)` to add project-specific Record fields.
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).

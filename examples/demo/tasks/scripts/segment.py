@@ -12,8 +12,14 @@ import os
 
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
-# Load only the best series if available, otherwise load the full study
-if best_series_uid is not None:  # type: ignore[name-defined]  # noqa: F821
+# Load only the best series if available, otherwise load the full study.
+# The hydrator returns {} when it can't resolve a series, leaving the name unbound.
+try:
+    best_series_uid  # type: ignore[name-defined]  # noqa: B018
+except NameError:
+    best_series_uid = None
+
+if best_series_uid is not None:  # type: ignore[name-defined]
     s.load_series_from_pacs(study_uid, best_series_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 else:
     s.load_study_from_pacs(study_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821

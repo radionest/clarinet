@@ -28,7 +28,10 @@ def _sha256_safe(path: Path) -> str | None:
     """Compute SHA256 if the file exists, otherwise return None."""
     if not path.is_file():
         return None
-    return _sha256(path)
+    try:
+        return _sha256(path)
+    except FileNotFoundError:  # unlinked between is_file() and open()
+        return None
 
 
 async def compute_file_checksum(path: Path) -> str | None:

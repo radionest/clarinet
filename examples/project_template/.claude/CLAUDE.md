@@ -113,7 +113,8 @@ This project's rules (auto-loaded via the `paths` frontmatter):
 - `.claude/rules/schemas.md` — JSON Schema for record.data, conditional schemas, UI hints, shared `$defs` across files (`$ref`)
 - `.claude/rules/utils.md` — helper modules, the `.seg.nrrd` format
 
-Framework rules (full reference docs, living in the clarinet repository itself — useful as a reference):
+Framework rules (full reference docs, living in the clarinet repository itself — useful as a reference).
+`<clarinet>` is the directory holding your clarinet checkout; with a pip-installed clarinet there is no checkout — run `clarinet agent init` instead, which installs the same docs with resolved paths:
 
 - `<clarinet>/clarinet/.claude/rules/recordflow-dsl.md` — full DSL API with pattern matching
 - `<clarinet>/clarinet/.claude/rules/slicer-helper-api.md` — all `SlicerHelper` methods + VTK pitfalls
