@@ -583,6 +583,27 @@
 
 ### Fixed
 
+- **Config errors from `reconcile_config` get the `STARTUP FAILED` banner.** An
+  undefined role, an unconfigured viewer, an unregistered validator/hydrator or
+  a cross-type shared-file mismatch raised a plain `ConfigurationError` /
+  `RecordConstraintViolationError` past the lifespan's `ConfigLoadError`
+  handler, aborting startup with a raw traceback and no structured critical
+  log; both now become `StartupError(component="Config")`. In python config
+  mode a `ValueError` from a `FileDef` reference or record-type validation
+  likewise becomes `ConfigLoadError` instead of escaping raw (#566, #529).
+- **Worker fingerprint check honours `api_verify_ssl`.** The startup diagnostic
+  built its `ClarinetClient` without `verify_ssl`, so a self-signed deployment
+  logged a spurious "Could not verify worker fingerprint" on every start (#588).
+- **Per-node C-STORE failure counts accumulate.** Two anonymization destinations
+  resolving to the same `aet@host:port` label overwrote each other's count,
+  under-reporting `send_failed_by_node` and letting `anon_fail_on_send_error`
+  miss a real failure (#493).
+- **File checksum scan tolerates a concurrent delete.** `compute_file_checksum`
+  returned `None` for a missing file but raised `FileNotFoundError` when the
+  file vanished between the existence check and the read (#563).
+- **Swallowed pipeline notification failures keep their traceback.**
+  `logger.warning(..., exc_info=True)` is a stdlib idiom loguru ignores; the
+  pipeline task wrapper now logs through loguru's exception path (#557).
 - **Importing `clarinet.settings` no longer mutates the process locale.** The
   module called `locale.setlocale(LC_TIME, "en-US")` at import time; on
   Windows that succeeded (the C runtime accepts hyphenated tags) but left

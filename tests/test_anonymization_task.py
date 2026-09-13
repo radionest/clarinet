@@ -778,3 +778,24 @@ async def test_run_anonymization_series_uids_kwarg_only() -> None:
 
         await run_anonymization(msg, MagicMock(), series_uids=["5.5.5"])
         assert orch.run.await_args.kwargs["series_uids"] == ["5.5.5"]
+
+
+@pytest.mark.asyncio
+async def test_send_accumulates_failures_for_duplicate_node_labels() -> None:
+    """Two destinations resolving to the same aet@host:port accumulate, never overwrite (#493)."""
+    series = _make_series("1.2.3.4.5.6")
+    extra = [DicomNode(aet="MAIN", host="h1", port=104)]  # same label as the main PACS
+    service, dicom_client, _ = _make_service(series=[series], extra_pacs=extra)
+
+    retrieve = MagicMock()
+    retrieve.instances = {"1.2.3.100": _good_dataset()}
+    dicom_client.get_series_to_memory = AsyncMock(return_value=retrieve)
+    dicom_client.store_instances_batch = AsyncMock(return_value=MagicMock(total_failed=1))
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        _patch_settings(mock_settings)
+        result = await service.anonymize_study("1.2.3.4.5", send_to_pacs=True)
+
+    assert dicom_client.store_instances_batch.await_count == 2
+    assert result.send_failed_by_node == {"MAIN@h1:104": 2}
+    assert result.instances_send_failed == 2

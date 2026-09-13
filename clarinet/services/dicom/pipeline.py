@@ -25,8 +25,9 @@ async def run_anonymization(
     Patient anonymization, DICOM anonymization, and Record updates to the
     framework. Reuses ``ctx.client`` so no extra HTTP connection is opened.
 
-    Reads ``send_to_pacs`` and ``save_to_disk`` from ``msg.payload``, falling
-    back to the corresponding ``settings.anon_*`` defaults.
+    Reads ``send_to_pacs``, ``save_to_disk`` and ``per_study_patient_id`` from
+    ``msg.payload``, falling back to the corresponding ``settings.anon_*``
+    defaults.
 
     ``series_uids`` is kwarg-only and deliberately NOT read from
     ``msg.payload``: payload keys are flow-authoring-time constants, while a

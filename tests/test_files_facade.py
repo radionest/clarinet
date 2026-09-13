@@ -497,3 +497,20 @@ class TestPathSafety:
 
         record = _record(monkeypatch)
         assert Files(record).render("mask.seg.nrrd") == "mask.seg.nrrd"
+
+
+@pytest.mark.asyncio
+async def test_checksum_file_removed_after_is_file_returns_none(tmp_path, monkeypatch):
+    """A file unlinked between ``is_file()`` and the hash read is 'missing', not an error (#563)."""
+    from clarinet.files import _checksums
+
+    target = tmp_path / "racy.bin"
+    target.write_bytes(b"data")
+    real_sha256 = _checksums._sha256
+
+    def unlink_then_hash(path: Path) -> str:
+        path.unlink()
+        return real_sha256(path)
+
+    monkeypatch.setattr(_checksums, "_sha256", unlink_then_hash)
+    assert await _checksums.compute_file_checksum(target) is None

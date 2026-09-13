@@ -1606,7 +1606,7 @@ class _VolumeLayoutMixin(_SlicerHelperBase):
 
         Args:
             thickness: Slab thickness in mm.
-            reconstruction_type: 0=Max, 1=Mean, 2=Sum.
+            reconstruction_type: VTK slab mode — 0=Min, 1=Max (default), 2=Mean, 3=Sum.
         """
         slice_node = self._scene.GetNodeByID("vtkMRMLSliceNodeRed")
         slice_node.SlabReconstructionEnabledOn()

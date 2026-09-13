@@ -112,7 +112,8 @@ columns**, generate a [pandera](https://pandera.readthedocs.io/) schema per
 report from the live SQL result types:
 
 ```bash
-# Run with the project's PostgreSQL database reachable (CLARINET_DATABASE_URL).
+# Run with the project's PostgreSQL database reachable
+# (CLARINET_DATABASE_DRIVER/_HOST/_PORT/_NAME/_USERNAME/_PASSWORD).
 uv run clarinet quarto gen-types
 ```
 

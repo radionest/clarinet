@@ -10,6 +10,7 @@ This version uses the implemented RecordFlow/Pipeline DSL.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -96,8 +97,8 @@ async def auto_project_ct(msg: PipelineMessage, ctx: TaskContext) -> None:
 
     master_path = ctx.files.resolve(master_model)
     proj_path = ctx.files.resolve(master_projection)
-    Path(proj_path).parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(master_path), str(proj_path))
+    await asyncio.to_thread(Path(proj_path).parent.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(shutil.copy2, str(master_path), str(proj_path))
 
     await ctx.client.submit_record_data(msg.record_id, {})
 

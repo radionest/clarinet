@@ -91,10 +91,10 @@ Two complementary, framework-level primitives (no project-specific script
 needed to detect):
 
 ```python
-from clarinet.services.image import RelationKind, grid_relation, read_grid
+from clarinet.services.image import RelationKind, classify_pair
 
-relation = grid_relation(read_grid(seg_path), read_grid(volume_path))
-if relation.kind is not RelationKind.SAME:
+verdict = classify_pair(seg_path, volume_path)  # subject first, reference second
+if verdict.kind is not RelationKind.SAME:
     ...  # REARRANGED: same series, different-epoch grid. FOREIGN: unrelated grid.
 ```
 

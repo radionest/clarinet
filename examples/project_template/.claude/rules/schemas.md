@@ -124,6 +124,8 @@ A custom extension providing hints to the form-builder. Ignored by the validator
 
 The list of available sources is extended by the frontend — check the frontend repo for the current list.
 
+A typo in `source` for a config-defined RecordType fails startup: `reconcile_config` raises `ConfigurationError`, naming the unknown source. For types mutated via the API, and for orphaned records, this check doesn't run — there a typo only surfaces as a WARNING ("Unknown x-options source") at render time, and the field is left unrendered ("raw").
+
 ## Localization (the `title` field)
 
 The frontend uses `title` instead of the field name for form labels. Write it in whatever language your project uses (Russian is typical for this framework's deployments):

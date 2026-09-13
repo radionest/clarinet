@@ -7,11 +7,12 @@ instance so that ``task.kicker().kiq()`` always routes to the queue the task
 was registered for, even when a worker handles multiple queues.
 
 Queue names are derived from ``settings.pipeline_task_namespace`` (which in
-turn comes from ``settings.project_name``).  For the default ``project_name
-= "Clarinet"`` the queues are ``clarinet.default``, ``clarinet.gpu``,
-``clarinet.dicom``, ``clarinet.dead_letter`` — preserving backward
-compatibility.  Other projects get isolated queues like
-``liver.default``/``liver.gpu``/...
+turn comes from ``settings.project_name``) plus, by default, a 12-hex version
+fingerprint (``Settings._versioned_queue``).  For the default ``project_name
+= "Clarinet"`` the queues are ``clarinet.<12-hex>.default``,
+``clarinet.<12-hex>.gpu``, ``clarinet.<12-hex>.dicom`` and the unversioned
+``clarinet.dead_letter``.  Other projects get isolated queues like
+``liver.<12-hex>.default``/``liver.<12-hex>.gpu``/...
 """
 
 from __future__ import annotations
