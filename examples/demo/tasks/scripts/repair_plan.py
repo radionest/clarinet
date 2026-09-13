@@ -24,6 +24,13 @@ except NameError:
 # Load repair model
 if os.path.isfile(repair_model_file):  # type: ignore[name-defined]  # noqa: F821
     repair_seg = s.load_segmentation(repair_model_file, "RepairModel")  # type: ignore[name-defined]  # noqa: F821
+else:
+    repair_seg = (
+        s.create_segmentation("RepairModel")
+        .add_segment("part_body", (0.8, 0.6, 0.4))
+        .add_segment("primary_channel", (0.0, 0.0, 1.0))
+        .add_segment("secondary_channel", (0.0, 0.5, 1.0))
+    )
 
 # Load master model as reference
 if os.path.isfile(master_model):  # type: ignore[name-defined]  # noqa: F821

@@ -104,8 +104,9 @@ class ReportRepository:
         if settings.database_driver == DatabaseDriver.SQLITE:
             raise ReportQueryError(
                 "Report type generation requires PostgreSQL — the SQLite driver "
-                "exposes no column types. Point CLARINET_DATABASE_URL at the "
-                "project's PostgreSQL database and re-run."
+                "exposes no column types. Point CLARINET_DATABASE_DRIVER/_HOST/"
+                "_PORT/_NAME/_USERNAME/_PASSWORD at the project's PostgreSQL "
+                "database and re-run."
             )
         try:
             return await self._describe(sql)

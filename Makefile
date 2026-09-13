@@ -181,7 +181,9 @@ slicer-demo-all: ## Run all Slicer demos sequentially
 	@uv run pytest tests/demos/ -v -s --timeout=120 -n0
 
 # Marker expression for tests that don't require external services
-PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema and not packaging
+PYTEST_NO_EXT_MARKERS := not pipeline and not dicom and not slicer and not schema
+# ... and are fast (packaging builds a wheel) — what `make test-unit` runs
+PYTEST_UNIT_MARKERS := $(PYTEST_NO_EXT_MARKERS) and not packaging
 
 # Max xdist workers (override: PYTEST_WORKERS=4 make test-fast)
 PYTEST_WORKERS ?= 10
@@ -252,7 +254,7 @@ _test-all-stages-impl:
 	@echo "=========================================="
 	@echo "  Stage 2/8: test-unit (DB-only, xdist)   "
 	@echo "=========================================="
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "$(PYTEST_UNIT_MARKERS)" -q
 	@echo ""
 	@echo "=========================================="
 	@echo "  Stage 2b/8: migration tests on PG       "
@@ -309,7 +311,7 @@ _test-all-stages-impl:
 		echo "=========================================="; \
 		echo "  Stage 5/8: test-fast — no VM, skip ext  "; \
 		echo "=========================================="; \
-		./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q; \
+		./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "$(PYTEST_NO_EXT_MARKERS)" -q; \
 	else \
 		echo ""; \
 		echo "=========================================="; \

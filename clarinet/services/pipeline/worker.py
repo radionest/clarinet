@@ -62,6 +62,7 @@ async def warn_if_stale(queues: list[str]) -> None:
         client = ClarinetClient(
             base_url=settings.effective_api_base_url,
             service_token=settings.effective_service_token,
+            verify_ssl=settings.api_verify_ssl,
         )
         api_fp = await client.get_worker_fingerprint()
         mine = compute_fingerprint()
