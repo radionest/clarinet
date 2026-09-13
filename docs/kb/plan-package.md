@@ -223,8 +223,8 @@ A broken plan file must crash startup, never degrade silently.
   description, multiple, level, `grid_conform_to`, `on_grid_mismatch`) — a
   `FileDefinition` row is shared by every type binding it, so the types must
   agree or the row would flip to whichever type reconciled last.
-- `app.py` converts `ConfigLoadError` → `StartupError`; `run_worker` converts it
-  → `SystemExit(1)`.
+- `app.py` converts `ConfigLoadError` (and any other `ConfigurationError` from
+  `reconcile_config`) → `StartupError`; `run_worker` converts it → `SystemExit(1)`.
 
 Full loading contract, including the test-sanitation fixtures:
 [`.claude/rules/custom-code-loading.md`](../../.claude/rules/custom-code-loading.md).

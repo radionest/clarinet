@@ -125,7 +125,8 @@ A broken plan file must crash startup, never degrade silently:
   therefore run BEFORE reconcile in the lifespan. Boundary: the guard covers
   config-defined RecordTypes only — types mutated via the API (TOML mode) and
   orphaned DB rows are caught only by the runtime ERROR/WARNING log
-- `app.py` lifespan converts `ConfigLoadError` → `StartupError(component="Config",
+- `app.py` lifespan converts `ConfigLoadError` — and any other `ConfigurationError`
+  raised by `reconcile_config` — → `StartupError(component="Config",
   disableable=False)`; `worker.run_worker` converts it → `SystemExit(1)`
 
 ## Test sanitation
