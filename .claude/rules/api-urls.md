@@ -56,6 +56,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/filter-options` | POST | 200 | Distinct patient/record_type/user values for filter dropdowns (RBAC-scoped; body filters ignored) |
 | `/api/records/bulk/status` | PATCH | 204 | Bulk status update. **409** for non-superusers when any target record is finished and its type locks submitted records (`editable=False` or expired `edit_window_days`); **409** when any target is `preparing` and the new status is `inwork`/`finished`. Preparing → pending re-validates files per record (may land in `blocked`) |
 | `/api/records/{id}` | GET | 200 | Get record |
+| `/api/records/{id}` | PATCH | 200 | Partial update (`viewer_study_uids`, `viewer_series_uids`); empty body is a no-op read. Auth: `MutableRecordDep` (superuser/owner/unassigned/`shared_editing`); response masked per record masking policy |
 | `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |
 | `/api/records/{id}/status` | PATCH | 200 | Update status. **409** for non-superusers when the record is finished and its type locks submitted records; **409** on `preparing` → `inwork`/`finished` (must exit via `pending`). Preparing → pending re-validates files (may land in `blocked`) |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |

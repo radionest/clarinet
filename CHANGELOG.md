@@ -418,6 +418,13 @@
 
 ### Security
 
+- `PATCH /api/records/{id}` now requires mutation rights on the record
+  (`MutableRecordDep`: superuser, assigned user, unassigned record, or a
+  `shared_editing` type) and masks patient data in the response like every
+  other record endpoint. Before, any authenticated user could send an
+  empty-body PATCH for an arbitrary record id and receive its unmasked
+  identifiers; a role-holder now gets **403** on records assigned to someone
+  else. Closes #555.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
