@@ -1,5 +1,6 @@
 """Unit tests for clarinet.settings."""
 
+import locale
 from pathlib import Path
 
 import pytest
@@ -214,3 +215,13 @@ class TestBrowserTitle:
         monkeypatch.setenv("CLARINET_PROJECT_NAME", "demo_ndt")
         monkeypatch.setenv("CLARINET_PROJECT_TITLE", "НИР Дефектоскопия")
         assert Settings().browser_title == "НИР Дефектоскопия"
+
+
+def test_import_leaves_process_locale_parseable() -> None:
+    """Importing clarinet.settings must not touch LC_TIME (#451).
+
+    A setlocale(LC_TIME, "en-US") at import time succeeded on Windows but left
+    a value CPython's locale.py cannot parse, so the next getlocale() caller
+    in the process (e.g. _strptime on `import pandas`) raised ValueError.
+    """
+    locale.getlocale(locale.LC_TIME)
