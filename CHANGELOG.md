@@ -576,6 +576,17 @@
 
 ### Fixed
 
+- **`ClarinetClient` owns an explicit httpx timeout, and transport errors
+  name their exception.** The client built its `httpx.AsyncClient` without a
+  `timeout`, so httpx's 5 s default governed every phase of every request; one
+  `iter_records` page at `batch=500` crosses it on record types that serialize
+  slowly, and the failure surfaced as a bare `HTTP error:` because
+  `str(httpx.ReadTimeout(""))` is empty. The default is now
+  `httpx.Timeout(60.0, connect=5.0)` (`clarinet.client.DEFAULT_TIMEOUT`),
+  overridable per instance with the new `timeout=` keyword; `download_report`'s
+  per-call `request_timeout` still wins. `ClarinetAPIError` wraps transport
+  errors with `repr()`, e.g. `HTTP error: ReadTimeout('')` — anything matching
+  the old message text should match on the class name instead (#586).
 - **`PATCH /types/{name}` no longer answers with an empty `file_registry`
   after a successful sync.** `sync_file_links(clear_existing=True)` deleted the
   old `RecordTypeFileLink` rows with `session.delete()` and then reassigned

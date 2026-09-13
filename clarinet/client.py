@@ -1271,7 +1271,7 @@ class ClarinetClient:
             request_timeout: Per-request httpx timeout in seconds. Report SQL
                 may legally run up to the server's
                 ``reports_query_timeout_seconds`` (minutes), far beyond the
-                httpx default — pass a matching value.
+                client default — pass a matching value.
 
         Returns:
             The serialized report body (CSV is UTF-8 with BOM).
