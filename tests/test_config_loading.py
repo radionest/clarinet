@@ -445,3 +445,19 @@ async def test_unnamed_grid_reference_raises_config_load_error(tmp_path):
 
     with pytest.raises(ConfigLoadError, match="defect-seg"):
         await _to_record_type_create(rt_def, tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_record_type_validation_error_raises_config_load_error(tmp_path, monkeypatch):
+    """A pydantic ``ValidationError`` (a ``ValueError``) from ``RecordTypeCreate`` is wrapped too."""
+    from clarinet.config import python_loader
+    from clarinet.config.primitives import RecordDef
+
+    def reject(**kwargs):
+        raise ValueError("shared_editing requires unique_by")
+
+    monkeypatch.setattr(python_loader, "RecordTypeCreate", reject)
+    rt_def = RecordDef(name="defect-seg", level="SERIES")
+
+    with pytest.raises(ConfigLoadError, match="defect-seg"):
+        await python_loader._to_record_type_create(rt_def, tmp_path)

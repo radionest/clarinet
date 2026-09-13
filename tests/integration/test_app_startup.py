@@ -425,16 +425,22 @@ async def test_startup_recordflow_no_eager_healthcheck(startup_settings, capture
 
 
 @pytest.mark.asyncio
-async def test_startup_reconcile_configuration_error_raises_config_startup_error(
-    startup_settings, monkeypatch
+@pytest.mark.parametrize("exc_name", ["ConfigurationError", "RecordConstraintViolationError"])
+async def test_startup_reconcile_config_error_raises_config_startup_error(
+    startup_settings, monkeypatch, exc_name
 ):
-    """A plain ``ConfigurationError`` from ``reconcile_config`` gets the Config banner (#566)."""
+    """A non-ConfigLoadError config failure from ``reconcile_config`` gets the Config banner (#566).
+
+    ``ConfigurationError`` covers undefined roles/viewers and unregistered
+    validators; ``RecordConstraintViolationError`` is what the cross-type
+    shared-file check raises.
+    """
     from clarinet.api import app as app_module
     from clarinet.api.app import StartupError
-    from clarinet.exceptions.domain import ConfigurationError
+    from clarinet.exceptions import domain
 
     async def broken_reconcile():
-        raise ConfigurationError("RecordType config references undefined role(s): ghost")
+        raise getattr(domain, exc_name)("RecordType config references undefined role(s): ghost")
 
     monkeypatch.setattr(app_module, "reconcile_config", broken_reconcile)
 

@@ -240,7 +240,7 @@ async def _to_record_type_create(
 
     try:
         return RecordTypeCreate(**kwargs)
-    except RecordConstraintViolationError as e:
+    except (RecordConstraintViolationError, ValueError) as e:
         raise ConfigLoadError(
             f"Invalid record type '{rt_def.name}': {e}",
             path=folder,

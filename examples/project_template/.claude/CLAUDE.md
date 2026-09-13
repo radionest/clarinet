@@ -79,7 +79,7 @@ cp .env.example .env                          # fill in secrets
 uv run clarinet db init                       # initialize the DB + create the admin
 uv run clarinet run                           # start the API + frontend
 uv run clarinet worker                        # pipeline worker (all queues)
-uv run clarinet worker --queues clarinet.dicom  # specific queues
+uv run clarinet worker --queues dicom  # specific queues (shorthand for settings.dicom_queue_name)
 uv run clarinet ohif install                  # install OHIF Viewer (served at /ohif)
 uv run clarinet rabbitmq status               # queue status
 ```

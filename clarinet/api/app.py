@@ -36,7 +36,12 @@ from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
-from clarinet.exceptions.domain import ConfigLoadError, ConfigurationError, RecordFlowError
+from clarinet.exceptions.domain import (
+    ConfigLoadError,
+    ConfigurationError,
+    RecordConstraintViolationError,
+    RecordFlowError,
+)
 from clarinet.files import Files
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
@@ -257,7 +262,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         reconcile_result = await reconcile_config()
     except ConfigLoadError as e:
         raise _config_startup_error(e) from e
-    except ConfigurationError as e:
+    except (ConfigurationError, RecordConstraintViolationError) as e:
         raise StartupError(
             component="Config",
             reason=str(e),
