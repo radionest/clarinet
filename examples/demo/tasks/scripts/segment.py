@@ -19,7 +19,7 @@ try:
 except NameError:
     best_series_uid = None
 
-if best_series_uid is not None:  # type: ignore[name-defined]
+if best_series_uid is not None:
     s.load_series_from_pacs(study_uid, best_series_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 else:
     s.load_study_from_pacs(study_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821

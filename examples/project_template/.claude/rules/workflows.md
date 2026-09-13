@@ -54,13 +54,13 @@ If a step takes <50ms and does no I/O, it's an action. If it reads files, hits t
 ### Decorator
 
 ```python
-@pipeline_task(queue="clarinet.dicom", auto_submit=False)
+@pipeline_task(queue=settings.dicom_queue_name, auto_submit=False)
 async def my_task(msg: PipelineMessage, ctx: TaskContext) -> None: ...
 ```
 
 | Parameter | Purpose |
 |---|---|
-| `queue` | The TaskIQ queue. Defaults to `"default"`. Built-in: `"clarinet.dicom"` (DICOM tasks). You can set up your own via `pipeline_default_timeout` etc. in settings. |
+| `queue` | The TaskIQ queue — always a `settings.*_queue_name` property (default `settings.default_queue_name`; `settings.dicom_queue_name` for DICOM tasks), never a literal: real names carry a version fingerprint (`{ns}.<12-hex>.{kind}`), so a hard-coded `"clarinet.dicom"` binds a queue no worker consumes. Tune timeouts/retries via `pipeline_default_timeout` etc. in settings. |
 | `auto_submit` | If `True` and the task returns a `dict`, the framework automatically calls `submit_record_data(msg.record_id, result)`. Convenient for short, pure functions. |
 
 ### Async vs sync
@@ -218,10 +218,10 @@ Only f-strings, never `print()`, never `import loguru`.
 
 ### Built-in tasks
 
-- `convert_series_to_nifti` — converts a DICOM series to NIfTI via C-GET. Queue `clarinet.dicom`. Idempotent (checks `volume.nii.gz`).
+- `convert_series_to_nifti` — converts a DICOM series to NIfTI via C-GET. Queue `settings.dicom_queue_name`. Idempotent (checks `volume.nii.gz`).
 - `_convert_series_impl(msg, ctx)` — the internal function for direct use inside custom tasks (if you need to both load NIfTI and do something else in a single task).
-- `anonymize_study_pipeline` — Record-aware DICOM anonymization: PACS → anonymize → distribute → submit to the Record. Queue `clarinet.dicom`. Requires `msg.record_id`. See `anonymization.md`.
-- `prefetch_dicom_web` — prefetches a study into the DICOMweb disk cache via C-GET. Queue `clarinet.dicom`. Requires `msg.study_uid`. Idempotent.
+- `anonymize_study_pipeline` — Record-aware DICOM anonymization: PACS → anonymize → distribute → submit to the Record. Queue `settings.dicom_queue_name`. Requires `msg.record_id`. See `anonymization.md`.
+- `prefetch_dicom_web` — prefetches a study into the DICOMweb disk cache via C-GET. Queue `settings.dicom_queue_name`. Requires `msg.study_uid`. Idempotent.
 
 A custom task's name must not collide with a built-in one — otherwise `register_task()` raises `PipelineConfigError`. The collision is on the **bare function name**: task names are `{namespace}:{function_name}`, not module-qualified, so a `plan/` task re-using a built-in's function name is rejected as soon as anything imports that built-in. See `anonymization.md` for the trap people hit most.
 

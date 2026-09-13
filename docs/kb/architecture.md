@@ -97,7 +97,7 @@ non-session work (HTTP calls, `asyncio.to_thread` CPU work).
     bus, if `sse_enabled`
 
 A `ConfigLoadError` from any plan-loading step, or any other `ConfigurationError`
-from `reconcile_config`, becomes
+or `RecordConstraintViolationError` from `reconcile_config`, becomes
 `StartupError(component="Config")` — the server refuses to boot rather than run
 without the project's validators, hydrators or flows.
 
