@@ -46,6 +46,11 @@ StudyRead.model_rebuild()
 SeriesRead.model_rebuild()
 RecordRead.model_rebuild()
 
+# httpx defaults to 5 s per phase — one ``iter_records`` page at batch=500
+# already exceeds that on record types costing >10 ms/record to serialize
+# (#586). Connect stays short so a dead host still fails fast.
+DEFAULT_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+
 
 class ClarinetAPIError(Exception):
     """Base exception for Clarinet API errors."""
@@ -114,6 +119,7 @@ class ClarinetClient:
         log_requests: bool = False,
         verify_ssl: bool = True,
         service_token: str | None = None,
+        timeout: float | httpx.Timeout | None = DEFAULT_TIMEOUT,
     ) -> None:
         """Initialize Clarinet client.
 
@@ -129,6 +135,11 @@ class ClarinetClient:
             service_token: Static service token for internal clients. When set,
                           sent as X-Internal-Token header — no login() needed,
                           no AccessToken created in DB.
+            timeout: httpx timeout for every request (default: 60 s read/write,
+                    5 s connect). A bare float sets every phase, connect
+                    included — to raise only the read budget for slow record
+                    types pass ``httpx.Timeout(300, connect=5)``. ``None``
+                    disables timeouts entirely.
         """
         self.base_url = base_url.rstrip("/")
         self.username = username
@@ -138,7 +149,7 @@ class ClarinetClient:
 
         # Create async HTTP client with cookie jar for session management
         self.client = httpx.AsyncClient(
-            base_url=self.base_url, follow_redirects=True, verify=verify_ssl
+            base_url=self.base_url, follow_redirects=True, verify=verify_ssl, timeout=timeout
         )
 
         if service_token:
@@ -289,8 +300,9 @@ class ClarinetClient:
             return response
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error during request: {e}")
-            raise ClarinetAPIError(f"HTTP error: {e!s}") from e
+            # repr, not str: ``httpx.ReadTimeout.__str__()`` is empty (#586).
+            logger.error(f"HTTP error during request: {e!r}")
+            raise ClarinetAPIError(f"HTTP error: {e!r}") from e
 
     async def login(self, username: str | None = None, password: str | None = None) -> UserRead:
         """Authenticate with the API.
@@ -1261,7 +1273,7 @@ class ClarinetClient:
             request_timeout: Per-request httpx timeout in seconds. Report SQL
                 may legally run up to the server's
                 ``reports_query_timeout_seconds`` (minutes), far beyond the
-                httpx default — pass a matching value.
+                client default — pass a matching value.
 
         Returns:
             The serialized report body (CSV is UTF-8 with BOM).

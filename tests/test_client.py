@@ -1095,3 +1095,39 @@ class TestDownloadReport:
         # The explicit per-request timeout must reach httpx (report SQL may
         # run for minutes — far beyond the client default).
         assert captured["timeout"] == 330
+
+
+class TestClientTimeout:
+    """The client owns an explicit httpx timeout instead of httpx's 5 s default (#586)."""
+
+    @pytest.mark.asyncio
+    async def test_default_timeout_is_explicit(self) -> None:
+        client = ClarinetClient("http://test", auto_login=False)
+        try:
+            assert client.client.timeout == httpx.Timeout(60.0, connect=5.0)
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_timeout_override_reaches_httpx(self) -> None:
+        client = ClarinetClient("http://test", auto_login=False, timeout=300)
+        try:
+            assert client.client.timeout == httpx.Timeout(300)
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_transport_error_names_exception_class(self) -> None:
+        """``str(httpx.ReadTimeout(""))`` is empty — the wrapped error must still say what happened."""
+
+        async def mock_request(method, url, **kwargs):
+            raise httpx.ReadTimeout("")
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        with pytest.raises(ClarinetAPIError) as exc_info:
+            await client._request("POST", "/records/find", json={"limit": 500})
+
+        assert "ReadTimeout" in str(exc_info.value)
