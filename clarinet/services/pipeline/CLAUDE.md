@@ -9,7 +9,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 - **TaskIQ** as task queue (not FastStream) — built-in retry, DLQ, FastAPI DI compatibility
 - **AioPikaBroker** connects to RabbitMQ via existing `settings.rabbitmq_*` configuration
 - **Direct exchange** (`settings.rabbitmq_exchange`, default `clarinet`) with **per-queue brokers**: each queue gets its own `AioPikaBroker` instance via `get_broker_for(queue_name)`
-- **Project-namespaced queues**: queue names are `{settings.pipeline_task_namespace}.{default,gpu,dicom,quarto,dead_letter}`. With the default `project_name = "Clarinet"` they remain `clarinet.default`/`.gpu`/`.dicom`/`.quarto`/`.dead_letter`. Other projects (e.g. `project_name = "Acme"`) get their own isolated queues
+- **Project-namespaced, versioned queues**: queue names are `{settings.pipeline_task_namespace}.<12-hex>.{default,gpu,dicom,quarto}` plus the unversioned `{namespace}.dead_letter` (see Queue Routing below). With the default `project_name = "Clarinet"` that is `clarinet.<12-hex>.default`/`.gpu`/`.dicom`/`.quarto` and `clarinet.dead_letter`. Other projects (e.g. `project_name = "Acme"`) get their own isolated queues
 - **routing_key = full queue name** — guarantees no cross-project routing collisions on a shared exchange
 - **Tasks are bound to brokers at decoration time**: `@pipeline_task(queue=...)` registers on `get_broker_for(queue)`. `task.kicker().kiq()` always publishes to the correct queue without any routing-key juggling
 - **PipelineChainMiddleware** advances multi-step pipelines via DB-backed definitions (HTTP API lookup); next-step dispatch goes through the next task's own broker

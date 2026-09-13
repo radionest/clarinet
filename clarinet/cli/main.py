@@ -228,6 +228,7 @@ secret_key = "change-this-secret-key-in-production"
     env_example = """# Environment variables (optional)
 # CLARINET_DATABASE_DRIVER=postgresql+asyncpg
 # CLARINET_DATABASE_HOST=localhost
+# CLARINET_DATABASE_PORT=5432
 # CLARINET_DATABASE_NAME=dbname
 # CLARINET_DATABASE_USERNAME=user
 # CLARINET_DATABASE_PASSWORD=pass
