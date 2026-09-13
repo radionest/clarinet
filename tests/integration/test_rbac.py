@@ -464,6 +464,29 @@ async def test_patient_masking_for_non_admin(
 
 
 @pytest.mark.asyncio
+async def test_patch_record_other_role_forbidden(role_a_client, record_role_b):
+    """Non-superuser cannot PATCH /api/records/{id} for a record with a different role."""
+    response = await role_a_client.patch(f"/api/records/{record_role_b.id}", json={})
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_patch_record_empty_body_masks_patient(
+    test_session, role_a_client, record_role_a, test_patient
+):
+    """Empty-body PATCH /api/records/{id} is a no-op read and must mask like GET does."""
+    test_patient.auto_id = 123
+    test_session.add(test_patient)
+    await test_session.commit()
+
+    response = await role_a_client.patch(f"/api/records/{record_role_a.id}", json={})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["patient_id"] == "CLARINET_123"
+    assert data["patient"]["id"] == "CLARINET_123"
+
+
+@pytest.mark.asyncio
 async def test_study_date_and_description_masked_for_non_admin(
     test_session, role_a_client, record_role_a, test_patient, test_study
 ):

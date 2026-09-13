@@ -927,10 +927,12 @@ async def resubmit_record_with_validation(
 
 @router.patch("/{record_id}", response_model=RecordRead)
 async def update_record(
-    record_id: Annotated[int, FastAPIPath(ge=1, le=2147483647)],
+    record_id: int,
     record_update: RecordOptional,
     repo: RecordRepositoryDep,
-) -> Record:
+    authorized_record: MutableRecordDep,
+    user: CurrentUserDep,
+) -> RecordRead:
     """Update a record with partial data.
 
     Currently supports: viewer_study_uids.
@@ -938,8 +940,9 @@ async def update_record(
     """
     update_data = record_update.model_dump(exclude_unset=True)
     if not update_data:
-        return await repo.get_with_relations(record_id)
-    return await repo.update_fields(record_id, update_data)
+        return mask_record_patient_data(RecordRead.model_validate(authorized_record), user)
+    updated = await repo.update_fields(record_id, update_data)
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
 @router.post("/{record_id}/validate-files")
