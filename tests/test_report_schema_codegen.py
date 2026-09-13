@@ -1,7 +1,6 @@
 """Unit tests for pandera schema codegen from SQL report column types."""
 
 import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
@@ -84,11 +83,6 @@ def test_render_empty_module_is_valid_python() -> None:
     compile(module, "report_schemas.py", "exec")  # no classes, still valid
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="importing pandas triggers _strptime LocaleTime → 'unknown locale: en-US' on the "
-    "Windows CI runner; the report kernel that imports the generated module runs on Linux only",
-)
 def test_generated_module_coerces_csv_dtypes(tmp_path: Path) -> None:
     """End-to-end: the generated schema reads a CSV with correct, coerced dtypes.
 

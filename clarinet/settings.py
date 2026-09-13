@@ -25,7 +25,7 @@ from taskiq.acks import AcknowledgeType
 # Set locale for date/time formatting
 try:
     if os.name == "nt":  # Windows
-        locale.setlocale(locale.LC_TIME, "en-US")
+        locale.setlocale(locale.LC_TIME, "en_US")
     else:  # Unix/Linux
         locale.setlocale(locale.LC_TIME, "en_US.UTF-8")
 except locale.Error:
