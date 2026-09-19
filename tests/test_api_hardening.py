@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from clarinet.api.app import create_app
 from clarinet.settings import Settings, settings
+from tests.conftest import create_authenticated_client, create_mock_superuser
 from tests.utils.urls import HEALTH, PIPELINES_SYNC
 
 EVIL_ORIGIN = "https://evil.example"
@@ -52,6 +53,15 @@ def test_ohif_does_not_serve_an_absolute_path_remainder(ohif_client, tmp_path):
     assert "PATIENT-SECRET" not in response.text
 
 
+def test_ohif_nul_byte_is_a_miss_not_an_error(ohif_client):
+    # Path.resolve() raises ValueError on an embedded NUL; unguarded, that is a
+    # 422 plus a full traceback in the log for every anonymous request.
+    response = ohif_client.get("/ohif/%00")
+
+    assert response.status_code == 200
+    assert response.text == "ohif index"
+
+
 def test_cors_does_not_reflect_arbitrary_origins():
     client = TestClient(create_app(root_path=""))
 
@@ -72,10 +82,13 @@ def test_cors_allows_configured_origin_with_credentials(monkeypatch):
     assert "access-control-allow-origin" not in denied.headers
 
 
-def test_cors_wildcard_origin_is_rejected(monkeypatch):
-    # "*" plus credentials makes Starlette echo any Origin back - the original hole.
-    # Via env: Settings ignores constructor kwargs (settings_customise_sources).
-    monkeypatch.setenv("CLARINET_CORS_ORIGINS", '["*"]')
+# "*" plus credentials makes Starlette echo any Origin back - the original hole.
+# "null" is what sandboxed iframes and data: documents send, so allowing it with
+# credentials admits any page that can wrap itself in one.
+# Via env: Settings ignores constructor kwargs (settings_customise_sources).
+@pytest.mark.parametrize("origin", ["*", "null"])
+def test_cors_unsafe_origin_is_rejected(monkeypatch, origin):
+    monkeypatch.setenv("CLARINET_CORS_ORIGINS", f'["{origin}"]')
 
     with pytest.raises(ValidationError):
         Settings()
@@ -86,3 +99,15 @@ async def test_pipeline_sync_requires_authentication(unauthenticated_client):
     response = await unauthenticated_client.post(PIPELINES_SYNC)
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_pipeline_sync_requires_admin(test_session, test_settings):
+    # Pins AdminUserDep: with only "authenticated" required this would be 200.
+    user = await create_mock_superuser(test_session, email="plain@test.com")
+    user.is_superuser = False
+
+    async for client in create_authenticated_client(user, test_session, test_settings):
+        response = await client.post(PIPELINES_SYNC)
+
+    assert response.status_code == 403
