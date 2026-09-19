@@ -210,12 +210,49 @@ async def test_loopback_service_token_is_never_locked(
     assert response.status_code == 200
 
 
+# hmac.compare_digest raises TypeError when EITHER operand is a non-ASCII str;
+# uncaught, that is an unauthenticated 500 whose traceback renders the real token
+# as a frame local.
 @pytest.mark.asyncio
-async def test_non_ascii_service_token_is_rejected_not_crashed(
-    unauthenticated_client, service_admin
+async def test_non_ascii_service_token_header_is_a_counted_failure(
+    unauthenticated_client, service_admin, test_settings, monkeypatch
 ):
-    # hmac.compare_digest raises TypeError on a non-ASCII str; uncaught, that is an
-    # unauthenticated 500 whose traceback renders the real token as a frame local.
-    response = await unauthenticated_client.get(AUTH_ME, headers={"X-Internal-Token": b"\xff\xfe"})
+    monkeypatch.setattr(test_settings, "login_max_failures_per_ip", 3)
+    async with _client_from(REMOTE_IP) as remote:  # loopback would not be counted
+        for _ in range(3):
+            response = await remote.get(AUTH_ME, headers={"X-Internal-Token": b"\xff\xfe"})
+            assert response.status_code == 401
+
+        locked = await remote.get(AUTH_ME, headers={"X-Internal-Token": SERVICE_TOKEN})
+
+    assert locked.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_configured_token_does_not_crash_every_request(
+    unauthenticated_client, service_admin, test_settings, monkeypatch
+):
+    # internal_service_token is free-form; only the admin_password-derived value is hex.
+    monkeypatch.setattr(test_settings, "internal_service_token", SecretStr("tökén"))
+
+    response = await unauthenticated_client.get(AUTH_ME, headers={"X-Internal-Token": "guess"})
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_server_fault_during_login_is_not_a_failed_attempt():
+    """A DB outage is not a wrong password: users retrying through one must not
+    come back to a locked account once it is over."""
+
+    class _BrokenUserDb:
+        async def get_by_email(self, email: str) -> None:
+            raise RuntimeError("database is down")
+
+    manager = UserManager(user_db=_BrokenUserDb(), client_ip="10.0.0.9")
+    for _ in range(6):  # past the default per-account limit of 5
+        with pytest.raises(RuntimeError):
+            await manager.authenticate(SimpleNamespace(username="a@example.com", password="x"))
+
+    assert not auth_config._is_throttled("email:a@example.com", 5)
+    assert not auth_config._is_throttled("ip:10.0.0.9", 5)

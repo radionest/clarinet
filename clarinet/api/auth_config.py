@@ -129,7 +129,15 @@ class UserManager(BaseUserManager[User, UUID]):
         if ip_key is not None:
             _record_auth_failure(ip_key)
 
-        user = await super().authenticate(credentials)
+        try:
+            user = await super().authenticate(credentials)
+        except BaseException:
+            # A DB outage or a cancelled request is not a wrong password: users
+            # retrying through one must not come back to a locked account.
+            _forgive_auth_failure(account_key)
+            if ip_key is not None:
+                _forgive_auth_failure(ip_key)
+            raise
         if user is not None:
             _auth_failures.pop(account_key, None)
             if ip_key is not None:
@@ -580,9 +588,10 @@ def is_service_request(request: Request) -> bool:
         )
         return False
 
-    # isascii() first: compare_digest raises TypeError on a non-ASCII str, which
-    # would be an unauthenticated 500 whose traceback renders the real token.
-    if not header_token.isascii() or not hmac.compare_digest(header_token, effective_token):
+    # Compare bytes: on str, compare_digest raises TypeError when either side is
+    # non-ASCII — an unauthenticated 500 whose traceback renders the real token.
+    # latin-1 restores the header's raw bytes (that is how Starlette decoded them).
+    if not hmac.compare_digest(header_token.encode("latin-1", "replace"), effective_token.encode()):
         logger.warning(
             f"Invalid service token from {host or 'unknown'}",
             extra={"reason": "invalid_service_token"},
