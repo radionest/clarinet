@@ -325,6 +325,7 @@ class TestGetAuditActor:
         user.id = uuid4()
         with patch("clarinet.api.auth_config.settings") as settings_mock:
             settings_mock.effective_service_token = "secret-token"
+            settings_mock.login_lockout_minutes = 0
             request = self._request({"X-Internal-Token": "secret-token"})
             assert get_audit_actor(request, user) is None
 
@@ -335,6 +336,7 @@ class TestGetAuditActor:
         user.id = uuid4()
         with patch("clarinet.api.auth_config.settings") as settings_mock:
             settings_mock.effective_service_token = "secret-token"
+            settings_mock.login_lockout_minutes = 0
             request = self._request({"X-Internal-Token": "wrong"})
             assert get_audit_actor(request, user) == user.id
 

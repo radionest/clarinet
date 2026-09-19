@@ -17,8 +17,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi import Request
+from fastapi import HTTPException, Request
 
+from clarinet.api import auth_config
 from clarinet.api.auth_config import DatabaseStrategy, UserManager
 from clarinet.models.user import User
 from clarinet.utils.logger import logger
@@ -276,3 +277,43 @@ class TestOnAfterLoginDebugStructure:
 
         assert _records_for(captured_records, "logged in")
         assert not _records_for(captured_records, "Login request metadata")
+
+
+class TestAuthThrottleLogStructure:
+    """Throttled auth attempts must carry a `reason` — and never the typed email."""
+
+    @pytest.mark.asyncio
+    async def test_login_throttled_logs_reason_without_email(self, captured_records):
+        # People type passwords into the email field; the value must not reach logs.
+        typed = "Hunter2-typed-into-email-field"
+        for _ in range(5):  # default login_max_failures_per_account
+            auth_config._record_auth_failure(f"email:{typed.lower()}")
+        manager = UserManager(user_db=MagicMock(), client_ip="10.0.0.1")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await manager.authenticate(SimpleNamespace(username=typed, password="x"))
+
+        assert exc_info.value.status_code == 429
+        warnings = _records_for(captured_records, "Login throttled")
+        assert len(warnings) == 1
+        extra = warnings[0]["extra"]["extra"]
+        assert extra["reason"] == "login_throttled"
+        assert extra["request_ip"] == "10.0.0.1"
+        assert typed.lower() not in str(warnings[0]["message"]).lower()
+        assert typed.lower() not in str(extra).lower()
+
+    def test_service_token_throttled_logs_reason(self, captured_records):
+        for _ in range(20):
+            auth_config._record_auth_failure("ip:10.0.0.1")
+        request = _make_request()
+        request.headers = {"X-Internal-Token": "secret-token"}
+
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
+            mock_settings.effective_service_token = "secret-token"
+            mock_settings.login_lockout_minutes = 15
+            mock_settings.login_max_failures_per_ip = 20
+            assert auth_config.is_service_request(request) is False
+
+        warnings = _records_for(captured_records, "Service token from 10.0.0.1 ignored")
+        assert len(warnings) == 1
+        assert warnings[0]["extra"]["extra"]["reason"] == "service_token_throttled"

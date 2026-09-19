@@ -337,6 +337,12 @@ class Settings(BaseSettings):
     session_secure_cookie: bool = True  # HTTPS only in production
     session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
 
+    # Failed-auth throttling (login + X-Internal-Token); see api/auth_config.py.
+    # Per-IP is looser than per-account: hospital users often share one NAT address.
+    login_max_failures_per_account: int = 5
+    login_max_failures_per_ip: int = 20
+    login_lockout_minutes: int = 15  # 0 = throttling disabled
+
     # SSE push (single-process in-memory bus; see services/events/bus.py)
     sse_enabled: bool = True
     sse_revalidate_seconds: int = 300  # session re-check interval per connection

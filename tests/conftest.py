@@ -130,6 +130,16 @@ def _reset_fingerprint_cache():
     reset_fingerprint_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_auth_throttle():
+    """Failed-auth counters are process-global; clear them so tests that log in
+    with bad credentials cannot lock later tests out."""
+    from clarinet.api.auth_config import _auth_failures
+
+    _auth_failures.clear()
+    yield
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _suppress_pynetdicom_logging():
     """Prevent pynetdicom background threads from polluting test output.

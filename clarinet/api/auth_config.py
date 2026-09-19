@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Request, Response
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -31,6 +32,47 @@ from clarinet.utils.fastapi_users_db import SQLModelUserDatabaseAsync
 from clarinet.utils.logger import logger
 from clarinet.utils.session import emit_offline_if_last
 
+# --- Failed-auth throttling (login + X-Internal-Token) ---
+
+# ponytail: in-memory counters — per-process and reset on restart. Fine while the
+# API is a single uvicorn process (the SSE bus assumes the same); move to the DB
+# if that changes. TTL is fixed at import, like DatabaseStrategy._user_cache.
+#
+# Counts live in one-element lists so they can be bumped in place: re-assigning
+# a TTLCache key restarts its TTL, which would turn the fixed window into one
+# that a trickle of typos behind a shared NAT address keeps alive forever.
+_auth_failures: TTLCache[str, list[int]] = TTLCache(
+    maxsize=10_000, ttl=max(settings.login_lockout_minutes, 1) * 60
+)
+_LOOPBACK_HOSTS = ("127.0.0.1", "::1")
+_MAX_EMAIL_LENGTH = 320  # bounds the counter key: the login form accepts any string
+
+
+def _is_throttled(key: str, limit: int) -> bool:
+    """True once ``key`` has ``limit`` failures in its window.
+
+    The window is fixed: it opens at the key's first failure and closes
+    ``login_lockout_minutes`` later, however many failures follow.
+    """
+    if settings.login_lockout_minutes <= 0 or limit <= 0:
+        return False
+    cell = _auth_failures.get(key)
+    return cell is not None and bool(cell[0] >= limit)
+
+
+def _record_auth_failure(key: str) -> None:
+    cell = _auth_failures.get(key)
+    if cell is None:
+        _auth_failures[key] = [1]
+    else:
+        cell[0] += 1
+
+
+def _forgive_auth_failure(key: str) -> None:
+    cell = _auth_failures.get(key)
+    if cell is not None:
+        cell[0] -= 1
+
 
 # Minimal UserManager
 class UserManager(BaseUserManager[User, UUID]):
@@ -38,6 +80,52 @@ class UserManager(BaseUserManager[User, UUID]):
 
     reset_password_token_secret = settings.secret_key
     verification_token_secret = settings.secret_key
+
+    def __init__(
+        self, user_db: SQLModelUserDatabaseAsync[User, UUID], client_ip: str | None = None
+    ) -> None:
+        super().__init__(user_db)
+        self.client_ip = client_ip
+
+    async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> User | None:
+        """Check credentials, throttling repeated failures per account and per IP.
+
+        Failures are counted for unknown emails too, so a lockout reveals nothing
+        about whether the account exists. The attempted email is never logged —
+        people type passwords into that field.
+
+        Raises:
+            HTTPException: 429 when the account or the client IP is locked out.
+        """
+        account_key = f"email:{credentials.username.lower()[:_MAX_EMAIL_LENGTH]}"
+        ip_key = f"ip:{self.client_ip}" if self.client_ip else None
+
+        if _is_throttled(account_key, settings.login_max_failures_per_account) or (
+            ip_key is not None and _is_throttled(ip_key, settings.login_max_failures_per_ip)
+        ):
+            logger.warning(
+                f"Login throttled for {self.client_ip or 'unknown'}",
+                extra={"reason": "login_throttled", "request_ip": self.client_ip},
+            )
+            raise HTTPException(
+                status_code=429,
+                detail="Too many failed login attempts",
+                headers={"Retry-After": str(settings.login_lockout_minutes * 60)},
+            )
+
+        # Count the attempt before the first await and take it back on success:
+        # counting only after the password check would let a parallel burst of
+        # guesses all pass the check above before any of them is recorded.
+        _record_auth_failure(account_key)
+        if ip_key is not None:
+            _record_auth_failure(ip_key)
+
+        user = await super().authenticate(credentials)
+        if user is not None:
+            _auth_failures.pop(account_key, None)
+            if ip_key is not None:
+                _forgive_auth_failure(ip_key)
+        return user
 
     async def on_after_register(
         self,
@@ -91,10 +179,11 @@ async def get_user_db(
 
 
 async def get_user_manager(
+    request: Request,
     user_db: SQLModelUserDatabaseAsync[User, UUID] = Depends(get_user_db),
 ) -> AsyncGenerator[UserManager]:
     """Get user manager."""
-    yield UserManager(user_db)
+    yield UserManager(user_db, client_ip=request.client.host if request.client else None)
 
 
 # Cookie transport configuration (KISS - only cookies, no tokens)
@@ -467,11 +556,27 @@ def is_service_request(request: Request) -> bool:
     if not header_token:
         return False
 
+    # The token is derived from admin_password, so guessing it is guessing the
+    # password: throttle it on the same per-IP budget as login. Loopback is
+    # exempt — in-process RecordFlow and co-located workers share it, and one
+    # stale worker must not lock the valid token out. A request can be counted
+    # twice (auth + audit actor both land here); that only tightens the limit.
+    host = request.client.host if request.client else None
+    ip_key = f"ip:{host}" if host and host not in _LOOPBACK_HOSTS else None
+    if ip_key and _is_throttled(ip_key, settings.login_max_failures_per_ip):
+        logger.warning(
+            f"Service token from {host} ignored: too many failed attempts",
+            extra={"reason": "service_token_throttled"},
+        )
+        return False
+
     if not hmac.compare_digest(header_token, effective_token):
         logger.warning(
-            f"Invalid service token from {request.client.host if request.client else 'unknown'}",
+            f"Invalid service token from {host or 'unknown'}",
             extra={"reason": "invalid_service_token"},
         )
+        if ip_key:
+            _record_auth_failure(ip_key)
         return False
 
     return True

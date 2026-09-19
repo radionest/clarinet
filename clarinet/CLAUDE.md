@@ -168,6 +168,23 @@ Session-based auth (fastapi-users, `AccessToken`). Subcommands of `uv run clarin
 `cleanup-all` (asks for confirmation). Helpers live in `clarinet/utils/session.py`;
 the long-running cleanup loop is `SessionCleanupService` in `clarinet/services/session_cleanup.py`.
 
+### Failed-auth throttling
+
+`api/auth_config.py` counts failed logins per account (lowercased email) and per
+client IP in a fixed window that opens at the first failure and lasts
+`login_lockout_minutes` (`0` disables); past `login_max_failures_per_account` /
+`login_max_failures_per_ip` the login endpoint answers **429** until it closes.
+Attempts are counted before the password check and taken back on success, so
+a parallel burst cannot outrun the limit.
+A wrong `X-Internal-Token` spends the same per-IP budget, and a locked IP has
+the header ignored — the token is derived from `admin_password`, so it would
+otherwise be an unthrottled password oracle. Loopback is exempt on the token
+path only (in-process RecordFlow + co-located workers). Counters are in-memory:
+per-process, cleared by an API restart. Per-IP limiting trusts
+`request.client.host`, i.e. uvicorn's proxy-header handling — behind a proxy
+on another host set `FORWARDED_ALLOW_IPS`, or every user shares the proxy's IP.
+Tests: the autouse `_reset_auth_throttle` fixture clears the counters.
+
 ## Alembic Migrations
 
 `make db-upgrade`, `make db-downgrade`, `make db-migration`. Or: `uv run alembic revision --autogenerate -m "msg"`.

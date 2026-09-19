@@ -128,7 +128,12 @@ jq 'select(.extra.extra.reason == "ip_mismatch")' /tmp/clarinet.log
 jq 'select(.extra.extra.reason == "not_found_or_expired")' /tmp/clarinet.log
 jq 'select(.extra.extra.reason == "idle_timeout")' /tmp/clarinet.log
 jq 'select(.extra.extra.reason == "user_not_found")' /tmp/clarinet.log
+jq 'select(.extra.extra.reason == "login_throttled")' /tmp/clarinet.log
+jq 'select(.extra.extra.reason == "service_token_throttled")' /tmp/clarinet.log
 ```
+
+The throttle branches log the client IP only. **Never log the attempted login
+email** — people type passwords into that field.
 
 When adding a new failure branch, give it a `reason` so it joins the same
 filter set — see `tests/test_auth_logging.py` for the regression suite.

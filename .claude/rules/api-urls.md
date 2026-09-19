@@ -16,7 +16,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/auth/login` | POST | 200 | Login (fastapi-users) |
+| `/api/auth/login` | POST | 200 | Login (fastapi-users). **400** bad credentials. **429** + `Retry-After` once the account (`login_max_failures_per_account`) or client IP (`login_max_failures_per_ip`) hits its limit inside the `login_lockout_minutes` window — returned even for the correct password |
 | `/api/auth/logout` | POST | 200 | Logout |
 | `/api/auth/register` | POST | 200 | Register |
 | `/api/auth/me` | GET | 200 | Current user info |
