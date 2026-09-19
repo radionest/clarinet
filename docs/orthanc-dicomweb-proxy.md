@@ -136,7 +136,7 @@ location {base_path}/pacs-web/ {
 
 location = /_clarinet_authz {
     internal;
-    proxy_pass http://127.0.0.1:8000{base_path}/api/auth/session/validate;
+    proxy_pass http://127.0.0.1:8000{base_path}/api/auth/dicomweb-access;
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
     proxy_set_header X-Real-IP        $remote_addr;          # preserve client IP (ip-binding)
@@ -148,10 +148,15 @@ location = /_clarinet_authz {
 ```
 
 Notes:
-- The auth target `GET {base_path}/api/auth/session/validate` is read-only and returns
-  200/401/403; `auth_request` inspects status only. `read_token` commits `last_accessed`,
-  so a cached validate every ~10 s keeps an actively-viewing session non-idle and visible
+- The auth target `GET {base_path}/api/auth/dicomweb-access` is read-only and returns
+  204/401/403; `auth_request` inspects status only. `read_token` commits `last_accessed`,
+  so a cached check every ~10 s keeps an actively-viewing session non-idle and visible
   in presence.
+- **Do not point `auth_request` at `/api/auth/session/validate`.** That endpoint admits
+  any active session; `dicomweb-access` applies the same gate as the builtin `/dicom-web`
+  router — an admin, or a user holding at least one role — so a role-less account (e.g.
+  self-registered) cannot read the PACS. Deployments set up before this endpoint existed
+  must update the `proxy_pass` line above.
 - **Client IP / `session_ip_check`.** `session_ip_check` is **off by default**
   (`settings.py`). When you enable it, Clarinet validates `request.client.host`; forward
   `X-Real-IP`/`X-Forwarded-For` on the subrequest so an IP-bound session sees the real

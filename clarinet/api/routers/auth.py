@@ -20,6 +20,7 @@ from clarinet.api.auth_config import (
     get_user_db,
     require_registration_enabled,
 )
+from clarinet.api.dependencies import current_role_holder
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User, UserCreate, UserRead
 from clarinet.settings import settings
@@ -75,6 +76,22 @@ router.include_router(
 async def get_me(user: User = Depends(current_active_user)) -> User:
     """Get current user."""
     return user
+
+
+@router.get(
+    "/dicomweb-access",
+    status_code=204,
+    responses={403: {"description": "No role assigned"}},
+)
+async def check_dicomweb_access(_user: User = Depends(current_role_holder)) -> None:
+    """nginx ``auth_request`` target for the external DICOMweb backend.
+
+    With ``dicomweb_backend = "external"`` images are served by the PACS behind
+    nginx and never pass the ``/dicom-web`` router, so its role gate has to be
+    reproduced here: same dependency, status only (204 / 401 / 403). Pointing
+    ``auth_request`` at ``/session/validate`` instead admits any active
+    session, role-less ones included.
+    """
 
 
 @router.get("/session/validate", response_model=UserRead)

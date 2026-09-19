@@ -19,6 +19,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/auth/login` | POST | 200 | Login (fastapi-users) |
 | `/api/auth/logout` | POST | 200 | Logout |
 | `/api/auth/register` | POST | 201 | Public self-registration. **403** unless `settings.registration_enabled` (default `False`); the new account has no roles |
+| `/api/auth/dicomweb-access` | GET | 204 | nginx `auth_request` target for `dicomweb_backend = "external"`: same gate as the `/dicom-web` router (`current_role_holder`). **401** no session, **403** role-less account |
 | `/api/auth/me` | GET | 200 | Current user info |
 | `/api/auth/session/validate` | GET | 200 | Validate session |
 | `/api/auth/session/refresh` | POST | 200 | Refresh session |
