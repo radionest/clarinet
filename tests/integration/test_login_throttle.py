@@ -208,3 +208,14 @@ async def test_loopback_service_token_is_never_locked(
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_service_token_is_rejected_not_crashed(
+    unauthenticated_client, service_admin
+):
+    # hmac.compare_digest raises TypeError on a non-ASCII str; uncaught, that is an
+    # unauthenticated 500 whose traceback renders the real token as a frame local.
+    response = await unauthenticated_client.get(AUTH_ME, headers={"X-Internal-Token": b"\xff\xfe"})
+
+    assert response.status_code == 401

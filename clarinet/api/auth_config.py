@@ -580,7 +580,9 @@ def is_service_request(request: Request) -> bool:
         )
         return False
 
-    if not hmac.compare_digest(header_token, effective_token):
+    # isascii() first: compare_digest raises TypeError on a non-ASCII str, which
+    # would be an unauthenticated 500 whose traceback renders the real token.
+    if not header_token.isascii() or not hmac.compare_digest(header_token, effective_token):
         logger.warning(
             f"Invalid service token from {host or 'unknown'}",
             extra={"reason": "invalid_service_token"},
