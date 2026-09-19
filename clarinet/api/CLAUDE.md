@@ -87,7 +87,7 @@ alembic migration for the `record_event` table.
 When `frontend_enabled=True`, catch-all `/{full_path:path}` serves:
 - Static file if exists in `settings.static_directories`
 - `index.html` otherwise (SPA client-side routing)
-- Skips paths starting with `api/`, `dicom-web/`, or `ohif/`
+- 404s paths starting with `api/` or `dicom-web/`; `ohif/` has its own branch (rendered `app-config.js`, OHIF static file, else OHIF `index.html`)
 
 The catch-all is **unauthenticated** and Starlette passes `..` segments through
 un-normalized, so every branch that maps the URL to a file (`static_directories`,

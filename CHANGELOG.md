@@ -492,6 +492,17 @@
   a subdirectory selector), so no containment check applies — a well-formed
   absolute path set by an admin, or already present in the database, is still
   honoured. This residual is accepted, not an oversight.
+- **Three unauthenticated surfaces are closed.** `/ohif/*` joined the URL onto
+  the OHIF directory without confining the result, and Starlette passes `..`
+  through un-normalized, so `/ohif/%2e%2e/<file>` read anything the process can
+  (settings with the admin password, patient DICOM); nginx normalizes the URL
+  and masked it, a directly exposed port did not. CORS listed `"*"` with
+  credentials allowed, which makes Starlette echo any `Origin` back — it is now
+  off unless the new `cors_origins` setting (`CLARINET_CORS_ORIGINS`) lists
+  exact origins, and `"*"` is rejected; the SPA and OHIF are same-origin and
+  need none. **Breaking:** `POST /api/pipelines/sync` wrote to the DB with no
+  auth and now requires an admin (the service token qualifies), and a
+  cross-origin frontend must be listed in `cors_origins`.
 
 ### Added
 

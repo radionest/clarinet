@@ -43,6 +43,15 @@ def test_ohif_does_not_serve_files_outside_its_directory(ohif_client, path):
     assert "PATIENT-SECRET" not in response.text
 
 
+def test_ohif_does_not_serve_an_absolute_path_remainder(ohif_client, tmp_path):
+    # "/ohif//abs/path": pathlib discards the base when joining an absolute path.
+    secret = tmp_path / "storage" / "secret.txt"
+
+    response = ohif_client.get(f"/ohif/{secret}")
+
+    assert "PATIENT-SECRET" not in response.text
+
+
 def test_cors_does_not_reflect_arbitrary_origins():
     client = TestClient(create_app(root_path=""))
 
