@@ -287,7 +287,7 @@ class TestAuthThrottleLogStructure:
         # People type passwords into the email field; the value must not reach logs.
         typed = "Hunter2-typed-into-email-field"
         for _ in range(5):  # default login_max_failures_per_account
-            auth_config._record_auth_failure(f"email:{typed.lower()}")
+            auth_config._record_auth_failure(auth_config._account_key(typed, "10.0.0.1"))
         manager = UserManager(user_db=MagicMock(), client_ip="10.0.0.1")
 
         with pytest.raises(HTTPException) as exc_info:

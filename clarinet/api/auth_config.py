@@ -48,6 +48,18 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "::ffff:127.0.0.1")  # last: dual-stack b
 _MAX_EMAIL_LENGTH = 320  # bounds the counter key: the login form accepts any string
 
 
+def _account_key(email: str, client_ip: str | None) -> str:
+    """Counter key for one account *as seen from one client IP*.
+
+    Keyed by IP as well as email on purpose: an email-only lock lets any peer
+    who knows an address (``admin_email`` has a well-known default) keep its
+    owner out of the web UI indefinitely, and the counters are in-process, so
+    nothing short of an API restart would clear it. The cost: guessing one
+    account from many IPs is bounded only by the per-IP budget.
+    """
+    return f"acct:{client_ip or ''}:{email.lower()[:_MAX_EMAIL_LENGTH]}"
+
+
 def _is_throttled(key: str, limit: int) -> bool:
     """True once ``key`` has ``limit`` failures in its window.
 
@@ -97,7 +109,7 @@ class UserManager(BaseUserManager[User, UUID]):
         self.client_ip = client_ip
 
     async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> User | None:
-        """Check credentials, throttling repeated failures per account and per IP.
+        """Check credentials, throttling repeated failures per account-and-IP and per IP.
 
         Failures are counted for unknown emails too, so a lockout reveals nothing
         about whether the account exists. The attempted email is never logged —
@@ -106,7 +118,7 @@ class UserManager(BaseUserManager[User, UUID]):
         Raises:
             HTTPException: 429 when the account or the client IP is locked out.
         """
-        account_key = f"email:{credentials.username.lower()[:_MAX_EMAIL_LENGTH]}"
+        account_key = _account_key(credentials.username, self.client_ip)
         ip_key = f"ip:{self.client_ip}" if self.client_ip else None
 
         if _is_throttled(account_key, settings.login_max_failures_per_account) or (

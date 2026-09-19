@@ -170,7 +170,10 @@ the long-running cleanup loop is `SessionCleanupService` in `clarinet/services/s
 
 ### Failed-auth throttling
 
-`api/auth_config.py` counts failed logins per account (lowercased email) and per
+`api/auth_config.py` counts failed logins per account **as seen from one client
+IP** (lowercased email + IP — an email-only lock would let any peer who knows an
+address keep its owner out of the web UI, and only an API restart clears the
+in-process counters) and per
 client IP in a fixed window that opens at the first failure and lasts
 `login_lockout_minutes` (`0` disables); past `login_max_failures_per_account` /
 `login_max_failures_per_ip` the login endpoint answers **429** until it closes.

@@ -421,7 +421,9 @@
 - **Failed logins and `X-Internal-Token` guesses are throttled.** Login had no
   rate limit or lockout, and the service token — derived from `admin_password`,
   accepted on every endpoint — was a second, cheaper oracle for the same secret.
-  Failures are now counted per account and per client IP in a fixed window:
+  Failures are now counted per account-and-client-IP and per client IP in a
+  fixed window (the account counter is scoped to the IP so a peer who knows an
+  email cannot lock its owner out from the owner's own machine):
   past `login_max_failures_per_account` (5) or `login_max_failures_per_ip` (20)
   `POST /api/auth/login` answers **429** with `Retry-After` for the rest of
   `login_lockout_minutes` (15; `0` disables), even for the correct password. A

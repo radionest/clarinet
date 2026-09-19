@@ -106,6 +106,21 @@ async def test_ip_locked_across_accounts(
 
 
 @pytest.mark.asyncio
+async def test_account_lock_is_scoped_to_the_attacking_ip(unauthenticated_client, test_user):
+    """The account counter is keyed by email AND client IP: a remote peer who
+    knows an email must not be able to lock its owner out from the owner's own
+    machine (the counters are in-process - nothing but a restart clears them)."""
+    async with _client_from(REMOTE_IP) as attacker:
+        for _ in range(5):  # default login_max_failures_per_account
+            await attacker.post(AUTH_LOGIN, data=BAD)
+        assert (await attacker.post(AUTH_LOGIN, data=GOOD)).status_code == 429
+
+    response = await unauthenticated_client.post(AUTH_LOGIN, data=GOOD)
+
+    assert response.status_code in (200, 204)
+
+
+@pytest.mark.asyncio
 async def test_lockout_minutes_zero_disables_throttling(
     unauthenticated_client, test_user, test_settings, monkeypatch
 ):
@@ -254,5 +269,5 @@ async def test_server_fault_during_login_is_not_a_failed_attempt():
         with pytest.raises(RuntimeError):
             await manager.authenticate(SimpleNamespace(username="a@example.com", password="x"))
 
-    assert not auth_config._is_throttled("email:a@example.com", 5)
+    assert not auth_config._is_throttled(auth_config._account_key("a@example.com", "10.0.0.9"), 5)
     assert not auth_config._is_throttled("ip:10.0.0.9", 5)
