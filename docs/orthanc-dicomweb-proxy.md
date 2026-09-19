@@ -149,7 +149,8 @@ location = /_clarinet_authz {
 
 Notes:
 - The auth target `GET {base_path}/api/auth/dicomweb-access` is read-only and returns
-  204/401/403; `auth_request` inspects status only. `read_token` commits `last_accessed`,
+  200/401/403; `auth_request` inspects status only. It answers 200 on purpose — that is
+  the only status `proxy_cache_valid 200 10s` caches. `read_token` commits `last_accessed`,
   so a cached check every ~10 s keeps an actively-viewing session non-idle and visible
   in presence.
 - **Do not point `auth_request` at `/api/auth/session/validate`.** That endpoint admits

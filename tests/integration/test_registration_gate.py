@@ -127,4 +127,6 @@ async def test_dicomweb_access_admits_role_holder(unauthenticated_client, test_u
     await _grant_role(test_session, test_user, "doctor")
     await _login(unauthenticated_client)
 
-    assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 204
+    # 200, not 204: the documented nginx authz cache is `proxy_cache_valid 200 10s`,
+    # so any other 2xx would go uncached and cost a round-trip per image frame.
+    assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 200

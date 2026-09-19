@@ -78,20 +78,23 @@ async def get_me(user: User = Depends(current_active_user)) -> User:
     return user
 
 
-@router.get(
-    "/dicomweb-access",
-    status_code=204,
-    responses={403: {"description": "No role assigned"}},
-)
-async def check_dicomweb_access(_user: User = Depends(current_role_holder)) -> None:
+@router.get("/dicomweb-access", responses={403: {"description": "No role assigned"}})
+async def check_dicomweb_access(
+    _user: User = Depends(current_role_holder),
+) -> dict[str, bool]:
     """nginx ``auth_request`` target for the external DICOMweb backend.
 
     With ``dicomweb_backend = "external"`` images are served by the PACS behind
     nginx and never pass the ``/dicom-web`` router, so its role gate has to be
-    reproduced here: same dependency, status only (204 / 401 / 403). Pointing
+    reproduced here: same dependency, status only (200 / 401 / 403). Pointing
     ``auth_request`` at ``/session/validate`` instead admits any active
     session, role-less ones included.
+
+    Deliberately 200 rather than 204: the documented nginx authz cache is
+    ``proxy_cache_valid 200 10s``, so another 2xx would go uncached and cost a
+    round-trip per image frame.
     """
+    return {"allowed": True}
 
 
 @router.get("/session/validate", response_model=UserRead)

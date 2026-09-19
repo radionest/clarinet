@@ -43,7 +43,7 @@
   router requires an admin or a user holding at least one role. Deployments on
   `dicomweb_backend = "external"` must repoint the nginx `auth_request` from
   `/api/auth/session/validate` to the new `GET /api/auth/dicomweb-access`
-  (204/401/403) — the old target admits role-less sessions; see
+  (200/401/403) — the old target admits role-less sessions; see
   `docs/orthanc-dicomweb-proxy.md`.
 - **The DICOM core moved to the `dimsechord` package.** `clarinet.services.dicom`
   no longer exports `DicomOperations`, `StorageHandler`, `StorageMode`,
