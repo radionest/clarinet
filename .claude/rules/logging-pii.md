@@ -132,6 +132,8 @@ jq 'select(.extra.extra.reason == "login_throttled")' /tmp/clarinet.log
 jq 'select(.extra.extra.reason == "service_token_throttled")' /tmp/clarinet.log
 ```
 
+The last two are not `read_token` branches: `login_throttled` comes from
+`UserManager.authenticate`, `service_token_throttled` from `is_service_request`.
 The throttle branches log the client IP only. **Never log the attempted login
 email** — people type passwords into that field.
 

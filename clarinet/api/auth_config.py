@@ -44,7 +44,7 @@ from clarinet.utils.session import emit_offline_if_last
 _auth_failures: TTLCache[str, list[int]] = TTLCache(
     maxsize=10_000, ttl=max(settings.login_lockout_minutes, 1) * 60
 )
-_LOOPBACK_HOSTS = ("127.0.0.1", "::1")
+_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "::ffff:127.0.0.1")  # last: dual-stack bind
 _MAX_EMAIL_LENGTH = 320  # bounds the counter key: the login form accepts any string
 
 
@@ -69,9 +69,18 @@ def _record_auth_failure(key: str) -> None:
 
 
 def _forgive_auth_failure(key: str) -> None:
+    """Take one counted attempt back, dropping the entry once nothing is left.
+
+    A zero-count leftover would keep its TTL, anchoring the window at a
+    *successful* login: failures landing late in it would be locked for
+    seconds instead of ``login_lockout_minutes``.
+    """
     cell = _auth_failures.get(key)
-    if cell is not None:
-        cell[0] -= 1
+    if cell is None:
+        return
+    cell[0] -= 1
+    if cell[0] <= 0:
+        _auth_failures.pop(key, None)
 
 
 # Minimal UserManager
@@ -542,7 +551,8 @@ _service_user_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
 
 
 def is_service_request(request: Request) -> bool:
-    """True when the request carries a valid ``X-Internal-Token``.
+    """True when the request carries a valid ``X-Internal-Token`` from an IP
+    that is not locked out for guessing it (see the throttle note below).
 
     Single source of truth for service-token detection — used by auth
     (``_get_service_user``) and audit actor resolution (``get_audit_actor``)

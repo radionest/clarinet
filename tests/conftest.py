@@ -133,10 +133,12 @@ def _reset_fingerprint_cache():
 @pytest.fixture(autouse=True)
 def _reset_auth_throttle():
     """Failed-auth counters are process-global; clear them so tests that log in
-    with bad credentials cannot lock later tests out."""
-    from clarinet.api.auth_config import _auth_failures
+    with bad credentials cannot lock later tests out. The cached service-token
+    user goes too: it outlives the DB row that ``clear_database`` deletes."""
+    from clarinet.api.auth_config import _auth_failures, _service_user_cache
 
     _auth_failures.clear()
+    _service_user_cache.clear()
     yield
 
 

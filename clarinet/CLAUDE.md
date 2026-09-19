@@ -182,7 +182,10 @@ otherwise be an unthrottled password oracle. Loopback is exempt on the token
 path only (in-process RecordFlow + co-located workers). Counters are in-memory:
 per-process, cleared by an API restart. Per-IP limiting trusts
 `request.client.host`, i.e. uvicorn's proxy-header handling — behind a proxy
-on another host set `FORWARDED_ALLOW_IPS`, or every user shares the proxy's IP.
+on another host set `FORWARDED_ALLOW_IPS` **to that proxy's IP**, or every user
+shares the proxy's IP. Never `*`: uvicorn then takes the leftmost
+`X-Forwarded-For` entry, which the client controls — a fresh value per request
+voids the per-IP budget, and `127.0.0.1` claims the loopback exemption.
 Tests: the autouse `_reset_auth_throttle` fixture clears the counters.
 
 ## Alembic Migrations

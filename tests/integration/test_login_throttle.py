@@ -159,6 +159,24 @@ def test_failures_do_not_extend_the_lockout_window(monkeypatch):
     assert not auth_config._is_throttled("ip:10.0.0.1", 2)
 
 
+def test_successful_login_does_not_open_the_ip_window(monkeypatch):
+    """A forgiven attempt must leave no entry behind: a zero-count leftover would
+    anchor the window at the *success*, so a later lock could expire in seconds."""
+    now = [0.0]
+    monkeypatch.setattr(
+        auth_config, "_auth_failures", TTLCache(maxsize=10, ttl=60, timer=lambda: now[0])
+    )
+    auth_config._record_auth_failure("ip:10.0.0.1")  # attempt reserved...
+    auth_config._forgive_auth_failure("ip:10.0.0.1")  # ...and taken back on success
+
+    now[0] = 50.0
+    auth_config._record_auth_failure("ip:10.0.0.1")
+    auth_config._record_auth_failure("ip:10.0.0.1")
+    now[0] = 61.0  # 61s after the success, only 11s after the first real failure
+
+    assert auth_config._is_throttled("ip:10.0.0.1", 2)
+
+
 @pytest.mark.asyncio
 async def test_invalid_service_token_locks_remote_ip(
     unauthenticated_client, service_admin, test_settings, monkeypatch
