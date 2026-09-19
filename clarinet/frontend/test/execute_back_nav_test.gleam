@@ -64,6 +64,7 @@ fn make_shared_for_user(
     viewers: [],
     anon_per_study: False,
     dicomweb_backend: "builtin",
+    registration_enabled: False,
     translate: fn(_) { "" },
     locale: i18n.En,
   )

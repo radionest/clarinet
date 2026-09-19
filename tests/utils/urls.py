@@ -129,6 +129,7 @@ DICOM_IMPORT_STUDY = "/api/dicom/import-study"
 
 # --- Health ---
 HEALTH = "/api/health"
+INFO = "/api/info"
 
 # --- SSE ---
 SSE_URL = "/api/events"
@@ -154,3 +155,4 @@ def record_runs_url(record_id: int) -> str:
 
 # --- DICOMweb (outside /api prefix for OHIF compatibility) ---
 DICOMWEB_BASE = "/dicom-web"
+DICOMWEB_STUDIES = "/dicom-web/studies"

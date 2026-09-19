@@ -18,6 +18,7 @@ from clarinet.api.auth_config import (
     current_active_user,
     fastapi_users,
     get_user_db,
+    require_registration_enabled,
 )
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User, UserCreate, UserRead
@@ -61,9 +62,11 @@ router.include_router(
     fastapi_users.get_auth_router(auth_backend),
 )
 
-# User registration
+# User registration (403 unless settings.registration_enabled)
 router.include_router(
     fastapi_users.get_register_router(UserRead, UserCreate),
+    dependencies=[Depends(require_registration_enabled)],
+    responses={403: {"description": "Self-registration is disabled"}},
 )
 
 

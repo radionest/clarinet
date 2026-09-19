@@ -18,7 +18,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 |---|---|---|---|
 | `/api/auth/login` | POST | 200 | Login (fastapi-users) |
 | `/api/auth/logout` | POST | 200 | Logout |
-| `/api/auth/register` | POST | 200 | Register |
+| `/api/auth/register` | POST | 201 | Public self-registration. **403** unless `settings.registration_enabled` (default `False`); the new account has no roles |
 | `/api/auth/me` | GET | 200 | Current user info |
 | `/api/auth/session/validate` | GET | 200 | Validate session |
 | `/api/auth/session/refresh` | POST | 200 | Refresh session |
@@ -179,6 +179,8 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 **Optional per-client storage override** — the storage prefix visible to the user's Slicer. Honored by `/slicer/records/{id}/open`, `/slicer/records/{id}/validate`, and `/records/{id}/submit` (POST and PATCH). Two transports, read header-first: the `X-Clarinet-Storage-Path-Client` header (sent only on the Slicer endpoints) and, as a fallback, the `clarinet_storage_path_client` cookie (URL-decoded; auto-attached to every same-origin request, so it survives formosh form-submits that strip custom headers). Both are set by the frontend from `localStorage` (managed on the `/settings` page). When absent or blank, falls back to `settings.storage_path_client` (legacy global). Consumed via `ClientStoragePathDep` in `dependencies.py`.
 
 ### DICOMweb (`/dicom-web`)
+
+Router-level `current_role_holder`: **403** for an authenticated account with no role (admins pass).
 
 | URL | Method | Status | Description |
 |---|---|---|---|

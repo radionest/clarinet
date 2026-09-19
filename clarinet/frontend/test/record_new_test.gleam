@@ -22,6 +22,7 @@ fn make_shared() -> shared.Shared {
     viewers: [],
     anon_per_study: False,
     dicomweb_backend: "builtin",
+    registration_enabled: False,
     translate: fn(_) { "" },
     locale: i18n.En,
   )

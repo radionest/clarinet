@@ -67,6 +67,7 @@ AuditActorDep       = Annotated[UUID | None, Depends(get_audit_actor)]  # curren
 - `authorize_mutable_record_access` (`MutableRecordDep`) — builds on `AuthorizedRecordDep`; mutation allowed for superuser, the assigned user, or an unassigned record. Additionally bypasses the owner check when `record.record_type.shared_editing` is `True`; any role-holder may then mutate the record regardless of `user_id`
 - `require_mutable_config(request)` — raises `AuthorizationError` when `app.state.config_mode == "python"` (RecordType mutations disabled — Python files are the single source of truth)
 - `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
+- `current_role_holder` — passes an admin (`is_admin`) or a user with at least one role; 403 otherwise. For routers with no per-object authorization of their own (router-level on `dicomweb.py`): a role-less account — e.g. freshly self-registered — must not reach patient data just by being authenticated.
 - `require_capability(capability)` — dependency factory; `capability` is a
   `Capability` enum member. Admits a user whose effective capabilities
   (`resolve_capabilities`, `clarinet/models/capability.py`) include it.
@@ -96,7 +97,7 @@ XRepositoryDep = Annotated[XRepository, Depends(get_X_repository)]
 ## DICOMweb Proxy Router Endpoints (dicomweb.py)
 
 Mounted at `/dicom-web` (outside `/api` prefix for OHIF compatibility).
-Conditional on `settings.dicomweb_enabled`. All endpoints require `CurrentUserDep`.
+Conditional on `settings.dicomweb_enabled`. All endpoints require `CurrentUserDep`, and the router requires `current_role_holder` (admin or ≥1 role).
 
 | Endpoint | DICOMweb | Backend |
 |---|---|---|
