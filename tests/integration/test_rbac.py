@@ -1153,11 +1153,49 @@ async def test_slicer_record_null_role_forbidden(role_a_client, record_null_role
 
 
 @pytest.mark.asyncio
-async def test_slicer_record_own_role_passes_authorization(role_a_client, record_role_a):
+async def test_slicer_record_own_role_passes_authorization(
+    test_session, role_a_client, record_role_a
+):
+    # Assigned to someone else on purpose: this pins AuthorizedRecordDep (read
+    # access), not MutableRecordDep — a same-role colleague must be able to open
+    # a record they do not own. On an unassigned record both dependencies pass.
+    owner = User(
+        id=uuid4(),
+        email="slicer-record-owner@test.com",
+        hashed_password="unused",
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(owner)
+    await test_session.commit()
+    record_role_a.user_id = owner.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
     # The type has no slicer_script, so the endpoint fails later — but not on authorization.
     response = await role_a_client.post(SLICER_RECORD_OPEN.format(record_id=record_role_a.id))
 
     assert response.status_code not in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_invalidate_response_is_masked_for_non_superuser(
+    test_session, role_a_client, record_role_a, test_patient
+):
+    """The only record-returning handler that skipped masking: a role holder got
+    back the real patient identity that GET /records/{id} withholds from them."""
+    test_patient.auto_id = 123
+    test_session.add(test_patient)
+    await test_session.commit()
+
+    response = await role_a_client.post(
+        f"{RECORDS_BASE}/{record_role_a.id}/invalidate", json={"mode": "soft", "reason": "test"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["patient_id"] == "CLARINET_123"
+    assert response.json()["patient"]["name"] == "ANON_001"
 
 
 # --- POST /api/records: a caller may only create records of a type they hold the role for ---
@@ -1206,7 +1244,7 @@ async def test_create_record_own_role_is_allowed_and_masked(
     response = await role_a_client.post(f"{RECORDS_BASE}/", json=payload)
 
     assert response.status_code == 201
-    # Same masking as GET /records/{id}: a non-admin creator never gets the real identity back.
+    # Same masking as GET /records/{id}: a non-superuser creator never gets the real identity back.
     assert response.json()["patient_id"] == "CLARINET_123"
     assert response.json()["patient"]["name"] == "ANON_001"
 

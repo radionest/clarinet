@@ -402,9 +402,12 @@ async def check_record_type_role(
 ) -> None:
     """Only an admin, or a holder of the record type's role, may create its records.
 
-    The create-time counterpart of ``authorize_record_access``: a type with
-    ``role_name=None`` is admin-only. Without it any authenticated account —
-    a role-less one included — could create records for any patient.
+    Without it any authenticated account — a role-less one included — could
+    create records for any patient. A type with ``role_name=None`` is
+    admin-only. Deliberately ``is_admin`` (superuser OR ``admin`` role), to
+    agree with ``check_storage_path_admin_only`` on this same endpoint — which
+    is NOT the read rule: ``authorize_record_access`` is superuser-only, so an
+    ``admin``-role non-superuser can create a record it cannot read back.
 
     Raises:
         AuthorizationError: 403 when the caller lacks the type's role.
@@ -1190,7 +1193,7 @@ async def invalidate_record(
         acting_user=user,
         actor_id=actor,
     )
-    return RecordRead.model_validate(record)
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
 def _build_record_search_criteria(

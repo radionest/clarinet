@@ -486,7 +486,8 @@ def is_admin(user: User) -> bool:
     The single definition of "admin" for every caller that can reach it.
     ``current_admin_user`` turns it into a 403; the sites that must branch on it
     inline rather than gate a whole route read it directly — the
-    ``clarinet_storage_path`` guard, the actor-email masking in the record audit
+    ``clarinet_storage_path`` guard and the create-time
+    ``check_record_type_role``, the actor-email masking in the record audit
     feed, and ``SseConnection.is_admin``, which decides whether a live event
     stream may carry admin-only frames.
 

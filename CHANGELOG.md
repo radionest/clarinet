@@ -350,6 +350,12 @@
   field. Creating a record without the field is unaffected. Both admitted
   caller kinds are covered: a superuser, and a non-superuser holding the
   built-in `admin` role.
+- **Creating a record requires the record type's role (security).**
+  `POST /api/records` answers **403** to a non-admin caller that does not hold
+  the type's `role_name` (a `role_name = NULL` type is admin-only), and
+  `POST /api/slicer/records/{id}/open|validate` answer **403** for a record of
+  another role. No in-repo caller is affected — the create form is admin-only,
+  RecordFlow and workers use the service token. Rationale under Security.
 - **Finishing a record now returns 422 when an OUTPUT file pattern cannot be
   safely resolved.** `POST /api/records/{id}/data` and
   `POST /api/records/{id}/submit` reject the submission with 422 when a
@@ -432,9 +438,11 @@
   `GET /api/records/{id}`. `POST /api/records` let any authenticated account —
   a role-less one included — create records of any type for any patient and
   answered with the patient's unmasked identity; creating now requires an admin
-  or the record type's role (a `role_name = NULL` type is admin-only, as for
-  reads), and the response is masked like every other record endpoint. Callers
-  that created records of a type whose role they do not hold get **403**.
+  (superuser or `admin` role) or the record type's role — a `role_name = NULL`
+  type is admin-only — and the response is masked like every other record
+  endpoint. `POST /api/records/{id}/invalidate` was the last record-returning
+  handler that skipped masking and now masks too. The caller-visible change is
+  described under Breaking.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
