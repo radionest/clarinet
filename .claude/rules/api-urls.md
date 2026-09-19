@@ -146,7 +146,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/pipelines/{name}/definition` | GET | 200 | Pipeline definition |
-| `/api/pipelines/sync` | POST | 200 | Sync definitions |
+| `/api/pipelines/sync` | POST | 200 | Sync definitions (AdminUserDep — writes to the DB; **401** unauthenticated) |
 | `/api/pipelines/runs` | POST | 201 | Create task run audit row (AdminUserDep; AuditMiddleware service token resolves to admin). Idempotent on duplicate id; `''` patient/study/series ids normalized to NULL |
 | `/api/pipelines/runs` | GET | 200 | List runs, filters: `status`, `task_name`, `record_id`, `patient_id`, `since` (started_at lower bound) + pagination (AdminUserDep); `''` patient_id filter treated as absent |
 | `/api/pipelines/runs/{task_id}` | GET | 200 | Get single run (AdminUserDep) |

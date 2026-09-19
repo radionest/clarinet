@@ -29,6 +29,7 @@ Plan-code loading contract: `.claude/rules/custom-code-loading.md`.
 
 ## Middleware (middleware.py)
 
+- `CORSMiddleware` — mounted only when `settings.cors_origins` is non-empty (default: empty, no CORS — the SPA and OHIF are same-origin). Credentials are allowed, so origins must be exact; `Settings` rejects `"*"`, which with credentials makes Starlette echo any `Origin` back.
 - `NullQueryParamMiddleware` — strips query params with null-like values (`"null"`, `"Null"`, `"NULL"`) so FastAPI treats them as absent (uses `None` default). Only re-encodes the query string when params are actually removed. Controlled by `settings.coerce_null_query_params` (default `True`). Added after CORS in `create_app()`.
 
 ## Exception Handlers (exception_handlers.py)
@@ -41,7 +42,7 @@ See `clarinet/api/exception_handlers.py` for the full mapping.
 
 Mounted at `/api/pipelines` (unconditionally). Endpoints:
 - `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`); no auth (workers)
-- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand; no auth
+- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand (`AdminUserDep` — it writes; the service token resolves to admin)
 - `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`AdminUserDep`; service token resolves to admin — regular users must not forge audit)
 - `GET /api/pipelines/runs[/{task_id}]` — list/get runs (`AdminUserDep`)
 - `GET /api/pipelines/fingerprint` — API version fingerprint (no auth; workers); used by the worker startup staleness diagnostic
@@ -87,6 +88,11 @@ When `frontend_enabled=True`, catch-all `/{full_path:path}` serves:
 - Static file if exists in `settings.static_directories`
 - `index.html` otherwise (SPA client-side routing)
 - Skips paths starting with `api/`, `dicom-web/`, or `ohif/`
+
+The catch-all is **unauthenticated** and Starlette passes `..` segments through
+un-normalized, so every branch that maps the URL to a file (`static_directories`,
+`ohif/`) must `resolve()` the candidate and check it stays inside its base
+directory before serving — a reverse proxy normalizing the URL is not a guard.
 
 ## URL Reference for Tests
 

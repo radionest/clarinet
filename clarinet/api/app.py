@@ -557,15 +557,17 @@ def create_app(root_path: str = "") -> FastAPI:
         default_response_class=ORJSONResponse,
     )
 
-    # Configure CORS
-    origins = ["http://localhost", "http://localhost:8080", "*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS only for explicitly configured origins: the SPA is served same-origin
+    # and needs none. Credentials are allowed, so the list must stay exact —
+    # Settings rejects "*".
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Compress responses (JS bundles, JSON, HTML) for faster delivery
     app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -688,9 +690,13 @@ def create_app(root_path: str = "") -> FastAPI:
                         _app_config_cache[root_path] = rendered
                         return Response(rendered, media_type="application/javascript")
                 if settings.ohif_enabled and ohif_dir.exists():
-                    # Try to serve the exact static file
-                    ohif_file = ohif_dir / full_path.removeprefix("ohif/")
-                    if ohif_file.exists() and ohif_file.is_file():
+                    # Try to serve the exact static file. Starlette hands over
+                    # ``..`` segments un-normalized, so confine the resolved
+                    # path to the OHIF directory (same guard as static_dirs
+                    # below) — this route is unauthenticated.
+                    ohif_base = ohif_dir.resolve()
+                    ohif_file = (ohif_base / full_path.removeprefix("ohif/")).resolve()
+                    if ohif_file.is_relative_to(ohif_base) and ohif_file.is_file():
                         return FileResponse(ohif_file)
                     # SPA fallback — serve index.html for client-side routing
                     ohif_idx = ohif_dir / "index.html"

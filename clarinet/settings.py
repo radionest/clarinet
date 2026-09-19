@@ -303,6 +303,21 @@ class Settings(BaseSettings):
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing
 
+    # Cross-origin callers allowed to use the API with the session cookie, e.g.
+    # ["https://ui.example.org"]. Empty = no CORS at all: the bundled SPA and
+    # OHIF are served same-origin and need none.
+    cors_origins: list[str] = []
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, v: list[str]) -> list[str]:
+        """Refuse a wildcard: CORS is mounted with credentials allowed, where
+        "*" makes Starlette echo any Origin back — every site could then call
+        the API as the logged-in user."""
+        if "*" in v:
+            raise ValueError('cors_origins must list exact origins; "*" is not allowed')
+        return v
+
     # Role settings
     extra_roles: list[str] = []
     # Maps a role name to the capabilities it grants (e.g. {"analyst": ["reports"]}).

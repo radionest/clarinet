@@ -82,6 +82,7 @@ storage_path = "./data"
 
 # ── Security (change in production!) ─────────────────
 secret_key = "change-this-secret-key-in-production"
+# cors_origins = []            # exact origins allowed to call the API with the session cookie; "*" is rejected
 
 # ── Roles ────────────────────────────────────────────
 # extra_roles = []             # e.g. ["inspector", "technician"]
