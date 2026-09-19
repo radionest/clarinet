@@ -519,6 +519,15 @@ async def current_role_holder(
     DICOMweb proxy reads straight from the PACS — use this so such an account
     cannot reach patient data.
     """
+    return require_role_holder(user)
+
+
+def require_role_holder(user: User) -> User:
+    """The ``current_role_holder`` check for callers that resolve the user themselves.
+
+    Raises:
+        HTTPException: 403 when the user is neither an admin nor holds a role.
+    """
     if is_admin(user) or get_user_role_names(user):
         return user
     raise HTTPException(status_code=403, detail="No role assigned")

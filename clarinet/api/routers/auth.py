@@ -20,7 +20,7 @@ from clarinet.api.auth_config import (
     get_user_db,
     require_registration_enabled,
 )
-from clarinet.api.dependencies import current_role_holder
+from clarinet.api.dependencies import require_role_holder
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User, UserCreate, UserRead
 from clarinet.settings import settings
@@ -78,15 +78,20 @@ async def get_me(user: User = Depends(current_active_user)) -> User:
     return user
 
 
+# Cookie-only on purpose — not ``current_active_user``, which also honours
+# ``X-Internal-Token``. nginx caches this verdict under the session cookie alone,
+# so a cookie-less, token-authenticated 200 would be stored under the empty key
+# and admit anonymous callers until the cache entry expires.
+_cookie_user = fastapi_users.current_user(active=True)
+
+
 @router.get("/dicomweb-access", responses={403: {"description": "No role assigned"}})
-async def check_dicomweb_access(
-    _user: User = Depends(current_role_holder),
-) -> dict[str, bool]:
+async def check_dicomweb_access(user: User = Depends(_cookie_user)) -> dict[str, bool]:
     """nginx ``auth_request`` target for the external DICOMweb backend.
 
     With ``dicomweb_backend = "external"`` images are served by the PACS behind
     nginx and never pass the ``/dicom-web`` router, so its role gate has to be
-    reproduced here: same dependency, status only (200 / 401 / 403). Pointing
+    reproduced here: same check, status only (200 / 401 / 403). Pointing
     ``auth_request`` at ``/session/validate`` instead admits any active
     session, role-less ones included.
 
@@ -94,6 +99,7 @@ async def check_dicomweb_access(
     ``proxy_cache_valid 200 10s``, so another 2xx would go uncached and cost a
     round-trip per image frame.
     """
+    require_role_holder(user)
     return {"allowed": True}
 
 

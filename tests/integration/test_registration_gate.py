@@ -9,7 +9,10 @@ so only the real auth path proves a role holder is recognised as one and that a
 403 comes from a genuinely empty role list, not from an unloaded relationship.
 """
 
+from uuid import uuid4
+
 import pytest
+from pydantic import SecretStr
 from sqlmodel import select
 
 from clarinet.api.app import app
@@ -20,6 +23,7 @@ from tests.conftest import create_authenticated_client, create_mock_superuser
 from tests.utils.urls import (
     AUTH_DICOMWEB_ACCESS,
     AUTH_LOGIN,
+    AUTH_ME,
     AUTH_REGISTER,
     DICOMWEB_STUDIES,
     INFO,
@@ -116,10 +120,40 @@ async def test_dicomweb_access_rejects_anonymous(unauthenticated_client):
 
 
 @pytest.mark.asyncio
+async def test_dicomweb_access_ignores_the_service_token(
+    unauthenticated_client, test_session, test_settings, monkeypatch
+):
+    """nginx caches the verdict under the session cookie alone, so identity must
+    come from the cookie alone: a cookie-less, token-authenticated 200 would be
+    cached under the empty key and admit anonymous callers for the cache TTL."""
+    monkeypatch.setattr(test_settings, "internal_service_token", SecretStr("tok-123"))
+    test_session.add(
+        User(
+            id=uuid4(),
+            email=test_settings.admin_email,
+            hashed_password="unused",
+            is_active=True,
+            is_verified=True,
+            is_superuser=True,
+        )
+    )
+    await test_session.commit()
+    token = {"X-Internal-Token": "tok-123"}
+    assert (await unauthenticated_client.get(AUTH_ME, headers=token)).status_code == 200  # control
+
+    response = await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS, headers=token)
+
+    assert response.status_code == 401
+
+
+# nginx re-checks every ~10 s, inside the 30 s session cache: the second request
+# is served from DatabaseStrategy._user_cache with a detached User.
+@pytest.mark.asyncio
 async def test_dicomweb_access_rejects_role_less_user(unauthenticated_client, test_user):
     await _login(unauthenticated_client)
 
-    assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 403
+    for _ in range(2):
+        assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -129,4 +163,5 @@ async def test_dicomweb_access_admits_role_holder(unauthenticated_client, test_u
 
     # 200, not 204: the documented nginx authz cache is `proxy_cache_valid 200 10s`,
     # so any other 2xx would go uncached and cost a round-trip per image frame.
-    assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 200
+    for _ in range(2):
+        assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 200

@@ -176,6 +176,8 @@ which carries the same gate (see `docs/orthanc-dicomweb-proxy.md`).
 
 This is a per-router property, not a global guarantee: any router without its
 own per-object authorization needs the same gate, because "authenticated" alone
-is not an access level. Known gap: the Slicer record endpoints
-(`/api/slicer/records/{id}/open|validate`) still take a raw record id behind
-`CurrentUserDep` only.
+is not an access level. Known gaps, both behind `CurrentUserDep` only: the
+Slicer record endpoints (`/api/slicer/records/{id}/open|validate`) take a raw
+record id with no `AuthorizedRecordDep`, and `POST /api/records` creates a
+record for any authenticated account — neither the router nor `RecordService`
+checks the caller's roles.
