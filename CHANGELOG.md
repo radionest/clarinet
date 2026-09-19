@@ -425,6 +425,16 @@
   empty-body PATCH for an arbitrary record id and receive its unmasked
   identifiers; a role-holder now gets **403** on records assigned to someone
   else. Closes #555.
+- **Two more endpoints of that class.** `POST /api/slicer/records/{id}/open`
+  and `/validate` loaded any record by id behind "authenticated" alone, built
+  its Slicer context (patient identifiers, file paths) and pushed it to a
+  Slicer at the *caller's* IP; they now use `AuthorizedRecordDep` like
+  `GET /api/records/{id}`. `POST /api/records` let any authenticated account —
+  a role-less one included — create records of any type for any patient and
+  answered with the patient's unmasked identity; creating now requires an admin
+  or the record type's role (a `role_name = NULL` type is admin-only, as for
+  reads), and the response is masked like every other record endpoint. Callers
+  that created records of a type whose role they do not hold get **403**.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
