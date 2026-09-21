@@ -303,6 +303,25 @@ class Settings(BaseSettings):
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing
 
+    # Cross-origin callers allowed to use the API with the session cookie, e.g.
+    # ["https://ui.example.org"]. Empty = no CORS at all: the bundled SPA and
+    # OHIF are served same-origin and need none.
+    cors_origins: list[str] = []
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, v: list[str]) -> list[str]:
+        """Refuse origins that are unsafe with credentials, which CORS is mounted with.
+
+        ``"*"`` makes Starlette echo any Origin back, so every site could call
+        the API as the logged-in user. ``"null"`` is what sandboxed iframes and
+        ``data:`` documents send, so any page can wrap itself into it.
+        """
+        unsafe = {"*", "null"} & set(v)
+        if unsafe:
+            raise ValueError(f"cors_origins must list exact origins; not allowed: {sorted(unsafe)}")
+        return v
+
     # Role settings
     extra_roles: list[str] = []
     # Maps a role name to the capabilities it grants (e.g. {"analyst": ["reports"]}).

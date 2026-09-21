@@ -61,8 +61,16 @@ Point the tests at the instance and (optionally) a PACS via env:
 SLICER_HOME=~/Slicer-5.10.0-linux-amd64 \
 CLARINET_TEST_SLICER_HOST=localhost \
 CLARINET_TEST_PACS_HOST=<orthanc-host> \
+CLARINET_TEST_PACS_SSH=<ssh-alias-of-that-host> \
 make test-all-stages
 ```
+
+Both PACS variables apply to the slicer stage (5b) only — stage 5 always tests
+against the pipeline's own VM Orthanc. Leave `CLARINET_TEST_PACS_HOST` unset and
+5b uses that VM too. With an explicit PACS host, also set
+`CLARINET_TEST_PACS_SSH`: the C-MOVE tests probe reachability over that SSH
+alias (default `klara`) and **skip** when it does not answer; `""` skips the
+probe and assumes the PACS can connect back.
 
 ### Config (env vars)
 
@@ -71,6 +79,8 @@ make test-all-stages
 | `SLICER_HOME` | autodetect | `run-headless.sh` (Slicer location) |
 | `CLARINET_TEST_SLICER_HOST` | `localhost` | tests + launcher verify |
 | `CLARINET_TEST_SLICER_PORT` | `2016` | Web Server port |
+| `CLARINET_TEST_PACS_HOST` | pipeline VM (in `test-all-stages`), else `localhost` | Slicer↔PACS tests |
+| `CLARINET_TEST_PACS_SSH` | `""` with the pipeline VM, else `klara` | C-MOVE reachability probe |
 | `CLARINET_SLICER_PACS_HOST` / `_PORT` / `_AET` | `localhost` / `4242` / `ORTHANC` | PACS seeded in Slicer QSettings |
 | `CLARINET_SLICER_CALLING_AET` | `SLICER_TEST` | Slicer's own AE title |
 | `CLARINET_SLICER_SCP_PORT` | `4006` | storage SCP listen port (C-MOVE) |
@@ -78,8 +88,11 @@ make test-all-stages
 ## Notes / limitations
 
 - Slicer is not a service — re-run `run-headless.sh` after a reboot.
-- The Web Server binds `0.0.0.0`, so a PACS on another host can C-MOVE back to
-  `CLARINET_TEST_SLICER_HOST:<SCP_PORT>`.
+- The storage SCP (`CLARINET_SLICER_SCP_PORT`, a separate listener from the Web
+  Server port) accepts C-MOVE deliveries from a PACS on another host. The tests
+  register it in Orthanc at `CLARINET_TEST_SLICER_HOST`, or — when that is a
+  loopback name, as in the example above — at this machine's IP on the route to
+  the PACS.
 - C-MOVE-to-Slicer retrieval (`DICOMListener` indexing of storescp deliveries)
   is unreliable under Xvfb. The `_cmove_indexing_works` fixture in
   `tests/e2e/test_slicer_pacs_workflow.py` probes this and self-skips that one
