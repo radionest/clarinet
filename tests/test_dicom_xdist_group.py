@@ -9,7 +9,7 @@ anonymized UID — delete each other's study.
 """
 
 import pytest
-from _pytest.config import PytestPluginManager
+from pytest import PytestPluginManager
 
 from tests import conftest
 
@@ -18,23 +18,30 @@ class _Item:
     def __init__(self, *marks: pytest.MarkDecorator) -> None:
         self.marks = [m.mark for m in marks]
 
+    def iter_markers(self, name: str) -> list[pytest.Mark]:
+        return [m for m in self.marks if m.name == name]
+
     def get_closest_marker(self, name: str) -> pytest.Mark | None:
-        return next((m for m in self.marks if m.name == name), None)
+        return next(iter(self.iter_markers(name)), None)
 
     def add_marker(self, marker: pytest.MarkDecorator) -> None:
         self.marks.append(marker.mark)
 
 
 class _LateRegisteredReader:
-    """Stands in for xdist's worker plugin: registered last, so called first."""
+    """Stands in for xdist's worker plugin: registered last, so called first.
+
+    Reads the marks as ``xdist/remote.py`` does — every ``xdist_group`` mark,
+    sorted and joined — so a test merged into two groups shows up as such.
+    """
 
     def __init__(self) -> None:
         self.groups: list[str | None] = []
 
     def pytest_collection_modifyitems(self, items: list[_Item]) -> None:
         for item in items:
-            mark = item.get_closest_marker("xdist_group")
-            self.groups.append(mark.args[0] if mark else None)
+            names = sorted({str(m.args[0]) for m in item.iter_markers("xdist_group")})
+            self.groups.append("_".join(names) or None)
 
 
 def _groups_seen_by_late_plugin(*items: _Item) -> list[str | None]:
