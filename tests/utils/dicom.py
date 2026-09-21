@@ -39,24 +39,29 @@ def skip_unless_pacs_reachable(reason: str) -> None:
         pytest.skip(reason)
 
 
+def local_ip_facing_pacs() -> str:
+    """This host's address on the route to the PACS (a UDP connect sends nothing)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect((PACS_HOST, PACS_PORT))
+        return str(s.getsockname()[0])
+
+
 def register_pacs_modality(aet: str) -> None:
     """Let ``aet`` query the test PACS.
 
     Stock Orthanc (``DicomAlwaysAllowFind``/``Get`` = false) answers C-FIND and
     C-GET from an unregistered AET with zero matches rather than an error, so an
     unregistered test AET looks exactly like an empty PACS. Host/port matter only
-    for C-MOVE, whose tests register their own; an AET that is already known is
-    left alone because it may carry such a real address.
+    for C-MOVE, whose tests register their own; an AET that is already known —
+    under any symbolic name — is left alone because it may carry such a real
+    address.
     """
-    known = requests.get(f"{PACS_REST_URL}/modalities", timeout=5)
-    if known.ok and aet in known.json():
+    known = requests.get(f"{PACS_REST_URL}/modalities?expand", timeout=5)
+    if known.ok and any(m.get("AET") == aet for m in known.json().values()):
         return
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((PACS_HOST, PACS_PORT))
-        local_ip = s.getsockname()[0]
     resp = requests.put(
         f"{PACS_REST_URL}/modalities/{aet}",
-        json={"AET": aet, "Host": local_ip, "Port": 11112},
+        json={"AET": aet, "Host": local_ip_facing_pacs(), "Port": 11112},
         timeout=5,
     )
     if not resp.ok:

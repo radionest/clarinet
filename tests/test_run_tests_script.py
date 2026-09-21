@@ -23,17 +23,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run(tmp_path: Path, *, pytest_exit: int, summary: dict[str, int]) -> int:
-    """Run the wrapper with a stub ``uv`` that writes ``summary`` and exits ``pytest_exit``."""
+def _run(tmp_path: Path, *, pytest_exit: int, summary: dict[str, int] | None) -> int:
+    """Run the wrapper with a stub ``uv`` that writes ``summary`` and exits ``pytest_exit``.
+
+    ``summary=None`` models a pytest killed before session end: no report is written.
+    """
     report = tmp_path / "report.json"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake_uv = bin_dir / "uv"
-    fake_uv.write_text(
-        "#!/usr/bin/env bash\n"
+    write_report = (
         f"cat > '{report}' <<'JSON'\n{json.dumps({'summary': summary})}\nJSON\n"
-        f"exit {pytest_exit}\n"
+        if summary is not None
+        else ""
     )
+    fake_uv.write_text(f"#!/usr/bin/env bash\n{write_report}exit {pytest_exit}\n")
     fake_uv.chmod(fake_uv.stat().st_mode | stat.S_IXUSR)
 
     env = {
@@ -66,6 +70,12 @@ def test_internal_error_is_not_forgiven(tmp_path: Path) -> None:
 def test_fixture_errors_are_not_forgiven(tmp_path: Path) -> None:
     """Setup/teardown errors land in ``summary.error``, not ``summary.failed``."""
     assert _run(tmp_path, pytest_exit=1, summary={"passed": 9, "error": 1, "total": 10}) == 1
+
+
+def test_a_previous_stages_green_report_is_not_trusted(tmp_path: Path) -> None:
+    """Every stage writes the same report path; a run killed before writing must not inherit it."""
+    (tmp_path / "report.json").write_text(json.dumps({"summary": {"passed": 10, "total": 10}}))
+    assert _run(tmp_path, pytest_exit=137, summary=None) == 137
 
 
 def test_sigkill_does_not_hide_fixture_errors(tmp_path: Path) -> None:

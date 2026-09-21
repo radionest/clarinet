@@ -50,7 +50,10 @@ RABBITMQ_MANAGEMENT_URL = f"http://{RABBITMQ_HOST}:{RABBITMQ_MANAGEMENT_PORT}"
 
 # ─── Orthanc PACS ────────────────────────────────────────────────────────────
 
-PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "localhost")
+# `or`, not a .get() default: a set-but-empty variable (a failed `vm.sh ip`
+# substitution) would otherwise yield "http://user:pass@:8042", and requests
+# prints that URL — credentials included — in its InvalidURL message.
+PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST") or "localhost"
 PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_REST_PORT = int(os.environ.get("CLARINET_TEST_PACS_REST_PORT", "8042"))
 # The deploy VM's Orthanc has REST auth on with the stock orthanc:orthanc user

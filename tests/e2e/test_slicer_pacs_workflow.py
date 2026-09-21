@@ -38,7 +38,12 @@ from tests.config import (
     SLICER_HOST,
     SLICER_PORT,
 )
-from tests.utils.dicom import cmove_storage_scp, move_with_retry, require_test_pacs
+from tests.utils.dicom import (
+    cmove_storage_scp,
+    local_ip_facing_pacs,
+    move_with_retry,
+    require_test_pacs,
+)
 
 pytestmark = [
     pytest.mark.slicer,
@@ -609,13 +614,6 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _get_local_ip() -> str:
-    """Get local IP reachable from Orthanc."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((PACS_HOST, PACS_PORT))
-        return s.getsockname()[0]
-
-
 def _pacs_can_reach_us() -> bool:
     """Check if PACS can connect back to our host (needed for C-MOVE)."""
     import os
@@ -626,7 +624,7 @@ def _pacs_can_reach_us() -> bool:
         return True
 
     port = _free_port()
-    local_ip = _get_local_ip()
+    local_ip = local_ip_facing_pacs()
     connected = False
 
     def _listen():
@@ -672,7 +670,7 @@ class TestBackendCmoveThenSlicer:
         """Install a test SCP as the singleton and register its AET in Orthanc."""
         port = _free_port()
         with cmove_storage_scp(CALLING_AET, port) as scp:
-            local_ip = _get_local_ip()
+            local_ip = local_ip_facing_pacs()
             modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
             resp = requests.put(
                 modality_url,

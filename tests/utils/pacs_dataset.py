@@ -9,7 +9,8 @@ built here and uploaded over Orthanc's REST API when the PACS has no
 What the tests need from the data (pinned by ``tests/test_pacs_dataset.py``):
 the SHIPILOV patient has exactly one study and it is MR, a CT study exists
 under another patient, every series is a geometrically valid volume with real
-pixel data, and UIDs are deterministic so re-seeding overwrites.
+pixel data, and UIDs are deterministic so seeding twice adds nothing (Orthanc
+answers the duplicate upload ``AlreadyStored``).
 """
 
 from dataclasses import dataclass
@@ -53,7 +54,11 @@ class _Study:
 
 
 # Seeded in this order: the SHIPILOV study doubles as the "dataset is present"
-# marker, so it goes last and a concurrent seeder never sees a half-loaded PACS.
+# marker, so it goes last — a concurrent session never sees the marker without
+# the CT study. The marker does flip on the first of the MR instances, so that
+# window stays open for the rest of the MR upload (well under a second); every
+# DICOM test shares one xdist group, so only a second concurrent pytest session
+# could ever land in it.
 _STUDIES = (
     _Study(
         patient_id="PHANTOM-CT-001",

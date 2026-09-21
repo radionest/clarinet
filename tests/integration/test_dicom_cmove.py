@@ -3,8 +3,9 @@
 These tests start a local Storage SCP on a free port, send C-MOVE to Orthanc,
 and verify that instances arrive via the SCP.
 
-Orthanc must be configured to allow C-MOVE to unknown AETs (default behavior)
-or have our test AET registered in its DicomModalities config.
+Stock Orthanc denies Q/R to unknown AETs, so the tests register their own: the
+``pacs_available`` gate for C-FIND, ``storage_scp`` with the real SCP host/port
+for the C-MOVE itself.
 
 Run:
     uv run pytest tests/integration/test_dicom_cmove.py -v
@@ -25,7 +26,12 @@ from dimsechord import StorageSCP
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyResult
 from clarinet.services.dicom.models import SeriesResult
 from tests.config import PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
-from tests.utils.dicom import cmove_storage_scp, move_with_retry, require_test_pacs
+from tests.utils.dicom import (
+    cmove_storage_scp,
+    local_ip_facing_pacs,
+    move_with_retry,
+    require_test_pacs,
+)
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
@@ -99,13 +105,6 @@ def mr_series(
     return series_list[0]
 
 
-def _get_local_ip() -> str:
-    """Get local IP reachable from Orthanc (same subnet)."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((PACS_HOST, PACS_PORT))
-        return s.getsockname()[0]
-
-
 def _pacs_can_reach_us() -> bool:
     """Check if PACS can connect back to our host (needed for C-MOVE).
 
@@ -122,7 +121,7 @@ def _pacs_can_reach_us() -> bool:
         return True  # Assume reachable when env var is explicitly empty
 
     port = _free_port()
-    local_ip = _get_local_ip()
+    local_ip = local_ip_facing_pacs()
     connected = False
 
     def _listen():
@@ -170,7 +169,7 @@ def storage_scp(cmove_available: None):
     port = _free_port()
     with cmove_storage_scp(CALLING_AET, port) as scp:
         # Register our AET in Orthanc so C-MOVE knows where to send
-        local_ip = _get_local_ip()
+        local_ip = local_ip_facing_pacs()
         modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
         resp = requests.put(
             modality_url,

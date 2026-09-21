@@ -1,7 +1,8 @@
 """Integration tests for DICOM service against a live Orthanc PACS server.
 
-These tests require a running Orthanc instance at PACS_HOST:PACS_PORT
-with known test data pre-loaded. They are skipped automatically if the
+These tests require a running Orthanc instance at PACS_HOST:PACS_PORT.
+`require_test_pacs()` seeds the dataset and registers the calling AET if the
+PACS lacks them (see tests/utils/pacs_dataset.py). They are skipped if the
 server is unreachable.
 
 Run:

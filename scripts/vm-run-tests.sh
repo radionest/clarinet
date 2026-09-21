@@ -111,6 +111,9 @@ export CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet:${DB_PASS}@loca
 # The VM also hosts Orthanc; without this the DICOM tests probe localhost and
 # skip, so they would never run against PostgreSQL.
 export CLARINET_TEST_PACS_HOST="${CLARINET_TEST_PACS_HOST:-$VM_IP}"
+# The C-MOVE reachability probe defaults to an SSH alias ("klara") that is not
+# this VM; "" = assume the NAT VM can reach the host. An explicit value wins.
+export CLARINET_TEST_PACS_SSH="${CLARINET_TEST_PACS_SSH-}"
 
 cd "$PROJECT_DIR"
 

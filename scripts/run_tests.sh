@@ -8,6 +8,10 @@ set -uo pipefail
 # pytest itself always writes the path set in pyproject.toml addopts.
 REPORT="${CLARINET_TEST_REPORT:-/tmp/clarinet-test-report.json}"
 
+# Every stage writes the same path and pytest only writes it at session end, so
+# a run killed earlier would otherwise be judged by the previous stage's report.
+rm -f "$REPORT"
+
 uv run pytest "$@"
 EXIT=$?
 

@@ -63,7 +63,7 @@ def test_patient_ids_are_importable_and_never_look_anonymized() -> None:
 
 
 def test_uids_are_deterministic_and_unique() -> None:
-    """Re-seeding must overwrite, not duplicate — two xdist groups may seed at once."""
+    """Seeding twice must not duplicate — the dicom and slicer xdist groups may both seed."""
     first = [ds.SOPInstanceUID for ds in build_test_instances()]
     second = [ds.SOPInstanceUID for ds in build_test_instances()]
     assert first == second

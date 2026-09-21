@@ -6,7 +6,7 @@ every DICOM test skipped as "not reachable" while the PACS was up.
 """
 
 from unittest.mock import MagicMock, patch
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import pytest
 import requests
@@ -27,10 +27,11 @@ def _response(status_code: int) -> MagicMock:
 
 
 def test_rest_url_carries_credentials() -> None:
+    # urlsplit neither percent-decodes userinfo nor preserves hostname case.
     parts = urlsplit(config.PACS_REST_URL)
-    assert parts.username == config.PACS_REST_USER
-    assert parts.password == config.PACS_REST_PASS
-    assert parts.hostname == config.PACS_HOST
+    assert unquote(parts.username or "") == config.PACS_REST_USER
+    assert unquote(parts.password or "") == config.PACS_REST_PASS
+    assert parts.hostname == config.PACS_HOST.lower()
     assert parts.port == config.PACS_REST_PORT
 
 
@@ -95,7 +96,7 @@ def test_gate_does_not_touch_a_pacs_it_could_not_reach() -> None:
 def test_an_unregistered_aet_is_registered_as_a_modality() -> None:
     """Stock Orthanc answers Q/R from unknown AETs with zero matches, not an error."""
     known = _response(200)
-    known.json.return_value = ["SOMEONE_ELSE"]
+    known.json.return_value = {"someone": {"AET": "SOMEONE_ELSE"}}
     with (
         patch("tests.utils.dicom.requests.get", return_value=known),
         patch("tests.utils.dicom.requests.put", return_value=_response(200)) as put,
@@ -106,9 +107,12 @@ def test_an_unregistered_aet_is_registered_as_a_modality() -> None:
 
 
 def test_a_registered_aet_is_left_alone() -> None:
-    """It may carry a real host/port for C-MOVE — never overwrite it."""
+    """It may carry a real host/port for C-MOVE — never overwrite or shadow it.
+
+    Orthanc keys modalities by a symbolic name that need not equal the AET.
+    """
     known = _response(200)
-    known.json.return_value = ["CLARINET_TEST"]
+    known.json.return_value = {"clarinet-tests": {"AET": "CLARINET_TEST", "Port": 4006}}
     with (
         patch("tests.utils.dicom.requests.get", return_value=known),
         patch("tests.utils.dicom.requests.put") as put,
@@ -119,7 +123,7 @@ def test_a_registered_aet_is_left_alone() -> None:
 
 def test_a_refused_registration_fails_without_printing_the_credentialed_url() -> None:
     known = _response(200)
-    known.json.return_value = []
+    known.json.return_value = {}
     with (
         patch("tests.utils.dicom.requests.get", return_value=known),
         patch("tests.utils.dicom.requests.put", return_value=_response(403)),
