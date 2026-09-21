@@ -317,7 +317,7 @@ _test-all-stages-impl:
 		echo "=========================================="; \
 		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
 		[ -n "$$VM_IP" ] || { echo "Cannot determine VM IP — is the VM running?"; exit 1; }; \
-		CLARINET_TEST_PACS_HOST="$$VM_IP" CLARINET_TEST_PACS_SSH="$${CLARINET_TEST_PACS_SSH-}" \
+		CLARINET_TEST_PACS_HOST="$$VM_IP" CLARINET_TEST_PACS_SSH="" \
 			./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
 	fi
 	@echo ""

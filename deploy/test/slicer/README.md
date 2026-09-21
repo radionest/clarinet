@@ -65,11 +65,12 @@ CLARINET_TEST_PACS_SSH=<ssh-alias-of-that-host> \
 make test-all-stages
 ```
 
-Leave `CLARINET_TEST_PACS_HOST` unset and stage 5b uses the pipeline's own VM
-Orthanc. With an explicit PACS host, also set `CLARINET_TEST_PACS_SSH`: the
-C-MOVE tests probe reachability over that SSH alias (default `klara`) and
-**skip** when it does not answer; `""` skips the probe and assumes the PACS can
-connect back.
+Both PACS variables apply to the slicer stage (5b) only — stage 5 always tests
+against the pipeline's own VM Orthanc. Leave `CLARINET_TEST_PACS_HOST` unset and
+5b uses that VM too. With an explicit PACS host, also set
+`CLARINET_TEST_PACS_SSH`: the C-MOVE tests probe reachability over that SSH
+alias (default `klara`) and **skip** when it does not answer; `""` skips the
+probe and assumes the PACS can connect back.
 
 ### Config (env vars)
 
