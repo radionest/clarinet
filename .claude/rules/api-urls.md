@@ -49,7 +49,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/records` | POST | 201 | Create record. **403**: a non-admin caller set `clarinet_storage_path` (admin-only per-record storage-root override). **409**: `RECORD_LIMIT_REACHED`, `UNIQUE_PER_USER`, `PARENT_REQUIRED` (record_type with `parent_required=True` and no `parent_record_id` in payload). `user_id` is inherited from the parent only when RecordType has `inherit_user_from_parent=True` |
+| `/api/records` | POST | 201 | Create record. Auth: admin, or a holder of the record type's role (`role_name = NULL` → admin-only); response masked per record masking policy. **403**: caller lacks the type's role, or a non-admin caller set `clarinet_storage_path` (admin-only per-record storage-root override). **409**: `RECORD_LIMIT_REACHED`, `UNIQUE_PER_USER`, `PARENT_REQUIRED` (record_type with `parent_required=True` and no `parent_record_id` in payload). `user_id` is inherited from the parent only when RecordType has `inherit_user_from_parent=True` |
 | `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
@@ -174,8 +174,8 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/api/slicer/exec/raw` | POST | 200 | Execute raw script |
 | `/api/slicer/ping` | GET | 200 | Ping Slicer |
 | `/api/slicer/clear` | POST | 200 | Clear scene |
-| `/api/slicer/records/{id}/open` | POST | 200 | Open record in Slicer |
-| `/api/slicer/records/{id}/validate` | POST | 200 | Validate in Slicer |
+| `/api/slicer/records/{id}/open` | POST | 200 | Open record in Slicer. Auth: `AuthorizedRecordDep` — the context carries patient identifiers and file paths and is sent to a Slicer at the caller's IP. **403** other role / NULL-role record |
+| `/api/slicer/records/{id}/validate` | POST | 200 | Validate in Slicer. Auth: `AuthorizedRecordDep` (same reason) |
 
 **Optional per-client storage override** — the storage prefix visible to the user's Slicer. Honored by `/slicer/records/{id}/open`, `/slicer/records/{id}/validate`, and `/records/{id}/submit` (POST and PATCH). Two transports, read header-first: the `X-Clarinet-Storage-Path-Client` header (sent only on the Slicer endpoints) and, as a fallback, the `clarinet_storage_path_client` cookie (URL-decoded; auto-attached to every same-origin request, so it survives formosh form-submits that strip custom headers). Both are set by the frontend from `localStorage` (managed on the `/settings` page). When absent or blank, falls back to `settings.storage_path_client` (legacy global). Consumed via `ClientStoragePathDep` in `dependencies.py`.
 

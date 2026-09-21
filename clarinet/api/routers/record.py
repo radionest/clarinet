@@ -395,17 +395,51 @@ async def check_storage_path_admin_only(
     )
 
 
+async def check_record_type_role(
+    new_record: RecordCreate,
+    user: CurrentUserDep,
+    record_type_repo: RecordTypeRepositoryDep,
+) -> None:
+    """Only an admin, or a holder of the record type's role, may create its records.
+
+    Without it any authenticated account — a role-less one included — could
+    create records for any patient. A type with ``role_name=None`` is
+    admin-only. Deliberately ``is_admin`` (superuser OR ``admin`` role), to
+    agree with ``check_storage_path_admin_only`` on this same endpoint — which
+    is NOT the read rule: ``authorize_record_access`` does not recognise the
+    ``admin`` role (superuser, or a holder of the type's role), so an
+    ``admin``-role non-superuser without that role can create a record it
+    cannot read back.
+
+    Raises:
+        AuthorizationError: 403 when the caller lacks the type's role.
+        RecordTypeNotFoundError: If the record type does not exist.
+    """
+    if is_admin(user):
+        return
+    record_type = await record_type_repo.get(new_record.record_type_name)
+    if record_type.role_name is None or record_type.role_name not in get_user_role_names(user):
+        raise AuthorizationError("Insufficient permissions to create records of this type")
+
+
 @router.post(
     "/",
     response_model=RecordRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(check_record_constraints), Depends(check_storage_path_admin_only)],
+    # Role check first: a caller who may not create this type learns nothing
+    # about its max_records / unique_by state.
+    dependencies=[
+        Depends(check_record_type_role),
+        Depends(check_record_constraints),
+        Depends(check_storage_path_admin_only),
+    ],
 )
 async def add_record(
     new_record: RecordCreate,
     service: RecordServiceDep,
     actor: AuditActorDep,
-) -> Record:
+    user: CurrentUserDep,
+) -> RecordRead:
     """Create a new record.
 
     If the RecordType defines required input files and they are not yet
@@ -416,8 +450,8 @@ async def add_record(
     parent record only if the RecordType has ``inherit_user_from_parent``
     enabled and no explicit ``user_id`` is provided.
     """
-    record = Record(**new_record.model_dump())
-    return await service.create_record(record, actor_id=actor)
+    record = await service.create_record(Record(**new_record.model_dump()), actor_id=actor)
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
 @router.patch(
@@ -1161,7 +1195,7 @@ async def invalidate_record(
         acting_user=user,
         actor_id=actor,
     )
-    return RecordRead.model_validate(record)
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
 def _build_record_search_criteria(

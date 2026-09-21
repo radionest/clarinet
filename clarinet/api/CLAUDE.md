@@ -11,7 +11,8 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 
 | Router | Auth Level | Notes |
 |--------|-----------|-------|
-| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record endpoints |
+| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record endpoints; `POST /` requires an admin or the record type's role (`check_record_type_role`) |
+| `slicer.py` | mixed | `/records/{id}/open` and `/validate` use `AuthorizedRecordDep` (they ship the record's context to the caller's Slicer); `exec`, `ping`, `clear` act only on the caller's own Slicer and stay `CurrentUserDep` |
 | `study.py` | `current_admin_user` | Admin-only (patients, studies, series): is_superuser OR `admin` role |
 | `record_type.py` | `current_superuser` | Admin-only for mutations; read is open to authenticated |
 | `user.py` | `AdminUserDep` | Admin-only mutations: is_superuser OR `admin` role; `/me` and `/me/roles` are open to any authenticated user |

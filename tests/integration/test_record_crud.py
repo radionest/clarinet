@@ -10,9 +10,9 @@ from sqlmodel import select
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.record import Record, RecordStatus, RecordType
+from clarinet.models.user import UserRole
 from tests.conftest import (
     create_authenticated_client,
-    create_mock_superuser,
     create_mock_user_with_role,
 )
 from tests.utils.urls import RECORD_TYPES, RECORDS_BASE
@@ -750,11 +750,20 @@ async def test_assign_user_rejects_preparing_record(
 # ── clarinet_storage_path — admin-only (Task 12 Part B, half 2) ────────────
 
 
+STORAGE_PATH_ROLE = "storage-path-role"
+
+
 @pytest_asyncio.fixture
 async def regular_user_client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
-    """A client authenticated as a regular (non-admin) user."""
-    user = await create_mock_superuser(test_session, email="storage-path-regular@test.com")
-    user.is_superuser = False  # downgrade
+    """A client authenticated as a regular (non-admin) user.
+
+    Holds the role of ``storage_path_perm_type``: creating a record requires the
+    type's role, and these tests are about the storage-path guard, which must be
+    the only thing standing between this user and a 201.
+    """
+    user = await create_mock_user_with_role(
+        test_session, STORAGE_PATH_ROLE, email="storage-path-regular@test.com"
+    )
     async for ac in create_authenticated_client(user, test_session, test_settings):
         yield ac
 
@@ -777,10 +786,15 @@ async def admin_role_client(test_session, test_settings) -> AsyncGenerator[Async
 @pytest_asyncio.fixture
 async def storage_path_perm_type(test_session):
     """PATIENT-level RecordType for the clarinet_storage_path permission tests."""
+    # role_name is an FK: the role must exist whichever fixture runs first.
+    if await test_session.get(UserRole, STORAGE_PATH_ROLE) is None:
+        test_session.add(UserRole(name=STORAGE_PATH_ROLE))
+        await test_session.commit()
     rt = RecordType(
         name="storage-path-perm-type",
         description="For clarinet_storage_path admin-only tests",
         level=DicomQueryLevel.PATIENT,
+        role_name=STORAGE_PATH_ROLE,
     )
     test_session.add(rt)
     await test_session.commit()
@@ -805,6 +819,8 @@ class TestCreateRecordStoragePathPermission:
             },
         )
         assert resp.status_code == 403
+        # The storage-path guard, not the record-type role check, must be what refuses.
+        assert "clarinet_storage_path" in resp.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_admin_setting_storage_path_succeeds(

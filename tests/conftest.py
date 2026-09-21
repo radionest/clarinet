@@ -35,6 +35,7 @@ from tests.utils.cookies import patch_cookie_forwarding
 settings.pipeline_version_check_enabled = False
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Serialize the DICOM suite onto a single xdist worker.
 
@@ -48,6 +49,10 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     ``--dist loadgroup`` (a no-op when xdist is inactive), restoring serial PACS
     access. (``mr_study``/``small_mr_study`` additionally scope their selection
     to the SHIPILOV patient so they never pick an anonymized copy.)
+
+    ``tryfirst``: xdist reads the marks in its own ``pytest_collection_modifyitems``
+    and, being registered after this conftest, would otherwise run before it and
+    never see the group (pinned in ``tests/test_dicom_xdist_group.py``).
     """
     for item in items:
         # Leave tests that already declare their own xdist_group alone — the

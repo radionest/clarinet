@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from clarinet.api.dependencies import (
+    AuthorizedRecordDep,
     ClientStoragePathDep,
     CurrentUserDep,
     RecordRepositoryDep,
@@ -136,6 +137,7 @@ async def clear_slicer_scene(
 async def open_record_in_slicer(
     record_id: int,
     request: Request,
+    record: AuthorizedRecordDep,
     record_repo: RecordRepositoryDep,
     service: SlicerServiceDep,
     _current_user: CurrentUserDep,
@@ -149,6 +151,8 @@ async def open_record_in_slicer(
 
     Args:
         record_id: Record ID to open.
+        record: The record, authorized for the caller (``AuthorizedRecordDep``) —
+            its context is sent to a Slicer at the caller's IP.
         record_repo: Injected RecordRepository.
         service: Injected SlicerService.
         _current_user: Authenticated user.
@@ -170,7 +174,6 @@ async def open_record_in_slicer(
         },
     )
 
-    record = await record_repo.get_with_relations(record_id)
     record_read = RecordRead.model_validate(record)
 
     if not record_read.record_type.slicer_script:
@@ -224,6 +227,7 @@ async def open_record_in_slicer(
 async def validate_record_in_slicer(
     record_id: int,
     request: Request,
+    record: AuthorizedRecordDep,
     record_repo: RecordRepositoryDep,
     service: SlicerServiceDep,
     _current_user: CurrentUserDep,
@@ -237,6 +241,8 @@ async def validate_record_in_slicer(
 
     Args:
         record_id: Record ID to validate.
+        record: The record, authorized for the caller (``AuthorizedRecordDep``) —
+            its context is sent to a Slicer at the caller's IP.
         record_repo: Injected RecordRepository.
         service: Injected SlicerService.
         _current_user: Authenticated user.
@@ -258,7 +264,6 @@ async def validate_record_in_slicer(
         },
     )
 
-    record = await record_repo.get_with_relations(record_id)
     record_read = RecordRead.model_validate(record)
 
     if not record_read.record_type.slicer_result_validator:
