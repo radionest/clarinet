@@ -38,7 +38,7 @@ from tests.config import (
     SLICER_HOST,
     SLICER_PORT,
 )
-from tests.utils.dicom import cmove_storage_scp, move_with_retry, skip_unless_pacs_reachable
+from tests.utils.dicom import cmove_storage_scp, move_with_retry, require_test_pacs
 
 pytestmark = [
     pytest.mark.slicer,
@@ -101,7 +101,7 @@ PacsHelper.from_slicer = classmethod(lambda cls, server_name=None: PacsHelper(
 @pytest.fixture(scope="session")
 def _check_pacs() -> None:
     """Skip all tests if Orthanc PACS is unreachable."""
-    skip_unless_pacs_reachable(f"Orthanc PACS not reachable at {PACS_HOST}")
+    require_test_pacs(f"Orthanc PACS not reachable at {PACS_HOST}", calling_aet=CALLING_AET)
 
 
 @pytest.fixture(scope="session")

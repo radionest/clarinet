@@ -108,6 +108,9 @@ fi
 log "Tunnel active (PID $TUNNEL_PID)."
 
 export CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet:${DB_PASS}@localhost:${LOCAL_PORT}/${TEST_DB}"
+# The VM also hosts Orthanc; without this the DICOM tests probe localhost and
+# skip, so they would never run against PostgreSQL.
+export CLARINET_TEST_PACS_HOST="${CLARINET_TEST_PACS_HOST:-$VM_IP}"
 
 cd "$PROJECT_DIR"
 

@@ -12,7 +12,11 @@ import pytest
 import requests
 
 from tests import config
-from tests.utils.dicom import skip_unless_pacs_reachable
+from tests.utils.dicom import (
+    register_pacs_modality,
+    require_test_pacs,
+    skip_unless_pacs_reachable,
+)
 
 
 def _response(status_code: int) -> MagicMock:
@@ -52,6 +56,76 @@ def test_probe_fails_when_credentials_are_rejected(status_code: int) -> None:
     ):
         skip_unless_pacs_reachable("unused")
     # The credentialed URL must never reach test output.
+    assert "@" not in str(excinfo.value)
+
+
+def test_gate_seeds_the_dataset_and_registers_the_default_calling_aet() -> None:
+    with (
+        patch("tests.utils.dicom.requests.get", return_value=_response(200)),
+        patch("tests.utils.dicom.seed_pacs_dataset") as seed,
+        patch("tests.utils.dicom.register_pacs_modality") as register,
+    ):
+        require_test_pacs("unused")
+    seed.assert_called_once_with()
+    register.assert_called_once_with(config.CALLING_AET)
+
+
+def test_gate_registers_a_module_specific_calling_aet() -> None:
+    with (
+        patch("tests.utils.dicom.requests.get", return_value=_response(200)),
+        patch("tests.utils.dicom.seed_pacs_dataset"),
+        patch("tests.utils.dicom.register_pacs_modality") as register,
+    ):
+        require_test_pacs("unused", calling_aet="SLICER_TEST")
+    register.assert_called_once_with("SLICER_TEST")
+
+
+def test_gate_does_not_touch_a_pacs_it_could_not_reach() -> None:
+    with (
+        patch("tests.utils.dicom.requests.get", side_effect=requests.ConnectionError),
+        patch("tests.utils.dicom.seed_pacs_dataset") as seed,
+        patch("tests.utils.dicom.register_pacs_modality") as register,
+        pytest.raises(pytest.skip.Exception),
+    ):
+        require_test_pacs("no pacs here")
+    seed.assert_not_called()
+    register.assert_not_called()
+
+
+def test_an_unregistered_aet_is_registered_as_a_modality() -> None:
+    """Stock Orthanc answers Q/R from unknown AETs with zero matches, not an error."""
+    known = _response(200)
+    known.json.return_value = ["SOMEONE_ELSE"]
+    with (
+        patch("tests.utils.dicom.requests.get", return_value=known),
+        patch("tests.utils.dicom.requests.put", return_value=_response(200)) as put,
+    ):
+        register_pacs_modality("CLARINET_TEST")
+    assert put.call_args.args[0].endswith("/modalities/CLARINET_TEST")
+    assert put.call_args.kwargs["json"]["AET"] == "CLARINET_TEST"
+
+
+def test_a_registered_aet_is_left_alone() -> None:
+    """It may carry a real host/port for C-MOVE — never overwrite it."""
+    known = _response(200)
+    known.json.return_value = ["CLARINET_TEST"]
+    with (
+        patch("tests.utils.dicom.requests.get", return_value=known),
+        patch("tests.utils.dicom.requests.put") as put,
+    ):
+        register_pacs_modality("CLARINET_TEST")
+    put.assert_not_called()
+
+
+def test_a_refused_registration_fails_without_printing_the_credentialed_url() -> None:
+    known = _response(200)
+    known.json.return_value = []
+    with (
+        patch("tests.utils.dicom.requests.get", return_value=known),
+        patch("tests.utils.dicom.requests.put", return_value=_response(403)),
+        pytest.raises(pytest.fail.Exception, match="HTTP 403") as excinfo,
+    ):
+        register_pacs_modality("CLARINET_TEST")
     assert "@" not in str(excinfo.value)
 
 

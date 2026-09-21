@@ -25,7 +25,7 @@ from dimsechord import StorageSCP
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyResult
 from clarinet.services.dicom.models import SeriesResult
 from tests.config import PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
-from tests.utils.dicom import cmove_storage_scp, move_with_retry, skip_unless_pacs_reachable
+from tests.utils.dicom import cmove_storage_scp, move_with_retry, require_test_pacs
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
@@ -53,7 +53,7 @@ def _free_port() -> int:
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip all tests if Orthanc is unreachable."""
-    skip_unless_pacs_reachable("Orthanc PACS not reachable — skipping C-MOVE tests")
+    require_test_pacs("Orthanc PACS not reachable — skipping C-MOVE tests", calling_aet=CALLING_AET)
 
 
 @pytest.fixture(scope="session")

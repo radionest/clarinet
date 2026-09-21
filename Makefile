@@ -328,12 +328,18 @@ _test-all-stages-impl:
     # CLARINET_TEST_PACS_HOST back into this make — set those in the environment
     # that invokes `make`. A failing hook is non-fatal (slicer tests then skip),
     # but its exit code is surfaced rather than swallowed.
+    # CLARINET_TEST_PACS_HOST defaults to the pipeline's own VM: without it the
+    # Slicer↔PACS tests probe localhost and skip.
 	@if [ -n "$${SLICER_PACS_SETUP}" ]; then \
 		echo "Running Slicer/PACS setup hook: $${SLICER_PACS_SETUP}"; \
 		bash "$${SLICER_PACS_SETUP}"; rc=$$?; \
 		[ $$rc -eq 0 ] || echo "⚠ Slicer/PACS setup hook exited $$rc — PACS-dependent slicer tests will skip"; \
 	fi
-	@$(MAKE) test-slicer
+	@if [ "$${SKIP_VM}" != "1" ] && [ -z "$${CLARINET_TEST_PACS_HOST}" ]; then \
+		CLARINET_TEST_PACS_HOST="$$(bash $(VM_SH) ip 2>/dev/null)" $(MAKE) test-slicer; \
+	else \
+		$(MAKE) test-slicer; \
+	fi
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
 		echo "=========================================="; \

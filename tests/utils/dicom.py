@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import socket
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -13,7 +14,8 @@ from dimsechord import DicomNode, RetrieveResult, StorageSCP
 from clarinet.services.dicom import scp as scp_module
 from clarinet.services.dicom.client import DicomClient
 from clarinet.settings import settings
-from tests.config import PACS_HOST, PACS_REST_PORT, PACS_REST_URL
+from tests.config import CALLING_AET, PACS_HOST, PACS_PORT, PACS_REST_PORT, PACS_REST_URL
+from tests.utils.pacs_dataset import seed_pacs_dataset
 
 
 def skip_unless_pacs_reachable(reason: str) -> None:
@@ -35,6 +37,44 @@ def skip_unless_pacs_reachable(reason: str) -> None:
         )
     if not resp.ok:
         pytest.skip(reason)
+
+
+def register_pacs_modality(aet: str) -> None:
+    """Let ``aet`` query the test PACS.
+
+    Stock Orthanc (``DicomAlwaysAllowFind``/``Get`` = false) answers C-FIND and
+    C-GET from an unregistered AET with zero matches rather than an error, so an
+    unregistered test AET looks exactly like an empty PACS. Host/port matter only
+    for C-MOVE, whose tests register their own; an AET that is already known is
+    left alone because it may carry such a real address.
+    """
+    known = requests.get(f"{PACS_REST_URL}/modalities", timeout=5)
+    if known.ok and aet in known.json():
+        return
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect((PACS_HOST, PACS_PORT))
+        local_ip = s.getsockname()[0]
+    resp = requests.put(
+        f"{PACS_REST_URL}/modalities/{aet}",
+        json={"AET": aet, "Host": local_ip, "Port": 11112},
+        timeout=5,
+    )
+    if not resp.ok:
+        pytest.fail(
+            f"Orthanc at {PACS_HOST} refused to register modality {aet} (HTTP {resp.status_code})"
+        )
+
+
+def require_test_pacs(reason: str, calling_aet: str = CALLING_AET) -> None:
+    """Gate for every DICOM fixture: probe Orthanc, then make it usable by the tests.
+
+    One entry point so a new DICOM test module cannot probe the PACS and forget
+    the rest: the synthetic dataset is seeded (``tests/utils/pacs_dataset.py``)
+    and ``calling_aet`` is allowed to query it.
+    """
+    skip_unless_pacs_reachable(reason)
+    seed_pacs_dataset()
+    register_pacs_modality(calling_aet)
 
 
 @contextlib.contextmanager
