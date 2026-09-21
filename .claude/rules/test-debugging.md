@@ -16,6 +16,9 @@ CLARINET_LOG_DIR=/tmp make test-fast  # + app logs → /tmp/clarinet.log
 make test-debug                   # both at once
 ```
 
+`scripts/run_tests.sh` writes the report to `$CLARINET_TEST_REPORT` when that is
+set — read that path instead of `/tmp/clarinet-test-report.json` in the recipes below.
+
 ## Analyze test failures (jq)
 
 ```bash

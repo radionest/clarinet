@@ -6,8 +6,8 @@ set -uo pipefail
 
 # Default matches pyproject.toml addopts; an override is passed on to pytest
 # below (a CLI option wins over addopts), so the path deleted, written and read
-# is always the same one — e.g. one report per pipeline when several worktrees
-# run at once.
+# is always the same one. Callers that run pytest without this wrapper still
+# write the default path.
 REPORT="${CLARINET_TEST_REPORT:-/tmp/clarinet-test-report.json}"
 
 # Every stage writes the same path and pytest only writes it at session end, so

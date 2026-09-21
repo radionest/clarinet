@@ -88,8 +88,11 @@ probe and assumes the PACS can connect back.
 ## Notes / limitations
 
 - Slicer is not a service — re-run `run-headless.sh` after a reboot.
-- The Web Server binds `0.0.0.0`, so a PACS on another host can C-MOVE back to
-  `CLARINET_TEST_SLICER_HOST:<SCP_PORT>`.
+- The storage SCP (`CLARINET_SLICER_SCP_PORT`, a separate listener from the Web
+  Server port) accepts C-MOVE deliveries from a PACS on another host. The tests
+  register it in Orthanc at `CLARINET_TEST_SLICER_HOST`, or — when that is a
+  loopback name, as in the example above — at this machine's IP on the route to
+  the PACS.
 - C-MOVE-to-Slicer retrieval (`DICOMListener` indexing of storescp deliveries)
   is unreliable under Xvfb. The `_cmove_indexing_works` fixture in
   `tests/e2e/test_slicer_pacs_workflow.py` probes this and self-skips that one

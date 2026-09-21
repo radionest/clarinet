@@ -82,7 +82,8 @@ def _study_uid(study: _Study) -> UID:
 
 
 # Tells our own SHIPILOV study apart from real ones on a PACS we must not write to.
-SYNTHETIC_SHIPILOV_STUDY_UID = _study_uid(_STUDIES[-1])
+(_SHIPILOV_STUDY,) = (s for s in _STUDIES if s.patient_name.startswith(PATIENT_NAME_PREFIX))
+SYNTHETIC_SHIPILOV_STUDY_UID = _study_uid(_SHIPILOV_STUDY)
 
 
 def _volume(modality: Literal["MR", "CT"]) -> npt.NDArray[np.int16] | npt.NDArray[np.uint16]:

@@ -180,7 +180,7 @@ via `PYTEST_ADDOPTS="-v" make test-fast`; file-scoped on PostgreSQL:
 
 ## Background and CI
 
-JSON report: `/tmp/clarinet-test-report.json` (written atomically at session end; `scripts/run_tests.sh` deletes it first, so it is absent during a run and after a run killed early — bare `uv run pytest` leaves the previous one in place). pynetdicom loguru errors at end of output are noise.
+JSON report: `/tmp/clarinet-test-report.json` (written atomically at session end; `scripts/run_tests.sh` deletes it first, so it is absent during a run and after a run killed early — bare `uv run pytest` leaves the previous one in place). `CLARINET_TEST_REPORT=<path>` moves it for `scripts/run_tests.sh` only; bare `uv run pytest` calls, including some pipeline stages, still write the default path. pynetdicom loguru errors at end of output are noise.
 
 ## Debugging / Schema Tests
 
