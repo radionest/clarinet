@@ -11,15 +11,18 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_tests.sh"
 
+# win32: a `bash` is on PATH there too, but the stub `uv` is a shell script and
+# the wrapper is a POSIX developer tool — nothing on Windows runs it.
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None or shutil.which("jq") is None,
-    reason="run_tests.sh needs bash and jq",
+    sys.platform == "win32" or shutil.which("bash") is None or shutil.which("jq") is None,
+    reason="run_tests.sh needs a POSIX host with bash and jq",
 )
 
 
