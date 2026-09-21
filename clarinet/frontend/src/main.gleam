@@ -503,6 +503,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           sse_enabled: project_info.sse_enabled,
           anon_per_study: project_info.anon_per_study,
           dicomweb_backend: project_info.dicomweb_backend,
+          registration_enabled: project_info.registration_enabled,
         )
       #(new_model, ensure_sse(new_model))
     }
@@ -1059,6 +1060,7 @@ fn build_shared(model: Model) -> shared.Shared {
     viewers: model.viewers,
     anon_per_study: model.anon_per_study,
     dicomweb_backend: model.dicomweb_backend,
+    registration_enabled: model.registration_enabled,
     translate: i18n.translate(model.locale, _),
     locale: model.locale,
   )

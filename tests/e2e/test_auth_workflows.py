@@ -42,6 +42,15 @@ LOGIN_SUCCESS_CODES = [200, 204]
 LOGOUT_SUCCESS_CODES = [200, 204]
 
 
+@pytest.fixture(autouse=True)
+def _enable_registration(test_settings, monkeypatch):
+    """These flows start from public self-registration, which is opt-in."""
+    # Both objects: conftest client fixtures rebind auth_config.settings to
+    # test_settings, but only after autouse fixtures have already run.
+    monkeypatch.setattr(settings, "registration_enabled", True)
+    monkeypatch.setattr(test_settings, "registration_enabled", True)
+
+
 class TestSessionManagement:
     """User-facing active-session listing + per-session revoke.
 

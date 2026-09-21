@@ -100,7 +100,8 @@ step `PipelineChainMiddleware.post_execute()` fetches the definition over HTTP
 (`GET /api/pipelines/{name}/definition`) and dispatches the next step through
 that step's own broker. The chain stops on error. Definitions are upserted at
 startup by `sync_pipeline_definitions()` and on demand via
-`POST /api/pipelines/sync`.
+`POST /api/pipelines/sync` (admin — it writes to the DB; the read-only
+definition and fingerprint endpoints stay open for workers).
 
 ## Retry, DLQ and ordering
 

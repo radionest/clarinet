@@ -513,6 +513,30 @@ async def current_admin_user(
 AdminUserDep = Annotated[User, Depends(current_admin_user)]
 
 
+async def current_role_holder(
+    user: Annotated[User, Depends(current_active_user)],
+) -> User:
+    """Require an admin or a user holding at least one role.
+
+    A role-less account (e.g. freshly self-registered) is authenticated but
+    entitled to nothing. Routers with no finer-grained check of their own — the
+    DICOMweb proxy reads straight from the PACS — use this so such an account
+    cannot reach patient data.
+    """
+    return require_role_holder(user)
+
+
+def require_role_holder(user: User) -> User:
+    """The ``current_role_holder`` check for callers that resolve the user themselves.
+
+    Raises:
+        HTTPException: 403 when the user is neither an admin nor holds a role.
+    """
+    if is_admin(user) or get_user_role_names(user):
+        return user
+    raise HTTPException(status_code=403, detail="No role assigned")
+
+
 def require_capability(capability: Capability) -> Callable[[User], Awaitable[User]]:
     """Build a dependency that admits a user holding ``capability``.
 

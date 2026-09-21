@@ -8,7 +8,7 @@ a traditional PACS that only supports C-FIND/C-GET.
 import asyncio
 import tempfile
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -18,11 +18,17 @@ from clarinet.api.dependencies import (
     DicomWebCacheDep,
     DicomWebProxyServiceDep,
     PacsNodeDep,
+    current_role_holder,
 )
 from clarinet.utils.dicom import parse_frame_numbers
 from clarinet.utils.logger import logger
 
-router = APIRouter()
+# The proxy has no per-record authorization — it reads straight from the PACS —
+# so a role-less account must not get past the router.
+router = APIRouter(
+    dependencies=[Depends(current_role_holder)],
+    responses={403: {"description": "No role assigned"}},
+)
 
 DICOM_JSON_CONTENT_TYPE = "application/dicom+json"
 
