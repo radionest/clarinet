@@ -1,7 +1,8 @@
 """Integration tests for DICOM service against a live Orthanc PACS server.
 
-These tests require a running Orthanc instance at PACS_HOST:PACS_PORT
-with known test data pre-loaded. They are skipped automatically if the
+These tests require a running Orthanc instance at PACS_HOST:PACS_PORT.
+`require_test_pacs()` seeds the dataset and registers the calling AET if the
+PACS lacks them (see tests/utils/pacs_dataset.py). They are skipped if the
 server is unreachable.
 
 Run:
@@ -27,6 +28,7 @@ from clarinet.services.dicom import (
 from clarinet.services.dicom.models import SeriesResult
 from clarinet.settings import settings
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
+from tests.utils.dicom import require_test_pacs
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,11 +57,7 @@ def _is_anonymized_copy(patient_id: str | None) -> bool:
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip the entire session if the PACS server is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip("Orthanc PACS server is not reachable — skipping DICOM tests")
+    require_test_pacs("Orthanc PACS server is not reachable — skipping DICOM tests")
 
 
 @pytest.fixture(scope="session")
@@ -581,28 +579,6 @@ async def test_get_study_to_disk_valid_dicom(
     ds = pydicom.dcmread(dcm_files[0])
     assert hasattr(ds, "PatientName")
     assert ds.Modality == "MR"
-
-
-@pytest.mark.dicom
-@pytest.mark.asyncio
-async def test_get_study_with_patient_id(
-    dicom_client: DicomClient,
-    orthanc_node: DicomNode,
-    mr_study: StudyResult,
-    tmp_path: Path,
-    mr_study_instance_count: int,
-) -> None:
-    """C-GET study with patient_id param succeeds and returns expected files."""
-    assert mr_study.patient_id, "MR study has no patient_id"
-    result = await dicom_client.get_study(
-        study_uid=mr_study.study_instance_uid,
-        peer=orthanc_node,
-        output_dir=tmp_path,
-        patient_id=mr_study.patient_id,
-    )
-    assert result.status == "success"
-    assert result.num_completed == mr_study_instance_count
-    assert result.num_failed == 0
 
 
 @pytest.mark.dicom

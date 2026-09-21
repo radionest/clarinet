@@ -160,7 +160,13 @@ POST create → 201, DELETE → 204, everything else → 200. Not found → 404,
 
 pytest-xdist: each worker gets its own in-memory SQLite DB (`StaticPool`). Session-scoped engine, data cleaned via `DELETE FROM` after each test.
 
-Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, read-only), `slicer` (`xdist_group`). Unreachable services auto-skip.
+Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, `xdist_group`; seeds its dataset and registers its AET, see below), `slicer` (`xdist_group`). Unreachable services auto-skip.
+
+Every DICOM fixture gates on `require_test_pacs()` (`tests/utils/dicom.py`): an absent Orthanc skips, but a 401/403 **fails** — a reachable PACS with wrong credentials must not hide the DICOM suite. `PACS_REST_URL` carries the REST credentials (`CLARINET_TEST_PACS_REST_USER`/`_PASS`, default stock `orthanc:orthanc`), so never print it; print `PACS_HOST`.
+
+The DICOM suite brings its own data. The tests query a `SHIPILOV*` patient; `require_test_pacs()` uploads a synthetic dataset (`tests/utils/pacs_dataset.py`: one MR study for `SHIPILOV^TEST`, one CT study for `PHANTOM^CT`, deterministic UIDs, real pixel data and slice geometry). The upload is idempotent and repeated every session, so an interrupted seeding heals itself; a PACS that holds a `SHIPILOV*` study other than the synthetic one — real data — is never written to. The properties the tests rely on — exactly one SHIPILOV study and it is MR, a CT study elsewhere, loadable volumes — are pinned in `tests/test_pacs_dataset.py`; change the generator and that file together.
+
+The gate also registers the module's calling AET as an Orthanc modality: stock Orthanc answers C-FIND/C-GET from an unknown AET with **zero matches, not an error**, so an unregistered AET looks like an empty PACS. A module with its own AET passes it — `require_test_pacs(reason, calling_aet=CALLING_AET)`. C-MOVE tests skip unless the PACS can connect back; the probe ssh-es to `CLARINET_TEST_PACS_SSH` (default `klara`), and `make test-all-stages` uses `""` (assume reachable) wherever its PACS is the pipeline's own NAT VM: always in stage 5 and the PostgreSQL pass, which force the VM as PACS host, and by default in the slicer stage 5b. Only 5b honours an explicit `CLARINET_TEST_PACS_HOST`; point it at another PACS and set `CLARINET_TEST_PACS_SSH` to that host's alias yourself.
 
 **Do NOT run multiple `make test-*` targets in parallel.** Different test suites may conflict on DB schema creation, service ports, or shared fixtures. Always run them sequentially (one at a time).
 
@@ -174,7 +180,7 @@ via `PYTEST_ADDOPTS="-v" make test-fast`; file-scoped on PostgreSQL:
 
 ## Background and CI
 
-JSON report: `/tmp/clarinet-test-report.json` (atomically at session end — stale during run). pynetdicom loguru errors at end of output are noise.
+JSON report: `/tmp/clarinet-test-report.json` (written atomically at session end; `scripts/run_tests.sh` deletes it first, so it is absent during a run and after a run killed early — bare `uv run pytest` leaves the previous one in place). `CLARINET_TEST_REPORT=<path>` moves it for `scripts/run_tests.sh` only; bare `uv run pytest` calls, including some pipeline stages, still write the default path. pynetdicom loguru errors at end of output are noise.
 
 ## Debugging / Schema Tests
 

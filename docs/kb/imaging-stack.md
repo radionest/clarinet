@@ -72,7 +72,10 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
 
 Connection settings live under `pacs_*` and `dicom_*` (env: `CLARINET_PACS_HOST`
 and friends). The test PACS is Orthanc on `localhost:4242`, AET `ORTHANC`, with
-its REST API on `:8042`.
+its REST API on `:8042` (HTTP auth on the deploy VM, stock `orthanc:orthanc`).
+Stock Orthanc answers C-FIND/C-GET from an unregistered AET with zero matches
+rather than an error, so the DICOM tests register their calling AET and seed a
+synthetic dataset themselves — see `require_test_pacs()` in `tests/utils/dicom.py`.
 
 Anonymization, and the path contract that governs where anonymized files land,
 are covered in [Files and the anonymized-path contract](./files-and-anonymization.md).

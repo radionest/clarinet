@@ -38,7 +38,12 @@ from tests.config import (
     SLICER_HOST,
     SLICER_PORT,
 )
-from tests.utils.dicom import cmove_storage_scp, move_with_retry
+from tests.utils.dicom import (
+    cmove_storage_scp,
+    local_ip_facing_pacs,
+    move_with_retry,
+    require_test_pacs,
+)
 
 pytestmark = [
     pytest.mark.slicer,
@@ -101,11 +106,7 @@ PacsHelper.from_slicer = classmethod(lambda cls, server_name=None: PacsHelper(
 @pytest.fixture(scope="session")
 def _check_pacs() -> None:
     """Skip all tests if Orthanc PACS is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip(f"Orthanc PACS not reachable at {PACS_REST_URL}")
+    require_test_pacs(f"Orthanc PACS not reachable at {PACS_HOST}", calling_aet=CALLING_AET)
 
 
 @pytest.fixture(scope="session")
@@ -613,11 +614,17 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _get_local_ip() -> str:
-    """Get local IP reachable from Orthanc."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((PACS_HOST, PACS_PORT))
-        return s.getsockname()[0]
+def _slicer_host_for_pacs() -> str:
+    """Address the PACS must use to reach Slicer's storage SCP.
+
+    ``SLICER_HOST`` is how the *tests* reach Slicer. When that is loopback, Slicer
+    runs on this host, and a PACS on another machine registering "localhost" would
+    deliver the C-MOVE to itself — which then surfaces as the unrelated
+    "DICOMListener does not index" skip.
+    """
+    if SLICER_HOST in ("localhost", "127.0.0.1", "::1"):
+        return local_ip_facing_pacs()
+    return SLICER_HOST
 
 
 def _pacs_can_reach_us() -> bool:
@@ -630,7 +637,7 @@ def _pacs_can_reach_us() -> bool:
         return True
 
     port = _free_port()
-    local_ip = _get_local_ip()
+    local_ip = local_ip_facing_pacs()
     connected = False
 
     def _listen():
@@ -676,7 +683,7 @@ class TestBackendCmoveThenSlicer:
         """Install a test SCP as the singleton and register its AET in Orthanc."""
         port = _free_port()
         with cmove_storage_scp(CALLING_AET, port) as scp:
-            local_ip = _get_local_ip()
+            local_ip = local_ip_facing_pacs()
             modality_url = f"{PACS_REST_URL}/modalities/{CALLING_AET}"
             resp = requests.put(
                 modality_url,
@@ -913,7 +920,7 @@ __execResult = {"calling_aet": pacs.calling_aet}
         modality_url = f"{PACS_REST_URL}/modalities/{slicer_aet}"
         resp = requests.put(
             modality_url,
-            json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
+            json={"AET": slicer_aet, "Host": _slicer_host_for_pacs(), "Port": SLICER_SCP_PORT},
             timeout=5,
         )
         resp.raise_for_status()
@@ -941,7 +948,7 @@ __execResult = {"calling_aet": pacs.calling_aet}
         modality_url = f"{PACS_REST_URL}/modalities/{slicer_aet}"
         requests.put(
             modality_url,
-            json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
+            json={"AET": slicer_aet, "Host": _slicer_host_for_pacs(), "Port": SLICER_SCP_PORT},
             timeout=5,
         ).raise_for_status()
         # NB: this mutates the shared session DICOM DB — it removes the series to
