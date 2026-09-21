@@ -6,7 +6,7 @@ behaviour of the scratch-DB drop used by the migration_project fixture.
 
 from unittest.mock import MagicMock
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from tests.migration import conftest
 
@@ -53,12 +53,10 @@ def test_happy_path_terminates_then_drops(monkeypatch):
 
 
 def test_terminate_targets_only_our_own_backends(monkeypatch):
-    """An autovacuum worker in the scratch DB must not turn teardown into an ERROR.
+    """Only our own lingering connections are ours to evict.
 
-    ``pg_terminate_backend`` on a backend with no role (autovacuum) or a superuser
-    role raises InsufficientPrivilege for the non-superuser test role — a
-    ProgrammingError the retry loop does not catch. Only our own lingering
-    connections need evicting; ``DROP DATABASE ... WITH (FORCE)`` deals with the rest.
+    ``pg_terminate_backend`` on an autovacuum worker or a superuser session raises
+    InsufficientPrivilege for the non-superuser test role.
     """
     executed: list[str] = []
 
@@ -71,6 +69,29 @@ def test_terminate_targets_only_our_own_backends(monkeypatch):
 
     (terminate,) = [s for s in executed if "pg_terminate_backend" in s]
     assert "usename = current_user" in terminate
+
+
+def test_privilege_error_is_retried_not_raised(monkeypatch):
+    """An autovacuum worker in the scratch DB must not turn teardown into an ERROR.
+
+    ``DROP DATABASE ... WITH (FORCE)`` applies the same superuser check as
+    ``pg_terminate_backend``, so while such a worker is attached it fails with
+    InsufficientPrivilege — a ProgrammingError, sibling of the OperationalError the
+    loop used to catch. The worker is gone moments later, so a retry succeeds.
+    """
+    drops = {"n": 0}
+
+    def execute(stmt, *a, **k):
+        if "DROP DATABASE" in str(stmt):
+            drops["n"] += 1
+            if drops["n"] == 1:
+                raise ProgrammingError("DROP DATABASE", {}, Exception("permission denied"))
+        return MagicMock()
+
+    _install_fake_engine(monkeypatch, execute)
+    conftest.drop_pg_database("scratch_db", "postgresql+psycopg2://u@h:5432")
+
+    assert drops["n"] == 2
 
 
 def test_retries_then_succeeds(monkeypatch):

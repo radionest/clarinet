@@ -98,10 +98,12 @@ def test_an_unregistered_aet_is_registered_as_a_modality() -> None:
     known = _response(200)
     known.json.return_value = {"someone": {"AET": "SOMEONE_ELSE"}}
     with (
-        patch("tests.utils.dicom.requests.get", return_value=known),
+        patch("tests.utils.dicom.requests.get", return_value=known) as get,
         patch("tests.utils.dicom.requests.put", return_value=_response(200)) as put,
     ):
         register_pacs_modality("CLARINET_TEST")
+    # Without ?expand Orthanc returns a bare list of names and no AETs to match.
+    assert get.call_args.args[0].endswith("/modalities?expand")
     assert put.call_args.args[0].endswith("/modalities/CLARINET_TEST")
     assert put.call_args.kwargs["json"]["AET"] == "CLARINET_TEST"
 

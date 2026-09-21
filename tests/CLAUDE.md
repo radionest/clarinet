@@ -166,7 +166,7 @@ Every DICOM fixture gates on `require_test_pacs()` (`tests/utils/dicom.py`): an 
 
 The DICOM suite brings its own data. The tests query a `SHIPILOV*` patient; when the PACS has no such study, `require_test_pacs()` uploads a synthetic dataset (`tests/utils/pacs_dataset.py`: one MR study for `SHIPILOV^TEST`, one CT study for `PHANTOM^CT`, deterministic UIDs, real pixel data and slice geometry). A PACS that already holds a `SHIPILOV*` study is never written to. The properties the tests rely on — exactly one SHIPILOV study and it is MR, a CT study elsewhere, loadable volumes — are pinned in `tests/test_pacs_dataset.py`; change the generator and that file together.
 
-The gate also registers the module's calling AET as an Orthanc modality: stock Orthanc answers C-FIND/C-GET from an unknown AET with **zero matches, not an error**, so an unregistered AET looks like an empty PACS. A module with its own AET passes it — `require_test_pacs(reason, calling_aet=CALLING_AET)`. C-MOVE tests skip unless the PACS can connect back; the probe ssh-es to `CLARINET_TEST_PACS_SSH` (default `klara`), and `make test-all-stages` sets it to `""` (assume reachable) because its PACS is the pipeline's own NAT VM.
+The gate also registers the module's calling AET as an Orthanc modality: stock Orthanc answers C-FIND/C-GET from an unknown AET with **zero matches, not an error**, so an unregistered AET looks like an empty PACS. A module with its own AET passes it — `require_test_pacs(reason, calling_aet=CALLING_AET)`. C-MOVE tests skip unless the PACS can connect back; the probe ssh-es to `CLARINET_TEST_PACS_SSH` (default `klara`), and `make test-all-stages` defaults it to `""` (assume reachable; an explicit value wins) wherever its PACS is the pipeline's own NAT VM. Point the pipeline at another PACS via `CLARINET_TEST_PACS_HOST` and that default no longer applies — set `CLARINET_TEST_PACS_SSH` yourself.
 
 **Do NOT run multiple `make test-*` targets in parallel.** Different test suites may conflict on DB schema creation, service ports, or shared fixtures. Always run them sequentially (one at a time).
 
@@ -180,7 +180,7 @@ via `PYTEST_ADDOPTS="-v" make test-fast`; file-scoped on PostgreSQL:
 
 ## Background and CI
 
-JSON report: `/tmp/clarinet-test-report.json` (atomically at session end — stale during run). pynetdicom loguru errors at end of output are noise.
+JSON report: `/tmp/clarinet-test-report.json` (written atomically at session end; `scripts/run_tests.sh` deletes it first, so it is absent during a run and after a run killed early — bare `uv run pytest` leaves the previous one in place). pynetdicom loguru errors at end of output are noise.
 
 ## Debugging / Schema Tests
 

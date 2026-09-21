@@ -61,8 +61,15 @@ Point the tests at the instance and (optionally) a PACS via env:
 SLICER_HOME=~/Slicer-5.10.0-linux-amd64 \
 CLARINET_TEST_SLICER_HOST=localhost \
 CLARINET_TEST_PACS_HOST=<orthanc-host> \
+CLARINET_TEST_PACS_SSH=<ssh-alias-of-that-host> \
 make test-all-stages
 ```
+
+Leave `CLARINET_TEST_PACS_HOST` unset and stage 5b uses the pipeline's own VM
+Orthanc. With an explicit PACS host, also set `CLARINET_TEST_PACS_SSH`: the
+C-MOVE tests probe reachability over that SSH alias (default `klara`) and
+**skip** when it does not answer; `""` skips the probe and assumes the PACS can
+connect back.
 
 ### Config (env vars)
 
@@ -71,6 +78,8 @@ make test-all-stages
 | `SLICER_HOME` | autodetect | `run-headless.sh` (Slicer location) |
 | `CLARINET_TEST_SLICER_HOST` | `localhost` | tests + launcher verify |
 | `CLARINET_TEST_SLICER_PORT` | `2016` | Web Server port |
+| `CLARINET_TEST_PACS_HOST` | pipeline VM (in `test-all-stages`), else `localhost` | Slicer↔PACS tests |
+| `CLARINET_TEST_PACS_SSH` | `""` with the pipeline VM, else `klara` | C-MOVE reachability probe |
 | `CLARINET_SLICER_PACS_HOST` / `_PORT` / `_AET` | `localhost` / `4242` / `ORTHANC` | PACS seeded in Slicer QSettings |
 | `CLARINET_SLICER_CALLING_AET` | `SLICER_TEST` | Slicer's own AE title |
 | `CLARINET_SLICER_SCP_PORT` | `4006` | storage SCP listen port (C-MOVE) |

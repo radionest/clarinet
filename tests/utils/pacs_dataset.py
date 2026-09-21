@@ -54,11 +54,11 @@ class _Study:
 
 
 # Seeded in this order: the SHIPILOV study doubles as the "dataset is present"
-# marker, so it goes last — a concurrent session never sees the marker without
-# the CT study. The marker does flip on the first of the MR instances, so that
-# window stays open for the rest of the MR upload (well under a second); every
-# DICOM test shares one xdist group, so only a second concurrent pytest session
-# could ever land in it.
+# marker, so it goes last — a concurrent seeder never sees the marker without
+# the CT study. The marker does flip on the first of the MR instances, so for
+# the rest of the MR upload (well under a second) a second seeder — the slicer
+# xdist group runs beside the dicom one — may skip seeding and read a partial
+# study. Deterministic UIDs keep a double upload harmless.
 _STUDIES = (
     _Study(
         patient_id="PHANTOM-CT-001",
