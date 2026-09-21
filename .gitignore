@@ -89,3 +89,6 @@ docs/superpowers/
 
 # OpenSpec local spec store (Claude working memory, synced via doc-review gate)
 /openspec
+
+# CTK DICOM tag cache that headless Slicer drops in its cwd (make test-all-stages stage 1)
+/ctkDICOMTagCache.sql

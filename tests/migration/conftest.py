@@ -11,7 +11,7 @@ from unittest.mock import PropertyMock, patch
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.pool import NullPool
 
 from clarinet.settings import Settings
@@ -122,14 +122,20 @@ def drop_pg_database(db_name: str, base_url: str) -> None:
                 with admin_engine.connect() as conn:
                     conn.execute(
                         text(
+                            # Own role only: signalling an autovacuum worker or a
+                            # superuser session raises InsufficientPrivilege for us.
                             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                            "WHERE datname = :d AND pid <> pg_backend_pid()"
+                            "WHERE datname = :d AND pid <> pg_backend_pid() "
+                            "AND usename = current_user"
                         ),
                         {"d": db_name},
                     )
                     conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
                 return
-            except OperationalError as exc:
+            # DBAPIError, not just OperationalError: FORCE refuses with
+            # InsufficientPrivilege (a ProgrammingError) while an autovacuum
+            # worker is attached; it is gone by the next attempt.
+            except DBAPIError as exc:
                 if attempt == _DROP_ATTEMPTS:
                     logger.warning(
                         "drop_pg_database: giving up on {} after {} attempts ({})",

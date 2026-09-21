@@ -1,7 +1,8 @@
 """Integration tests for DICOM router against a live Orthanc PACS server.
 
-These tests require a running Orthanc instance at PACS_HOST:PACS_PORT
-with known test data pre-loaded. They are skipped automatically if the
+These tests require a running Orthanc instance at PACS_HOST:PACS_PORT.
+`require_test_pacs()` seeds the dataset and registers the calling AET if the
+PACS lacks them (see tests/utils/pacs_dataset.py). They are skipped if the
 server is unreachable.
 
 Run:
@@ -29,6 +30,7 @@ from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQu
 from clarinet.services.dicom.models import StudyResult
 from clarinet.settings import settings
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
+from tests.utils.dicom import require_test_pacs
 from tests.utils.factories import make_patient
 
 # ---------------------------------------------------------------------------
@@ -63,11 +65,7 @@ def _delete_study_from_pacs(study_uid: str) -> None:
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip the entire session if the PACS server is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip("Orthanc PACS server is not reachable — skipping DICOM tests")
+    require_test_pacs("Orthanc PACS server is not reachable — skipping DICOM tests")
 
 
 @pytest.fixture(scope="session")

@@ -316,7 +316,9 @@ _test-all-stages-impl:
 		echo "  Stage 5/8: test-fast (all, xdist + VM)  "; \
 		echo "=========================================="; \
 		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
-		CLARINET_TEST_PACS_HOST="$$VM_IP" ./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
+		[ -n "$$VM_IP" ] || { echo "Cannot determine VM IP — is the VM running?"; exit 1; }; \
+		CLARINET_TEST_PACS_HOST="$$VM_IP" CLARINET_TEST_PACS_SSH="" \
+			./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
 	fi
 	@echo ""
 	@echo "=========================================="
@@ -328,12 +330,23 @@ _test-all-stages-impl:
     # CLARINET_TEST_PACS_HOST back into this make — set those in the environment
     # that invokes `make`. A failing hook is non-fatal (slicer tests then skip),
     # but its exit code is surfaced rather than swallowed.
+    # CLARINET_TEST_PACS_HOST defaults to the pipeline's own VM: without it the
+    # Slicer↔PACS tests probe localhost and skip. With the VM as PACS, the
+    # C-MOVE reachability probe (CLARINET_TEST_PACS_SSH, default alias "klara")
+    # would ask the wrong host, so it defaults to "" = assume the NAT VM can
+    # reach this host; an explicit value still wins.
 	@if [ -n "$${SLICER_PACS_SETUP}" ]; then \
 		echo "Running Slicer/PACS setup hook: $${SLICER_PACS_SETUP}"; \
 		bash "$${SLICER_PACS_SETUP}"; rc=$$?; \
 		[ $$rc -eq 0 ] || echo "⚠ Slicer/PACS setup hook exited $$rc — PACS-dependent slicer tests will skip"; \
 	fi
-	@$(MAKE) test-slicer
+	@if [ "$${SKIP_VM}" != "1" ] && [ -z "$${CLARINET_TEST_PACS_HOST}" ]; then \
+		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
+		[ -n "$$VM_IP" ] || { echo "Cannot determine VM IP — is the VM running?"; exit 1; }; \
+		CLARINET_TEST_PACS_HOST="$$VM_IP" CLARINET_TEST_PACS_SSH="$${CLARINET_TEST_PACS_SSH-}" $(MAKE) test-slicer; \
+	else \
+		$(MAKE) test-slicer; \
+	fi
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
 		echo "=========================================="; \
