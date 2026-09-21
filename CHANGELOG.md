@@ -415,6 +415,11 @@
   `conform` would repair passes, and nothing is repaired or deleted.
   `check-files` stays INPUT-only by design — its verdict drives the
   `blocked` auto-unblock.
+- **CORS is off by default and `POST /api/pipelines/sync` needs an admin
+  (security).** A frontend served from another origin must now be listed in
+  `cors_origins` (`CLARINET_CORS_ORIGINS`, exact origins only). Anonymous
+  `POST /api/pipelines/sync` answers 401; the `X-Internal-Token` service token
+  qualifies as admin. Rationale under Security.
 
 ### Security
 
@@ -492,6 +497,20 @@
   a subdirectory selector), so no containment check applies — a well-formed
   absolute path set by an admin, or already present in the database, is still
   honoured. This residual is accepted, not an oversight.
+- **Three unauthenticated surfaces are closed.** `/ohif/*` joined the URL onto
+  the OHIF directory without confining the result, and Starlette passes `..`
+  through un-normalized, so `/ohif/%2e%2e/<file>` read anything the process can
+  (settings with the admin password, patient DICOM); nginx normalizes the URL
+  and masked it, a directly exposed port did not. CORS listed `"*"` with
+  credentials allowed, which makes Starlette echo any `Origin` back — it is now
+  off unless the new `cors_origins` setting (`CLARINET_CORS_ORIGINS`) lists
+  exact origins (`"*"` and `"null"` are rejected); the SPA and OHIF are
+  same-origin and need none. This stops another origin *reading* API responses
+  and sending preflighted writes (JSON, PATCH, DELETE); a bodiless POST is a
+  "simple request" and another app on the same site can still send one with
+  the `SameSite=Lax` cookie — not closed here. `POST /api/pipelines/sync` wrote
+  to the DB with no auth and now requires an admin. The caller-visible changes
+  are described under Breaking.
 
 ### Added
 
