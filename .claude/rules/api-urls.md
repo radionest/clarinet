@@ -16,9 +16,10 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/auth/login` | POST | 200 | Login (fastapi-users) |
+| `/api/auth/login` | POST | 200 | Login (fastapi-users). **400** bad credentials. **429** + `Retry-After` once the account as seen from this client IP (`login_max_failures_per_account`) or the client IP (`login_max_failures_per_ip`) hits its limit inside the `login_lockout_minutes` window — returned even for the correct password |
 | `/api/auth/logout` | POST | 200 | Logout |
-| `/api/auth/register` | POST | 200 | Register |
+| `/api/auth/register` | POST | 201 | Public self-registration. **403** unless `settings.registration_enabled` (default `False`); the new account has no roles |
+| `/api/auth/dicomweb-access` | GET | 200 | nginx `auth_request` target for `dicomweb_backend = "external"`: same gate as the `/dicom-web` router (`current_role_holder`). **401** no session, **403** role-less account |
 | `/api/auth/me` | GET | 200 | Current user info |
 | `/api/auth/session/validate` | GET | 200 | Validate session |
 | `/api/auth/session/refresh` | POST | 200 | Refresh session |
@@ -48,7 +49,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/records` | POST | 201 | Create record. **403**: a non-admin caller set `clarinet_storage_path` (admin-only per-record storage-root override). **409**: `RECORD_LIMIT_REACHED`, `UNIQUE_PER_USER`, `PARENT_REQUIRED` (record_type with `parent_required=True` and no `parent_record_id` in payload). `user_id` is inherited from the parent only when RecordType has `inherit_user_from_parent=True` |
+| `/api/records` | POST | 201 | Create record. Auth: admin, or a holder of the record type's role (`role_name = NULL` → admin-only); response masked per record masking policy. **403**: caller lacks the type's role, or a non-admin caller set `clarinet_storage_path` (admin-only per-record storage-root override). **409**: `RECORD_LIMIT_REACHED`, `UNIQUE_PER_USER`, `PARENT_REQUIRED` (record_type with `parent_required=True` and no `parent_record_id` in payload). `user_id` is inherited from the parent only when RecordType has `inherit_user_from_parent=True` |
 | `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
@@ -146,7 +147,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/pipelines/{name}/definition` | GET | 200 | Pipeline definition |
-| `/api/pipelines/sync` | POST | 200 | Sync definitions |
+| `/api/pipelines/sync` | POST | 200 | Sync definitions (AdminUserDep — writes to the DB; **401** unauthenticated) |
 | `/api/pipelines/runs` | POST | 201 | Create task run audit row (AdminUserDep; AuditMiddleware service token resolves to admin). Idempotent on duplicate id; `''` patient/study/series ids normalized to NULL |
 | `/api/pipelines/runs` | GET | 200 | List runs, filters: `status`, `task_name`, `record_id`, `patient_id`, `since` (started_at lower bound) + pagination (AdminUserDep); `''` patient_id filter treated as absent |
 | `/api/pipelines/runs/{task_id}` | GET | 200 | Get single run (AdminUserDep) |
@@ -173,12 +174,14 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/api/slicer/exec/raw` | POST | 200 | Execute raw script |
 | `/api/slicer/ping` | GET | 200 | Ping Slicer |
 | `/api/slicer/clear` | POST | 200 | Clear scene |
-| `/api/slicer/records/{id}/open` | POST | 200 | Open record in Slicer |
-| `/api/slicer/records/{id}/validate` | POST | 200 | Validate in Slicer |
+| `/api/slicer/records/{id}/open` | POST | 200 | Open record in Slicer. Auth: `AuthorizedRecordDep` — the context carries patient identifiers and file paths and is sent to a Slicer at the caller's IP. **403** other role / NULL-role record |
+| `/api/slicer/records/{id}/validate` | POST | 200 | Validate in Slicer. Auth: `AuthorizedRecordDep` (same reason) |
 
 **Optional per-client storage override** — the storage prefix visible to the user's Slicer. Honored by `/slicer/records/{id}/open`, `/slicer/records/{id}/validate`, and `/records/{id}/submit` (POST and PATCH). Two transports, read header-first: the `X-Clarinet-Storage-Path-Client` header (sent only on the Slicer endpoints) and, as a fallback, the `clarinet_storage_path_client` cookie (URL-decoded; auto-attached to every same-origin request, so it survives formosh form-submits that strip custom headers). Both are set by the frontend from `localStorage` (managed on the `/settings` page). When absent or blank, falls back to `settings.storage_path_client` (legacy global). Consumed via `ClientStoragePathDep` in `dependencies.py`.
 
 ### DICOMweb (`/dicom-web`)
+
+Router-level `current_role_holder`: **403** for an authenticated account with no role (admins pass).
 
 | URL | Method | Status | Description |
 |---|---|---|---|

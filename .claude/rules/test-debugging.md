@@ -16,6 +16,9 @@ CLARINET_LOG_DIR=/tmp make test-fast  # + app logs → /tmp/clarinet.log
 make test-debug                   # both at once
 ```
 
+`scripts/run_tests.sh` writes the report to `$CLARINET_TEST_REPORT` when that is
+set — read that path instead of `/tmp/clarinet-test-report.json` in the recipes below.
+
 ## Analyze test failures (jq)
 
 ```bash
@@ -24,6 +27,10 @@ jq '.tests[] | select(.outcome == "failed") | {nodeid, message: .call.longrepr}'
 
 # Just the names of failed tests
 jq -r '.tests[] | select(.outcome == "failed") .nodeid' /tmp/clarinet-test-report.json
+
+# Fixture ERRORs (outcome "error", counted in .summary.error — NOT in .summary.failed):
+# the traceback sits under .setup or .teardown, not .call
+jq '.tests[] | select(.outcome == "error") | {nodeid, message: (.setup.longrepr // .teardown.longrepr)}' /tmp/clarinet-test-report.json
 
 # Test durations (slowest first)
 jq '[.tests[] | {nodeid, duration}] | sort_by(-.duration) | .[:10]' /tmp/clarinet-test-report.json

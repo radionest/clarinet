@@ -22,4 +22,5 @@ async def get_project_info(registry: ViewerRegistryDep) -> dict[str, Any]:
         "sse_enabled": settings.sse_enabled,
         "anon_per_study_patient_id": settings.anon_per_study_patient_id,
         "dicomweb_backend": settings.dicomweb_backend,
+        "registration_enabled": settings.registration_enabled,
     }

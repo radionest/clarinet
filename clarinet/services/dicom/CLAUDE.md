@@ -145,8 +145,8 @@ Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 
 - Host: `localhost` by default; override via `CLARINET_TEST_PACS_HOST` (see `tests/config.py` and `.env.test.example`)
 - DICOM port: `4242`, AET: `ORTHANC`
-- REST API: `http://<host>:8042` (no auth)
-- All operations allowed: C-ECHO, C-FIND, C-GET, C-MOVE, C-STORE
+- REST API: `http://<host>:8042`. The deploy VM's Orthanc has HTTP auth on (stock `orthanc:orthanc`, see `deploy/CLAUDE.md`); tests send `CLARINET_TEST_PACS_REST_USER`/`_PASS`
+- Stock Orthanc allows C-ECHO and C-STORE from anyone but answers C-FIND/C-GET/C-MOVE from an unregistered AET with **zero matches, not an error** (`DicomAlwaysAllowFind/Get/Move = false`). Tests register their calling AET and seed their own dataset through `require_test_pacs()` (`tests/utils/dicom.py`)
 
 ## Usage
 

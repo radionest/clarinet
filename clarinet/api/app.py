@@ -139,6 +139,26 @@ def _config_startup_error(e: ConfigLoadError) -> StartupError:
     )
 
 
+def _file_within(base: Path, url_remainder: str) -> Path | None:
+    """The file *url_remainder* names under *base*, or ``None``.
+
+    For the unauthenticated SPA catch-all, which maps URLs to files. Starlette
+    hands over ``..`` segments un-normalized and pathlib discards *base* when
+    joined with an absolute remainder, so the **resolved** candidate must stay
+    inside *base* (this also refuses a symlink pointing out of it). A remainder
+    ``resolve()`` cannot take — embedded NUL, over-long name — is a miss, not an
+    error: it would otherwise cost a 4xx/5xx and a full traceback per request.
+    """
+    try:
+        root = base.resolve()
+        candidate = (root / url_remainder).resolve()
+    except (ValueError, OSError):
+        return None
+    if candidate.is_relative_to(root) and candidate.is_file():
+        return candidate
+    return None
+
+
 def _check_frontend() -> None:
     """Verify frontend static files exist when frontend is enabled."""
     if not settings.frontend_enabled:
@@ -557,15 +577,17 @@ def create_app(root_path: str = "") -> FastAPI:
         default_response_class=ORJSONResponse,
     )
 
-    # Configure CORS
-    origins = ["http://localhost", "http://localhost:8080", "*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS only for explicitly configured origins: the SPA is served same-origin
+    # and needs none. Credentials are allowed, so the list must stay exact —
+    # Settings rejects "*".
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Compress responses (JS bundles, JSON, HTML) for faster delivery
     app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -689,8 +711,8 @@ def create_app(root_path: str = "") -> FastAPI:
                         return Response(rendered, media_type="application/javascript")
                 if settings.ohif_enabled and ohif_dir.exists():
                     # Try to serve the exact static file
-                    ohif_file = ohif_dir / full_path.removeprefix("ohif/")
-                    if ohif_file.exists() and ohif_file.is_file():
+                    ohif_file = _file_within(ohif_dir, full_path.removeprefix("ohif/"))
+                    if ohif_file is not None:
                         return FileResponse(ohif_file)
                     # SPA fallback — serve index.html for client-side routing
                     ohif_idx = ohif_dir / "index.html"
@@ -714,13 +736,8 @@ def create_app(root_path: str = "") -> FastAPI:
 
             # Try to serve the requested file (project-level overrides built-in)
             for sd in static_dirs:
-                base = sd.resolve()
-                candidate = (base / full_path).resolve()
-                try:
-                    candidate.relative_to(base)
-                except ValueError:
-                    continue
-                if candidate.is_file():
+                candidate = _file_within(sd, full_path)
+                if candidate is not None:
                     # index.html carries $BASE_PATH/$PROJECT_TITLE placeholders —
                     # render it instead of serving the raw template.
                     if candidate.name == "index.html":

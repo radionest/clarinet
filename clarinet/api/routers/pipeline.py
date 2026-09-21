@@ -1,7 +1,8 @@
 """Pipeline definition and task run audit API router.
 
-Definition endpoints require no authentication — workers need
-unauthenticated access. Run audit endpoints are admin-only for both
+The read-only definition and fingerprint endpoints require no
+authentication — workers need unauthenticated access. ``POST /sync``
+writes to the DB, so it is admin-only. Run audit endpoints are admin-only for both
 read and write: AuditMiddleware authenticates with ``X-Internal-Token``,
 which resolves to the admin user, and regular users must not be able
 to forge or overwrite audit rows.
@@ -157,6 +158,7 @@ async def get_pipeline_definition(
 
 @router.post("/sync")
 async def sync_definitions(
+    _user: AdminUserDep,
     repo: PipelineDefinitionRepositoryDep,
 ) -> dict[str, int]:
     """Sync in-memory pipeline definitions to database.

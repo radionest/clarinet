@@ -155,6 +155,15 @@ correlatable. Prefill writes are deliberately not audited.
 `AuthorizedRecordDep` grants read access to superusers and to holders of the
 record type's role; `MutableRecordDep` adds mutation for the assigned user or an
 unassigned record (and bypasses the owner check when `shared_editing` is set).
+*Creating* a record is a third rule (`check_record_type_role` on
+`POST /api/records`): an admin — superuser **or** `admin` role — or a holder of
+the type's role; a `role_name = NULL` type is admin-only. The create predicate
+is a deliberate choice (it agrees with the other admin guard on that endpoint);
+its mismatch with the read rule is unresolved: reads do not recognise the
+`admin` role, so an `admin`-role non-superuser who lacks the type's role can
+create a record it cannot read back. The Slicer record endpoints
+(`/api/slicer/records/{id}/open|validate`) ship the record's context to the
+caller's machine and use `AuthorizedRecordDep`.
 Beyond roles, capabilities map roles to features in `settings.toml`
 (`[role_capabilities]`); superusers and the built-in `admin` role hold every
 capability implicitly. Non-superusers see patient identifiers masked by `mask_records`
@@ -162,3 +171,18 @@ capability implicitly. Non-superusers see patient identifiers masked by `mask_re
 Masking is skipped when the patient has no `anon_name`, and when the record
 type sets `mask_patient_data=False`, the deliberate opt-out for roles that need
 real identifiers (every such access is audit-logged).
+
+An authenticated account with **no role** is meant to be entitled to nothing.
+Accounts are created by an admin (`/api/user`); public self-registration
+(`POST /api/auth/register`) answers 403 unless `registration_enabled` is set,
+and an account made that way starts role-less. Record list/find endpoints
+filter by role and single-record endpoints use `AuthorizedRecordDep`, but the
+DICOMweb proxy (`/dicom-web/*`) has no per-record check — it reads straight
+from the PACS — so its router requires `current_role_holder` (admin, or at
+least one role). With `dicomweb_backend = "external"` images bypass that router
+entirely; nginx must authorize them through `GET /api/auth/dicomweb-access`,
+which carries the same gate (see `docs/orthanc-dicomweb-proxy.md`).
+
+This is a per-router property, not a global guarantee: any router without its
+own per-object authorization needs the same gate, because "authenticated" alone
+is not an access level.

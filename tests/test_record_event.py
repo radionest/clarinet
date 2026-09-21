@@ -309,34 +309,39 @@ class TestGetAuditActor:
     def _request(self, headers: dict[str, str]) -> SimpleNamespace:
         return SimpleNamespace(headers=headers, client=SimpleNamespace(host="10.0.0.1"))
 
-    def test_browser_user_is_actor(self) -> None:
+    @pytest.mark.asyncio
+    async def test_browser_user_is_actor(self) -> None:
         from clarinet.api.dependencies import get_audit_actor
 
         user = MagicMock()
         user.id = uuid4()
         with patch("clarinet.api.auth_config.settings") as settings_mock:
             settings_mock.effective_service_token = "secret-token"
-            assert get_audit_actor(self._request({}), user) == user.id
+            assert await get_audit_actor(self._request({}), user) == user.id
 
-    def test_service_token_maps_to_none(self) -> None:
+    @pytest.mark.asyncio
+    async def test_service_token_maps_to_none(self) -> None:
         from clarinet.api.dependencies import get_audit_actor
 
         user = MagicMock()
         user.id = uuid4()
         with patch("clarinet.api.auth_config.settings") as settings_mock:
             settings_mock.effective_service_token = "secret-token"
+            settings_mock.login_lockout_minutes = 0
             request = self._request({"X-Internal-Token": "secret-token"})
-            assert get_audit_actor(request, user) is None
+            assert await get_audit_actor(request, user) is None
 
-    def test_wrong_token_falls_back_to_user(self) -> None:
+    @pytest.mark.asyncio
+    async def test_wrong_token_falls_back_to_user(self) -> None:
         from clarinet.api.dependencies import get_audit_actor
 
         user = MagicMock()
         user.id = uuid4()
         with patch("clarinet.api.auth_config.settings") as settings_mock:
             settings_mock.effective_service_token = "secret-token"
+            settings_mock.login_lockout_minutes = 0
             request = self._request({"X-Internal-Token": "wrong"})
-            assert get_audit_actor(request, user) == user.id
+            assert await get_audit_actor(request, user) == user.id
 
     def test_empty_effective_token_never_matches(self) -> None:
         from clarinet.api.auth_config import is_service_request

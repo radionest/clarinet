@@ -11,14 +11,16 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 
 | Router | Auth Level | Notes |
 |--------|-----------|-------|
-| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record endpoints |
+| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record endpoints; `POST /` requires an admin or the record type's role (`check_record_type_role`) |
+| `slicer.py` | mixed | `/records/{id}/open` and `/validate` use `AuthorizedRecordDep` (they ship the record's context to the caller's Slicer); `exec`, `ping`, `clear` act only on the caller's own Slicer and stay `CurrentUserDep` |
 | `study.py` | `current_admin_user` | Admin-only (patients, studies, series): is_superuser OR `admin` role |
 | `record_type.py` | `current_superuser` | Admin-only for mutations; read is open to authenticated |
 | `user.py` | `AdminUserDep` | Admin-only mutations: is_superuser OR `admin` role; `/me` and `/me/roles` are open to any authenticated user |
 | `admin.py` | `AdminUserDep` | Admin-only: is_superuser OR `admin` role |
 | `reports.py` | `ReportsAccessDep` | Capability-gated: superuser/`admin` OR a role mapped to `reports` in `settings.role_capabilities`. Same guard on `quarto_reports.py` |
 | `dicom.py` | mixed | `search_patient_studies` + `import_study_from_pacs` use `AdminUserDep`; `anonymize_study` stays `SuperUserDep` |
-| `dicomweb.py` | `CurrentUserDep` | Any authenticated user |
+| `dicomweb.py` | `current_role_holder` (router-level) | Admin, or any user holding at least one role — a role-less account gets 403 (the proxy has no per-record check) |
+| `auth.py` (`/register`) | public, gated | 403 unless `settings.registration_enabled` (default `False`) |
 
 ## Application Lifespan (app.py)
 
@@ -29,6 +31,7 @@ Plan-code loading contract: `.claude/rules/custom-code-loading.md`.
 
 ## Middleware (middleware.py)
 
+- `CORSMiddleware` — mounted only when `settings.cors_origins` is non-empty (default: empty, no CORS — the SPA and OHIF are same-origin). Credentials are allowed, so origins must be exact; `Settings` rejects `"*"`, which with credentials makes Starlette echo any `Origin` back.
 - `NullQueryParamMiddleware` — strips query params with null-like values (`"null"`, `"Null"`, `"NULL"`) so FastAPI treats them as absent (uses `None` default). Only re-encodes the query string when params are actually removed. Controlled by `settings.coerce_null_query_params` (default `True`). Added after CORS in `create_app()`.
 
 ## Exception Handlers (exception_handlers.py)
@@ -41,7 +44,7 @@ See `clarinet/api/exception_handlers.py` for the full mapping.
 
 Mounted at `/api/pipelines` (unconditionally). Endpoints:
 - `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`); no auth (workers)
-- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand; no auth
+- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand (`AdminUserDep` — it writes; the service token resolves to admin)
 - `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`AdminUserDep`; service token resolves to admin — regular users must not forge audit)
 - `GET /api/pipelines/runs[/{task_id}]` — list/get runs (`AdminUserDep`)
 - `GET /api/pipelines/fingerprint` — API version fingerprint (no auth; workers); used by the worker startup staleness diagnostic
@@ -86,7 +89,12 @@ alembic migration for the `record_event` table.
 When `frontend_enabled=True`, catch-all `/{full_path:path}` serves:
 - Static file if exists in `settings.static_directories`
 - `index.html` otherwise (SPA client-side routing)
-- Skips paths starting with `api/`, `dicom-web/`, or `ohif/`
+- 404s paths starting with `api/` or `dicom-web/`; `ohif/` has its own branch (rendered `app-config.js`, OHIF static file, else OHIF `index.html`)
+
+The catch-all is **unauthenticated** and Starlette passes `..` segments through
+un-normalized, so every branch that maps the URL to a file (`static_directories`,
+`ohif/`) must `resolve()` the candidate and check it stays inside its base
+directory before serving — a reverse proxy normalizing the URL is not a guard.
 
 ## URL Reference for Tests
 

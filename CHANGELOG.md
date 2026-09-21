@@ -33,6 +33,18 @@
 
 ### Breaking
 
+- **Self-registration is opt-in, and DICOMweb needs a role (security).**
+  `POST /api/auth/register` was public and produced an active account, while
+  `/dicom-web/*` asked only for an authenticated user and has no per-record
+  check — anyone who could reach the server could mint an account and query the
+  PACS. Registration now answers **403** unless `registration_enabled = true`
+  (admins create accounts via `/api/user`; the login page hides its Register
+  link, driven by `registration_enabled` in `/api/info`), and the DICOMweb
+  router requires an admin or a user holding at least one role. Deployments on
+  `dicomweb_backend = "external"` must repoint the nginx `auth_request` from
+  `/api/auth/session/validate` to the new `GET /api/auth/dicomweb-access`
+  (200/401/403) — the old target admits role-less sessions; see
+  `docs/orthanc-dicomweb-proxy.md`.
 - **The DICOM core moved to the `dimsechord` package.** `clarinet.services.dicom`
   no longer exports `DicomOperations`, `StorageHandler`, `StorageMode`,
   `StorageConfig`, `AssociationConfig`, `RetrieveRequest` or
@@ -350,6 +362,12 @@
   field. Creating a record without the field is unaffected. Both admitted
   caller kinds are covered: a superuser, and a non-superuser holding the
   built-in `admin` role.
+- **Creating a record requires the record type's role (security).**
+  `POST /api/records` answers **403** to a non-admin caller that does not hold
+  the type's `role_name` (a `role_name = NULL` type is admin-only), and
+  `POST /api/slicer/records/{id}/open|validate` answer **403** for a record of
+  another role. No in-repo caller is affected — the create form is admin-only,
+  RecordFlow and workers use the service token. Rationale under Security.
 - **Finishing a record now returns 422 when an OUTPUT file pattern cannot be
   safely resolved.** `POST /api/records/{id}/data` and
   `POST /api/records/{id}/submit` reject the submission with 422 when a
@@ -415,9 +433,27 @@
   `conform` would repair passes, and nothing is repaired or deleted.
   `check-files` stays INPUT-only by design — its verdict drives the
   `blocked` auto-unblock.
+- **CORS is off by default and `POST /api/pipelines/sync` needs an admin
+  (security).** A frontend served from another origin must now be listed in
+  `cors_origins` (`CLARINET_CORS_ORIGINS`, exact origins only). Anonymous
+  `POST /api/pipelines/sync` answers 401; the `X-Internal-Token` service token
+  qualifies as admin. Rationale under Security.
 
 ### Security
 
+- **Failed logins and `X-Internal-Token` guesses are throttled.** Login had no
+  rate limit or lockout, and the service token — derived from `admin_password`,
+  accepted on every endpoint — was a second, cheaper oracle for the same secret.
+  Failures are now counted per account-and-client-IP and per client IP in a
+  fixed window (the account counter is scoped to the IP so a peer who knows an
+  email cannot lock its owner out from the owner's own machine):
+  past `login_max_failures_per_account` (5) or `login_max_failures_per_ip` (20)
+  `POST /api/auth/login` answers **429** with `Retry-After` for the rest of
+  `login_lockout_minutes` (15; `0` disables), even for the correct password. A
+  wrong service token spends the same per-IP budget and a locked IP has the
+  header ignored; loopback is exempt on that path. Counters are in-memory and
+  reset on API restart. Behind a proxy on another host, set
+  `FORWARDED_ALLOW_IPS` to that proxy's IP (never `*`) so clients are told apart.
 - `PATCH /api/records/{id}` now requires mutation rights on the record
   (`MutableRecordDep`: superuser, assigned user, unassigned record, or a
   `shared_editing` type) and masks patient data in the response like every
@@ -425,6 +461,18 @@
   empty-body PATCH for an arbitrary record id and receive its unmasked
   identifiers; a role-holder now gets **403** on records assigned to someone
   else. Closes #555.
+- **Two more endpoints of that class.** `POST /api/slicer/records/{id}/open`
+  and `/validate` loaded any record by id behind "authenticated" alone, built
+  its Slicer context (patient identifiers, file paths) and pushed it to a
+  Slicer at the *caller's* IP; they now use `AuthorizedRecordDep` like
+  `GET /api/records/{id}`. `POST /api/records` let any authenticated account —
+  a role-less one included — create records of any type for any patient and
+  answered with the patient's unmasked identity; creating now requires an admin
+  (superuser or `admin` role) or the record type's role — a `role_name = NULL`
+  type is admin-only — and the response is masked like every other record
+  endpoint. `POST /api/records/{id}/invalidate` was the last record-returning
+  handler that skipped masking and now masks too. The caller-visible change is
+  described under Breaking.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
@@ -492,6 +540,20 @@
   a subdirectory selector), so no containment check applies — a well-formed
   absolute path set by an admin, or already present in the database, is still
   honoured. This residual is accepted, not an oversight.
+- **Three unauthenticated surfaces are closed.** `/ohif/*` joined the URL onto
+  the OHIF directory without confining the result, and Starlette passes `..`
+  through un-normalized, so `/ohif/%2e%2e/<file>` read anything the process can
+  (settings with the admin password, patient DICOM); nginx normalizes the URL
+  and masked it, a directly exposed port did not. CORS listed `"*"` with
+  credentials allowed, which makes Starlette echo any `Origin` back — it is now
+  off unless the new `cors_origins` setting (`CLARINET_CORS_ORIGINS`) lists
+  exact origins (`"*"` and `"null"` are rejected); the SPA and OHIF are
+  same-origin and need none. This stops another origin *reading* API responses
+  and sending preflighted writes (JSON, PATCH, DELETE); a bodiless POST is a
+  "simple request" and another app on the same site can still send one with
+  the `SameSite=Lax` cookie — not closed here. `POST /api/pipelines/sync` wrote
+  to the DB with no auth and now requires an admin. The caller-visible changes
+  are described under Breaking.
 
 ### Added
 

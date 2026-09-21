@@ -29,6 +29,9 @@ pub type Shared {
     // Selected DICOMweb backend ("builtin" | "external") — gates the
     // builtin-only OHIF preload widget.
     dicomweb_backend: String,
+    // Server allows public self-registration — gates the login page's
+    // "Register" link.
+    registration_enabled: Bool,
     // i18n
     translate: fn(Key) -> String,
     locale: Locale,

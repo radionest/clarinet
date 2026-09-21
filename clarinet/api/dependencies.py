@@ -233,12 +233,16 @@ PipelineTaskRunRepositoryDep = Annotated[
 RecordEventRepositoryDep = Annotated[RecordEventRepository, Depends(get_record_event_repository)]
 
 
-def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
+async def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
     """Resolve the audit actor for the current request.
 
     ``None`` marks a system call: requests authenticated with a valid
     ``X-Internal-Token`` (pipeline workers, RecordFlow engine) act as the
     admin user but must not be attributed to a human in the audit trail.
+
+    ``async`` although it never awaits: a plain ``def`` dependency runs in the
+    threadpool, and ``is_service_request`` touches the failed-auth ``TTLCache``,
+    which is not thread-safe and is otherwise used from the event loop only.
     """
     if is_service_request(request):
         return None
@@ -486,7 +490,8 @@ def is_admin(user: User) -> bool:
     The single definition of "admin" for every caller that can reach it.
     ``current_admin_user`` turns it into a 403; the sites that must branch on it
     inline rather than gate a whole route read it directly — the
-    ``clarinet_storage_path`` guard, the actor-email masking in the record audit
+    ``clarinet_storage_path`` guard and the create-time
+    ``check_record_type_role``, the actor-email masking in the record audit
     feed, and ``SseConnection.is_admin``, which decides whether a live event
     stream may carry admin-only frames.
 
@@ -507,6 +512,30 @@ async def current_admin_user(
 
 
 AdminUserDep = Annotated[User, Depends(current_admin_user)]
+
+
+async def current_role_holder(
+    user: Annotated[User, Depends(current_active_user)],
+) -> User:
+    """Require an admin or a user holding at least one role.
+
+    A role-less account (e.g. freshly self-registered) is authenticated but
+    entitled to nothing. Routers with no finer-grained check of their own — the
+    DICOMweb proxy reads straight from the PACS — use this so such an account
+    cannot reach patient data.
+    """
+    return require_role_holder(user)
+
+
+def require_role_holder(user: User) -> User:
+    """The ``current_role_holder`` check for callers that resolve the user themselves.
+
+    Raises:
+        HTTPException: 403 when the user is neither an admin nor holds a role.
+    """
+    if is_admin(user) or get_user_role_names(user):
+        return user
+    raise HTTPException(status_code=403, detail="No role assigned")
 
 
 def require_capability(capability: Capability) -> Callable[[User], Awaitable[User]]:
