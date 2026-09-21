@@ -97,6 +97,16 @@ async def get_user_manager(
     yield UserManager(user_db)
 
 
+async def require_registration_enabled() -> None:
+    """Gate for the public register route.
+
+    Checked per request, not at mount time: the router is built at import,
+    before a test (or a settings override) gets to choose the mode.
+    """
+    if not settings.registration_enabled:
+        raise HTTPException(status_code=403, detail="Self-registration is disabled")
+
+
 # Cookie transport configuration (KISS - only cookies, no tokens)
 cookie_transport = CookieTransport(
     cookie_name=settings.cookie_name,

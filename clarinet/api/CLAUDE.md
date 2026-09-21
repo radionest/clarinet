@@ -18,7 +18,8 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 | `admin.py` | `AdminUserDep` | Admin-only: is_superuser OR `admin` role |
 | `reports.py` | `ReportsAccessDep` | Capability-gated: superuser/`admin` OR a role mapped to `reports` in `settings.role_capabilities`. Same guard on `quarto_reports.py` |
 | `dicom.py` | mixed | `search_patient_studies` + `import_study_from_pacs` use `AdminUserDep`; `anonymize_study` stays `SuperUserDep` |
-| `dicomweb.py` | `CurrentUserDep` | Any authenticated user |
+| `dicomweb.py` | `current_role_holder` (router-level) | Admin, or any user holding at least one role — a role-less account gets 403 (the proxy has no per-record check) |
+| `auth.py` (`/register`) | public, gated | 403 unless `settings.registration_enabled` (default `False`) |
 
 ## Application Lifespan (app.py)
 

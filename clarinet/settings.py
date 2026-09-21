@@ -337,6 +337,10 @@ class Settings(BaseSettings):
     admin_auto_create: bool = True  # Auto-create admin on initialization
     admin_require_strong_password: bool = False  # Enforce in production
 
+    # Public self-registration (POST /api/auth/register). Off by default: admins
+    # create accounts via /api/user. A self-registered account has no roles.
+    registration_enabled: bool = False
+
     # Session settings (KISS - only essentials)
     cookie_name: str = "clarinet_session"
     session_expire_hours: int = 24

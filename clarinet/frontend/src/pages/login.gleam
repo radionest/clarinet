@@ -94,18 +94,27 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
           html.text(shared.project_description),
         ]),
         login_form(model, shared),
-        html.div([attribute.class("login-footer")], [
-          html.p([attribute.class("text-muted")], [
-            html.text(shared.translate(i18n.LoginNoAccount)),
-            html.a(
-              [attribute.href(router.route_to_path(router.Register))],
-              [html.text(shared.translate(i18n.LoginRegisterLink))],
-            ),
-          ]),
-        ]),
+        register_footer(shared),
       ]),
     ]),
   ])
+}
+
+// Self-registration is opt-in on the server (`registration_enabled`); without
+// it the link would lead to a form that can only answer 403.
+fn register_footer(shared: Shared) -> Element(Msg) {
+  case shared.registration_enabled {
+    False -> element.none()
+    True ->
+      html.div([attribute.class("login-footer")], [
+        html.p([attribute.class("text-muted")], [
+          html.text(shared.translate(i18n.LoginNoAccount)),
+          html.a([attribute.href(router.route_to_path(router.Register))], [
+            html.text(shared.translate(i18n.LoginRegisterLink)),
+          ]),
+        ]),
+      ])
+  }
 }
 
 fn login_form(model: Model, shared: Shared) -> Element(Msg) {

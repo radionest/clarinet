@@ -93,6 +93,7 @@ secret_key = "change-this-secret-key-in-production"
 # admin_password = ""          # required in production
 # admin_auto_create = true
 # admin_require_strong_password = false
+# registration_enabled = false   # public self-registration; accounts start with no roles
 
 # ── Session ──────────────────────────────────────────
 # cookie_name = "clarinet_session"

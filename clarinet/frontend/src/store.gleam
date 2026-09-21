@@ -63,6 +63,8 @@ pub type Model {
     // DICOMweb backend in use ("builtin" | "external") — gates the builtin-only
     // OHIF preload widget.
     dicomweb_backend: String,
+    // Server allows public self-registration (from /api/info).
+    registration_enabled: Bool,
     // Viewers
     viewers: List(ViewerInfo),
     // Locale
@@ -213,6 +215,7 @@ pub fn init() -> Model {
     sse_enabled: False,
     anon_per_study: False,
     dicomweb_backend: "builtin",
+    registration_enabled: False,
     viewers: [],
     locale: i18n.En,
     page: NoPage,
@@ -239,6 +242,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     sse_enabled: model.sse_enabled,
     anon_per_study: model.anon_per_study,
     dicomweb_backend: model.dicomweb_backend,
+    registration_enabled: model.registration_enabled,
     checking_session: False,
     page: NoPage,
   )

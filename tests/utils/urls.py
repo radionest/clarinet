@@ -15,6 +15,7 @@ AUTH_BASE = "/api/auth"
 AUTH_LOGIN = "/api/auth/login"
 AUTH_LOGOUT = "/api/auth/logout"
 AUTH_REGISTER = "/api/auth/register"
+AUTH_DICOMWEB_ACCESS = "/api/auth/dicomweb-access"
 AUTH_ME = "/api/auth/me"
 AUTH_SESSION_VALIDATE = "/api/auth/session/validate"
 AUTH_SESSION_REFRESH = "/api/auth/session/refresh"
@@ -129,6 +130,7 @@ DICOM_IMPORT_STUDY = "/api/dicom/import-study"
 
 # --- Health ---
 HEALTH = "/api/health"
+INFO = "/api/info"
 
 # --- SSE ---
 SSE_URL = "/api/events"
@@ -154,3 +156,4 @@ def record_runs_url(record_id: int) -> str:
 
 # --- DICOMweb (outside /api prefix for OHIF compatibility) ---
 DICOMWEB_BASE = "/dicom-web"
+DICOMWEB_STUDIES = "/dicom-web/studies"
