@@ -169,3 +169,22 @@ capability implicitly. Non-superusers see patient identifiers masked by `mask_re
 Masking is skipped when the patient has no `anon_name`, and when the record
 type sets `mask_patient_data=False`, the deliberate opt-out for roles that need
 real identifiers (every such access is audit-logged).
+
+An authenticated account with **no role** is meant to be entitled to nothing.
+Accounts are created by an admin (`/api/user`); public self-registration
+(`POST /api/auth/register`) answers 403 unless `registration_enabled` is set,
+and an account made that way starts role-less. Record list/find endpoints
+filter by role and single-record endpoints use `AuthorizedRecordDep`, but the
+DICOMweb proxy (`/dicom-web/*`) has no per-record check — it reads straight
+from the PACS — so its router requires `current_role_holder` (admin, or at
+least one role). With `dicomweb_backend = "external"` images bypass that router
+entirely; nginx must authorize them through `GET /api/auth/dicomweb-access`,
+which carries the same gate (see `docs/orthanc-dicomweb-proxy.md`).
+
+This is a per-router property, not a global guarantee: any router without its
+own per-object authorization needs the same gate, because "authenticated" alone
+is not an access level. Known gaps, both behind `CurrentUserDep` only: the
+Slicer record endpoints (`/api/slicer/records/{id}/open|validate`) take a raw
+record id with no `AuthorizedRecordDep`, and `POST /api/records` creates a
+record for any authenticated account — neither the router nor `RecordService`
+checks the caller's roles.

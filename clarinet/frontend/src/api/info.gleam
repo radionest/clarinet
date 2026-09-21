@@ -23,6 +23,9 @@ pub type ProjectInfo {
     // OHIF preload widget — external backends (e.g. Orthanc) serve their own
     // DICOMweb, so preloading the builtin cache is meaningless.
     dicomweb_backend: String,
+    // Public self-registration is open. Off by default on the server; gates
+    // the "Register" link on the login page.
+    registration_enabled: Bool,
   )
 }
 
@@ -47,6 +50,11 @@ fn project_info_decoder() -> decode.Decoder(ProjectInfo) {
     "builtin",
     decode.string,
   )
+  use registration_enabled <- decode.optional_field(
+    "registration_enabled",
+    False,
+    decode.bool,
+  )
   decode.success(ProjectInfo(
     project_name:,
     project_description:,
@@ -54,6 +62,7 @@ fn project_info_decoder() -> decode.Decoder(ProjectInfo) {
     sse_enabled:,
     anon_per_study:,
     dicomweb_backend:,
+    registration_enabled:,
   ))
 }
 

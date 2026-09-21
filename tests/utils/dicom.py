@@ -2,15 +2,84 @@
 
 import asyncio
 import contextlib
+import socket
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+import requests
 from dimsechord import DicomNode, RetrieveResult, StorageSCP
 
 from clarinet.services.dicom import scp as scp_module
 from clarinet.services.dicom.client import DicomClient
 from clarinet.settings import settings
+from tests.config import CALLING_AET, PACS_HOST, PACS_PORT, PACS_REST_PORT, PACS_REST_URL
+from tests.utils.pacs_dataset import seed_pacs_dataset
+
+
+def skip_unless_pacs_reachable(reason: str) -> None:
+    """Skip when Orthanc is absent; fail when it is up but rejects the credentials.
+
+    A 401/403 means the PACS answered, so the DICOM tests are runnable and only
+    the test credentials are wrong. Skipping there once hid the whole DICOM
+    suite behind a "not reachable" message, so it fails loudly instead.
+    """
+    try:
+        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
+    except (requests.ConnectionError, requests.Timeout):
+        pytest.skip(reason)
+    if resp.status_code in (401, 403):
+        pytest.fail(
+            f"Orthanc at {PACS_HOST}:{PACS_REST_PORT} rejected the test REST credentials "
+            f"(HTTP {resp.status_code}) — set CLARINET_TEST_PACS_REST_USER / "
+            "CLARINET_TEST_PACS_REST_PASS"
+        )
+    if not resp.ok:
+        pytest.skip(reason)
+
+
+def local_ip_facing_pacs() -> str:
+    """This host's address on the route to the PACS (a UDP connect sends nothing)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect((PACS_HOST, PACS_PORT))
+        return str(s.getsockname()[0])
+
+
+def register_pacs_modality(aet: str) -> None:
+    """Let ``aet`` query the test PACS.
+
+    Stock Orthanc (``DicomAlwaysAllowFind``/``Get`` = false) answers C-FIND and
+    C-GET from an unregistered AET with zero matches rather than an error, so an
+    unregistered test AET looks exactly like an empty PACS. Host/port matter only
+    for C-MOVE, whose tests register their own; an AET that is already known —
+    under any symbolic name — is left alone because it may carry such a real
+    address.
+    """
+    known = requests.get(f"{PACS_REST_URL}/modalities?expand", timeout=5)
+    if known.ok and any(m.get("AET") == aet for m in known.json().values()):
+        return
+    resp = requests.put(
+        f"{PACS_REST_URL}/modalities/{aet}",
+        json={"AET": aet, "Host": local_ip_facing_pacs(), "Port": 11112},
+        timeout=5,
+    )
+    if not resp.ok:
+        pytest.fail(
+            f"Orthanc at {PACS_HOST} refused to register modality {aet} (HTTP {resp.status_code})"
+        )
+
+
+def require_test_pacs(reason: str, calling_aet: str = CALLING_AET) -> None:
+    """Gate for every DICOM fixture: probe Orthanc, then make it usable by the tests.
+
+    One entry point so a new DICOM test module cannot probe the PACS and forget
+    the rest: the synthetic dataset is seeded (``tests/utils/pacs_dataset.py``)
+    and ``calling_aet`` is allowed to query it.
+    """
+    skip_unless_pacs_reachable(reason)
+    seed_pacs_dataset()
+    register_pacs_modality(calling_aet)
 
 
 @contextlib.contextmanager

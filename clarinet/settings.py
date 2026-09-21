@@ -303,6 +303,25 @@ class Settings(BaseSettings):
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing
 
+    # Cross-origin callers allowed to use the API with the session cookie, e.g.
+    # ["https://ui.example.org"]. Empty = no CORS at all: the bundled SPA and
+    # OHIF are served same-origin and need none.
+    cors_origins: list[str] = []
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, v: list[str]) -> list[str]:
+        """Refuse origins that are unsafe with credentials, which CORS is mounted with.
+
+        ``"*"`` makes Starlette echo any Origin back, so every site could call
+        the API as the logged-in user. ``"null"`` is what sandboxed iframes and
+        ``data:`` documents send, so any page can wrap itself into it.
+        """
+        unsafe = {"*", "null"} & set(v)
+        if unsafe:
+            raise ValueError(f"cors_origins must list exact origins; not allowed: {sorted(unsafe)}")
+        return v
+
     # Role settings
     extra_roles: list[str] = []
     # Maps a role name to the capabilities it grants (e.g. {"analyst": ["reports"]}).
@@ -317,6 +336,10 @@ class Settings(BaseSettings):
     admin_password: str | None = None  # Required in production
     admin_auto_create: bool = True  # Auto-create admin on initialization
     admin_require_strong_password: bool = False  # Enforce in production
+
+    # Public self-registration (POST /api/auth/register). Off by default: admins
+    # create accounts via /api/user. A self-registered account has no roles.
+    registration_enabled: bool = False
 
     # Session settings (KISS - only essentials)
     cookie_name: str = "clarinet_session"
@@ -336,6 +359,12 @@ class Settings(BaseSettings):
     session_ip_check: bool = False  # Validate IP consistency
     session_secure_cookie: bool = True  # HTTPS only in production
     session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
+
+    # Failed-auth throttling (login + X-Internal-Token); see api/auth_config.py.
+    # Per-IP is looser than per-account: hospital users often share one NAT address.
+    login_max_failures_per_account: int = 5
+    login_max_failures_per_ip: int = 20
+    login_lockout_minutes: int = 15  # 0 = throttling disabled
 
     # SSE push (single-process in-memory bus; see services/events/bus.py)
     sse_enabled: bool = True

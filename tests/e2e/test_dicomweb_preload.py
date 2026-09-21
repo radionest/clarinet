@@ -35,6 +35,7 @@ from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.dicomweb.service import DicomWebProxyService
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.conftest import create_authenticated_client, create_mock_superuser
+from tests.utils.dicom import require_test_pacs
 from tests.utils.factories import make_patient
 from tests.utils.urls import DICOM_BASE, DICOMWEB_BASE
 
@@ -52,11 +53,7 @@ PRELOAD_TIMEOUT = 120.0  # seconds
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip the entire session if the PACS server is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip("Orthanc PACS server is not reachable — skipping preload tests")
+    require_test_pacs("Orthanc PACS server is not reachable — skipping preload tests")
 
 
 @pytest.fixture(scope="session")

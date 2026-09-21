@@ -82,6 +82,7 @@ storage_path = "./data"
 
 # ── Security (change in production!) ─────────────────
 secret_key = "change-this-secret-key-in-production"
+# cors_origins = []            # exact origins allowed to call the API with the session cookie; "*" is rejected
 
 # ── Roles ────────────────────────────────────────────
 # extra_roles = []             # e.g. ["inspector", "technician"]
@@ -92,6 +93,7 @@ secret_key = "change-this-secret-key-in-production"
 # admin_password = ""          # required in production
 # admin_auto_create = true
 # admin_require_strong_password = false
+# registration_enabled = false   # public self-registration; accounts start with no roles
 
 # ── Session ──────────────────────────────────────────
 # cookie_name = "clarinet_session"
@@ -103,6 +105,11 @@ secret_key = "change-this-secret-key-in-production"
 # session_ip_check = false
 # session_secure_cookie = true
 # session_cache_ttl_seconds = 30
+
+# ── Failed-login throttling (also covers X-Internal-Token guessing) ──
+# login_max_failures_per_account = 5
+# login_max_failures_per_ip = 20   # looser: users behind one NAT share an IP
+# login_lockout_minutes = 15       # 0 disables throttling
 
 # ── Session cleanup ──────────────────────────────────
 # session_cleanup_enabled = true
