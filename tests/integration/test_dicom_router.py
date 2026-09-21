@@ -29,6 +29,7 @@ from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQu
 from clarinet.services.dicom.models import StudyResult
 from clarinet.settings import settings
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
+from tests.utils.dicom import skip_unless_pacs_reachable
 from tests.utils.factories import make_patient
 
 # ---------------------------------------------------------------------------
@@ -63,11 +64,7 @@ def _delete_study_from_pacs(study_uid: str) -> None:
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip the entire session if the PACS server is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip("Orthanc PACS server is not reachable — skipping DICOM tests")
+    skip_unless_pacs_reachable("Orthanc PACS server is not reachable — skipping DICOM tests")
 
 
 @pytest.fixture(scope="session")

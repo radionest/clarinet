@@ -35,6 +35,7 @@ from clarinet.services.dicomweb.service import DicomWebProxyService
 from clarinet.utils.database import get_async_session
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.utils.cookies import patch_cookie_forwarding
+from tests.utils.dicom import skip_unless_pacs_reachable
 from tests.utils.urls import DICOMWEB_BASE
 
 pytestmark = [pytest.mark.dicom]
@@ -79,11 +80,7 @@ def _dicom_json_tag_value(obj: dict, tag: str) -> str | None:
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip the entire session if the PACS server is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip("Orthanc PACS server is not reachable — skipping DICOMweb tests")
+    skip_unless_pacs_reachable("Orthanc PACS server is not reachable — skipping DICOMweb tests")
 
 
 @pytest.fixture(scope="session")

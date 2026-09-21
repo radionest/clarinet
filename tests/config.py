@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 
 def _load_env_test() -> None:
@@ -52,7 +53,16 @@ RABBITMQ_MANAGEMENT_URL = f"http://{RABBITMQ_HOST}:{RABBITMQ_MANAGEMENT_PORT}"
 PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "localhost")
 PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_REST_PORT = int(os.environ.get("CLARINET_TEST_PACS_REST_PORT", "8042"))
-PACS_REST_URL = f"http://{PACS_HOST}:{PACS_REST_PORT}"
+# The deploy VM's Orthanc has REST auth on with the stock orthanc:orthanc user
+# (see deploy/CLAUDE.md); an Orthanc with auth off ignores the header. The
+# credentials ride in the URL so every `requests` call site authenticates
+# without passing `auth=` — never print PACS_REST_URL, print PACS_HOST instead.
+PACS_REST_USER = os.environ.get("CLARINET_TEST_PACS_REST_USER", "orthanc")
+PACS_REST_PASS = os.environ.get("CLARINET_TEST_PACS_REST_PASS", "orthanc")
+PACS_REST_URL = (
+    f"http://{quote(PACS_REST_USER, safe='')}:{quote(PACS_REST_PASS, safe='')}"
+    f"@{PACS_HOST}:{PACS_REST_PORT}"
+)
 PACS_AET = os.environ.get("CLARINET_TEST_PACS_AET", "ORTHANC")
 CALLING_AET = os.environ.get("CLARINET_TEST_CALLING_AET", "CLARINET_TEST")
 

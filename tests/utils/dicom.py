@@ -6,11 +6,35 @@ from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+import requests
 from dimsechord import DicomNode, RetrieveResult, StorageSCP
 
 from clarinet.services.dicom import scp as scp_module
 from clarinet.services.dicom.client import DicomClient
 from clarinet.settings import settings
+from tests.config import PACS_HOST, PACS_REST_PORT, PACS_REST_URL
+
+
+def skip_unless_pacs_reachable(reason: str) -> None:
+    """Skip when Orthanc is absent; fail when it is up but rejects the credentials.
+
+    A 401/403 means the PACS answered, so the DICOM tests are runnable and only
+    the test credentials are wrong. Skipping there once hid the whole DICOM
+    suite behind a "not reachable" message, so it fails loudly instead.
+    """
+    try:
+        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
+    except (requests.ConnectionError, requests.Timeout):
+        pytest.skip(reason)
+    if resp.status_code in (401, 403):
+        pytest.fail(
+            f"Orthanc at {PACS_HOST}:{PACS_REST_PORT} rejected the test REST credentials "
+            f"(HTTP {resp.status_code}) — set CLARINET_TEST_PACS_REST_USER / "
+            "CLARINET_TEST_PACS_REST_PASS"
+        )
+    if not resp.ok:
+        pytest.skip(reason)
 
 
 @contextlib.contextmanager

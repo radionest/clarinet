@@ -20,6 +20,7 @@ from tests.config import (
     SLICER_HOST,
     SLICER_PORT,
 )
+from tests.utils.dicom import skip_unless_pacs_reachable
 
 # ---------------------------------------------------------------------------
 # Constants (same as tests/e2e/test_slicer_pacs_workflow.py)
@@ -46,11 +47,7 @@ def _check_slicer() -> None:
 @pytest.fixture(scope="session")
 def _check_pacs() -> None:
     """Skip all demos if Orthanc PACS is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip(f"Orthanc PACS not reachable at {PACS_REST_URL}")
+    skip_unless_pacs_reachable(f"Orthanc PACS not reachable at {PACS_HOST}")
 
 
 @pytest.fixture(autouse=True)

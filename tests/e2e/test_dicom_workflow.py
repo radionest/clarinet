@@ -32,6 +32,7 @@ from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.utils.cookies import patch_cookie_forwarding
+from tests.utils.dicom import skip_unless_pacs_reachable
 
 pytestmark = [pytest.mark.dicom]
 
@@ -78,11 +79,7 @@ def _get_pacs_series_count(study_uid: str) -> int:
 @pytest.fixture(scope="session")
 def pacs_available() -> None:
     """Skip the entire session if the PACS server is unreachable."""
-    try:
-        resp = requests.get(f"{PACS_REST_URL}/system", timeout=2)
-        resp.raise_for_status()
-    except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
-        pytest.skip("Orthanc PACS server is not reachable — skipping DICOM tests")
+    skip_unless_pacs_reachable("Orthanc PACS server is not reachable — skipping DICOM tests")
 
 
 @pytest.fixture(scope="session")

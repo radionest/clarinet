@@ -162,6 +162,8 @@ pytest-xdist: each worker gets its own in-memory SQLite DB (`StaticPool`). Sessi
 
 Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, read-only), `slicer` (`xdist_group`). Unreachable services auto-skip.
 
+PACS probes go through `skip_unless_pacs_reachable()` (`tests/utils/dicom.py`): an absent Orthanc skips, but a 401/403 **fails** — a reachable PACS with wrong credentials must not hide the DICOM suite. `PACS_REST_URL` carries the REST credentials (`CLARINET_TEST_PACS_REST_USER`/`_PASS`, default stock `orthanc:orthanc`), so never print it; print `PACS_HOST`.
+
 **Do NOT run multiple `make test-*` targets in parallel.** Different test suites may conflict on DB schema creation, service ports, or shared fixtures. Always run them sequentially (one at a time).
 
 ## Verbosity
