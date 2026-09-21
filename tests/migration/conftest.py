@@ -122,8 +122,12 @@ def drop_pg_database(db_name: str, base_url: str) -> None:
                 with admin_engine.connect() as conn:
                     conn.execute(
                         text(
+                            # Own role only: an autovacuum worker (no role) or a
+                            # superuser session raises InsufficientPrivilege for
+                            # us, and FORCE below evicts those itself.
                             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                            "WHERE datname = :d AND pid <> pg_backend_pid()"
+                            "WHERE datname = :d AND pid <> pg_backend_pid() "
+                            "AND usename = current_user"
                         ),
                         {"d": db_name},
                     )

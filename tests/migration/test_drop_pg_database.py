@@ -52,6 +52,27 @@ def test_happy_path_terminates_then_drops(monkeypatch):
     assert "statement_timeout=10000" in calls[0]["connect_args"]["options"]
 
 
+def test_terminate_targets_only_our_own_backends(monkeypatch):
+    """An autovacuum worker in the scratch DB must not turn teardown into an ERROR.
+
+    ``pg_terminate_backend`` on a backend with no role (autovacuum) or a superuser
+    role raises InsufficientPrivilege for the non-superuser test role — a
+    ProgrammingError the retry loop does not catch. Only our own lingering
+    connections need evicting; ``DROP DATABASE ... WITH (FORCE)`` deals with the rest.
+    """
+    executed: list[str] = []
+
+    def execute(stmt, *a, **k):
+        executed.append(str(stmt))
+        return MagicMock()
+
+    _install_fake_engine(monkeypatch, execute)
+    conftest.drop_pg_database("scratch_db", "postgresql+psycopg2://u@h:5432")
+
+    (terminate,) = [s for s in executed if "pg_terminate_backend" in s]
+    assert "usename = current_user" in terminate
+
+
 def test_retries_then_succeeds(monkeypatch):
     drops = {"n": 0}
 
