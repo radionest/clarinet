@@ -614,6 +614,19 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _slicer_host_for_pacs() -> str:
+    """Address the PACS must use to reach Slicer's storage SCP.
+
+    ``SLICER_HOST`` is how the *tests* reach Slicer. When that is loopback, Slicer
+    runs on this host, and a PACS on another machine registering "localhost" would
+    deliver the C-MOVE to itself — which then surfaces as the unrelated
+    "DICOMListener does not index" skip.
+    """
+    if SLICER_HOST in ("localhost", "127.0.0.1", "::1"):
+        return local_ip_facing_pacs()
+    return SLICER_HOST
+
+
 def _pacs_can_reach_us() -> bool:
     """Check if PACS can connect back to our host (needed for C-MOVE)."""
     import os
@@ -907,7 +920,7 @@ __execResult = {"calling_aet": pacs.calling_aet}
         modality_url = f"{PACS_REST_URL}/modalities/{slicer_aet}"
         resp = requests.put(
             modality_url,
-            json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
+            json={"AET": slicer_aet, "Host": _slicer_host_for_pacs(), "Port": SLICER_SCP_PORT},
             timeout=5,
         )
         resp.raise_for_status()
@@ -935,7 +948,7 @@ __execResult = {"calling_aet": pacs.calling_aet}
         modality_url = f"{PACS_REST_URL}/modalities/{slicer_aet}"
         requests.put(
             modality_url,
-            json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
+            json={"AET": slicer_aet, "Host": _slicer_host_for_pacs(), "Port": SLICER_SCP_PORT},
             timeout=5,
         ).raise_for_status()
         # NB: this mutates the shared session DICOM DB — it removes the series to

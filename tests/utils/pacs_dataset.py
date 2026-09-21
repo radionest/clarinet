@@ -3,8 +3,8 @@
 The DICOM tests query a ``SHIPILOV*`` patient. That data used to exist only on
 one developer's PACS, so everywhere else the fixtures failed with "No SHIPILOV
 studies found on test PACS". The suite now brings its own: two tiny studies
-built here and uploaded over Orthanc's REST API when the PACS has no
-``SHIPILOV*`` study yet. A PACS that already holds one is never written to.
+built here and uploaded over Orthanc's REST API. A PACS that holds someone
+else's ``SHIPILOV*`` study — the real dataset — is never written to.
 
 What the tests need from the data (pinned by ``tests/test_pacs_dataset.py``):
 the SHIPILOV patient has exactly one study and it is MR, a CT study exists
@@ -53,12 +53,6 @@ class _Study:
     series_descriptions: tuple[str, ...]
 
 
-# Seeded in this order: the SHIPILOV study doubles as the "dataset is present"
-# marker, so it goes last — a concurrent seeder never sees the marker without
-# the CT study. The marker does flip on the first of the MR instances, so for
-# the rest of the MR upload (well under a second) a second seeder — the slicer
-# xdist group runs beside the dicom one — may skip seeding and read a partial
-# study. Deterministic UIDs keep a double upload harmless.
 _STUDIES = (
     _Study(
         patient_id="PHANTOM-CT-001",
@@ -81,6 +75,14 @@ _STUDIES = (
 
 def _uid(*parts: str) -> UID:
     return generate_uid(entropy_srcs=[_UID_NAMESPACE, *parts])
+
+
+def _study_uid(study: _Study) -> UID:
+    return _uid(study.patient_id, "study")
+
+
+# Tells our own SHIPILOV study apart from real ones on a PACS we must not write to.
+SYNTHETIC_SHIPILOV_STUDY_UID = _study_uid(_STUDIES[-1])
 
 
 def _volume(modality: Literal["MR", "CT"]) -> npt.NDArray[np.int16] | npt.NDArray[np.uint16]:
@@ -118,7 +120,7 @@ def _instance(
     ds.PatientBirthDate = "19700101"
     ds.PatientSex = "O"
 
-    ds.StudyInstanceUID = _uid(study.patient_id, "study")
+    ds.StudyInstanceUID = _study_uid(study)
     ds.StudyDate = "20260101"
     ds.StudyTime = "120000"
     ds.StudyID = "1"
@@ -180,7 +182,12 @@ def encode_instance(ds: FileDataset) -> bytes:
 
 
 def seed_pacs_dataset() -> None:
-    """Upload the synthetic dataset unless the PACS already has a SHIPILOV* study.
+    """Upload the synthetic dataset unless the PACS holds someone else's SHIPILOV* study.
+
+    Only a *foreign* study stops the upload. Our own may be a truncated leftover
+    of an interrupted seeding (the study appears on its first instance), so it
+    never counts as "already seeded": the upload is simply repeated, and Orthanc
+    answers ``AlreadyStored`` for whatever is there.
 
     Failures name the status code only: ``PACS_REST_URL`` carries credentials, so
     ``raise_for_status()`` (which prints the URL) is deliberately not used.
@@ -191,13 +198,21 @@ def seed_pacs_dataset() -> None:
 
     found = requests.post(
         f"{PACS_REST_URL}/tools/find",
-        json={"Level": "Study", "Query": {"PatientName": f"{PATIENT_NAME_PREFIX}*"}},
+        json={
+            "Level": "Study",
+            "Expand": True,
+            "Query": {"PatientName": f"{PATIENT_NAME_PREFIX}*"},
+        },
         timeout=10,
     )
     if not found.ok:
         pytest.fail(f"Orthanc at {PACS_HOST} refused tools/find (HTTP {found.status_code})")
 
-    if not found.json():
+    has_real_data = any(
+        study["MainDicomTags"].get("StudyInstanceUID") != SYNTHETIC_SHIPILOV_STUDY_UID
+        for study in found.json()
+    )
+    if not has_real_data:
         for ds in build_test_instances():
             resp = requests.post(
                 f"{PACS_REST_URL}/instances",

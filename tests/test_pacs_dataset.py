@@ -16,7 +16,12 @@ import pytest
 import requests
 
 from clarinet.models.patient import PATIENT_ID_PATTERN
-from tests.utils.pacs_dataset import build_test_instances, encode_instance, seed_pacs_dataset
+from tests.utils.pacs_dataset import (
+    SYNTHETIC_SHIPILOV_STUDY_UID,
+    build_test_instances,
+    encode_instance,
+    seed_pacs_dataset,
+)
 
 
 def _response(status_code: int, payload: object = None) -> MagicMock:
@@ -95,16 +100,34 @@ def test_instances_encode_as_part10_files() -> None:
     assert decoded.file_meta.MediaStorageSOPClassUID == ds.SOPClassUID
 
 
-def test_seeding_leaves_a_pacs_that_already_has_the_dataset_alone() -> None:
-    """A PACS holding real SHIPILOV studies must never be written to."""
+def _found(study_uid: str) -> list[dict[str, dict[str, str]]]:
+    return [{"MainDicomTags": {"StudyInstanceUID": study_uid}}]
+
+
+def test_seeding_never_writes_to_a_pacs_holding_real_shipilov_data() -> None:
     with (
         patch("tests.utils.pacs_dataset._seeded", False),
         patch("tests.utils.pacs_dataset.requests.post") as post,
     ):
-        post.return_value = _response(200, ["some-orthanc-id"])
+        post.return_value = _response(200, _found("1.2.840.113619.2.55.3.real"))
         seed_pacs_dataset()
     assert post.call_count == 1
     assert post.call_args.args[0].endswith("/tools/find")
+
+
+def test_seeding_repairs_a_truncated_copy_of_its_own_study() -> None:
+    """The marker study appears on its first instance; an interrupted upload must self-heal."""
+    with (
+        patch("tests.utils.pacs_dataset._seeded", False),
+        patch("tests.utils.pacs_dataset.requests.post") as post,
+    ):
+        post.side_effect = lambda url, **_: _response(
+            200, _found(SYNTHETIC_SHIPILOV_STUDY_UID) if url.endswith("/find") else {}
+        )
+        seed_pacs_dataset()
+
+    uploads = [c for c in post.call_args_list if c.args[0].endswith("/instances")]
+    assert len(uploads) == len(build_test_instances())
 
 
 def test_seeding_uploads_every_instance_when_the_dataset_is_missing() -> None:

@@ -4,15 +4,17 @@
 # Example: ./scripts/run_tests.sh -n auto --dist loadgroup
 set -uo pipefail
 
-# Overridable only so tests/test_run_tests_script.py can point at a stub report;
-# pytest itself always writes the path set in pyproject.toml addopts.
+# Default matches pyproject.toml addopts; an override is passed on to pytest
+# below (a CLI option wins over addopts), so the path deleted, written and read
+# is always the same one — e.g. one report per pipeline when several worktrees
+# run at once.
 REPORT="${CLARINET_TEST_REPORT:-/tmp/clarinet-test-report.json}"
 
 # Every stage writes the same path and pytest only writes it at session end, so
 # a run killed earlier would otherwise be judged by the previous stage's report.
 rm -f "$REPORT"
 
-uv run pytest "$@"
+uv run pytest "$@" --json-report-file="$REPORT"
 EXIT=$?
 
 echo ""

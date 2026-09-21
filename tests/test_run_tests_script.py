@@ -37,7 +37,11 @@ def _run(tmp_path: Path, *, pytest_exit: int, summary: dict[str, int] | None) ->
         if summary is not None
         else ""
     )
-    fake_uv.write_text(f"#!/usr/bin/env bash\n{write_report}exit {pytest_exit}\n")
+    fake_uv.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" > '{tmp_path / 'args.txt'}'\n"
+        f"{write_report}exit {pytest_exit}\n"
+    )
     fake_uv.chmod(fake_uv.stat().st_mode | stat.S_IXUSR)
 
     env = {
@@ -52,6 +56,13 @@ def _run(tmp_path: Path, *, pytest_exit: int, summary: dict[str, int] | None) ->
 
 def test_clean_run_passes(tmp_path: Path) -> None:
     assert _run(tmp_path, pytest_exit=0, summary={"passed": 10, "total": 10}) == 0
+
+
+def test_pytest_is_told_to_write_the_report_the_wrapper_reads(tmp_path: Path) -> None:
+    """Otherwise an overridden report path is deleted and read, but never written."""
+    _run(tmp_path, pytest_exit=0, summary={"passed": 10, "total": 10})
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert f"--json-report-file={tmp_path / 'report.json'}" in args
 
 
 def test_sigkill_at_teardown_after_a_clean_run_is_forgiven(tmp_path: Path) -> None:
