@@ -406,8 +406,10 @@ async def check_record_type_role(
     create records for any patient. A type with ``role_name=None`` is
     admin-only. Deliberately ``is_admin`` (superuser OR ``admin`` role), to
     agree with ``check_storage_path_admin_only`` on this same endpoint — which
-    is NOT the read rule: ``authorize_record_access`` is superuser-only, so an
-    ``admin``-role non-superuser can create a record it cannot read back.
+    is NOT the read rule: ``authorize_record_access`` does not recognise the
+    ``admin`` role (superuser, or a holder of the type's role), so an
+    ``admin``-role non-superuser without that role can create a record it
+    cannot read back.
 
     Raises:
         AuthorizationError: 403 when the caller lacks the type's role.

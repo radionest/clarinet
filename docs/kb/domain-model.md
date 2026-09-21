@@ -157,11 +157,13 @@ record type's role; `MutableRecordDep` adds mutation for the assigned user or an
 unassigned record (and bypasses the owner check when `shared_editing` is set).
 *Creating* a record is a third rule (`check_record_type_role` on
 `POST /api/records`): an admin — superuser **or** `admin` role — or a holder of
-the type's role; a `role_name = NULL` type is admin-only. The read and create
-predicates differ, and that is an open question rather than a design: reads are
-superuser-only while creation admits the `admin` role, so an `admin`-role
-non-superuser can create a record it cannot read back. The Slicer record endpoints (`/api/slicer/records/{id}/open|validate`)
-ship the record's context to the caller's machine and use `AuthorizedRecordDep`.
+the type's role; a `role_name = NULL` type is admin-only. The create predicate
+is a deliberate choice (it agrees with the other admin guard on that endpoint);
+its mismatch with the read rule is unresolved: reads do not recognise the
+`admin` role, so an `admin`-role non-superuser who lacks the type's role can
+create a record it cannot read back. The Slicer record endpoints
+(`/api/slicer/records/{id}/open|validate`) ship the record's context to the
+caller's machine and use `AuthorizedRecordDep`.
 Beyond roles, capabilities map roles to features in `settings.toml`
 (`[role_capabilities]`); superusers and the built-in `admin` role hold every
 capability implicitly. Non-superusers see patient identifiers masked by `mask_records`
