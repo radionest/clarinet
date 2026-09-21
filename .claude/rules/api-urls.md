@@ -16,7 +16,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/auth/login` | POST | 200 | Login (fastapi-users) |
+| `/api/auth/login` | POST | 200 | Login (fastapi-users). **400** bad credentials. **429** + `Retry-After` once the account as seen from this client IP (`login_max_failures_per_account`) or the client IP (`login_max_failures_per_ip`) hits its limit inside the `login_lockout_minutes` window — returned even for the correct password |
 | `/api/auth/logout` | POST | 200 | Logout |
 | `/api/auth/register` | POST | 201 | Public self-registration. **403** unless `settings.registration_enabled` (default `False`); the new account has no roles |
 | `/api/auth/dicomweb-access` | GET | 200 | nginx `auth_request` target for `dicomweb_backend = "external"`: same gate as the `/dicom-web` router (`current_role_holder`). **401** no session, **403** role-less account |

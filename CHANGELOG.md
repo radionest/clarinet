@@ -435,6 +435,19 @@
 
 ### Security
 
+- **Failed logins and `X-Internal-Token` guesses are throttled.** Login had no
+  rate limit or lockout, and the service token — derived from `admin_password`,
+  accepted on every endpoint — was a second, cheaper oracle for the same secret.
+  Failures are now counted per account-and-client-IP and per client IP in a
+  fixed window (the account counter is scoped to the IP so a peer who knows an
+  email cannot lock its owner out from the owner's own machine):
+  past `login_max_failures_per_account` (5) or `login_max_failures_per_ip` (20)
+  `POST /api/auth/login` answers **429** with `Retry-After` for the rest of
+  `login_lockout_minutes` (15; `0` disables), even for the correct password. A
+  wrong service token spends the same per-IP budget and a locked IP has the
+  header ignored; loopback is exempt on that path. Counters are in-memory and
+  reset on API restart. Behind a proxy on another host, set
+  `FORWARDED_ALLOW_IPS` to that proxy's IP (never `*`) so clients are told apart.
 - `PATCH /api/records/{id}` now requires mutation rights on the record
   (`MutableRecordDep`: superuser, assigned user, unassigned record, or a
   `shared_editing` type) and masks patient data in the response like every

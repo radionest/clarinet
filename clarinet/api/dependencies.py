@@ -233,12 +233,16 @@ PipelineTaskRunRepositoryDep = Annotated[
 RecordEventRepositoryDep = Annotated[RecordEventRepository, Depends(get_record_event_repository)]
 
 
-def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
+async def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
     """Resolve the audit actor for the current request.
 
     ``None`` marks a system call: requests authenticated with a valid
     ``X-Internal-Token`` (pipeline workers, RecordFlow engine) act as the
     admin user but must not be attributed to a human in the audit trail.
+
+    ``async`` although it never awaits: a plain ``def`` dependency runs in the
+    threadpool, and ``is_service_request`` touches the failed-auth ``TTLCache``,
+    which is not thread-safe and is otherwise used from the event loop only.
     """
     if is_service_request(request):
         return None

@@ -106,6 +106,11 @@ secret_key = "change-this-secret-key-in-production"
 # session_secure_cookie = true
 # session_cache_ttl_seconds = 30
 
+# ── Failed-login throttling (also covers X-Internal-Token guessing) ──
+# login_max_failures_per_account = 5
+# login_max_failures_per_ip = 20   # looser: users behind one NAT share an IP
+# login_lockout_minutes = 15       # 0 disables throttling
+
 # ── Session cleanup ──────────────────────────────────
 # session_cleanup_enabled = true
 # session_cleanup_interval = 3600
