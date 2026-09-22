@@ -111,12 +111,12 @@ def pipeline_task(
                     try:
                         await client.notify_file_changes(message.patient_id, changed)
                     except Exception:
-                        logger.warning("Failed to notify file changes", exc_info=True)
+                        logger.opt(exception=True).warning("Failed to notify file changes")
                 if isinstance(result, PipelineMessage):
                     return result.model_dump()
                 return message.model_dump()
             except Exception:
-                logger.error(f"pipeline_task '{fn.__name__}' failed", exc_info=True)
+                logger.exception(f"pipeline_task '{fn.__name__}' failed")
                 raise
             finally:
                 await client.close()

@@ -92,8 +92,9 @@ Tasks requiring computation (GPU segmentation, DICOM anonymization, annotation c
 
 ```python
 from clarinet.services.pipeline import pipeline_task, PipelineMessage, SyncTaskContext
+from clarinet.settings import settings
 
-@pipeline_task(queue="clarinet.gpu")
+@pipeline_task(queue=settings.gpu_queue_name)
 def run_segmentation(msg: PipelineMessage, ctx: SyncTaskContext) -> None:
     image = ctx.files.resolve("ct_image")
     output = ctx.files.resolve("segmentation")

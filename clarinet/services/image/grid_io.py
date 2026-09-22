@@ -32,7 +32,10 @@ def read_grid(path: Path | str) -> Grid:
     to its first 3 (spatial) axes, since :class:`Grid` requires exactly 3.
 
     Raises:
-        ImageReadError: the file cannot be read (corrupt or missing header).
+        ImageReadError: the file cannot be read — corrupt or missing header, or
+            a well-formed NRRD header carrying ``space directions``/``space
+            origin`` without a supported ``space`` field (``Image.read_nrrd``'s
+            strictness rule; repair once with ``declare_nrrd_space``).
         ImageError: unsupported extension (delegated to ``Image.read``).
     """
     path = Path(path)

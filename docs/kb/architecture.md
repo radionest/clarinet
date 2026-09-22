@@ -96,7 +96,8 @@ non-session work (HTTP calls, `asyncio.to_thread` CPU work).
 12. DICOMweb cache and its cleanup service, if `dicomweb_enabled`; SSE event
     bus, if `sse_enabled`
 
-A `ConfigLoadError` from any plan-loading step becomes
+A `ConfigLoadError` from any plan-loading step, or any other `ConfigurationError`
+or `RecordConstraintViolationError` from `reconcile_config`, becomes
 `StartupError(component="Config")` — the server refuses to boot rather than run
 without the project's validators, hydrators or flows.
 

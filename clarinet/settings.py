@@ -126,13 +126,14 @@ class Settings(BaseSettings):
     #
     # "Shape" settings — not part of the template itself, but baked into
     # the values its placeholders resolve to:
+    #   * anon_id_prefix (every mode — prefixes {anon_patient_id})
     #   * anon_uid_salt
     #   * anon_per_study_patient_id
     #   * anon_per_study_patient_id_hex_length
     # Changing any of these between anonymize and read invalidates resolved
-    # disk paths even when ``disk_path_template`` is unchanged. The
-    # ``clarinet anon migrate-paths`` CLI only handles template changes —
-    # not shape changes (it has no notion of the previous shape's values).
+    # disk paths even when ``disk_path_template`` is unchanged. Only template
+    # changes are migratable: the ``clarinet anon migrate-paths`` CLI has no
+    # notion of the previous shape's values.
     disk_path_template: str = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
 
     @field_validator("anon_id_prefix")

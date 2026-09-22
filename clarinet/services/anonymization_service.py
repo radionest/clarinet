@@ -159,9 +159,11 @@ class AnonymizationService:
             save_to_disk: Override settings.anon_save_to_disk (None = use setting)
             send_to_pacs: Override settings.anon_send_to_pacs (None = use setting)
             per_study_patient_id: Override settings.anon_per_study_patient_id.
-                When True, PatientID/PatientName are set to a per-study 8-hex
-                hash (sha256(salt:study_uid)) — different across studies of the
-                same patient, preventing PACS-side correlation.
+                When True, PatientID/PatientName are set to
+                ``{anon_id_prefix}_{hash}``, where hash is sha256(salt:study_uid)
+                truncated to settings.anon_per_study_patient_id_hex_length hex
+                chars — different across studies of the same patient,
+                preventing PACS-side correlation.
             series_uids: Restrict the run to these series (None = whole study).
                 Empty, unknown, or filter-excluded selections raise — a subset
                 request is never silently narrowed.
@@ -504,17 +506,18 @@ class AnonymizationService:
             datasets: Anonymized DICOM datasets
 
         Returns:
-            Failed-send counts keyed by ``aet@host:port`` node label
+            Failed-send counts keyed by ``aet@host:port`` node label,
+            accumulated when two destinations share a label
         """
         counts: dict[str, int] = {}
         for node in self.destinations:
             label = _node_label(node)
             try:
                 batch_result = await self.dicom_client.store_instances_batch(datasets, node)
-                counts[label] = batch_result.total_failed
+                counts[label] = counts.get(label, 0) + batch_result.total_failed
             except Exception:
                 logger.exception(f"Failed to batch C-STORE anonymized series to {label}")
-                counts[label] = len(datasets)
+                counts[label] = counts.get(label, 0) + len(datasets)
         return counts
 
     @staticmethod
