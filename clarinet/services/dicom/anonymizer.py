@@ -194,7 +194,8 @@ class DicomAnonymizer:
         """Anonymize a DICOM dataset in-place.
 
         Applies dicomanonymizer defaults for most tags (dates, strings,
-        private tags) and overrides patient/UID tags with deterministic values.
+        private tags), sets the anonymized patient ID/name, and replaces every
+        UID dicomanonymizer touches with ``generate_anon_uid`` (see ``_replace_uid``).
 
         Args:
             dataset: pydicom Dataset to anonymize (modified in-place)
@@ -202,28 +203,11 @@ class DicomAnonymizer:
         anon_patient_id = self.anon_patient_id
         anon_patient_name = self.anon_patient_name
 
-        original_study_uid = str(getattr(dataset, "StudyInstanceUID", ""))
-        original_series_uid = str(getattr(dataset, "SeriesInstanceUID", ""))
-        original_sop_uid = str(getattr(dataset, "SOPInstanceUID", ""))
-
-        anon_study_uid = self.generate_anon_uid(original_study_uid) if original_study_uid else ""
-        anon_series_uid = self.generate_anon_uid(original_series_uid) if original_series_uid else ""
-        anon_sop_uid = self.generate_anon_uid(original_sop_uid) if original_sop_uid else ""
-
         def _set_patient_id(dataset: Dataset, tag: tuple[int, int]) -> None:
             dataset[tag].value = anon_patient_id
 
         def _set_patient_name(dataset: Dataset, tag: tuple[int, int]) -> None:
             dataset[tag].value = anon_patient_name
-
-        def _set_study_uid(dataset: Dataset, tag: tuple[int, int]) -> None:
-            dataset[tag].value = anon_study_uid
-
-        def _set_series_uid(dataset: Dataset, tag: tuple[int, int]) -> None:
-            dataset[tag].value = anon_series_uid
-
-        def _set_sop_uid(dataset: Dataset, tag: tuple[int, int]) -> None:
-            dataset[tag].value = anon_sop_uid
 
         def _preserve_value(dataset: Dataset, tag: tuple[int, int]) -> None:
             pass
@@ -231,10 +215,6 @@ class DicomAnonymizer:
         extra_rules: dict[tuple[int, int], object] = {
             (0x0010, 0x0020): _set_patient_id,  # PatientID
             (0x0010, 0x0010): _set_patient_name,  # PatientName
-            (0x0020, 0x000D): _set_study_uid,  # StudyInstanceUID
-            (0x0020, 0x000E): _set_series_uid,  # SeriesInstanceUID
-            (0x0008, 0x0018): _set_sop_uid,  # SOPInstanceUID
-            (0x0002, 0x0003): _set_sop_uid,  # MediaStorageSOPInstanceUID
             (0x0008, 0x103E): _preserve_value,  # SeriesDescription — not PHI
         }
 
@@ -242,14 +222,14 @@ class DicomAnonymizer:
         # on malformed vendor-specific tags (e.g. Philips implicit VR)
         dataset.remove_private_tags()
 
-        # Every UID dicomanonymizer replaces (U-tags such as FrameOfReferenceUID,
-        # UIDs nested in replaced sequences) goes through its module-level
-        # get_UID, which memoises *random* UIDs. Route it through the salted
-        # hash so they stay consistent across instances, runs and processes (#505).
+        # Every UID dicomanonymizer replaces (Study/Series/SOP, FrameOfReferenceUID
+        # and the other U-tags, UIDs nested in replaced sequences) goes through its
+        # module-level get_UID, which memoises *random* UIDs. Route it through the
+        # salted hash so they stay consistent across instances, runs and processes (#505).
         # ponytail: module-global swap, assumes calls are not interleaved across
         # threads (true today: the service anonymizes on the event loop).
         original_get_uid = simpledicomanonymizer.get_UID
-        simpledicomanonymizer.get_UID = lambda uid: self.generate_anon_uid(uid) if uid else uid
+        simpledicomanonymizer.get_UID = self._replace_uid
         try:
             simpledicomanonymizer.anonymize_dataset(
                 dataset,
@@ -261,5 +241,12 @@ class DicomAnonymizer:
 
         logger.debug(
             f"Anonymized dataset: PatientID={anon_patient_id}, "
-            f"SOPInstanceUID={anon_sop_uid[:20]}..."
+            f"SOPInstanceUID={str(getattr(dataset, 'SOPInstanceUID', ''))[:20]}..."
         )
+
+    def _replace_uid(self, uid: str) -> str:
+        # Empty stays empty; DICOM-standard UIDs (SOP classes, well-known frames of
+        # reference) identify nobody and must keep their meaning.
+        if not uid or uid.startswith("1.2.840.10008."):
+            return uid
+        return self.generate_anon_uid(uid)

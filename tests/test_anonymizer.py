@@ -3,6 +3,7 @@
 import hashlib
 
 import pytest
+from dicomanonymizer import simpledicomanonymizer  # type: ignore[import-untyped]
 from pydicom import Dataset, config
 from pydicom.dataelem import RawDataElement
 from pydicom.multival import MultiValue
@@ -244,15 +245,47 @@ class TestAnonymizeDatasetEdgeCases:
         assert ds.SOPInstanceUID == ""
 
     def test_missing_uid_tags(self, anonymizer: DicomAnonymizer) -> None:
-        """Dataset missing UID tags raises KeyError (documents current behavior)."""
+        """Missing UID tags stay absent instead of raising."""
         ds = Dataset()
         ds.PatientID = "REAL_PAT"
         ds.PatientName = "Real^Name"
         ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
         # No StudyInstanceUID, SeriesInstanceUID, SOPInstanceUID
 
+        anonymizer.anonymize_dataset(ds)
+
+        assert ds.PatientID == "CLARINET_1"
+        assert "StudyInstanceUID" not in ds
+        assert "SOPInstanceUID" not in ds
+
+    def test_get_uid_swap_restored(
+        self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
+    ) -> None:
+        """The dicomanonymizer get_UID swap is undone, also when anonymization raises."""
+        original = simpledicomanonymizer.get_UID
+        anonymizer.anonymize_dataset(sample_dataset)
+        assert simpledicomanonymizer.get_UID is original
+
+        del sample_dataset.PatientID  # the PatientID rule raises KeyError
         with pytest.raises(KeyError):
-            anonymizer.anonymize_dataset(ds)
+            anonymizer.anonymize_dataset(sample_dataset)
+        assert simpledicomanonymizer.get_UID is original
+
+    def test_standard_uids_in_replaced_sequence_kept(
+        self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
+    ) -> None:
+        """DICOM-standard UIDs keep their meaning; instance UIDs beside them are hashed."""
+        item = Dataset()
+        item.ReferencedSOPClassUID = "1.2.840.10008.3.1.2.3.3"
+        item.ReferencedSOPInstanceUID = "1.2.3.4.5.99"
+        # A sequence dicomanonymizer replaces (not blanks), so nested UIDs hit get_UID
+        sample_dataset.ReferencedPerformedProcedureStepSequence = [item]
+
+        anonymizer.anonymize_dataset(sample_dataset)
+
+        out = sample_dataset.ReferencedPerformedProcedureStepSequence[0]
+        assert out.ReferencedSOPClassUID == "1.2.840.10008.3.1.2.3.3"
+        assert out.ReferencedSOPInstanceUID == anonymizer.generate_anon_uid("1.2.3.4.5.99")
 
     def test_private_tags_removed(self, anonymizer: DicomAnonymizer) -> None:
         """Private tags are removed before anonymization."""
@@ -335,6 +368,7 @@ class TestAnonymizeDatasetEdgeCases:
         ds1.SeriesInstanceUID = "1.2.3.1.1"
         ds1.SOPInstanceUID = "1.2.3.1.1.1"
         ds1.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+        ds1.FrameOfReferenceUID = "1.2.3.9"
 
         ds2 = Dataset()
         ds2.PatientID = "PAT_2"
@@ -343,6 +377,7 @@ class TestAnonymizeDatasetEdgeCases:
         ds2.SeriesInstanceUID = "1.2.3.2.1"
         ds2.SOPInstanceUID = "1.2.3.2.1.1"
         ds2.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+        ds2.FrameOfReferenceUID = "1.2.3.9"
 
         a1.anonymize_dataset(ds1)
         a2.anonymize_dataset(ds2)
@@ -351,6 +386,9 @@ class TestAnonymizeDatasetEdgeCases:
         assert ds2.PatientID == "ANON_B"
         assert ds1.StudyInstanceUID == a1.generate_anon_uid("1.2.3.1")
         assert ds2.StudyInstanceUID == a2.generate_anon_uid("1.2.3.2")
+        # Same original FoR, each hashed with its own anonymizer's salt
+        assert ds1.FrameOfReferenceUID == a1.generate_anon_uid("1.2.3.9")
+        assert ds2.FrameOfReferenceUID == a2.generate_anon_uid("1.2.3.9")
         # Cross-check: UIDs differ between the two
         assert ds1.StudyInstanceUID != ds2.StudyInstanceUID
 

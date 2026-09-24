@@ -659,13 +659,17 @@
   replaces got a fresh random value per instance, so each slice claimed its own
   frame of reference and viewers (OHIF MPR, scout lines) could not build a
   volume. All replaced UIDs now go through the salted hash — consistent across
-  instances, runs and processes (#505). **Operator note:** studies anonymized
-  before this fix keep the broken per-instance values, and the skip-guard will
-  not redo them. There is no HTTP/CLI switch: re-run from code via
-  `run_anonymization(msg, ctx, series_uids=[...])` or
-  `AnonymizationOrchestrator.run(..., series_uids=[...])`, listing every series
-  the filter includes (an explicit list bypasses the guard; a filter-excluded
-  UID raises). Study/Series/SOP anon UIDs are unchanged by the re-run, so first
+  instances, runs and processes — except DICOM-standard `1.2.840.10008.*` UIDs
+  (SOP classes inside replaced sequences), which are now kept (#505).
+  **Operator note:** studies anonymized before this fix keep the broken
+  per-instance values. A study with no `anonymize-study` Record re-runs by
+  POSTing `/api/dicom/studies/{uid}/anonymize` again (raw mode has no
+  skip-guard). A tracked study is skipped by the guard, and there is no HTTP/CLI
+  switch: re-run from code via `run_anonymization(msg, ctx, series_uids=[...])`
+  or `AnonymizationOrchestrator.run(..., series_uids=[...])`, listing every
+  series the filter includes (an explicit list bypasses the guard; a
+  filter-excluded UID raises). Keep `save_to_disk` on so `dcm_anon/` is
+  rewritten. Study/Series/SOP anon UIDs are unchanged by the re-run, so first
   delete the anonymized study (`anon_study_uid`) on every destination PACS — one
   that does not overwrite existing instances (Orthanc's default) keeps the old
   copies — and `{storage_path}/dicomweb_cache/<anon_study_uid>/`, which OHIF
