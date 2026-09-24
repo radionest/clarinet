@@ -374,7 +374,7 @@ def test_export_segmentation_plain_export_unchanged(
 
 
 def test_export_segmentation_reference_volume_deprecated_still_guards(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Deprecated reference_volume= warns, runs the in-scene guard, then exports."""
     fake_util = MagicMock()
@@ -390,6 +390,9 @@ def test_export_segmentation_reference_volume_deprecated_still_guards(
 
     guard.assert_called_once_with(fake_util.getNode.return_value, volume)
     assert os.path.isfile(output_path)
+    assert (
+        "[SlicerHelper] WARNING: export_segmentation(reference_volume=" in capsys.readouterr().out
+    )
 
 
 def test_export_segmentation_reference_volume_guard_failure_skips_export(

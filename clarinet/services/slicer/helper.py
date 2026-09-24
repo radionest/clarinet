@@ -583,12 +583,14 @@ def export_segmentation(
         raise SlicerHelperError(f"Segmentation node '{name}' not found in scene")
 
     if reference_volume is not None:
-        warnings.warn(
+        msg = (
             "export_segmentation(reference_volume=...) is deprecated and will be removed "
-            "in the next release; pass conform_to=<volume file path> instead.",
-            DeprecationWarning,
-            stacklevel=2,
+            "in the next release; pass conform_to=<volume file path> instead."
         )
+        # Slicer execs scripts under WebServerLib's __name__, so the default filters
+        # drop DeprecationWarning there -- the print is what reaches the console.
+        warnings.warn(msg, DeprecationWarning, stacklevel=2)
+        print(f"[SlicerHelper] WARNING: {msg}")
         _assert_segmentation_matches_volume(seg_node, reference_volume)
 
     if conform_to is None:
