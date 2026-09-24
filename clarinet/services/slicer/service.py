@@ -17,8 +17,12 @@ _HELPER_PATH = Path(__file__).parent / "helper.py"
 # No processEvents(): the composite-node detach removes stale volume refs
 # before Clear(0), so no VTK warnings are queued and a re-entrant Qt drain
 # (this script runs inside Slicer's HTTP handler) is unnecessary.
+# The record id stored by helper.store_record_id survives Clear(0); it is
+# dropped first, before anything that can raise, so an open that fails after
+# this reset cannot leave the previous record's id guarding a cleared scene.
 _RESET_SCENE_SCRIPT = """
 import slicer
+slicer.modules._clarinet_record_id = None
 lm = slicer.app.layoutManager()
 for name in ("Red", "Yellow", "Green"):
     widget = lm.sliceWidget(name)
@@ -111,7 +115,7 @@ class SlicerService:
         slicer_url: str,
         request_timeout: float = 5.0,
     ) -> None:
-        """Reset Slicer scene state — detach views and clear scene.
+        """Reset Slicer scene state — forget the opened record id, detach views, clear scene.
 
         Fails silently with a warning log on **any** Slicer error — pre-cleanup
         should never block the primary request. Intended to be called before
