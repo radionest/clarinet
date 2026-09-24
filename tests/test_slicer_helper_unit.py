@@ -448,6 +448,17 @@ def test_export_segmentation_conform_to_supersedes_reference_volume(
     guard.assert_not_called()
 
 
+def test_unset_sentinel_survives_helper_reexec() -> None:
+    """Slicer re-execs helper.py in one namespace; an older export_segmentation
+    (held by a callback) must still see its default as unset."""
+    code = compile(Path(helper_mod.__file__).read_text(), "helper.py", "exec")
+    ns: dict[str, Any] = {}
+    exec(code, ns)
+    first = ns["export_segmentation"]
+    exec(code, ns)
+    assert first.__kwdefaults__["reference_volume"] is ns["_UNSET"]
+
+
 class TestMissingVoxelSegments:
     def test_all_present(self) -> None:
         assert _missing_voxel_segments({"A": 1, "B": 1}, {"A": 1, "B": 1}) == []

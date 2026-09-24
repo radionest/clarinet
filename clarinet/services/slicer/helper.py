@@ -524,7 +524,9 @@ def _missing_voxel_segments(source: dict[str, int], written: dict[str, int]) -> 
     return sorted(name for name, count in source.items() if written.get(name, 0) < count)
 
 
-_UNSET: Any = object()
+# Reused across re-execs of this file in Slicer's shared namespace, so an older
+# export_segmentation (captured by a callback) still recognizes its default.
+_UNSET: Any = globals().get("_UNSET", object())
 
 
 def export_segmentation(
