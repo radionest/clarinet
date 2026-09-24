@@ -554,6 +554,15 @@
   the `SameSite=Lax` cookie — not closed here. `POST /api/pipelines/sync` wrote
   to the DB with no auth and now requires an admin. The caller-visible changes
   are described under Breaking.
+- **Security floors now ship in the wheel.** The floors for vulnerable transitive
+  dependencies lived only in `[tool.uv] constraint-dependencies`, which binds
+  this repo's `uv.lock` but is not written to the wheel's `Requires-Dist`, so a
+  downstream install could still resolve the vulnerable releases. They are now
+  base dependencies: `aiohttp>=3.14.3`, `anyio>=4.14.2`, `cryptography>=50.0.0`,
+  `idna>=3.15`, `mako>=1.3.12`, `pillow>=12.3.0`, `pyjwt>=2.13.0`,
+  `starlette>=1.3.1`, `tornado>=6.5.8`; `fastapi` rises to `>=0.133.0`, the first
+  release that allows starlette 1.x. A downstream environment pinned below any
+  of these no longer resolves until it upgrades.
 
 ### Added
 
