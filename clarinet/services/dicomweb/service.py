@@ -383,7 +383,7 @@ class DicomWebProxyService:
                 if not_cached:
                     raise RuntimeError(
                         f"Study {study_uid}: {len(not_cached)}/{len(series_uids)} series "
-                        f"did not arrive whole and were not cached: {not_cached}"
+                        f"were not cached (short or absent in the retrieve): {not_cached}"
                     )
                 total_received += sum(len(e.instances) for e in cached_map.values())
             progress.update(status="ready", received=total_received, total=total_received)
