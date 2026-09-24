@@ -661,10 +661,16 @@
   volume. All replaced UIDs now go through the salted hash — consistent across
   instances, runs and processes (#505). **Operator note:** studies anonymized
   before this fix keep the broken per-instance values, and the skip-guard will
-  not redo them; re-run with an explicit `series_uids` subset (bypasses the
-  guard). SOP Instance UIDs are unchanged by the re-run, so delete the study on
-  the destination PACS first — one that does not overwrite existing instances
-  (Orthanc's default) would keep the old copies.
+  not redo them. There is no HTTP/CLI switch: re-run from code via
+  `run_anonymization(msg, ctx, series_uids=[...])` or
+  `AnonymizationOrchestrator.run(..., series_uids=[...])`, listing every series
+  the filter includes (an explicit list bypasses the guard; a filter-excluded
+  UID raises). Study/Series/SOP anon UIDs are unchanged by the re-run, so first
+  delete the anonymized study (`anon_study_uid`) on every destination PACS — one
+  that does not overwrite existing instances (Orthanc's default) keeps the old
+  copies — and `{storage_path}/dicomweb_cache/<anon_study_uid>/`, which OHIF
+  otherwise keeps serving until cache cleanup (restart the API or wait out the
+  30-minute memory tier too).
 - **Config errors from `reconcile_config` get the `STARTUP FAILED` banner.** An
   undefined role, an unconfigured viewer, an unregistered validator/hydrator or
   a cross-type shared-file mismatch raised a plain `ConfigurationError` /
