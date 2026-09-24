@@ -153,8 +153,14 @@ correlatable. Prefill writes are deliberately not audited.
 ## Access control
 
 `AuthorizedRecordDep` grants read access to superusers and to holders of the
-record type's role; `MutableRecordDep` adds mutation for the assigned user or an
-unassigned record (and bypasses the owner check when `shared_editing` is set).
+record type's role; `MutableRecordDep` adds mutation for admins (`is_admin`),
+the assigned user or an unassigned record (and bypasses the owner check when
+`shared_editing` is set). Every record mutation goes through it — including
+`/fail`, `/invalidate` and, per target record, `PATCH /bulk/status`.
+Assignment (`PATCH /api/records/{id}/user`) is stricter, since it decides who
+the owner is and forces `inwork`: a non-admin may only claim for themselves an
+unassigned `pending`/`inwork` record, even on a `shared_editing` type —
+reassigning, or re-opening a finished record by assigning it, is admin-only.
 *Creating* a record is a third rule (`check_record_type_role` on
 `POST /api/records`): an admin — superuser **or** `admin` role — or a holder of
 the type's role; a `role_name = NULL` type is admin-only. The create predicate

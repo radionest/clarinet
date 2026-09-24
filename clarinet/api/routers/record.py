@@ -46,6 +46,7 @@ from clarinet.api.dependencies import (
     SeriesRepositoryDep,
     SessionDep,
     SlicerServiceDep,
+    authorize_mutable_record_access,
     get_client_ip,
     get_user_role_names,
     is_admin,
@@ -469,8 +470,10 @@ async def bulk_update_record_status(
 ) -> None:
     """Update status for multiple records at once.
 
-    409 when any target record is finished and its type locks submitted
-    records (``editable`` / ``edit_window_days``) — non-superusers only.
+    Non-superusers need the type's role and ``MutableRecordDep`` rights on
+    every target record. 409 when any target record is finished and its type
+    locks submitted records (``editable`` / ``edit_window_days``) —
+    non-superusers only.
     """
     if not user.is_superuser:
         user_roles = get_user_role_names(user)
@@ -479,6 +482,7 @@ async def bulk_update_record_status(
             role_name = record.record_type.role_name
             if role_name is None or role_name not in user_roles:
                 raise AuthorizationError(f"Insufficient permissions to access record {rid}")
+            await authorize_mutable_record_access(record, user)
     await service.bulk_update_status(record_ids, new_status, acting_user=user, actor_id=actor)
 
 
@@ -508,11 +512,32 @@ async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
     service: RecordServiceDep,
-    _authorized_record: AuthorizedRecordDep,
+    authorized_record: AuthorizedRecordDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
 ) -> RecordRead:
-    """Assign a record to a user."""
+    """Assign a record to a user.
+
+    Non-admins may only claim for themselves an unassigned ``pending`` /
+    ``inwork`` record — what the frontend's auto-assign on open does.
+    Re-targeting a colleague's record would side-step the owner check of
+    ``MutableRecordDep``, and assigning forces ``inwork``, so claiming a
+    finished record would re-open it past its edit lock. Admins may assign
+    anyone, but still only past the read gate: a non-superuser admin needs
+    the type's role.
+    """
+    # ponytail: check-then-write, not atomic — a self-claim racing another assign
+    # of the same free record: last wins. Fix with a conditional
+    # UPDATE ... WHERE user_id IS NULL (a row lock alone won't do).
+    if not is_admin(user) and (
+        user_id != user.id
+        or authorized_record.user_id is not None
+        or authorized_record.status not in (RecordStatus.pending, RecordStatus.inwork)
+    ):
+        raise AuthorizationError(
+            "Only an admin can assign another user, take an assigned record, "
+            "or claim one that is not pending or inwork"
+        )
     record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
@@ -528,7 +553,7 @@ async def update_record_context_info(
 ) -> RecordRead:
     """Replace ``context_info`` (markdown source) on a record.
 
-    Permitted to superusers (which includes pipeline service tokens), the
+    Permitted to admins (which includes pipeline service tokens), the
     record's assigned user, and any role-authorised user when the record is
     unassigned. Pass ``null`` to clear the field. The rendered HTML is
     available on the response as ``context_info_html``.
@@ -1133,7 +1158,7 @@ _MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
 @router.post("/{record_id}/fail", response_model=RecordRead)
 async def fail_record(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
@@ -1160,7 +1185,7 @@ async def fail_record(
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
 async def invalidate_record(
     record_id: int,
-    _authorized_record: AuthorizedRecordDep,
+    _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,

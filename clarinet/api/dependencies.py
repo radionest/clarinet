@@ -491,9 +491,10 @@ def is_admin(user: User) -> bool:
     ``current_admin_user`` turns it into a 403; the sites that must branch on it
     inline rather than gate a whole route read it directly — the
     ``clarinet_storage_path`` guard and the create-time
-    ``check_record_type_role``, the actor-email masking in the record audit
-    feed, and ``SseConnection.is_admin``, which decides whether a live event
-    stream may carry admin-only frames.
+    ``check_record_type_role``, the owner bypass in
+    ``authorize_mutable_record_access`` and on record assign, the actor-email
+    masking in the record audit feed, and ``SseConnection.is_admin``, which
+    decides whether a live event stream may carry admin-only frames.
 
     One further copy of the same predicate survives in
     ``models/capability.py::resolve_capabilities``, which is derived from
@@ -606,9 +607,9 @@ async def authorize_mutable_record_access(
     record: AuthorizedRecordDep,
     user: CurrentUserDep,
 ) -> Record:
-    """Authorize mutation access: superuser, assigned user, unassigned record, or
-    any role-holder when the record type has ``shared_editing=True``."""
-    if user.is_superuser:
+    """Authorize mutation access: admin (``is_admin``), assigned user, unassigned
+    record, or any role-holder when the record type has ``shared_editing=True``."""
+    if is_admin(user):
         return record
     if record.user_id is None or record.user_id == user.id:
         return record
