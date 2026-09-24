@@ -240,9 +240,9 @@
   segment with voxels that has no voxeled counterpart in the written file
   (matched by name) also deletes the file and raises, naming the lost
   segment(s).
-  `reference_volume=` still works for this release: it emits a
-  `DeprecationWarning` and runs the old in-scene check before exporting, and is
-  removed in the next release. `assert_segmentation_matches_volume` stays
+  Not breaking in this release — listed here because the removal in the next
+  one is: `reference_volume=` still works, emitting a `DeprecationWarning` and
+  running the old in-scene check before exporting. `assert_segmentation_matches_volume` stays
   public as an in-scene foreign-grid check, but it is no longer the export
   guard. **Downstream migration:** replace
   `export_segmentation(name, path, reference_volume=<node>)` with

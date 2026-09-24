@@ -162,14 +162,15 @@ def _assert_segmentation_matches_volume(
 
     Also exposed as the public ``assert_segmentation_matches_volume`` alias,
     which downstream validators call directly as an in-scene foreign-grid guard.
-    It is not a file-export guard (see ``export_segmentation``'s ``conform_to``
-    for that). Used internally as a fail-fast check at two call sites --
-    ``load_segmentation`` (best-effort load-time check) and
-    ``_export_segments_labelmap`` (the
-    correspondence-engine set-ops' own pre-regrid check, gated by their
-    ``resample=`` parameter). Compares node-to-node VTK matrices directly;
-    ``export_segmentation``'s guard instead classifies against a reference
-    file's on-disk grid via the bundled ``grid_relation``.
+    Used internally as a fail-fast check at three call sites --
+    ``load_segmentation`` (best-effort load-time check),
+    ``_export_segments_labelmap`` (the correspondence-engine set-ops' own
+    pre-regrid check, gated by their ``resample=`` parameter), and
+    ``export_segmentation``'s deprecated ``reference_volume=`` path (removed
+    next release). Compares node-to-node VTK matrices directly, so it is blind
+    to a load-time mirror; ``export_segmentation``'s ``conform_to`` guard
+    instead classifies against a reference file's on-disk grid via the bundled
+    ``grid_relation``.
 
     Compares the segmentation's reference image geometry (dimensions +
     voxel-to-world matrix) against the volume within ``tol``. A no-op when the
@@ -566,6 +567,8 @@ def export_segmentation(
 
     Raises:
         SlicerHelperError: The node is not found; the file was not created;
+            the deprecated ``reference_volume`` check fails (grid mismatch, or
+            the volume has no image data) -- raised before anything is written;
             ``conform_to`` is set but the script was sent without the
             correspondence bundle (same opt-in contract as
             ``detect_overlaps``/``subtract_segmentations``); ``conform_to``
