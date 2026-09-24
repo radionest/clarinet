@@ -473,6 +473,15 @@
   endpoint. `POST /api/records/{id}/invalidate` was the last record-returning
   handler that skipped masking and now masks too. The caller-visible change is
   described under Breaking.
+- **A role-holder can no longer take a colleague's record.**
+  `PATCH /api/records/{id}/user` checked only read access, so any holder of the
+  type's role could re-target a record assigned to someone else — to themselves
+  or anyone — and then pass the owner check of every `MutableRecordDep`
+  endpoint. A non-admin may now only claim for themselves a record that is
+  unassigned or already theirs (the frontend's auto-assign on opening a free
+  record keeps working); anything else is **403**, and reassignment stays with
+  admins. `POST /api/records/{id}/fail` and `/invalidate` had the same weak gate
+  and now use `MutableRecordDep`. Closes #620.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then

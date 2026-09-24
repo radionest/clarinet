@@ -508,11 +508,23 @@ async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
     service: RecordServiceDep,
-    _authorized_record: AuthorizedRecordDep,
+    authorized_record: AuthorizedRecordDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
 ) -> RecordRead:
-    """Assign a record to a user."""
+    """Assign a record to a user.
+
+    Non-admins may only claim for themselves a record that is unassigned or
+    already theirs — re-targeting a colleague's record would side-step the
+    owner check of ``MutableRecordDep``. Admins reassign freely, as on
+    ``PATCH /admin/records/{id}/assign``.
+    """
+    # ponytail: check-then-write, not atomic — two simultaneous self-claims of one
+    # free record: last wins. Lock the row in repo.assign_user if that ever matters.
+    if not is_admin(user) and (
+        user_id != user.id or authorized_record.user_id not in (None, user.id)
+    ):
+        raise AuthorizationError("Only an admin can assign another user or take an assigned record")
     record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
@@ -1133,7 +1145,7 @@ _MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
 @router.post("/{record_id}/fail", response_model=RecordRead)
 async def fail_record(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
@@ -1160,7 +1172,7 @@ async def fail_record(
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
 async def invalidate_record(
     record_id: int,
-    _authorized_record: AuthorizedRecordDep,
+    _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,

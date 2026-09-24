@@ -503,6 +503,60 @@ async def test_patch_record_assigned_to_other_user_forbidden(
 
 
 @pytest.mark.asyncio
+async def test_assign_user_cannot_take_over_other_users_record(
+    test_session, role_a_client, record_role_a, superuser, user_with_role_a
+):
+    """A same-role caller cannot re-target a colleague's record to themselves (#620)."""
+    record_role_a.user_id = superuser.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_assign_user_cannot_assign_unassigned_record_to_someone_else(
+    role_a_client, record_role_a, superuser
+):
+    response = await role_a_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(superuser.id)}
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_assign_user_self_claim_of_unassigned_record_allowed(
+    role_a_client, record_role_a, user_with_role_a
+):
+    """The frontend auto-assigns an opened unassigned record to its viewer this way."""
+    response = await role_a_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
+    )
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(user_with_role_a.id)
+    assert response.json()["status"] == "inwork"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "body"),
+    [("fail", {"reason": "test"}), ("invalidate", {"mode": "soft", "reason": "test"})],
+)
+async def test_fail_and_invalidate_other_users_record_forbidden(
+    test_session, role_a_client, record_role_a, superuser, action, body
+):
+    record_role_a.user_id = superuser.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.post(f"{RECORDS_BASE}/{record_role_a.id}/{action}", json=body)
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_patch_record_update_masks_patient(
     test_session, role_a_client, record_role_a, test_patient
 ):
