@@ -16,7 +16,7 @@ dicom/
   models.py         # Clarinet models (anonymization, PACS import) + dimsechord re-exports
   client.py         # DicomClient — dimsechord's SCU plus dicom_retrieve_mode dispatch
   scp.py            # Storage SCP singleton (dimsechord.StorageSCP) lifecycle
-  anonymizer.py     # Anonymizer, PACS stubs (planned; not yet exported)
+  anonymizer.py     # DicomAnonymizer — salted-hash UIDs over dicomanonymizer defaults
   series_filter.py  # Configurable series filter (modality blocklist, instance count, unknown policy)
   orchestrator.py   # AnonymizationOrchestrator — Record-aware skip-guard + Patient + submit
   pipeline.py       # Built-in @pipeline_task anonymize_study_pipeline + run_anonymization helper
