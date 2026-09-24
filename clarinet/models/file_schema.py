@@ -110,10 +110,10 @@ class FileDefinition(SQLModel, table=True):
 # Row-level fields of ``FileDefinition`` — shared by every RecordType binding
 # the file (``RecordTypeFileLink`` carries the per-binding ones: role, required,
 # allow_path_collision). The upsert (``FileDefinitionRepository``), the
-# config-load cross-type check (``validate_shared_file_definitions``) and the
-# API merge (``RecordTypeService._merge_with_stored``) iterate this tuple;
+# config-load cross-type check (``validate_shared_file_definitions``), the
+# reconciler's link diff (``_file_links_differ``) and the API merge
+# (``RecordTypeService._merge_with_stored``) iterate this tuple;
 # ``tests/test_shared_file_definitions.py`` pins it to the model's columns.
-# The reconciler's link diff (``_file_links_differ``) compares a subset — #565.
 FILE_DEFINITION_FIELDS: tuple[str, ...] = (
     "pattern",
     "description",

@@ -12,7 +12,7 @@ from sqlmodel import select
 
 from clarinet.config.reconciler import _COMPARED_FIELDS, ReconcileResult, reconcile_record_types
 from clarinet.exceptions.domain import ConfigurationError, RecordConstraintViolationError
-from clarinet.models.file_schema import RecordTypeFileLink
+from clarinet.models.file_schema import FileDefinition, RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
 
@@ -682,6 +682,38 @@ async def test_grid_conform_to_identical_second_pass_is_unchanged(
     result = await reconcile_record_types(config, test_session)
     assert result.unchanged == ["grid-stable-test"]
     assert result.updated == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "new_value"),
+    [("pattern", "mask_{id}.nrrd"), ("description", "Mask"), ("multiple", True)],
+)
+async def test_file_definition_field_change_reaches_db(
+    test_session: AsyncSession, field_name: str, new_value: object
+) -> None:
+    """A change to a row-level file field alone must reach the stored row (#565)."""
+    file_def = {"name": "seg_file", "pattern": "seg_{id}.nrrd", "role": "output"}
+    result = await reconcile_record_types(
+        [_make_config("fd-field-test", file_registry=[file_def])], test_session
+    )
+    assert result.created == ["fd-field-test"]
+
+    test_session.expire_all()
+
+    config_v2 = [_make_config("fd-field-test", file_registry=[{**file_def, field_name: new_value}])]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.updated == ["fd-field-test"]
+
+    test_session.expire_all()
+    stored = (
+        await test_session.execute(select(FileDefinition).where(FileDefinition.name == "seg_file"))
+    ).scalar_one()
+    assert getattr(stored, field_name) == new_value
+
+    test_session.expire_all()
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.unchanged == ["fd-field-test"]
 
 
 @pytest.mark.asyncio

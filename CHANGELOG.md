@@ -700,6 +700,12 @@
   report `timeout` on complete retrieves, which now fail `ensure_series_cached`
   and `convert_series_to_nifti`; the paths with a C-FIND count compensate, the
   rest needs a dimsechord fix (#538).
+- **A file's changed `pattern`, `description` or `multiple` now reaches the
+  database on reconcile.** The config reconciler's file-link diff compared only
+  some of a file definition's fields, so a change to one of these three alone
+  reconciled as `unchanged` and the stored row kept the old value until some
+  other change on a type binding the file forced a sync. The diff now compares
+  every row-level and binding field (#565).
 - **A failed Slicer open no longer leaves the previous record's id behind.**
   The record id stored in Slicer survives `mrmlScene.Clear(0)` and was only
   re-set at the end of the open script, so an open that failed part-way left
