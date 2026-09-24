@@ -680,14 +680,17 @@
   short with no error. `retrieve_is_complete()` (exported from
   `clarinet.services.dicom`) now decides: `ensure_series_cached` raises and
   `convert_series_to_nifti` refuses to convert; `ensure_study_cached` and
-  `prefetch_dicom_web` keep only the series whose arrivals reach their C-FIND
-  instance count (`series_instance_counts()`) and leave the rest uncached.
+  `prefetch_dicom_web` keep only the series that arrived whole — after a
+  study-level retrieve, judged by the C-FIND instance count
+  (`series_instance_counts()`) — and leave the rest uncached.
   `prefetch_dicom_web` then **fails** naming those series — including
   per-series retrieves that return nothing, which used to log an error and
   succeed — so its retry fetches only them; a study that cannot be retrieved
   whole now shows up as failed task runs (and a DLQ entry once retries run out).
   `ensure_study_cached` takes the counts as a new optional `expected_counts=`;
-  without them a short study retrieve caches nothing (#538).
+  without them a short study retrieve caches nothing. The preload widget
+  (`POST /dicom-web/preload`) now ends on `error` naming those series instead
+  of `ready` (#538).
 - **Anonymization keeps one `FrameOfReferenceUID` per series.** Only Study,
   Series and SOP Instance UIDs were hashed; every other UID dicomanonymizer
   replaces got a fresh random value per instance, so each slice claimed its own

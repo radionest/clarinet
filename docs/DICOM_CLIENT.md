@@ -348,15 +348,18 @@ StudyResult(
 
 ```python
 RetrieveResult(
-    status: str                          # "success", "pending", "warning_0x..."
+    status: str                          # "success", "pending", "warning_0x...", "timeout" (C-MOVE)
     num_remaining: int = 0               # Оставшиеся
     num_completed: int = 0               # Завершённые
     num_failed: int = 0                  # Неудачные
     num_warning: int = 0                 # С предупреждениями
     failed_sop_instances: list[str] = [] # Список неудачных
-    instances: list[Dataset] = []        # Datasets (для memory mode)
+    instances: dict[str, Dataset] = {}   # SOPInstanceUID → Dataset (для memory mode)
 )
 ```
+
+`num_completed > 0` не значит, что пришло всё: полноту проверяет
+`retrieve_is_complete(result)` (`status == "success"` и `num_failed == 0`).
 
 ### DicomNode
 

@@ -52,13 +52,14 @@ def series_instance_counts(results: Iterable[SeriesResult]) -> dict[str, int]:
     """Instance count per series, as the peer's C-FIND reported it.
 
     After an incomplete study retrieve this is the only evidence that a series
-    which did arrive arrived whole. Series the peer gave no count for are left
-    out, so they are never vouched for.
+    which did arrive arrived whole. Series the peer gave no count for — or a
+    count of 0, which any arrival would satisfy — are left out, so they are
+    never vouched for.
     """
     return {
         r.series_instance_uid: r.number_of_series_related_instances
         for r in results
-        if r.series_instance_uid and r.number_of_series_related_instances is not None
+        if r.series_instance_uid and r.number_of_series_related_instances
     }
 
 

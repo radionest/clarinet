@@ -115,7 +115,7 @@ def _organize_to_cache(
     tmp_dir: Path,
     cache_base: Path,
     study_uid: str,
-    expected_counts: Mapping[str, int] | None = None,
+    min_instances: Mapping[str, int] | None = None,
 ) -> dict[str, int]:
     """Move retrieved DICOM files into ``dicomweb_cache`` structure.
 
@@ -133,8 +133,8 @@ def _organize_to_cache(
     fresh instances mid-write.
 
     Args:
-        expected_counts: Pass after an incomplete retrieve — only a series
-            whose arrivals reach its count is published; the rest are left in
+        min_instances: Pass after an incomplete retrieve — only a listed series
+            with at least that many arrivals is published; the rest are left in
             ``tmp_dir`` to be discarded with it. ``None`` publishes everything.
 
     Returns:
@@ -169,8 +169,8 @@ def _organize_to_cache(
 
     grouped: dict[str, int] = {}
     for series_uid, files in arrived.items():
-        if expected_counts is not None and (
-            series_uid not in expected_counts or len(files) < expected_counts[series_uid]
+        if min_instances is not None and (
+            series_uid not in min_instances or len(files) < min_instances[series_uid]
         ):
             continue
         target_dir = cache_base / study_uid / series_uid
@@ -383,6 +383,11 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
                     f"Study C-GET returned 0 instances for study {msg.study_uid}",
                 )
             results = [result]
+            # One retrieve for the whole study cannot say which series fell short —
+            # only the C-FIND count can vouch that one arrived whole.
+            min_instances = (
+                None if retrieve_is_complete(result) else series_instance_counts(series_results)
+            )
         else:
             results = [
                 await client.get_series(
@@ -399,17 +404,16 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
                     f"Per-series C-GET retrieved 0 instances for study {msg.study_uid} "
                     f"(all {len(results)} series failed)",
                 )
+            # Each series had its own retrieve, so its own status vouches for it.
+            min_instances = {
+                uid: 0
+                for uid, r in zip(series_to_fetch, results, strict=True)
+                if retrieve_is_complete(r)
+            }
         total_completed = sum(r.num_completed for r in results)
 
-        # A short retrieve cannot say which series fell short — only the C-FIND
-        # count can vouch that one arrived whole, so publish just those.
-        whole_only = (
-            None
-            if all(retrieve_is_complete(r) for r in results)
-            else series_instance_counts(series_results)
-        )
         grouped = await asyncio.to_thread(
-            _organize_to_cache, tmp_path, cache_base, msg.study_uid, whole_only
+            _organize_to_cache, tmp_path, cache_base, msg.study_uid, min_instances
         )
 
     # Fail after publishing what arrived whole: the retry then fetches only

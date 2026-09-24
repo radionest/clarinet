@@ -846,7 +846,8 @@ class TestPrefetchDicomWebImpl:
 
     @pytest.mark.asyncio
     async def test_short_series_retrieve_is_not_published(self, tmp_path: Path, monkeypatch):
-        """Per-series path: a series with failed sub-operations stays unpublished."""
+        """Per-series path: each series' own retrieve decides — SER2 (failed
+        sub-operations) stays unpublished, SER3 (clean, no C-FIND count) is published."""
         monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
 
         ctx = _build_ctx(tmp_path)
@@ -862,20 +863,25 @@ class TestPrefetchDicomWebImpl:
             return_value=[
                 _series_result("SER1", instances=1),
                 _series_result("SER2", instances=2),
+                _series_result("SER3"),
             ]
         )
 
         async def fake_get_series(study_uid, series_uid, peer, output_dir):
-            _make_dcm(output_dir / "new.dcm", series_uid, "SOP-NEW")
-            return _retrieve_result(num_completed=1, status="warning_0xb000", num_failed=1)
+            _make_dcm(output_dir / f"{series_uid}.dcm", series_uid, f"SOP-{series_uid}")
+            if series_uid == "SER2":
+                return _retrieve_result(num_completed=1, status="warning_0xb000", num_failed=1)
+            return _retrieve_result(num_completed=1)
 
         mock_client.get_series = AsyncMock(side_effect=fake_get_series)
 
         with (
             patch("clarinet.services.dicom.DicomClient", return_value=mock_client),
             patch("clarinet.services.dicom.DicomNode"),
-            pytest.raises(PipelineStepError, match="SER2"),
+            pytest.raises(PipelineStepError, match=r"\['SER2'\]"),
         ):
             await _prefetch_dicom_web_impl(msg, ctx)
 
         assert not (cache_base / "STUDY1" / "SER2").exists()
+        assert (cache_base / "STUDY1" / "SER3" / "SOP-SER3.dcm").exists()
+        assert (cache_base / "STUDY1" / "SER3" / ".cached_at").exists()

@@ -134,7 +134,7 @@ A timed-out C-MOVE (`timeout`), a C-GET whose SOP class got no context
 | Consumer | On a short retrieve |
 |---|---|
 | `DicomWebCache.ensure_series_cached`, `convert_series_to_nifti` | raise — nothing is cached or converted |
-| `DicomWebCache.ensure_study_cached`, `prefetch_dicom_web` | keep only the series whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`); the rest are not cached. The cache leaves them out of its result and logs them; the task publishes the whole ones, then raises naming the rest, so its retry fetches only those |
+| `DicomWebCache.ensure_study_cached`, `prefetch_dicom_web` | keep only the series that arrived whole — after a study-level retrieve, those whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`); after prefetch's per-series retrieves, those whose own retrieve is complete. The rest are not cached: the cache leaves them out of its result and logs them; the task publishes the whole ones, then raises naming the rest, so its retry fetches only those |
 | `AnonymizationService._retrieve_series` | its own check — received vs `Series.instance_count`, retried; does not read `status` |
 
 A series the peer gave no count for is never vouched for, so a short study

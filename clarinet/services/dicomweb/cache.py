@@ -624,7 +624,8 @@ class DicomWebCache:
                     f"series, not caching {len(not_cached)} requested: {not_cached}"
                 )
 
-            # Cache all series from C-GET (including unexpected SR/KO/PR)
+            # Cache every grouped series, including unexpected SR/KO/PR — after
+            # a short retrieve only the whole ones are left in `grouped`
             requested_set = set(series_uids)
             for ser_uid, instances in grouped.items():
                 entry = self._put_to_memory(study_uid, ser_uid, instances, disk_persisted=False)

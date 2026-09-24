@@ -12,10 +12,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from dimsechord import DicomClient as DimsechordClient
-from dimsechord import QueryRetrieveLevel, RetrieveResult
+from dimsechord import QueryRetrieveLevel, RetrieveResult, SeriesResult
 from dimsechord._models import StorageMode
 
-from clarinet.services.dicom.client import DicomClient, retrieve_is_complete
+from clarinet.services.dicom.client import (
+    DicomClient,
+    retrieve_is_complete,
+    series_instance_counts,
+)
 from clarinet.services.dicom.models import DicomNode
 
 PEER = DicomNode(aet="ORTHANC", host="localhost", port=4242)
@@ -307,3 +311,16 @@ class TestRetrieveIsComplete:
     def test_status_and_failures_decide(self, status: str, num_failed: int, complete: bool):
         result = RetrieveResult(status=status, num_completed=5, num_failed=num_failed)
         assert retrieve_is_complete(result) is complete
+
+
+def test_series_instance_counts_vouches_only_for_positive_counts():
+    """A missing or zero C-FIND count would let any partial arrival pass as whole."""
+    results = [
+        SeriesResult(
+            study_instance_uid="1.2.3",
+            series_instance_uid=uid,
+            number_of_series_related_instances=n,
+        )
+        for uid, n in [("a", 3), ("b", 0), ("c", None)]
+    ]
+    assert series_instance_counts(results) == {"a": 3}
