@@ -842,7 +842,9 @@ def test_reset_scene_script_drops_stored_record_id(monkeypatch):
     """The pre-open scene reset forgets the stored record id (#608).
 
     Otherwise an open that fails after the reset leaves the previous record's
-    id guarding a cleared scene, and ``/validate`` on that record passes.
+    id guarding a cleared scene, and ``/validate`` on that record passes. The
+    drop must come before anything that can raise: here ``layoutManager()``
+    fails, as on a fresh Slicer, and the id is still gone.
     """
     import clarinet.services.slicer.helper as helper_mod
     from clarinet.services.slicer.helper import (
@@ -853,15 +855,15 @@ def test_reset_scene_script_drops_stored_record_id(monkeypatch):
     from clarinet.services.slicer.service import _RESET_SCENE_SCRIPT
 
     fake_slicer = MagicMock()
-    fake_slicer.app.layoutManager.return_value.sliceWidget.return_value = None
+    fake_slicer.app.layoutManager.side_effect = RuntimeError("layout not ready")
     fake_slicer.modules = SimpleNamespace()
     monkeypatch.setattr(helper_mod, "slicer", fake_slicer)
     monkeypatch.setitem(sys.modules, "slicer", fake_slicer)
 
     store_record_id(42)
-    exec(_RESET_SCENE_SCRIPT, {})
+    with pytest.raises(RuntimeError, match="layout not ready"):
+        exec(_RESET_SCENE_SCRIPT, {})
 
-    fake_slicer.mrmlScene.Clear.assert_called_once_with(0)
     with pytest.raises(SlicerHelperError, match="No record was opened"):
         validate_record_id(42)
 
