@@ -126,7 +126,7 @@ def test_labelmap_array_none_point_data_no_attributeerror(
 # --- _export_segments_labelmap: resample= gate (issue #415) ------------------
 #
 # The resample= parameter on the set-op choke point gates the pre-regrid
-# ``_assert_segmentation_matches_volume`` check. ``test_labelmap_array_*`` above
+# ``assert_segmentation_matches_volume`` check. ``test_labelmap_array_*`` above
 # covers the post-export empty/foreign-grid discrimination; these cover the
 # other half of #415 — that ``resample=True`` opts out of the geometry guard
 # (legacy re-grid path) while ``resample=False`` (default) invokes it. The full
@@ -149,8 +149,8 @@ def _wire_labelmap_export_gate(
     helper._image_node = MagicMock(name="volume_node")
 
     monkeypatch.setattr(helper_mod, "_segmentation_has_voxels", lambda node: has_voxels)
-    assert_grid = MagicMock(name="_assert_segmentation_matches_volume")
-    monkeypatch.setattr(helper_mod, "_assert_segmentation_matches_volume", assert_grid)
+    assert_grid = MagicMock(name="assert_segmentation_matches_volume")
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", assert_grid)
     monkeypatch.setattr(helper, "_apply_reference_geometry", MagicMock())
 
     fake_seg_logic = MagicMock()
@@ -197,7 +197,7 @@ def test_export_segments_labelmap_empty_source_skips_geometry_guard(
 #
 # Task 5 (canonicalize-segmentation-grids): only the contract is unit-tested
 # here (bundle-absent guard, missing-reference-file raise, unchanged plain
-# export, the reference_volume= removal). The SAME/REARRANGED/FOREIGN
+# export, the deprecated reference_volume= shim). The SAME/REARRANGED/FOREIGN
 # classification and the re-grid mechanics themselves touch the live Slicer
 # API (ImportLabelmapToSegmentationNode, addVolumeFromArray, ...) and are
 # exercised end-to-end by the live-Slicer test in Task 6.
@@ -373,12 +373,90 @@ def test_export_segmentation_plain_export_unchanged(
     fake_util.exportNode.assert_called_once_with(fake_util.getNode.return_value, output_path)
 
 
-def test_export_segmentation_reference_volume_kwarg_removed() -> None:
-    """reference_volume= no longer exists -- calling with it is a TypeError."""
-    with pytest.raises(TypeError):
+def test_export_segmentation_reference_volume_deprecated_still_guards(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Deprecated reference_volume= warns, runs the in-scene guard, then exports."""
+    fake_util = MagicMock()
+    fake_util.exportNode.side_effect = lambda node, path: open(path, "w").close()
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+    guard = MagicMock(name="assert_segmentation_matches_volume")
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", guard)
+    volume = MagicMock()
+    output_path = str(tmp_path / "out.seg.nrrd")
+
+    with pytest.warns(DeprecationWarning, match="conform_to"):
+        helper_mod.export_segmentation("Segmentation", output_path, reference_volume=volume)
+
+    guard.assert_called_once_with(fake_util.getNode.return_value, volume)
+    assert os.path.isfile(output_path)
+    assert (
+        "[SlicerHelper] WARNING: export_segmentation(reference_volume=" in capsys.readouterr().out
+    )
+
+
+def test_export_segmentation_reference_volume_guard_failure_skips_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A foreign grid on the deprecated path raises before anything is written."""
+    fake_util = MagicMock()
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+    guard = MagicMock(side_effect=SlicerHelperError("foreign grid"))
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", guard)
+
+    with pytest.warns(DeprecationWarning), pytest.raises(SlicerHelperError, match="foreign"):
         helper_mod.export_segmentation(
-            "Segmentation", "/tmp/out.seg.nrrd", reference_volume=object()
+            "Segmentation", "/nonexistent/out.seg.nrrd", reference_volume=MagicMock()
         )
+
+    fake_util.exportNode.assert_not_called()
+
+
+def test_export_segmentation_reference_volume_none_still_warns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """reference_volume=None (find_loaded_volume found nothing) warns too."""
+    fake_util = MagicMock()
+    fake_util.exportNode.side_effect = lambda node, path: open(path, "w").close()
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+
+    with pytest.warns(DeprecationWarning, match="conform_to"):
+        helper_mod.export_segmentation(
+            "Segmentation", str(tmp_path / "out.seg.nrrd"), reference_volume=None
+        )
+
+
+def test_export_segmentation_conform_to_supersedes_reference_volume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both passed → warn, skip the in-scene check, go straight to conform_to."""
+    monkeypatch.setattr(helper_mod.slicer, "util", MagicMock())
+    guard = MagicMock()
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", guard)
+
+    with (
+        pytest.warns(DeprecationWarning),
+        pytest.raises(SlicerHelperError, match="correspondence bundle"),
+    ):
+        helper_mod.export_segmentation(
+            "Segmentation",
+            "/tmp/out.seg.nrrd",
+            conform_to="/tmp/ref.nii.gz",
+            reference_volume=MagicMock(),
+        )
+
+    guard.assert_not_called()
+
+
+def test_unset_sentinel_survives_helper_reexec() -> None:
+    """Slicer re-execs helper.py in one namespace; an older export_segmentation
+    (held by a callback) must still see its default as unset."""
+    code = compile(Path(helper_mod.__file__).read_text(), "helper.py", "exec")
+    ns: dict[str, Any] = {}
+    exec(code, ns)
+    first = ns["export_segmentation"]
+    exec(code, ns)
+    assert first.__kwdefaults__["reference_volume"] is ns["_UNSET"]
 
 
 class TestMissingVoxelSegments:

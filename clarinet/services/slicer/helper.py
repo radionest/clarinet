@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -151,7 +152,7 @@ def find_loaded_volume(path: str | None = None) -> Any:
     return None
 
 
-def _assert_segmentation_matches_volume(
+def assert_segmentation_matches_volume(
     segmentation: Any,
     volume_node: Any,
     *,
@@ -159,14 +160,16 @@ def _assert_segmentation_matches_volume(
 ) -> None:
     """Raise if a segmentation's reference geometry does not match a volume's grid.
 
-    Private: no longer part of the public Slicer-script API (see
-    ``export_segmentation``'s ``conform_to`` for the file-export guard). Used
-    internally as a fail-fast check at two call sites -- ``load_segmentation``
-    (best-effort load-time check) and ``_export_segments_labelmap`` (the
-    correspondence-engine set-ops' own pre-regrid check, gated by their
-    ``resample=`` parameter). Compares node-to-node VTK matrices directly;
-    ``export_segmentation``'s guard instead classifies against a reference
-    file's on-disk grid via the bundled ``grid_relation``.
+    Public: downstream validators call it directly as an in-scene foreign-grid
+    guard. Used internally as a fail-fast check at three call sites --
+    ``load_segmentation`` (best-effort load-time check),
+    ``_export_segments_labelmap`` (the correspondence-engine set-ops' own
+    pre-regrid check, gated by their ``resample=`` parameter), and
+    ``export_segmentation``'s deprecated ``reference_volume=`` path (removed
+    next release). Compares node-to-node VTK matrices directly, so it is blind
+    to a load-time mirror; ``export_segmentation``'s ``conform_to`` guard
+    instead classifies against a reference file's on-disk grid via the bundled
+    ``grid_relation``.
 
     Compares the segmentation's reference image geometry (dimensions +
     voxel-to-world matrix) against the volume within ``tol``. A no-op when the
@@ -300,7 +303,7 @@ def _read_grid_on_disk(path: str) -> Grid:
 def _node_binary_labelmap_grid(seg_node: Any) -> Grid:
     """Read a segmentation node's current binary-labelmap grid as a bundled ``Grid``.
 
-    Same geometry source as ``_assert_segmentation_matches_volume``: the
+    Same geometry source as ``assert_segmentation_matches_volume``: the
     segmentation's recorded reference-image-geometry conversion parameter.
     Slicer "world" space is RAS; the bundled ``Grid`` is LPS by construction,
     so the matrix is flipped via ``_flip_lps_ras`` before building the
@@ -521,7 +524,18 @@ def _missing_voxel_segments(source: dict[str, int], written: dict[str, int]) -> 
     return sorted(name for name, count in source.items() if written.get(name, 0) < count)
 
 
-def export_segmentation(name: str, output_path: str, *, conform_to: str | None = None) -> str:
+# Reused across re-execs of this file in Slicer's shared namespace, so an older
+# export_segmentation (captured by a callback) still recognizes its default.
+_UNSET: Any = globals().get("_UNSET", object())
+
+
+def export_segmentation(
+    name: str,
+    output_path: str,
+    *,
+    conform_to: str | None = None,
+    reference_volume: Any = _UNSET,
+) -> str:
     """Find segmentation node by name, export to file, and verify.
 
     Args:
@@ -544,12 +558,21 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
             lost segment(s).
             ``None`` skips all of this and exports the node as-is (today's
             behavior).
+        reference_volume: Deprecated, removed in the next release -- use
+            ``conform_to``. A loaded ``vtkMRMLScalarVolumeNode``; runs the
+            in-scene ``assert_segmentation_matches_volume`` check before
+            exporting, as before #497. Passing it at all warns, ``None``
+            included (``None`` skips the check). Ignored when ``conform_to``
+            is set -- the on-disk guard can re-grid a REARRANGED node the
+            in-scene check would reject.
 
     Returns:
         The output_path on success.
 
     Raises:
         SlicerHelperError: The node is not found; the file was not created;
+            the deprecated ``reference_volume`` check fails (grid mismatch, or
+            the volume has no image data) -- raised before anything is written;
             ``conform_to`` is set but the script was sent without the
             correspondence bundle (same opt-in contract as
             ``detect_overlaps``/``subtract_segmentations``); ``conform_to``
@@ -562,6 +585,18 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
     seg_node = slicer.util.getNode(name)
     if seg_node is None:
         raise SlicerHelperError(f"Segmentation node '{name}' not found in scene")
+
+    if reference_volume is not _UNSET:
+        msg = (
+            "export_segmentation(reference_volume=...) is deprecated and will be removed "
+            "in the next release; pass conform_to=<volume file path> instead."
+        )
+        # Slicer execs scripts under WebServerLib's __name__, so the default filters
+        # drop DeprecationWarning there -- the print is what reaches the console.
+        warnings.warn(msg, DeprecationWarning, stacklevel=2)
+        print(f"[SlicerHelper] WARNING: {msg}")
+        if conform_to is None:
+            assert_segmentation_matches_volume(seg_node, reference_volume)
 
     if conform_to is None:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -649,7 +684,7 @@ def _labelmap_array_or_raise(labelmap_node: Any, source_node: Any, *, what: str)
       ``slicer.util.arrayFromVolume`` would then dereference ``None`` and crash
       with an opaque ``'NoneType' object has no attribute 'GetDataType'``. Raise a
       diagnosable ``SlicerHelperError`` pointing at the on-disk repair instead —
-      the set-op companion to the pre-regrid ``_assert_segmentation_matches_volume``.
+      the set-op companion to the pre-regrid ``assert_segmentation_matches_volume``.
     - **Genuinely empty** — the source has no voxels anywhere. Pre-guard set-ops
       treated this as a no-op; preserve that. Warn and return ``None`` so the
       caller can short-circuit to its own empty-result path.
@@ -2072,7 +2107,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         if self._image_node is not None:
             try:
-                _assert_segmentation_matches_volume(seg_node, self._image_node)
+                assert_segmentation_matches_volume(seg_node, self._image_node)
             except SlicerHelperError:
                 slicer.mrmlScene.RemoveNode(seg_node)
                 raise
@@ -2358,7 +2393,7 @@ class _SegmentEditMixin(_SlicerHelperBase):
 
         Unless *resample* is set, a non-empty source is checked against the
         source volume's grid before re-gridding (see
-        ``_assert_segmentation_matches_volume``) — a partially-overlapping
+        ``assert_segmentation_matches_volume``) — a partially-overlapping
         misaligned grid would otherwise export non-empty-but-wrong voxels and
         slip through the empty/foreign-grid guard below undetected.
 
@@ -2373,10 +2408,10 @@ class _SegmentEditMixin(_SlicerHelperBase):
                 extent (see ``_labelmap_array_or_raise``); or, when *resample*
                 is False, a non-empty source whose recorded reference geometry
                 does not match the source volume's grid (see
-                ``_assert_segmentation_matches_volume``).
+                ``assert_segmentation_matches_volume``).
         """
         if not resample and _segmentation_has_voxels(node):
-            _assert_segmentation_matches_volume(node, self._image_node)
+            assert_segmentation_matches_volume(node, self._image_node)
         self._apply_reference_geometry(node)
         seg_logic = slicer.modules.segmentations.logic()
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", tmp_name)

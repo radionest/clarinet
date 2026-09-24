@@ -158,13 +158,13 @@ explain actually happens:
   it exports mirrored relative to the on-disk volume file, even though it looked
   correctly aligned to the user on screen the whole time.
 - `export_segmentation(name, output_path, *, conform_to=None)`
-  (`clarinet/services/slicer/helper.py:524`) is the write-boundary guard.
+  (`clarinet/services/slicer/helper.py`) is the write-boundary guard.
   `conform_to=<reference file path>` reads the reference's **on-disk** grid
-  (`_read_grid_on_disk`, `helper.py:244` — via `sitk.ImageFileReader`, never a
+  (`_read_grid_on_disk`, `helper.py` — via `sitk.ImageFileReader`, never a
   loaded node, never `loadVolume` — Probe P2), classifies the segmentation node's
   *current* grid against it: `SAME` exports directly; `REARRANGED` re-grids
   **exactly** onto the reference **per layer** on a temporary node
-  (`_reindex_segmentation_to_grid`, `helper.py:335`): segments are grouped by
+  (`_reindex_segmentation_to_grid`, `helper.py`): segments are grouped by
   their shared binary-labelmap layer, each layer's multi-label image is
   resampled onto the reference grid in one shot (nearest-neighbor, no
   interpolation blur — exact for a signed-permutation relation) and
@@ -197,20 +197,21 @@ flowchart LR
 
 ### Why the in-scene guard alone is blind
 
-The load-time check `_assert_segmentation_matches_volume`
-(`helper.py:154`, private since this change — see
-[design rationale](#design-rationale)) compares the segmentation's in-memory
+The load-time check `assert_segmentation_matches_volume`
+(`helper.py`; public — downstream validators call it directly) compares the segmentation's in-memory
 reference geometry against the in-memory volume node. On a `det < 0` volume both
 were flipped **identically** at load, so they agree by construction — the guard
 cannot see the mirror at all. It is also fail-open by construction: an unresolved
 reference volume skips the check, and a segmentation loaded from disk carries no
 recorded reference geometry, so the guard returns early either way. **Only a
 disk-level read can catch the mirror** — `assert_same_grid_on_disk`
-(`clarinet/services/image/grid_io.py:109`) server-side, `_read_grid_on_disk`
-(`helper.py:244`) inside Slicer. `_assert_segmentation_matches_volume` remains,
-narrowed, as a best-effort load-time diagnostic (`load_segmentation`) and as the
+(`clarinet/services/image/grid_io.py:112`) server-side, `_read_grid_on_disk`
+(`helper.py`) inside Slicer. `assert_segmentation_matches_volume` remains,
+narrowed, as a best-effort load-time diagnostic (`load_segmentation`), as the
 correspondence-engine set-ops' own pre-regrid check
-(`_export_segments_labelmap`) — it is no longer `export_segmentation`'s guard.
+(`_export_segments_labelmap`), and behind `export_segmentation`'s deprecated
+`reference_volume=` shim (removed next release) — `conform_to` is the export
+guard that can see the mirror (see [design rationale](#design-rationale)).
 
 ---
 
@@ -509,13 +510,13 @@ once the painting effort is already spent.
 | `grid_relation(a, b, *, atol=1e-4)` | `grid.py:201` | You want a verdict *and* detail (`perm`/`flips`) to act on; works on any two `Grid`s regardless of source | Never raises — `FOREIGN` is a normal return, not an exception |
 | `read_grid(path)` | `clarinet/services/image/grid_io.py:21` | Read a file's grid off disk without loading voxel data; 4-D-safe (a 4-D `.seg.nrrd` dispatches through `LayeredSegmentation`) | Clarinet-side only (imports `Image`/`LayeredSegmentation`) |
 | `nrrd_grid_from_header(header, source=None, *, spatial=slice(0, 3))` | `clarinet/services/image/nrrd_space.py:149` | You already parsed a NRRD header with pynrrd and need its spacing/direction/origin placed in LPS — the one place the `space` rule is applied, so a third-party RAS/LAS file lands in the same frame as a clarinet one | Pure function of the header (no pynrrd, no disk); raises `ImageReadError` when geometry is present without a supported `space`. *spatial* is not validated — a 4-D `.seg.nrrd` header **must** pass `spatial=slice(1, 4)` or the `none` list-axis row is resolved into a silent NaN grid |
-| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:88` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
-| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:109` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
+| `classify_pair(subject, reference, *, atol=1e-4)` | `grid_io.py:91` | You need a verdict on two *files* plus both grids for the message — the one place that fixes read order, reference-first argument order and `atol` | Returns a `PairVerdict` (`.kind`, `.subject`, `.reference`, `.describe(subject_name, reference_name)`); raises only what `read_grid` raises |
+| `assert_same_grid_on_disk(path_a, path_b, *, atol=1e-4)` | `grid_io.py:112` | Fail-fast guard at a file load/save boundary — raises `GeometryMismatchError` | Inherits `grid_relation`'s half-voxel offset tolerance on `SAME` |
 | `Image.same_grid` / `Image.assert_same_grid` | `image.py:306`, `:332` | In-memory pre-overlay guard on two already-loaded `Image`/`Segmentation` objects | Tight `atol`-only, **no** permutation tolerance — not the same contract as `grid_relation`'s `SAME` |
 | `Image.reindex_to(target, *, order=0\|1)` / `Segmentation.reindex_to` (overrides, forces `order=0`) | `image.py:348`, `segmentation.py:352` | Resample one loaded image onto another's grid | `order=0` (nearest) is *exact* for a `REARRANGED` pair — no interpolation blur. `Segmentation.reindex_to` forces `order=0` regardless of the argument (prevents label-value corruption from interpolation) and carries segment metadata onto the new grid; `order=1` on a plain `Image` is for genuine sub-voxel interpolation of continuous data |
 | `conform_seg_to_grid(seg_path, grid_path, *, out_path=None, atol=1e-4, allow_resample=False)` | `clarinet/services/image/segmentation.py:673` | File-level repair script primitive (batch remediation, one-time migrations) | `SAME` no-op; `REARRANGED` exact index rearrangement (3-D **and** 4-D layered, label/layer-preserving); `FOREIGN` raises `GeometryMismatchError` unless `allow_resample=True` |
 | Set-op `resample=` (`Segmentation.union`/`intersection`/`difference`/`symmetric_difference`/`subtract`/`append`) | `segmentation.py:383` (`_align_other`) | Two in-memory segmentations must be compared index-wise and might legitimately be on different grids | Default `resample=False` raises `GeometryMismatchError`; `True` resamples `other` onto the caller's grid (nearest-neighbour) |
-| `export_segmentation(name, output_path, *, conform_to=None)` | `clarinet/services/slicer/helper.py:524` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the only export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`) |
+| `export_segmentation(name, output_path, *, conform_to=None, reference_volume=<deprecated>)` | `clarinet/services/slicer/helper.py` | The write boundary for a segmentation authored/loaded in Slicer | `conform_to=<reference file path>` is the export guard (see [design rationale](#design-rationale)); requires the correspondence bundle (`include_correspondence=True`). `reference_volume=` is a deprecated in-scene shim, ignored when `conform_to` is set |
 | `FileDefinition.grid_conform_to` / `on_grid_mismatch` | `clarinet/models/file_schema.py:39,91-92` | You want the framework to enforce a pair automatically on every submission/input-check, instead of a script calling any row above by hand | Declaration only, not a callable; INPUT blocks or 422s on mismatch, OUTPUT follows `on_grid_mismatch` — see [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement) |
 
 For the full per-parameter behavior of any row above (return types, exact
@@ -592,13 +593,13 @@ imports (`grid.py:1-19`) — is appended to `correspondence_bundle.py`'s
 rides into Slicer alongside the correspondence engine through the same
 `include_correspondence=True` opt-in, injected between the helper source and the
 script runner (`clarinet/services/slicer/service.py:234-235`). Inside Slicer,
-`_read_grid_on_disk` (`helper.py:244`) is the adapter: `sitk.ImageFileReader` +
+`_read_grid_on_disk` (`helper.py`) is the adapter: `sitk.ImageFileReader` +
 `ReadImageInformation()` (metadata-only — no voxel data touched) built into a
 bundled `Grid`.
 
-### Why `conform_to` is the only export guard
+### Why `conform_to` is the export guard
 
-The removed `reference_volume=` parameter's fail-open was **structural to its own
+The deprecated `reference_volume=` parameter's fail-open was **structural to its own
 shape**, not a fixable bug in its implementation: callers passed
 `reference_volume=find_loaded_volume(path)`, and `None` meant both "don't guard"
 and "resolution failed" — no implementation can fail closed on a channel that
@@ -606,11 +607,14 @@ conflates those two meanings without breaking the volume-resolution helper's own
 query contract. `conform_to=<reference file path>` heals this by moving grid
 resolution *inside* the enforcement point itself — it reads the reference file
 directly, so there is no separate "resolve, then maybe guard" step to fail open
-on. Keeping the old parameter alongside the new one would have shipped permanent
-API debt (which one wins when both are passed?) for no safety benefit, so it was
-removed outright rather than deprecated. Enforcement now lives at the **write**
-boundary — the load-time check (`_assert_segmentation_matches_volume`,
-`helper.py:154`) stays a best-effort diagnostic by design, not a guarantee.
+on. The old parameter survives one release as a deprecated shim so downstream
+validators don't break on upgrade: passing it at all (even `None`) emits a
+`DeprecationWarning` plus a `[SlicerHelper] WARNING` console line, and runs the
+old in-scene check before exporting — unless `conform_to` is also passed, in
+which case `conform_to` alone decides (the in-scene check could reject a
+REARRANGED node that `conform_to` re-grids). Enforcement now lives at the **write**
+boundary — the load-time check (`assert_segmentation_matches_volume`,
+`helper.py`) stays a best-effort diagnostic by design, not a guarantee.
 
 ### Why guarded repair — `conform_seg_to_grid` refuses to guess
 
