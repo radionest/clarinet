@@ -25,21 +25,21 @@ from clarinet.services.pipeline.tasks.cache_dicomweb import (
 from clarinet.settings import settings
 
 
-def _series_result(series_uid: str, study_uid: str = "STUDY1") -> MagicMock:
+def _series_result(
+    series_uid: str, study_uid: str = "STUDY1", instances: int | None = None
+) -> MagicMock:
     """Build a SeriesResult-shaped mock with explicit attributes."""
     mock = MagicMock(spec=SeriesResult)
     mock.study_instance_uid = study_uid
     mock.series_instance_uid = series_uid
+    mock.number_of_series_related_instances = instances
     return mock
 
 
-def _retrieve_result(num_completed: int) -> MagicMock:
-    """Build a RetrieveResult-shaped mock with explicit attributes."""
-    mock = MagicMock(spec=RetrieveResult)
-    mock.num_completed = num_completed
-    mock.num_failed = 0
-    mock.status = "Success"
-    return mock
+def _retrieve_result(
+    num_completed: int, status: str = "success", num_failed: int = 0
+) -> RetrieveResult:
+    return RetrieveResult(status=status, num_completed=num_completed, num_failed=num_failed)
 
 
 def _build_ctx(tmp_path: Path) -> TaskContext:
@@ -805,3 +805,77 @@ class TestPrefetchDicomWebImpl:
             pytest.raises(PipelineStepError, match="0 instances"),
         ):
             await _prefetch_dicom_web_impl(msg, ctx)
+
+    @pytest.mark.asyncio
+    async def test_short_study_retrieve_publishes_only_whole_series(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """#538: a timed-out study retrieve publishes the series that arrived whole
+        and fails the task naming the rest, so a retry fetches only those."""
+        monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
+
+        ctx = _build_ctx(tmp_path)
+        msg = PipelineMessage(patient_id="PAT001", study_uid="STUDY1")
+
+        mock_client = AsyncMock()
+        mock_client.find_series = AsyncMock(
+            return_value=[
+                _series_result("SER1", instances=1),
+                _series_result("SER2", instances=2),
+            ]
+        )
+
+        async def fake_get_study(study_uid, peer, output_dir):
+            _make_dcm(output_dir / "a.dcm", "SER1", "SOP1")
+            _make_dcm(output_dir / "b.dcm", "SER2", "SOP2")
+            return _retrieve_result(num_completed=2, status="timeout")
+
+        mock_client.get_study = AsyncMock(side_effect=fake_get_study)
+
+        with (
+            patch("clarinet.services.dicom.DicomClient", return_value=mock_client),
+            patch("clarinet.services.dicom.DicomNode"),
+            pytest.raises(PipelineStepError, match="SER2"),
+        ):
+            await _prefetch_dicom_web_impl(msg, ctx)
+
+        study_dir = tmp_path / "dicomweb_cache" / "STUDY1"
+        assert (study_dir / "SER1" / "SOP1.dcm").exists()
+        assert (study_dir / "SER1" / ".cached_at").exists()
+        assert not (study_dir / "SER2").exists()
+
+    @pytest.mark.asyncio
+    async def test_short_series_retrieve_is_not_published(self, tmp_path: Path, monkeypatch):
+        """Per-series path: a series with failed sub-operations stays unpublished."""
+        monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
+
+        ctx = _build_ctx(tmp_path)
+        msg = PipelineMessage(patient_id="PAT001", study_uid="STUDY1")
+
+        cache_base = tmp_path / "dicomweb_cache"
+        (cache_base / "STUDY1" / "SER1").mkdir(parents=True)
+        (cache_base / "STUDY1" / "SER1" / "old.dcm").write_bytes(b"fake")
+        (cache_base / "STUDY1" / "SER1" / ".cached_at").write_text(str(time.time()))
+
+        mock_client = AsyncMock()
+        mock_client.find_series = AsyncMock(
+            return_value=[
+                _series_result("SER1", instances=1),
+                _series_result("SER2", instances=2),
+            ]
+        )
+
+        async def fake_get_series(study_uid, series_uid, peer, output_dir):
+            _make_dcm(output_dir / "new.dcm", series_uid, "SOP-NEW")
+            return _retrieve_result(num_completed=1, status="warning_0xb000", num_failed=1)
+
+        mock_client.get_series = AsyncMock(side_effect=fake_get_series)
+
+        with (
+            patch("clarinet.services.dicom.DicomClient", return_value=mock_client),
+            patch("clarinet.services.dicom.DicomNode"),
+            pytest.raises(PipelineStepError, match="SER2"),
+        ):
+            await _prefetch_dicom_web_impl(msg, ctx)
+
+        assert not (cache_base / "STUDY1" / "SER2").exists()

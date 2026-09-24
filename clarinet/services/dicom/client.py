@@ -25,14 +25,41 @@ from dimsechord._models import RetrieveRequest, StorageConfig, StorageMode
 from clarinet.settings import settings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
-    from dimsechord import DicomNode, RetrieveResult
+    from dimsechord import DicomNode, RetrieveResult, SeriesResult
 
 
 def _is_move_mode() -> bool:
     return settings.dicom_retrieve_mode in ("c-move", "c-move-study")
+
+
+def retrieve_is_complete(result: RetrieveResult) -> bool:
+    """Whether a retrieve delivered every instance the peer matched.
+
+    ``num_completed`` cannot tell: a C-MOVE whose instances stop arriving
+    returns ``status="timeout"`` with the ones that did, and a C-GET
+    sub-operation for a SOP class outside the negotiated storage contexts
+    counts in ``num_failed`` under a final ``warning_0xb000``. dimsechord's
+    store handlers never answer with a warning, so any final status but
+    ``success`` means something is missing.
+    """
+    return result.status == "success" and result.num_failed == 0
+
+
+def series_instance_counts(results: Iterable[SeriesResult]) -> dict[str, int]:
+    """Instance count per series, as the peer's C-FIND reported it.
+
+    After an incomplete study retrieve this is the only evidence that a series
+    which did arrive arrived whole. Series the peer gave no count for are left
+    out, so they are never vouched for.
+    """
+    return {
+        r.series_instance_uid: r.number_of_series_related_instances
+        for r in results
+        if r.series_instance_uid and r.number_of_series_related_instances is not None
+    }
 
 
 class DicomClient(DimsechordClient):

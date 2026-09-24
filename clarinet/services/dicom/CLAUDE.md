@@ -54,7 +54,8 @@ So c-get needs nothing from the network, and c-move never silently drops an
 unusual modality. **On c-get, check your modalities first**: a SOP class outside
 `DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES` gets no
 accepted context, so its instances fail their sub-operations and the retrieve
-returns short — with a partial series, not an error. The curated set covers CT,
+returns short — `num_failed > 0` under `warning_0xb000`, not an exception from
+the client (see Short retrieves below). The curated set covers CT,
 MR, Enhanced CT/MR, PET, CR, DX-for-presentation, SC, US and US multi-frame,
 plus RT, SEG, SR, KO, PR and encapsulated documents. Notably **absent**: X-Ray
 Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA/XRF, Breast
@@ -117,9 +118,27 @@ sub-operations waits out `dicom_cmove_timeout` and reports `status="timeout"`
 with the instances that did arrive; and a peer that omits the counters entirely
 on its first pending response leaves the target unset, with the same effect on
 an otherwise successful retrieve. Both want fixing in dimsechord, not here.
+Clarinet's consumers read either as a short retrieve (below).
 
 The `-study` suffix does not reach this path at all — it is read by the Slicer
 helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.
+
+### Short retrieves
+
+`num_completed` cannot tell a whole retrieve from a short one;
+`retrieve_is_complete(result)` can — `status == "success"` and `num_failed == 0`.
+A timed-out C-MOVE (`timeout`), a C-GET whose SOP class got no context
+(`warning_0xb000`) and an association dropped before its final response
+(`pending`) all fail it. Consumers check it after their zero-instance guard:
+
+| Consumer | On a short retrieve |
+|---|---|
+| `DicomWebCache.ensure_series_cached`, `convert_series_to_nifti` | raise — nothing is cached or converted |
+| `DicomWebCache.ensure_study_cached`, `prefetch_dicom_web` | keep only the series whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`); the rest are not cached. The cache leaves them out of its result and logs them; the task publishes the whole ones, then raises naming the rest, so its retry fetches only those |
+| `AnonymizationService._retrieve_series` | its own check — received vs `Series.instance_count`, retried; does not read `status` |
+
+A series the peer gave no count for is never vouched for, so a short study
+retrieve caches none of it.
 
 ## Settings (`clarinet/settings.py`)
 

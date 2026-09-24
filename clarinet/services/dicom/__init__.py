@@ -3,7 +3,11 @@
 from pynetdicom import _config as _pynetdicom_config
 
 from clarinet.services.dicom.anonymizer import DicomAnonymizer
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import (
+    DicomClient,
+    retrieve_is_complete,
+    series_instance_counts,
+)
 from clarinet.services.dicom.models import (
     AnonymizationResult,
     AnonymizeStudyRequest,
@@ -54,4 +58,6 @@ __all__ = [
     "SkippedSeriesInfo",
     "StudyQuery",
     "StudyResult",
+    "retrieve_is_complete",
+    "series_instance_counts",
 ]

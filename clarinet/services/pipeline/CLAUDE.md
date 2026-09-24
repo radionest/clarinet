@@ -164,8 +164,8 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 ## Built-in Tasks
 
 Located in `tasks/` — auto-imported when broker starts:
-- `convert_series_to_nifti` (queue `settings.dicom_queue_name`) — downloads DICOM via C-GET, converts to NIfTI with correct affine/spacing. Requires `msg.series_uid`. Idempotent (skips if output exists). Output: `VOLUME_NIFTI` FileDef, level=SERIES.
-- `prefetch_dicom_web` (queue `settings.dicom_queue_name`) — prefetches a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Requires `msg.study_uid`. Bypasses the API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload knob: `skip_if_anon` (default `True`).
+- `convert_series_to_nifti` (queue `settings.dicom_queue_name`) — downloads DICOM via C-GET, converts to NIfTI with correct affine/spacing. Requires `msg.series_uid`. Idempotent (skips if output exists). Raises on a short retrieve instead of converting a truncated series. Output: `VOLUME_NIFTI` FileDef, level=SERIES.
+- `prefetch_dicom_web` (queue `settings.dicom_queue_name`) — prefetches a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Requires `msg.study_uid`. Bypasses the API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). A short retrieve publishes only the series that arrived whole (C-FIND count), then raises naming the rest. Payload knob: `skip_if_anon` (default `True`).
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).
 

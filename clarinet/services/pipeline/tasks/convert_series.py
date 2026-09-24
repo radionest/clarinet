@@ -44,8 +44,8 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Core conversion logic — testable without TaskIQ broker.
 
     Raises:
-        PipelineStepError: If ``series_uid`` is missing, C-GET returns 0 instances,
-            or DICOM read / NIfTI write fails.
+        PipelineStepError: If ``series_uid`` is missing, the retrieve returns 0
+            instances or comes back incomplete, or DICOM read / NIfTI write fails.
     """
     series_uid = msg.series_uid
     if not series_uid:
@@ -71,7 +71,7 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
         return
 
     # 1. C-GET series to temp directory
-    from clarinet.services.dicom import DicomClient, DicomNode
+    from clarinet.services.dicom import DicomClient, DicomNode, retrieve_is_complete
 
     with tempfile.TemporaryDirectory() as tmpdir:
         client = DicomClient(
@@ -94,6 +94,13 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
             raise PipelineStepError(
                 "convert_series_to_nifti",
                 f"DICOM retrieve returned 0 instances for series {series_uid} (study {msg.study_uid})",
+            )
+        if not retrieve_is_complete(result):
+            raise PipelineStepError(
+                "convert_series_to_nifti",
+                f"DICOM retrieve of series {series_uid} is incomplete (status: "
+                f"{result.status}, {result.num_completed} received, "
+                f"{result.num_failed} failed) — not converting a truncated series",
             )
 
         logger.info(f"Retrieve completed: {result.num_completed} instances for series {series_uid}")
@@ -128,6 +135,7 @@ async def convert_series_to_nifti(msg: PipelineMessage, ctx: TaskContext) -> Non
     Output: ``volume.nii.gz`` in the series working directory.
 
     Raises:
-        PipelineStepError: If ``series_uid`` is missing or C-GET returns 0 instances.
+        PipelineStepError: If ``series_uid`` is missing, or the retrieve returns
+            0 instances or comes back incomplete.
     """
     await _convert_series_impl(msg, ctx)

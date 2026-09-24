@@ -2,8 +2,9 @@
 
 Move-to-self itself is dimsechord's ``DicomOperations.retrieve_via_move`` and is
 tested there. What Clarinet owns, and what these cover, is: which process gets a
-listener, the ``dicom_retrieve_mode`` dispatch, and the translation of a
-Clarinet-level call into the request/storage/AET that dimsechord is handed.
+listener, the ``dicom_retrieve_mode`` dispatch, the translation of a
+Clarinet-level call into the request/storage/AET that dimsechord is handed, and
+what counts as a complete retrieve.
 """
 
 from pathlib import Path
@@ -11,10 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from dimsechord import DicomClient as DimsechordClient
-from dimsechord import QueryRetrieveLevel
+from dimsechord import QueryRetrieveLevel, RetrieveResult
 from dimsechord._models import StorageMode
 
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import DicomClient, retrieve_is_complete
 from clarinet.services.dicom.models import DicomNode
 
 PEER = DicomNode(aet="ORTHANC", host="localhost", port=4242)
@@ -288,3 +289,21 @@ class TestMoveDelegation:
         request = move.call_args.args[1]
         assert request.level is QueryRetrieveLevel.SERIES
         assert request.series_instance_uid == "1.2.4"
+
+
+class TestRetrieveIsComplete:
+    """``num_completed`` cannot tell a short retrieve from a whole one (#538)."""
+
+    @pytest.mark.parametrize(
+        ("status", "num_failed", "complete"),
+        [
+            ("success", 0, True),
+            ("success", 2, False),  # peer claims success over failed sub-operations
+            ("timeout", 0, False),  # C-MOVE whose instances stopped arriving
+            ("warning_0xb000", 3, False),  # C-GET: a SOP class with no accepted context
+            ("pending", 0, False),  # association dropped before a final response
+        ],
+    )
+    def test_status_and_failures_decide(self, status: str, num_failed: int, complete: bool):
+        result = RetrieveResult(status=status, num_completed=5, num_failed=num_failed)
+        assert retrieve_is_complete(result) is complete

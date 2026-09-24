@@ -44,6 +44,12 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis, the VL
   family — comes back as a short series rather than an error. c-move needs a
   route back and drops nothing.
+- **Short retrieves.** `num_completed` cannot tell a whole retrieve from a
+  short one — a timed-out C-MOVE and a C-GET with failed sub-operations both
+  return what did arrive. `retrieve_is_complete()` reads `status` and
+  `num_failed` instead, and every cache, prefetch and conversion consumer checks
+  it: a short series is never cached or converted, and a short study keeps only
+  the series whose arrivals reach their C-FIND instance count.
 - `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
   (`dimsechord.StorageSCP`). It accepts 120 storage classes with every transfer
   syntax, so a PACS may send compressed objects verbatim instead of failing
@@ -117,6 +123,10 @@ Two ways to warm the cache without going through the viewer:
 not flooded, progress polled by `task_id`), and the `prefetch_dicom_web`
 pipeline task, which runs in a worker, writes straight to the disk tier and
 bypasses the memory tier entirely — the safe choice for bulk RecordFlow triggers.
+After a short retrieve the task publishes the series that arrived whole and
+fails naming the rest, so its retry fetches only those, one series at a time —
+given C-FIND instance counts, a study too large to arrive within
+`dicom_cmove_timeout` still ends up cached.
 
 ## 3D Slicer
 

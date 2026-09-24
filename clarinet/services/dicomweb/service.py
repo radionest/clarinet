@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from pydicom import Dataset
 
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import DicomClient, series_instance_counts
 from clarinet.services.dicom.models import (
     DicomNode,
     ImageQuery,
@@ -208,6 +208,7 @@ class DicomWebProxyService:
             series_uids=series_uids,
             client=self._client,
             pacs=self._pacs,
+            expected_counts=series_instance_counts(results),
         )
 
         all_metadata = await asyncio.to_thread(
@@ -375,6 +376,7 @@ class DicomWebProxyService:
                     self._client,
                     self._pacs,
                     on_progress=on_progress,
+                    expected_counts=series_instance_counts(results),
                 )
                 total_received += sum(len(e.instances) for e in cached_map.values())
             progress.update(status="ready", received=total_received, total=total_received)

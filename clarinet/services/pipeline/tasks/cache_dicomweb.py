@@ -39,6 +39,8 @@ from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from clarinet.client import ClarinetClient
     from clarinet.models.patient import PatientInfo
     from clarinet.models.study import SeriesBase, StudyBase
@@ -109,7 +111,12 @@ def _has_dcm_anon(
     return dcm_anon.is_dir() and any(dcm_anon.glob("*.dcm"))
 
 
-def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[str, int]:
+def _organize_to_cache(
+    tmp_dir: Path,
+    cache_base: Path,
+    study_uid: str,
+    expected_counts: Mapping[str, int] | None = None,
+) -> dict[str, int]:
     """Move retrieved DICOM files into ``dicomweb_cache`` structure.
 
     Reads only ``SeriesInstanceUID`` and ``SOPInstanceUID`` (no pixel
@@ -125,12 +132,16 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
     marker is present but whose directory contains a mix of stale and
     fresh instances mid-write.
 
+    Args:
+        expected_counts: Pass after an incomplete retrieve — only a series
+            whose arrivals reach its count is published; the rest are left in
+            ``tmp_dir`` to be discarded with it. ``None`` publishes everything.
+
     Returns:
         Mapping ``series_uid → instance count`` for the series that
-        actually received files.
+        were published.
     """
-    grouped: dict[str, int] = {}
-    cleaned_series: set[str] = set()
+    arrived: dict[str, list[tuple[Path, str]]] = {}
     for dcm_path in tmp_dir.rglob("*.dcm"):
         try:
             ds = pydicom.dcmread(
@@ -154,24 +165,28 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
             )
             continue
 
-        series_uid = str(series_uid_attr)
-        sop_uid = str(sop_uid_attr)
+        arrived.setdefault(str(series_uid_attr), []).append((dcm_path, str(sop_uid_attr)))
+
+    grouped: dict[str, int] = {}
+    for series_uid, files in arrived.items():
+        if expected_counts is not None and (
+            series_uid not in expected_counts or len(files) < expected_counts[series_uid]
+        ):
+            continue
         target_dir = cache_base / study_uid / series_uid
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Clear stale state from a previous cache entry before writing
-        # the first new instance for this series. Marker is removed
-        # first so the API reader never sees a present marker pointing
-        # at a mix of stale and fresh *.dcm files during the publish.
-        if series_uid not in cleaned_series:
-            (target_dir / ".cached_at").unlink(missing_ok=True)
-            for stale in target_dir.glob("*.dcm"):
-                stale.unlink(missing_ok=True)
-            cleaned_series.add(series_uid)
+        # Clear stale state from a previous cache entry before writing the
+        # new instances. Marker is removed first so the API reader never
+        # sees a present marker pointing at a mix of stale and fresh *.dcm
+        # files during the publish.
+        (target_dir / ".cached_at").unlink(missing_ok=True)
+        for stale in target_dir.glob("*.dcm"):
+            stale.unlink(missing_ok=True)
 
-        target_path = target_dir / f"{sop_uid}.dcm"
-        shutil.move(str(dcm_path), str(target_path))
-        grouped[series_uid] = grouped.get(series_uid, 0) + 1
+        for dcm_path, sop_uid in files:
+            shutil.move(str(dcm_path), str(target_dir / f"{sop_uid}.dcm"))
+        grouped[series_uid] = len(files)
 
     now = str(time.time())
     for series_uid in grouped:
@@ -262,7 +277,9 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
     can run this task without ``WinError 1225``.
 
     Raises:
-        PipelineStepError: If ``study_uid`` is missing or C-GET returns 0 instances.
+        PipelineStepError: If ``study_uid`` is missing, the retrieve returns 0
+            instances, or any series to fetch did not arrive whole — raised
+            after the whole ones are published, so a retry fetches only the rest.
     """
     if not msg.study_uid:
         raise PipelineStepError(
@@ -282,7 +299,13 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         )
     skip_if_anon = raw_skip_if_anon
 
-    from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery
+    from clarinet.services.dicom import (
+        DicomClient,
+        DicomNode,
+        SeriesQuery,
+        retrieve_is_complete,
+        series_instance_counts,
+    )
 
     pacs = DicomNode(
         aet=settings.pacs_aet,
@@ -359,36 +382,47 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
                     "prefetch_dicom_web",
                     f"Study C-GET returned 0 instances for study {msg.study_uid}",
                 )
-            total_completed = result.num_completed
+            results = [result]
         else:
-            total_completed = 0
-            failed_series: list[str] = []
-            for series_uid in series_to_fetch:
-                result = await client.get_series(
+            results = [
+                await client.get_series(
                     study_uid=msg.study_uid,
                     series_uid=series_uid,
                     peer=pacs,
                     output_dir=tmp_path,
                 )
-                if result.num_completed == 0:
-                    failed_series.append(series_uid)
-                    continue
-                total_completed += result.num_completed
-
-            if total_completed == 0:
+                for series_uid in series_to_fetch
+            ]
+            if not any(r.num_completed for r in results):
                 raise PipelineStepError(
                     "prefetch_dicom_web",
                     f"Per-series C-GET retrieved 0 instances for study {msg.study_uid} "
-                    f"(all {len(failed_series)} series failed)",
+                    f"(all {len(results)} series failed)",
                 )
-            if failed_series:
-                logger.error(
-                    f"prefetch_dicom_web: partial failure for study {msg.study_uid} — "
-                    f"{len(failed_series)}/{len(series_to_fetch)} series returned 0 "
-                    f"instances: {failed_series}"
-                )
+        total_completed = sum(r.num_completed for r in results)
 
-        grouped = await asyncio.to_thread(_organize_to_cache, tmp_path, cache_base, msg.study_uid)
+        # A short retrieve cannot say which series fell short — only the C-FIND
+        # count can vouch that one arrived whole, so publish just those.
+        whole_only = (
+            None
+            if all(retrieve_is_complete(r) for r in results)
+            else series_instance_counts(series_results)
+        )
+        grouped = await asyncio.to_thread(
+            _organize_to_cache, tmp_path, cache_base, msg.study_uid, whole_only
+        )
+
+    # Fail after publishing what arrived whole: the retry then fetches only
+    # these, where re-running a study-level retrieve that timed out would not.
+    not_cached = [uid for uid in series_to_fetch if uid not in grouped]
+    if not_cached:
+        statuses = ", ".join(sorted({r.status for r in results}))
+        raise PipelineStepError(
+            "prefetch_dicom_web",
+            f"study {msg.study_uid}: {len(not_cached)}/{len(series_to_fetch)} series "
+            f"arrived incomplete or empty and were not cached (retrieve status: "
+            f"{statuses}): {not_cached}",
+        )
 
     logger.info(
         f"prefetch_dicom_web: cached study {msg.study_uid} — "
@@ -415,6 +449,7 @@ async def prefetch_dicom_web(msg: PipelineMessage, ctx: TaskContext) -> None:
             to force a fresh C-GET regardless of anonymized files.
 
     Raises:
-        PipelineStepError: If ``study_uid`` is missing or C-GET fails entirely.
+        PipelineStepError: If ``study_uid`` is missing, or a series to fetch
+            did not arrive whole (the ones that did are still published).
     """
     await _prefetch_dicom_web_impl(msg, ctx)

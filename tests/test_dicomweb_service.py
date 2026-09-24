@@ -12,6 +12,7 @@ from clarinet.services.dicomweb.service import DicomWebProxyService
 def _make_series_result(series_uid: str) -> MagicMock:
     result = MagicMock()
     result.series_instance_uid = series_uid
+    result.number_of_series_related_instances = 3
     return result
 
 
@@ -64,7 +65,10 @@ class TestPreloadWorker:
             client: Any,
             pacs: Any,
             on_progress: Any = None,
+            expected_counts: Any = None,
         ) -> dict[str, MagicMock]:
+            # The C-FIND counts are what lets a short retrieve keep its whole series
+            assert expected_counts == {series_uids[0]: 3}
             for i in range(1, 4):
                 on_progress(i, 3)
                 snapshots.append(dict(progress_store[task_id]))

@@ -5,7 +5,7 @@ import io
 import shutil
 import time
 import zipfile
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import IO, Any
 
@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from clarinet.files import AnonPathError, Files
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import DicomClient, retrieve_is_complete
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from clarinet.utils.logger import logger
@@ -400,7 +400,8 @@ class DicomWebCache:
             MemoryCachedSeries with instances dict for O(1) lookup
 
         Raises:
-            RuntimeError: If C-GET returns no instances
+            RuntimeError: If the retrieve returns no instances, or comes back
+                incomplete — a partial series is never cached.
         """
         # 1. Memory hit (no lock needed for read)
         cached = self._get_from_memory(study_uid, series_uid)
@@ -455,6 +456,12 @@ class DicomWebCache:
                 raise RuntimeError(
                     f"DICOM retrieve returned 0 instances for series {series_uid} (status: {result.status})"
                 )
+            if not retrieve_is_complete(result):
+                raise RuntimeError(
+                    f"DICOM retrieve of series {series_uid} is incomplete (status: "
+                    f"{result.status}, {result.num_completed} received, "
+                    f"{result.num_failed} failed) — not caching a partial series"
+                )
 
             self._validate_series_in_study(study_uid, series_uid, result.instances)
 
@@ -482,6 +489,7 @@ class DicomWebCache:
         client: DicomClient,
         pacs: DicomNode,
         on_progress: Callable[[int, int | None], None] | None = None,
+        expected_counts: Mapping[str, int] | None = None,
     ) -> dict[str, MemoryCachedSeries]:
         """Ensure all series of a study are cached, using a single study-level C-GET.
 
@@ -496,9 +504,15 @@ class DicomWebCache:
             pacs: Target PACS node
             on_progress: Optional callback(received, total) forwarded to the
                 study-level C-GET. Terminal status reporting belongs to the caller.
+            expected_counts: Instances per series from the C-FIND
+                (``series_instance_counts``). Read only when the retrieve comes
+                back incomplete: a series whose arrivals reach its count is
+                still cached, every other one is not.
 
         Returns:
-            Dict mapping series_uid → MemoryCachedSeries for all requested series
+            Dict mapping series_uid → MemoryCachedSeries for the requested series.
+            After an incomplete retrieve, series that did not arrive whole are
+            absent from it (and logged) rather than cached short.
 
         Raises:
             RuntimeError: If C-GET returns no instances for missing series
@@ -588,10 +602,27 @@ class DicomWebCache:
                     grouped[ser_uid] = {}
                 grouped[ser_uid][sop_uid] = ds
 
-            logger.info(
-                f"Study C-GET completed: {cget_result.num_completed} instances "
-                f"across {len(grouped)} series"
-            )
+            if retrieve_is_complete(cget_result):
+                logger.info(
+                    f"Study C-GET completed: {cget_result.num_completed} instances "
+                    f"across {len(grouped)} series"
+                )
+            else:
+                # The result cannot say which series fell short — only the C-FIND
+                # count can vouch that one arrived whole.
+                counts = expected_counts or {}
+                grouped = {
+                    ser_uid: instances
+                    for ser_uid, instances in grouped.items()
+                    if ser_uid in counts and len(instances) >= counts[ser_uid]
+                }
+                not_cached = [uid for uid in still_missing if uid not in grouped]
+                logger.warning(
+                    f"Study retrieve for {study_uid} is incomplete (status: "
+                    f"{cget_result.status}, {cget_result.num_completed} received, "
+                    f"{cget_result.num_failed} failed) — caching {len(grouped)} whole "
+                    f"series, not caching {len(not_cached)} requested: {not_cached}"
+                )
 
             # Cache all series from C-GET (including unexpected SR/KO/PR)
             requested_set = set(series_uids)
