@@ -171,6 +171,34 @@ class TestAnonymizeDataset:
         # For full idempotency, re-run on fresh copy would be needed
         assert sample_dataset.PatientID == "CLARINET_1"
 
+    def test_frame_of_reference_uid_shared_and_deterministic(self) -> None:
+        """Unpinned U-tags hash like the pinned ones (#505).
+
+        Every slice of a series must keep one FrameOfReferenceUID, stable across
+        runs, or viewers cannot build an MPR volume from the anonymized series.
+        """
+
+        def _slice(n: int) -> Dataset:
+            ds = Dataset()
+            ds.PatientID = "REAL_PAT"
+            ds.PatientName = "Real^Name"
+            ds.StudyInstanceUID = "1.2.3.4.5"
+            ds.SeriesInstanceUID = "1.2.3.4.5.6"
+            ds.SOPInstanceUID = f"1.2.3.100.{n}"
+            ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+            ds.FrameOfReferenceUID = "1.2.3.4.5.7"
+            return ds
+
+        runs = []
+        for _ in range(2):
+            anon = DicomAnonymizer("test-salt", "CLARINET_1", "AnonName")
+            slices = [_slice(n) for n in (1, 2, 3)]
+            for ds in slices:
+                anon.anonymize_dataset(ds)
+            runs.append({ds.FrameOfReferenceUID for ds in slices})
+
+        assert runs[0] == runs[1] == {anon.generate_anon_uid("1.2.3.4.5.7")}
+
     def test_modality_preserved(self, anonymizer: DicomAnonymizer, sample_dataset: Dataset) -> None:
         """Non-identifying tags like Modality may be handled by dicomanonymizer defaults."""
         anonymizer.anonymize_dataset(sample_dataset)
@@ -296,7 +324,7 @@ class TestAnonymizeDatasetEdgeCases:
         assert sample_dataset.StudyDate != original_study_date
 
     def test_multiple_datasets_isolation(self) -> None:
-        """dictionary.clear() prevents state leaks between two anonymizers."""
+        """Two anonymizers with different salts do not leak state into each other."""
         a1 = DicomAnonymizer("salt-a", "ANON_A", "Name_A")
         a2 = DicomAnonymizer("salt-b", "ANON_B", "Name_B")
 

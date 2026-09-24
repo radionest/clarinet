@@ -654,6 +654,12 @@
 
 ### Fixed
 
+- **Anonymization keeps one `FrameOfReferenceUID` per series.** Only Study,
+  Series and SOP Instance UIDs were hashed; every other UID dicomanonymizer
+  replaces got a fresh random value per instance, so each slice claimed its own
+  frame of reference and viewers (OHIF MPR, scout lines) could not build a
+  volume. All replaced UIDs now go through the salted hash — consistent across
+  instances, runs and processes (#505).
 - **Config errors from `reconcile_config` get the `STARTUP FAILED` banner.** An
   undefined role, an unconfigured viewer, an unregistered validator/hydrator or
   a cross-type shared-file mismatch raised a plain `ConfigurationError` /

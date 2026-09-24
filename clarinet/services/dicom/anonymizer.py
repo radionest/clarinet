@@ -199,9 +199,6 @@ class DicomAnonymizer:
         Args:
             dataset: pydicom Dataset to anonymize (modified in-place)
         """
-        # Clear global UID dictionary to avoid cross-dataset state leaks
-        simpledicomanonymizer.dictionary.clear()
-
         anon_patient_id = self.anon_patient_id
         anon_patient_name = self.anon_patient_name
 
@@ -245,11 +242,22 @@ class DicomAnonymizer:
         # on malformed vendor-specific tags (e.g. Philips implicit VR)
         dataset.remove_private_tags()
 
-        simpledicomanonymizer.anonymize_dataset(
-            dataset,
-            extra_anonymization_rules=extra_rules,
-            delete_private_tags=False,
-        )
+        # Every UID dicomanonymizer replaces (U-tags such as FrameOfReferenceUID,
+        # UIDs nested in replaced sequences) goes through its module-level
+        # get_UID, which memoises *random* UIDs. Route it through the salted
+        # hash so they stay consistent across instances, runs and processes (#505).
+        # ponytail: module-global swap, assumes calls are not interleaved across
+        # threads (true today: the service anonymizes on the event loop).
+        original_get_uid = simpledicomanonymizer.get_UID
+        simpledicomanonymizer.get_UID = lambda uid: self.generate_anon_uid(uid) if uid else uid
+        try:
+            simpledicomanonymizer.anonymize_dataset(
+                dataset,
+                extra_anonymization_rules=extra_rules,
+                delete_private_tags=False,
+            )
+        finally:
+            simpledicomanonymizer.get_UID = original_get_uid
 
         logger.debug(
             f"Anonymized dataset: PatientID={anon_patient_id}, "
