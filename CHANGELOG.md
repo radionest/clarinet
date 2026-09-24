@@ -481,7 +481,7 @@
   unassigned or already theirs (the frontend's auto-assign on opening a free
   record keeps working); anything else is **403**, and reassignment stays with
   admins. `POST /api/records/{id}/fail` and `/invalidate` had the same weak gate
-  and now use `MutableRecordDep`. Closes #620.
+  and now require an admin or `MutableRecordDep` rights. Closes #620.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then

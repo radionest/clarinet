@@ -557,6 +557,27 @@ async def test_fail_and_invalidate_other_users_record_forbidden(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "body"),
+    [("fail", {"reason": "test"}), ("invalidate", {"mode": "soft", "reason": "test"})],
+)
+async def test_admin_role_may_fail_and_invalidate_other_users_record(
+    test_session, admin_role_client, admin_role_user, role_a, record_role_a, superuser, action, body
+):
+    """A non-superuser admin holding the type's role keeps the frontend's Fail/Restart."""
+    test_session.add(UserRolesLink(user_id=admin_role_user.id, role_name=role_a.name))
+    record_role_a.user_id = superuser.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+    await test_session.refresh(admin_role_user, ["roles"])
+
+    response = await admin_role_client.post(
+        f"{RECORDS_BASE}/{record_role_a.id}/{action}", json=body
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_patch_record_update_masks_patient(
     test_session, role_a_client, record_role_a, test_patient
 ):

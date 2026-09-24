@@ -46,6 +46,7 @@ from clarinet.api.dependencies import (
     SeriesRepositoryDep,
     SessionDep,
     SlicerServiceDep,
+    authorize_mutable_record_access,
     get_client_ip,
     get_user_role_names,
     is_admin,
@@ -516,11 +517,12 @@ async def assign_record_to_user(
 
     Non-admins may only claim for themselves a record that is unassigned or
     already theirs — re-targeting a colleague's record would side-step the
-    owner check of ``MutableRecordDep``. Admins reassign freely, as on
-    ``PATCH /admin/records/{id}/assign``.
+    owner check of ``MutableRecordDep``. Admins may assign anyone, but still
+    only past the read gate: a non-superuser admin needs the type's role.
     """
-    # ponytail: check-then-write, not atomic — two simultaneous self-claims of one
-    # free record: last wins. Lock the row in repo.assign_user if that ever matters.
+    # ponytail: check-then-write, not atomic — a self-claim racing another assign
+    # of the same free record: last wins. Fix with a conditional
+    # UPDATE ... WHERE user_id IS NULL OR user_id = :me (a row lock alone won't do).
     if not is_admin(user) and (
         user_id != user.id or authorized_record.user_id not in (None, user.id)
     ):
@@ -1145,7 +1147,7 @@ _MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
 @router.post("/{record_id}/fail", response_model=RecordRead)
 async def fail_record(
     record_id: int,
-    authorized_record: MutableRecordDep,
+    authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
@@ -1154,7 +1156,10 @@ async def fail_record(
     """Manually mark a record as failed with a reason.
 
     Only records in ``pending`` or ``inwork`` status can be failed manually.
+    Admins may fail any record they can read; others need mutation rights.
     """
+    if not is_admin(user):
+        await authorize_mutable_record_access(authorized_record, user)
     reason = reason.strip()
     if not reason:
         raise CONFLICT.with_context("Reason cannot be empty or whitespace-only.")
@@ -1172,7 +1177,7 @@ async def fail_record(
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
 async def invalidate_record(
     record_id: int,
-    _authorized_record: MutableRecordDep,
+    authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
@@ -1190,6 +1195,8 @@ async def invalidate_record(
     Hard mode returns 409 for non-superusers when the record is finished and
     its type locks submitted records (``editable`` / ``edit_window_days``).
 
+    Admins may invalidate any record they can read; others need mutation rights.
+
     Args:
         record_id: ID of the record to invalidate.
         mode: "hard" or "soft".
@@ -1199,6 +1206,8 @@ async def invalidate_record(
     Returns:
         Updated record.
     """
+    if not is_admin(user):
+        await authorize_mutable_record_access(authorized_record, user)
     record = await service.invalidate_record(
         record_id=record_id,
         mode=mode,
