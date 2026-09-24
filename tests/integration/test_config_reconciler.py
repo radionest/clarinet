@@ -507,7 +507,7 @@ async def test_file_level_change_triggers_update(
 ) -> None:
     """Changing file level triggers update via _file_links_differ."""
     # {id} discriminates regardless of unique_by/level -> path-uniqueness check
-    # no-ops here; the diff being tested is (name, role, required, level) only.
+    # no-ops here; only level changes between the two passes.
     # Create initial with no level
     config_v1 = [
         _make_config(
