@@ -12,7 +12,7 @@ paths:
 - `assert_segmentation_matches_volume(segmentation, volume_node, *, tol=0.1)` → in-scene foreign-grid check (dims + voxel-to-world matrix vs the loaded volume node); raises `SlicerHelperError`, no-op when `volume_node` is None. Blind to a load-time mirror (pitfall 7), so it is not an export guard
 - `find_loaded_volume(path=None)` → reference `vtkMRMLScalarVolumeNode`: matches a loaded volume by storage filename (inode-aware), else the sole scalar volume, else `None` (ambiguous with several volumes)
 - `clear_scene()` → calls `slicer.mrmlScene.Clear(0)`
-- `store_record_id(rid)` — saves record ID to `slicer.modules` (called automatically after `/open`)
+- `store_record_id(rid)` — saves record ID to `slicer.modules` (called automatically after `/open`; the pre-open `reset_scene` drops the previous id first, so a failed open leaves none behind)
 - `validate_record_id(rid)` — checks stored record ID matches expected (called automatically before validation); raises `SlicerHelperError` on mismatch or if no record was opened
 - `OverwriteMode` — str enum for Segment Editor "Modify other segments" masking mode: `OVERWRITE_ALL` (default in `setup_editor`), `OVERWRITE_VISIBLE`, `ALLOW_OVERLAP`. Resolved to `vtkMRMLSegmentEditorNode` constants lazily inside Slicer so the module stays importable under the `_Dummy` fallback
 

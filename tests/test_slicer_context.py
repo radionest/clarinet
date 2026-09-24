@@ -13,7 +13,8 @@ import contextlib
 import sys
 from datetime import date
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -835,6 +836,34 @@ def test_validate_record_id_mismatch():
     store_record_id(42)
     with pytest.raises(SlicerHelperError, match=r"record_id=42.*record_id=99"):
         validate_record_id(99)
+
+
+def test_reset_scene_script_drops_stored_record_id(monkeypatch):
+    """The pre-open scene reset forgets the stored record id (#608).
+
+    Otherwise an open that fails after the reset leaves the previous record's
+    id guarding a cleared scene, and ``/validate`` on that record passes.
+    """
+    import clarinet.services.slicer.helper as helper_mod
+    from clarinet.services.slicer.helper import (
+        SlicerHelperError,
+        store_record_id,
+        validate_record_id,
+    )
+    from clarinet.services.slicer.service import _RESET_SCENE_SCRIPT
+
+    fake_slicer = MagicMock()
+    fake_slicer.app.layoutManager.return_value.sliceWidget.return_value = None
+    fake_slicer.modules = SimpleNamespace()
+    monkeypatch.setattr(helper_mod, "slicer", fake_slicer)
+    monkeypatch.setitem(sys.modules, "slicer", fake_slicer)
+
+    store_record_id(42)
+    exec(_RESET_SCENE_SCRIPT, {})
+
+    fake_slicer.mrmlScene.Clear.assert_called_once_with(0)
+    with pytest.raises(SlicerHelperError, match="No record was opened"):
+        validate_record_id(42)
 
 
 # ---------------------------------------------------------------------------
