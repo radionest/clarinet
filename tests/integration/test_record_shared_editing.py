@@ -116,6 +116,29 @@ class TestSharedEditingAuthz:
         assert resp.json()["data"] == {"answer": "edited-by-other"}
 
     @pytest.mark.asyncio
+    async def test_non_owner_cannot_take_assignment_when_shared(
+        self,
+        editor_client,
+        editor_user,
+        owner_user,
+        test_session,
+        test_patient,
+        test_study,
+        test_series,
+    ):
+        """Shared editing lets a colleague edit, not become the assignee (#620)."""
+        rt = await _seed_type(test_session, "shared-assign", shared_editing=True, unique_by=None)
+        rec = await _seed_record(
+            test_session, test_patient, test_study, test_series, rt, owner_user
+        )
+        rec.status = RecordStatus.inwork
+        await test_session.commit()
+        resp = await editor_client.patch(
+            f"{RECORDS_BASE}/{rec.id}/user", params={"user_id": str(editor_user.id)}
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
     async def test_non_owner_blocked_when_not_shared(
         self, editor_client, owner_user, test_session, test_patient, test_study, test_series
     ):

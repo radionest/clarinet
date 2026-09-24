@@ -477,11 +477,16 @@
   `PATCH /api/records/{id}/user` checked only read access, so any holder of the
   type's role could re-target a record assigned to someone else — to themselves
   or anyone — and then pass the owner check of every `MutableRecordDep`
-  endpoint. A non-admin may now only claim for themselves a record that is
-  unassigned or already theirs (the frontend's auto-assign on opening a free
-  record keeps working); anything else is **403**, and reassignment stays with
-  admins. `POST /api/records/{id}/fail` and `/invalidate` had the same weak gate
-  and now require an admin or `MutableRecordDep` rights. Closes #620.
+  endpoint. Assigning also forced `inwork`, so it re-opened finished records
+  past their edit lock. A non-admin may now only claim for themselves an
+  unassigned `pending`/`inwork` record (the frontend's auto-assign on opening a
+  free record keeps working); anything else is **403**, and reassignment stays
+  with admins. `POST /api/records/{id}/fail`, `/invalidate` and — per target
+  record — `PATCH /api/records/bulk/status` had the same weak gate and now
+  require `MutableRecordDep` rights. `MutableRecordDep` now lets any admin
+  (superuser or `admin` role) past the owner check, not only superusers,
+  matching what the frontend already offered them. Closes #620; closes the
+  non-admin path of #629.
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then

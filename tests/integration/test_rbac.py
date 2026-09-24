@@ -19,7 +19,7 @@ from httpx import ASGITransport, AsyncClient
 from clarinet.api.app import app
 from clarinet.api.auth_config import current_active_user, current_superuser
 from clarinet.api.dependencies import current_admin_user, get_dicom_client, get_pacs_node
-from clarinet.models import DicomQueryLevel
+from clarinet.models import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
 from clarinet.models.record_event import RecordEvent
 from clarinet.models.user import User, UserRole, UserRolesLink
@@ -33,6 +33,7 @@ from tests.utils.urls import (
     DICOM_IMPORT_STUDY,
     PIPELINE_RUNS,
     RECORDS_BASE,
+    RECORDS_BULK_STATUS,
     SLICER_RECORD_OPEN,
     SLICER_RECORD_VALIDATE,
     record_events_url,
@@ -538,6 +539,73 @@ async def test_assign_user_self_claim_of_unassigned_record_allowed(
     assert response.status_code == 200
     assert response.json()["user_id"] == str(user_with_role_a.id)
     assert response.json()["status"] == "inwork"
+
+
+@pytest.mark.asyncio
+async def test_assign_user_cannot_claim_finished_record(
+    test_session, role_a_client, record_role_a, user_with_role_a
+):
+    """Assigning forces inwork, so a self-claim would re-open a finished record (#629)."""
+    record_role_a.status = RecordStatus.finished
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_role_may_reassign_other_users_record(
+    test_session,
+    admin_role_client,
+    admin_role_user,
+    role_a,
+    record_role_a,
+    superuser,
+    user_with_role_a,
+):
+    test_session.add(UserRolesLink(user_id=admin_role_user.id, role_name=role_a.name))
+    record_role_a.user_id = superuser.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+    await test_session.refresh(admin_role_user, ["roles"])
+
+    response = await admin_role_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
+    )
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(user_with_role_a.id)
+
+
+@pytest.mark.asyncio
+async def test_bulk_status_on_other_users_record_forbidden(
+    test_session, role_a_client, record_role_a, superuser
+):
+    record_role_a.user_id = superuser.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.patch(
+        f"{RECORDS_BULK_STATUS}?new_status=failed", json=[record_role_a.id]
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_role_holder_may_fail_own_record(
+    test_session, role_a_client, record_role_a, user_with_role_a
+):
+    record_role_a.user_id = user_with_role_a.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.post(
+        f"{RECORDS_BASE}/{record_role_a.id}/fail", json={"reason": "test"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
 
 
 @pytest.mark.asyncio
