@@ -126,7 +126,7 @@ def test_labelmap_array_none_point_data_no_attributeerror(
 # --- _export_segments_labelmap: resample= gate (issue #415) ------------------
 #
 # The resample= parameter on the set-op choke point gates the pre-regrid
-# ``_assert_segmentation_matches_volume`` check. ``test_labelmap_array_*`` above
+# ``assert_segmentation_matches_volume`` check. ``test_labelmap_array_*`` above
 # covers the post-export empty/foreign-grid discrimination; these cover the
 # other half of #415 — that ``resample=True`` opts out of the geometry guard
 # (legacy re-grid path) while ``resample=False`` (default) invokes it. The full
@@ -149,8 +149,8 @@ def _wire_labelmap_export_gate(
     helper._image_node = MagicMock(name="volume_node")
 
     monkeypatch.setattr(helper_mod, "_segmentation_has_voxels", lambda node: has_voxels)
-    assert_grid = MagicMock(name="_assert_segmentation_matches_volume")
-    monkeypatch.setattr(helper_mod, "_assert_segmentation_matches_volume", assert_grid)
+    assert_grid = MagicMock(name="assert_segmentation_matches_volume")
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", assert_grid)
     monkeypatch.setattr(helper, "_apply_reference_geometry", MagicMock())
 
     fake_seg_logic = MagicMock()
@@ -380,8 +380,8 @@ def test_export_segmentation_reference_volume_deprecated_still_guards(
     fake_util = MagicMock()
     fake_util.exportNode.side_effect = lambda node, path: open(path, "w").close()
     monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
-    guard = MagicMock(name="_assert_segmentation_matches_volume")
-    monkeypatch.setattr(helper_mod, "_assert_segmentation_matches_volume", guard)
+    guard = MagicMock(name="assert_segmentation_matches_volume")
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", guard)
     volume = MagicMock()
     output_path = str(tmp_path / "out.seg.nrrd")
 
@@ -402,7 +402,7 @@ def test_export_segmentation_reference_volume_guard_failure_skips_export(
     fake_util = MagicMock()
     monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
     guard = MagicMock(side_effect=SlicerHelperError("foreign grid"))
-    monkeypatch.setattr(helper_mod, "_assert_segmentation_matches_volume", guard)
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", guard)
 
     with pytest.warns(DeprecationWarning), pytest.raises(SlicerHelperError, match="foreign"):
         helper_mod.export_segmentation(
@@ -412,12 +412,40 @@ def test_export_segmentation_reference_volume_guard_failure_skips_export(
     fake_util.exportNode.assert_not_called()
 
 
-def test_assert_segmentation_matches_volume_public_alias() -> None:
-    """Downstream validators call the public name (rtk_lung_segmentation)."""
-    assert (
-        helper_mod.assert_segmentation_matches_volume
-        is helper_mod._assert_segmentation_matches_volume
-    )
+def test_export_segmentation_reference_volume_none_still_warns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """reference_volume=None (find_loaded_volume found nothing) warns too."""
+    fake_util = MagicMock()
+    fake_util.exportNode.side_effect = lambda node, path: open(path, "w").close()
+    monkeypatch.setattr(helper_mod.slicer, "util", fake_util)
+
+    with pytest.warns(DeprecationWarning, match="conform_to"):
+        helper_mod.export_segmentation(
+            "Segmentation", str(tmp_path / "out.seg.nrrd"), reference_volume=None
+        )
+
+
+def test_export_segmentation_conform_to_supersedes_reference_volume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both passed → warn, skip the in-scene check, go straight to conform_to."""
+    monkeypatch.setattr(helper_mod.slicer, "util", MagicMock())
+    guard = MagicMock()
+    monkeypatch.setattr(helper_mod, "assert_segmentation_matches_volume", guard)
+
+    with (
+        pytest.warns(DeprecationWarning),
+        pytest.raises(SlicerHelperError, match="correspondence bundle"),
+    ):
+        helper_mod.export_segmentation(
+            "Segmentation",
+            "/tmp/out.seg.nrrd",
+            conform_to="/tmp/ref.nii.gz",
+            reference_volume=MagicMock(),
+        )
+
+    guard.assert_not_called()
 
 
 class TestMissingVoxelSegments:

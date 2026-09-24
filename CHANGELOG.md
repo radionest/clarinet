@@ -225,28 +225,6 @@
   set the ratio wins (`max_overlap` is ignored). The scalars→strategy derivation
   is shared as `strategy_from_thresholds` in
   `clarinet.services.image.correspondence` and ships inside the bundle.
-- **`export_segmentation`'s `reference_volume=` parameter is deprecated;
-  `conform_to=` is the export guard.** The old parameter compared two
-  in-memory Slicer objects that Slicer's own load-time canonicalization had
-  already flipped identically, so it could not detect the mirror it existed to
-  catch (see the new `docs/grid-workflows.md`). `conform_to=<path to the
-  reference volume file>` reads the reference's **on-disk** grid instead and
-  classifies the segmentation node's current grid against it: `SAME` exports
-  as-is, `REARRANGED` re-grids exactly onto the reference before exporting
-  (layer/label-preserving for every layer representation — shared, separate,
-  or mixed; caller's node untouched), `FOREIGN` raises without writing; the
-  written file is then re-read and re-classified, deleting it on any
-  post-write mismatch, including a strict per-segment check: any source
-  segment with voxels that has no voxeled counterpart in the written file
-  (matched by name) also deletes the file and raises, naming the lost
-  segment(s).
-  Not breaking in this release — listed here because the removal in the next
-  one is: `reference_volume=` still works, emitting a `DeprecationWarning` and
-  running the old in-scene check before exporting. `assert_segmentation_matches_volume` stays
-  public as an in-scene foreign-grid check, but it is no longer the export
-  guard. **Downstream migration:** replace
-  `export_segmentation(name, path, reference_volume=<node>)` with
-  `export_segmentation(name, path, conform_to=<volume file path>)`.
 - **`conform_seg_to_grid` raises on a `FOREIGN` grid pair by default.** It
   previously resampled unconditionally, including onto an unrelated study's
   grid. It now classifies the pair first (`SAME` no-op, `REARRANGED` exact
@@ -439,6 +417,31 @@
   `cors_origins` (`CLARINET_CORS_ORIGINS`, exact origins only). Anonymous
   `POST /api/pipelines/sync` answers 401; the `X-Internal-Token` service token
   qualifies as admin. Rationale under Security.
+
+### Deprecated
+
+- **`export_segmentation(reference_volume=)` → `conform_to=`; removed in the
+  release after this one (tracked in #628).** The old parameter compared two
+  in-memory Slicer objects that Slicer's own load-time canonicalization had
+  already flipped identically, so it could not detect the mirror it existed to
+  catch (see the new `docs/grid-workflows.md`). `conform_to=<path to the
+  reference volume file>` reads the reference's **on-disk** grid instead and
+  classifies the segmentation node's current grid against it: `SAME` exports
+  as-is, `REARRANGED` re-grids exactly onto the reference before exporting
+  (layer/label-preserving for every layer representation — shared, separate,
+  or mixed; caller's node untouched), `FOREIGN` raises without writing; the
+  written file is then re-read and re-classified, deleting it on any
+  post-write mismatch, including a strict per-segment check: any source
+  segment with voxels that has no voxeled counterpart in the written file
+  (matched by name) also deletes the file and raises, naming the lost
+  segment(s). Nothing breaks on upgrade: `reference_volume=` still works —
+  passing it at all (even `None`) emits a `DeprecationWarning` plus a
+  `[SlicerHelper] WARNING` line in the Slicer console, then runs the old
+  in-scene check before exporting; with `conform_to` also passed, only
+  `conform_to` applies. `assert_segmentation_matches_volume` stays public as an
+  in-scene foreign-grid check, but it is not the export guard. **Downstream
+  migration:** replace `export_segmentation(name, path, reference_volume=<node>)`
+  with `export_segmentation(name, path, conform_to=<volume file path>)`.
 
 ### Security
 
