@@ -225,8 +225,8 @@
   set the ratio wins (`max_overlap` is ignored). The scalars→strategy derivation
   is shared as `strategy_from_thresholds` in
   `clarinet.services.image.correspondence` and ships inside the bundle.
-- **`export_segmentation`'s `reference_volume=` parameter is removed;
-  `conform_to=` is the only export guard.** The old parameter compared two
+- **`export_segmentation`'s `reference_volume=` parameter is deprecated;
+  `conform_to=` is the export guard.** The old parameter compared two
   in-memory Slicer objects that Slicer's own load-time canonicalization had
   already flipped identically, so it could not detect the mirror it existed to
   catch (see the new `docs/grid-workflows.md`). `conform_to=<path to the
@@ -240,12 +240,13 @@
   segment with voxels that has no voxeled counterpart in the written file
   (matched by name) also deletes the file and raises, naming the lost
   segment(s).
-  `assert_segmentation_matches_volume` is now private
-  (`_assert_segmentation_matches_volume`) and remains only as
-  `load_segmentation`'s best-effort load-time check. **Downstream migration:**
-  replace `export_segmentation(name, path, reference_volume=<node>)` with
-  `export_segmentation(name, path, conform_to=<volume file path>)` — a
-  `TypeError` on upgrade names every call site that needs it.
+  `reference_volume=` still works for this release: it emits a
+  `DeprecationWarning` and runs the old in-scene check before exporting, and is
+  removed in the next release. `assert_segmentation_matches_volume` stays
+  public as an in-scene foreign-grid check, but it is no longer the export
+  guard. **Downstream migration:** replace
+  `export_segmentation(name, path, reference_volume=<node>)` with
+  `export_segmentation(name, path, conform_to=<volume file path>)`.
 - **`conform_seg_to_grid` raises on a `FOREIGN` grid pair by default.** It
   previously resampled unconditionally, including onto an unrelated study's
   grid. It now classifies the pair first (`SAME` no-op, `REARRANGED` exact

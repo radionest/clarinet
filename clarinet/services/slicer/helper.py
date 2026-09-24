@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -159,10 +160,12 @@ def _assert_segmentation_matches_volume(
 ) -> None:
     """Raise if a segmentation's reference geometry does not match a volume's grid.
 
-    Private: no longer part of the public Slicer-script API (see
-    ``export_segmentation``'s ``conform_to`` for the file-export guard). Used
-    internally as a fail-fast check at two call sites -- ``load_segmentation``
-    (best-effort load-time check) and ``_export_segments_labelmap`` (the
+    Also exposed as the public ``assert_segmentation_matches_volume`` alias,
+    which downstream validators call directly as an in-scene foreign-grid guard.
+    It is not a file-export guard (see ``export_segmentation``'s ``conform_to``
+    for that). Used internally as a fail-fast check at two call sites --
+    ``load_segmentation`` (best-effort load-time check) and
+    ``_export_segments_labelmap`` (the
     correspondence-engine set-ops' own pre-regrid check, gated by their
     ``resample=`` parameter). Compares node-to-node VTK matrices directly;
     ``export_segmentation``'s guard instead classifies against a reference
@@ -221,6 +224,9 @@ def _assert_segmentation_matches_volume(
             "Re-segment on the loaded volume, or conform the saved file to the "
             "volume grid (clarinet.services.image.conform_seg_to_grid)."
         )
+
+
+assert_segmentation_matches_volume = _assert_segmentation_matches_volume
 
 
 # TYPE_CHECKING-only: not a real import at runtime -- clarinet.services.image.grid
@@ -521,7 +527,13 @@ def _missing_voxel_segments(source: dict[str, int], written: dict[str, int]) -> 
     return sorted(name for name, count in source.items() if written.get(name, 0) < count)
 
 
-def export_segmentation(name: str, output_path: str, *, conform_to: str | None = None) -> str:
+def export_segmentation(
+    name: str,
+    output_path: str,
+    *,
+    conform_to: str | None = None,
+    reference_volume: Any = None,
+) -> str:
     """Find segmentation node by name, export to file, and verify.
 
     Args:
@@ -544,6 +556,10 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
             lost segment(s).
             ``None`` skips all of this and exports the node as-is (today's
             behavior).
+        reference_volume: Deprecated, removed in the next release -- use
+            ``conform_to``. A loaded ``vtkMRMLScalarVolumeNode``; runs the
+            in-scene ``assert_segmentation_matches_volume`` check before
+            exporting, as before #497. ``None`` is a no-op.
 
     Returns:
         The output_path on success.
@@ -562,6 +578,15 @@ def export_segmentation(name: str, output_path: str, *, conform_to: str | None =
     seg_node = slicer.util.getNode(name)
     if seg_node is None:
         raise SlicerHelperError(f"Segmentation node '{name}' not found in scene")
+
+    if reference_volume is not None:
+        warnings.warn(
+            "export_segmentation(reference_volume=...) is deprecated and will be removed "
+            "in the next release; pass conform_to=<volume file path> instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        _assert_segmentation_matches_volume(seg_node, reference_volume)
 
     if conform_to is None:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
