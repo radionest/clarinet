@@ -118,7 +118,12 @@ sub-operations waits out `dicom_cmove_timeout` and reports `status="timeout"`
 with the instances that did arrive; and a peer that omits the counters entirely
 on its first pending response leaves the target unset, with the same effect on
 an otherwise successful retrieve. Both want fixing in dimsechord, not here.
-Clarinet's consumers read either as a short retrieve (below).
+Clarinet's consumers read either as a short retrieve (below), which makes the
+second fatal rather than slow: a first pending response without counters sums
+to `total_expected == 0`, skipping both `set_expected` and the final-count
+fallback, so every retrieve from such a peer ends `timeout` and every
+series-level consumer fails. Only `prefetch_dicom_web`'s per-series path
+compensates (C-FIND count); the fix belongs in dimsechord.
 
 The `-study` suffix does not reach this path at all — it is read by the Slicer
 helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.
@@ -134,11 +139,15 @@ A timed-out C-MOVE (`timeout`), a C-GET whose SOP class got no context
 | Consumer | On a short retrieve |
 |---|---|
 | `DicomWebCache.ensure_series_cached`, `convert_series_to_nifti` | raise — nothing is cached or converted |
-| `DicomWebCache.ensure_study_cached`, `prefetch_dicom_web` | keep only the series that arrived whole — after a study-level retrieve, those whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`); after prefetch's per-series retrieves, those whose own retrieve is complete. The rest are not cached: the cache leaves them out of its result and logs them; the task publishes the whole ones, then raises naming the rest, so its retry fetches only those |
+| `DicomWebCache.ensure_study_cached` | keep the series whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`), then retrieve every requested series still missing on its own through `ensure_series_cached` — which raises if that is short too. A study is returned whole or not at all |
+| `prefetch_dicom_web` | publish only the series that arrived whole — after the study-level retrieve, by C-FIND count; after per-series ones, by the series' own status or, failing that, its C-FIND count — then raise naming the rest, so the retry fetches only those |
 | `AnonymizationService._retrieve_series` | its own check — received vs `Series.instance_count`, retried; does not read `status` |
 
-A series the peer gave no count for is never vouched for, so a short study
-retrieve caches none of it.
+A series the peer gave no (or a zero) count for is never vouched for by count.
+
+A series that is short *every* time — a SOP class outside c-get's negotiated
+contexts — fails every retrieve: `prefetch_dicom_web` spends its retries and
+lands in the DLQ, and the viewer's study metadata request errors.
 
 ## Settings (`clarinet/settings.py`)
 

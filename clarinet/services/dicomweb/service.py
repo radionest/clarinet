@@ -309,7 +309,7 @@ class DicomWebProxyService:
 
         Fail-fast: an error on study N leaves studies 1..N-1 warm in cache and
         reports status="error" — a retry resumes faster, no partial-success state.
-        A study whose series did not all arrive whole is such an error, naming them.
+        A study with a series that cannot be retrieved whole is such an error.
         """
         progress = self._cache.get_preload_progress(task_id)
         if progress is None:
@@ -379,12 +379,6 @@ class DicomWebProxyService:
                     on_progress=on_progress,
                     expected_counts=series_instance_counts(results),
                 )
-                not_cached = [uid for uid in series_uids if uid not in cached_map]
-                if not_cached:
-                    raise RuntimeError(
-                        f"Study {study_uid}: {len(not_cached)}/{len(series_uids)} series "
-                        f"were not cached (short or absent in the retrieve): {not_cached}"
-                    )
                 total_received += sum(len(e.instances) for e in cached_map.values())
             progress.update(status="ready", received=total_received, total=total_received)
             _publish(force=True)

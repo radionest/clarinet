@@ -679,18 +679,21 @@
   was cached, prefetched or converted as complete, and OHIF showed the study
   short with no error. `retrieve_is_complete()` (exported from
   `clarinet.services.dicom`) now decides: `ensure_series_cached` raises and
-  `convert_series_to_nifti` refuses to convert; `ensure_study_cached` and
-  `prefetch_dicom_web` keep only the series that arrived whole — after a
-  study-level retrieve, judged by the C-FIND instance count
-  (`series_instance_counts()`) — and leave the rest uncached.
-  `prefetch_dicom_web` then **fails** naming those series — including
+  `convert_series_to_nifti` refuses to convert. After a short study retrieve,
+  `ensure_study_cached` keeps the series whose arrivals reach their C-FIND
+  instance count (`series_instance_counts()`, passed as the new optional
+  `expected_counts=`) and retrieves every other requested series on its own,
+  raising if that is short too — WADO-RS study metadata and the preload widget
+  (`POST /dicom-web/preload`, now ending on `error`, not `ready`) report the
+  failure instead of serving a short study. `prefetch_dicom_web` publishes only
+  the series that arrived whole, then **fails** naming the rest — including
   per-series retrieves that return nothing, which used to log an error and
   succeed — so its retry fetches only them; a study that cannot be retrieved
-  whole now shows up as failed task runs (and a DLQ entry once retries run out).
-  `ensure_study_cached` takes the counts as a new optional `expected_counts=`;
-  without them a short study retrieve caches nothing. The preload widget
-  (`POST /dicom-web/preload`) now ends on `error` naming those series instead
-  of `ready` (#538).
+  whole now shows up as failed task runs (and a DLQ entry once retries run
+  out). A PACS that omits the C-MOVE sub-operation counters on pending
+  responses makes dimsechord report `timeout` on complete retrieves, which now
+  fail the series-level paths; prefetch compensates with the C-FIND count, the
+  rest needs a dimsechord fix (#538).
 - **Anonymization keeps one `FrameOfReferenceUID` per series.** Only Study,
   Series and SOP Instance UIDs were hashed; every other UID dicomanonymizer
   replaces got a fresh random value per instance, so each slice claimed its own

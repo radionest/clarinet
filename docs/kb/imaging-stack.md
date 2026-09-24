@@ -49,7 +49,8 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   return what did arrive. `retrieve_is_complete()` reads `status` and
   `num_failed` instead, and every cache, prefetch and conversion consumer checks
   it: a short series is never cached or converted, and a short study keeps only
-  the series whose arrivals reach their C-FIND instance count.
+  the series whose arrivals reach their C-FIND instance count — the rest are
+  retrieved one series at a time.
 - `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
   (`dimsechord.StorageSCP`). It accepts 120 storage classes with every transfer
   syntax, so a PACS may send compressed objects verbatim instead of failing
@@ -117,6 +118,9 @@ Four tiers, checked in order:
 An `asyncio.Lock` per `(study_uid, series_uid)` prevents duplicate C-GETs, and a
 study-level lock does the same for `ensure_study_cached()`, which retrieves all
 missing series in a **single** study-level C-GET instead of N per-series ones.
+Only a series that study retrieve left out — short, or never sent — gets a
+retrieve of its own, and one that is short on its own too raises: the viewer
+gets an error rather than a short study.
 
 Two ways to warm the cache without going through the viewer:
 `POST /dicom-web/preload` (1–20 study UIDs, cached sequentially so the PACS is
@@ -125,8 +129,8 @@ pipeline task, which runs in a worker, writes straight to the disk tier and
 bypasses the memory tier entirely — the safe choice for bulk RecordFlow triggers.
 After a short retrieve the task publishes the series that arrived whole and
 fails naming the rest, so its retry fetches only those, one series at a time —
-given C-FIND instance counts, a study too large to arrive within
-`dicom_cmove_timeout` still ends up cached.
+a study too large to arrive within `dicom_cmove_timeout` still ends up cached,
+as long as each of its series fits in that budget.
 
 ## 3D Slicer
 

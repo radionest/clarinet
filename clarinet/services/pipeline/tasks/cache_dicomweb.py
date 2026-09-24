@@ -133,9 +133,10 @@ def _organize_to_cache(
     fresh instances mid-write.
 
     Args:
-        min_instances: Pass after an incomplete retrieve — only a listed series
-            with at least that many arrivals is published; the rest are left in
-            ``tmp_dir`` to be discarded with it. ``None`` publishes everything.
+        min_instances: When given, only a listed series with at least that many
+            arrivals is published; the rest are left in ``tmp_dir`` to be
+            discarded with it. ``0`` publishes whatever arrived — the mark of a
+            series whose own retrieve completed. ``None`` publishes everything.
 
     Returns:
         Mapping ``series_uid → instance count`` for the series that
@@ -404,11 +405,15 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
                     f"Per-series C-GET retrieved 0 instances for study {msg.study_uid} "
                     f"(all {len(results)} series failed)",
                 )
-            # Each series had its own retrieve, so its own status vouches for it.
+            # Each series had its own retrieve, so its own status vouches for it;
+            # failing that, its C-FIND count — a peer that omits the C-MOVE
+            # sub-operation counters gets "timeout" on a retrieve that
+            # delivered everything.
+            counts = series_instance_counts(series_results)
             min_instances = {
-                uid: 0
+                uid: 0 if retrieve_is_complete(r) else counts[uid]
                 for uid, r in zip(series_to_fetch, results, strict=True)
-                if retrieve_is_complete(r)
+                if retrieve_is_complete(r) or uid in counts
             }
         total_completed = sum(r.num_completed for r in results)
 

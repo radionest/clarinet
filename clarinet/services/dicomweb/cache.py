@@ -507,15 +507,15 @@ class DicomWebCache:
             expected_counts: Instances per series from the C-FIND
                 (``series_instance_counts``). Read only when the retrieve comes
                 back incomplete: a series whose arrivals reach its count is
-                still cached, every other one is not.
+                cached from it, every other one is retrieved on its own.
 
         Returns:
-            Dict mapping series_uid → MemoryCachedSeries for the requested series.
-            After an incomplete retrieve, series that did not arrive whole are
-            absent from it (and logged) rather than cached short.
+            Dict mapping series_uid → MemoryCachedSeries for every requested series.
 
         Raises:
-            RuntimeError: If C-GET returns no instances for missing series
+            RuntimeError: If the study retrieve returns no instances, or a series
+                it left out — short, or never sent — cannot be retrieved whole
+                on its own either (see ``ensure_series_cached``).
         """
         result: dict[str, MemoryCachedSeries] = {}
         missing_series: list[str] = []
@@ -621,7 +621,7 @@ class DicomWebCache:
                     f"Study retrieve for {study_uid} is incomplete (status: "
                     f"{cget_result.status}, {cget_result.num_completed} received, "
                     f"{cget_result.num_failed} failed) — caching {len(grouped)} whole "
-                    f"series, not caching {len(not_cached)} requested: {not_cached}"
+                    f"series, retrieving {len(not_cached)} on their own: {not_cached}"
                 )
 
             # Cache every grouped series, including unexpected SR/KO/PR — after
@@ -645,6 +645,15 @@ class DicomWebCache:
                 )
                 self._disk_write_tasks.add(task)
                 task.add_done_callback(self._disk_write_tasks.discard)
+
+            # A requested series the study retrieve left out — short, or never
+            # sent — gets a retrieve of its own, which raises if it is short
+            # too: a study is served whole or not at all.
+            for ser_uid in still_missing:
+                if ser_uid not in result:
+                    result[ser_uid] = await self.ensure_series_cached(
+                        study_uid, ser_uid, client, pacs
+                    )
 
         return result
 

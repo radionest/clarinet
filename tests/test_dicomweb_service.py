@@ -126,30 +126,6 @@ class TestPreloadWorker:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_short_study_reports_error_naming_missing_series(
-        self,
-        mock_cache: MagicMock,
-        progress_store: dict[str, dict[str, Any]],
-    ) -> None:
-        """#538: a study that came back short is an error naming what was not cached,
-        never "ready"."""
-        task_id = "t_short"
-        progress_store[task_id] = {"status": "starting", "received": 0}
-
-        mock_client = MagicMock()
-        mock_client.find_series = AsyncMock(
-            return_value=[_make_series_result("s1"), _make_series_result("s2")]
-        )
-        mock_cache.ensure_study_cached = AsyncMock(return_value={"s1": _make_cached_entry(3)})
-        service = _make_service(mock_cache, mock_client)
-
-        await service._preload_worker(["study1"], task_id)
-
-        final = progress_store[task_id]
-        assert final["status"] == "error"
-        assert "['s2']" in final["error"]
-
-    @pytest.mark.asyncio
     async def test_studies_without_series_reach_ready_zero(
         self,
         mock_cache: MagicMock,

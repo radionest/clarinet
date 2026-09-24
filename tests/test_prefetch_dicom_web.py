@@ -885,3 +885,100 @@ class TestPrefetchDicomWebImpl:
         assert not (cache_base / "STUDY1" / "SER2").exists()
         assert (cache_base / "STUDY1" / "SER3" / "SOP-SER3.dcm").exists()
         assert (cache_base / "STUDY1" / "SER3" / ".cached_at").exists()
+
+    @staticmethod
+    async def _run(tmp_path: Path, monkeypatch, series_results, *, get_study=None, get_series=None):
+        """Run the task against a mocked PACS; SER1 is pre-cached when ``get_series`` is given."""
+        monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
+        if get_series is not None:
+            ser1 = tmp_path / "dicomweb_cache" / "STUDY1" / "SER1"
+            ser1.mkdir(parents=True)
+            (ser1 / "old.dcm").write_bytes(b"fake")
+            (ser1 / ".cached_at").write_text(str(time.time()))
+
+        mock_client = AsyncMock()
+        mock_client.find_series = AsyncMock(return_value=series_results)
+        mock_client.get_study = AsyncMock(side_effect=get_study)
+        mock_client.get_series = AsyncMock(side_effect=get_series)
+        with (
+            patch("clarinet.services.dicom.DicomClient", return_value=mock_client),
+            patch("clarinet.services.dicom.DicomNode"),
+        ):
+            await _prefetch_dicom_web_impl(
+                PipelineMessage(patient_id="PAT001", study_uid="STUDY1"), _build_ctx(tmp_path)
+            )
+
+    @pytest.mark.asyncio
+    async def test_short_study_retrieve_without_counts_publishes_nothing(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """No C-FIND count can vouch for SER1, so a short study retrieve publishes none of it."""
+
+        async def get_study(study_uid, peer, output_dir):
+            _make_dcm(output_dir / "a.dcm", "SER1", "SOP1")
+            return _retrieve_result(num_completed=1, status="timeout")
+
+        with pytest.raises(PipelineStepError, match=r"\['SER1'\]"):
+            await self._run(tmp_path, monkeypatch, [_series_result("SER1")], get_study=get_study)
+
+        assert not (tmp_path / "dicomweb_cache" / "STUDY1" / "SER1").exists()
+
+    @pytest.mark.asyncio
+    async def test_complete_study_retrieve_missing_a_listed_series_fails(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """C-FIND listed SER2 but the retrieve never sent it — the task does not claim it."""
+
+        async def get_study(study_uid, peer, output_dir):
+            _make_dcm(output_dir / "a.dcm", "SER1", "SOP1")
+            return _retrieve_result(num_completed=1)
+
+        with pytest.raises(PipelineStepError, match=r"\['SER2'\]"):
+            await self._run(
+                tmp_path,
+                monkeypatch,
+                [_series_result("SER1"), _series_result("SER2")],
+                get_study=get_study,
+            )
+
+        assert (tmp_path / "dicomweb_cache" / "STUDY1" / "SER1" / ".cached_at").exists()
+
+    @pytest.mark.asyncio
+    async def test_empty_series_retrieve_fails_the_task(self, tmp_path: Path, monkeypatch):
+        """A per-series retrieve that returns nothing fails the task (it used to only log)."""
+
+        async def get_series(study_uid, series_uid, peer, output_dir):
+            if series_uid == "SER2":
+                return _retrieve_result(num_completed=0)
+            _make_dcm(output_dir / "c.dcm", series_uid, "SOP3")
+            return _retrieve_result(num_completed=1)
+
+        with pytest.raises(PipelineStepError, match=r"\['SER2'\]"):
+            await self._run(
+                tmp_path,
+                monkeypatch,
+                [_series_result("SER1"), _series_result("SER2"), _series_result("SER3")],
+                get_series=get_series,
+            )
+
+        assert (tmp_path / "dicomweb_cache" / "STUDY1" / "SER3" / ".cached_at").exists()
+
+    @pytest.mark.asyncio
+    async def test_timed_out_series_retrieve_vouched_by_cfind_count_is_published(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A peer without C-MOVE counters makes dimsechord report "timeout" on a whole
+        retrieve — arrivals reaching the C-FIND count still publish the series."""
+
+        async def get_series(study_uid, series_uid, peer, output_dir):
+            _make_dcm(output_dir / "b.dcm", series_uid, "SOP2")
+            return _retrieve_result(num_completed=1, status="timeout")
+
+        await self._run(
+            tmp_path,
+            monkeypatch,
+            [_series_result("SER1"), _series_result("SER2", instances=1)],
+            get_series=get_series,
+        )
+
+        assert (tmp_path / "dicomweb_cache" / "STUDY1" / "SER2" / ".cached_at").exists()
