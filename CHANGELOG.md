@@ -659,7 +659,12 @@
   replaces got a fresh random value per instance, so each slice claimed its own
   frame of reference and viewers (OHIF MPR, scout lines) could not build a
   volume. All replaced UIDs now go through the salted hash — consistent across
-  instances, runs and processes (#505).
+  instances, runs and processes (#505). **Operator note:** studies anonymized
+  before this fix keep the broken per-instance values, and the skip-guard will
+  not redo them; re-run with an explicit `series_uids` subset (bypasses the
+  guard). SOP Instance UIDs are unchanged by the re-run, so delete the study on
+  the destination PACS first — one that does not overwrite existing instances
+  (Orthanc's default) would keep the old copies.
 - **Config errors from `reconcile_config` get the `STARTUP FAILED` banner.** An
   undefined role, an unconfigured viewer, an unregistered validator/hydrator or
   a cross-type shared-file mismatch raised a plain `ConfigurationError` /

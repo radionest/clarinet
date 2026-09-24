@@ -157,7 +157,9 @@ With `per_study_patient_id=True` the PatientID/PatientName become a per-study
 hash instead — `{anon_id_prefix}_{sha256(salt:study_uid) truncated to
 anon_per_study_patient_id_hex_length}`, e.g. `CLARINET_a3f5c2e1`. It differs across
 studies of the same patient, which prevents PACS-side correlation, and needs no
-`auto_id`.
+`auto_id`. Replaced UIDs hash `salt:uid` with no per-study component, though, so a
+`FrameOfReferenceUID` shared by two studies, or a `ReferencedSOPInstanceUID`
+pointing into another study, still maps to the same anonymized UID in both.
 
 ## Settings
 
