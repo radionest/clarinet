@@ -591,7 +591,9 @@
 - `clarinet ohif install` extracts the OHIF tarball with `filter="data"`, as the
   Quarto installer already did, so a malicious or compromised tarball (download
   or `--from-file`) can no longer write outside the temporary extraction dir;
-  such a tarball now aborts the install. Closes #604.
+  such a tarball now aborts the install. Both `ohif install` and
+  `quarto install` now report an unsafe or corrupt tarball as a logged error
+  with exit code 1 instead of a traceback. Closes #604.
 - **Security floors now ship in the wheel.** The floors for vulnerable transitive
   dependencies lived only in `[tool.uv] constraint-dependencies`, which binds
   this repo's `uv.lock` but is not written to the wheel's `Requires-Dist`, so a
