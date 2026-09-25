@@ -37,8 +37,14 @@
   `await mask_records(records, user, repo)` (and the new single-record
   `mask_record`) resolve the viewer-list anon UIDs through
   `RecordRepository.get_viewer_anon_uids`. `mask_record_patient_data` gains an
-  optional UID map; called without one it empties the viewer lists, so use it
-  only where they are not returned.
+  optional UID map; called without one it all but empties the viewer lists, so
+  use it only where they are not returned.
+- **Writing a record's viewer lists is admin-only.** `PATCH /api/records/{id}`
+  with `viewer_study_uids` / `viewer_series_uids` now answers **403** unless the
+  caller is an admin (superuser or `admin` role); an empty body stays a no-op
+  read under the old `MutableRecordDep` rule. Pipelines are unaffected — the
+  service token resolves to admin — and the frontend never writes these fields.
+  Each list is capped at 1000 entries (**422** past that).
 - **`ClarinetError.with_context` is removed.** It shared its name with
   `CustomHTTPException.with_context` but, unlike that method after #548, rewrote
   the exception in place and returned it. Nothing in clarinet called it; pass
@@ -594,12 +600,14 @@
 - **`viewer_study_uids` / `viewer_series_uids` are masked.** Record masking
   rewrote `study_uid`, `series_uid` and the nested study/series but returned the
   viewer lists verbatim, so the raw StudyInstanceUIDs / SeriesInstanceUIDs a
-  pipeline (or a `PATCH /api/records/{id}`) wrote there reached non-superusers
-  on every record endpoint. A raw entry is now replaced by the anon UID of the
-  matching study/series of the record's own patient, a known anon UID is kept,
-  and anything else — not anonymized yet, unknown, another patient's raw UID —
-  is dropped. Scoping raw UIDs to the patient keeps PATCH from becoming a lookup
-  of any study's anon UID. Closes #592.
+  pipeline wrote there reached non-superusers on every record endpoint. A raw
+  entry is now replaced by the anon UID of the matching study/series of the
+  record's own patient, a known anon UID is kept, the record's own study/series
+  follow its top-level `study_uid` / `series_uid` (raw until the study is
+  anonymized), and anything else — not anonymized yet, unknown, another
+  patient's raw UID — is dropped. Writing the lists is now admin-only (see
+  Breaking): a user-written list would make the masked response reveal whether
+  a study belongs to the record's patient. Closes #592.
 
 ### Added
 

@@ -60,9 +60,10 @@ def mask_record_patient_data(
         user: Current user.
         viewer_anon_uids: UID -> anon UID map for the viewer lists: the
             record's own patient's raw UIDs plus any known anon UID (see
-            ``RecordRepository.get_viewer_anon_uids``).
-            Entries it lacks are dropped, so omitting it empties the lists —
-            use ``mask_record`` when the response carries them.
+            ``RecordRepository.get_viewer_anon_uids``). Entries it lacks are
+            dropped (the record's own study/series excepted), so omitting it
+            all but empties the lists — use ``mask_record`` when the response
+            carries them.
 
     Returns:
         Original or masked RecordRead.
@@ -124,14 +125,7 @@ def mask_record_patient_data(
 
     masked_patient = record.patient.model_copy(update=patient_update)
 
-    # Viewer lists are written by pipelines and may hold raw UIDs of any study
-    # or series, not just the record's own (#592).
-    anon_uids = viewer_anon_uids or {}
-    updates: dict[str, Any] = {
-        "patient": masked_patient,
-        "viewer_study_uids": _mask_viewer_uids(record.viewer_study_uids, anon_uids),
-        "viewer_series_uids": _mask_viewer_uids(record.viewer_series_uids, anon_uids),
-    }
+    updates: dict[str, Any] = {"patient": masked_patient}
     if masked_id is not None:
         updates["patient_id"] = masked_id
 
@@ -191,6 +185,21 @@ def mask_record_patient_data(
         # per-patient-anon — leaks through the study relation.
         updates["study"] = record.study.model_copy(update={"patient_id": masked_id})
 
+    # Viewer lists are written by pipelines and may hold raw UIDs of any study
+    # or series (#592). The record's own study/series show what the top-level
+    # fields show — raw in the race window, dropped with a masked-out series —
+    # since the frontend opens the first list entry in place of study_uid.
+    own_uids = {
+        record.study_uid: updates.get("study_uid", record.study_uid),
+        record.series_uid: updates.get("series_uid", record.series_uid),
+    }
+    anon_uids = {
+        **(viewer_anon_uids or {}),
+        **{uid: shown for uid, shown in own_uids.items() if uid and shown},
+    }
+    updates["viewer_study_uids"] = _mask_viewer_uids(record.viewer_study_uids, anon_uids)
+    updates["viewer_series_uids"] = _mask_viewer_uids(record.viewer_series_uids, anon_uids)
+
     return record.model_copy(update=updates)
 
 
@@ -212,10 +221,15 @@ async def mask_records(
     reads = [RecordRead.model_validate(r) for r in records]
     if user.is_superuser:
         return reads
+    # Look up only what mask_record_patient_data will rewrite: it passes through
+    # a patient not anonymized yet and a type opted out of masking.
+    masked = [
+        r for r in reads if r.patient.anon_name is not None and r.record_type.mask_patient_data
+    ]
     uids = {
-        uid for r in reads for uid in (r.viewer_study_uids or []) + (r.viewer_series_uids or [])
+        uid for r in masked for uid in (r.viewer_study_uids or []) + (r.viewer_series_uids or [])
     }
-    anon_uids = await repo.get_viewer_anon_uids(uids, {r.patient_id for r in reads})
+    anon_uids = await repo.get_viewer_anon_uids(uids, {r.patient_id for r in masked})
     return [mask_record_patient_data(r, user, anon_uids.get(r.patient_id)) for r in reads]
 
 

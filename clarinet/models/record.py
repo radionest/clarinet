@@ -290,8 +290,8 @@ class RecordCreate(RecordBase):
 class RecordOptional(SQLModel):
     """Pydantic model for partial record updates."""
 
-    viewer_study_uids: list[str] | None = None
-    viewer_series_uids: list[str] | None = None
+    viewer_study_uids: list[str] | None = Field(default=None, max_length=1000)
+    viewer_series_uids: list[str] | None = Field(default=None, max_length=1000)
 
 
 class RecordContextInfoUpdate(SQLModel):

@@ -177,12 +177,14 @@ capability implicitly. Non-superusers see patient identifiers masked by `mask_re
 Masking is skipped when the patient has no `anon_name`, and when the record
 type sets `mask_patient_data=False`, the deliberate opt-out for roles that need
 real identifiers (every such access is audit-logged). `viewer_study_uids` /
-`viewer_series_uids` are written by pipelines and by `PATCH /api/records/{id}`,
-so they may hold raw UIDs: a raw entry is replaced by the anon UID of the
-matching study/series **of the record's own patient**, a known anon UID is kept
-as-is, and anything else is dropped. Resolving other patients' raw UIDs would
-turn PATCH into a raw → anon oracle; dropping other patients' anon UIDs would
-reveal which anonymized studies share a patient.
+`viewer_series_uids` are written by pipelines, so they may hold raw UIDs: a raw
+entry is replaced by the anon UID of the matching study/series **of the
+record's own patient**, a known anon UID is kept as-is, the record's own
+study/series show what its top-level `study_uid` / `series_uid` show (raw until
+the study is anonymized — the frontend opens the first entry), and anything
+else is dropped. Writing the lists (`PATCH /api/records/{id}`) is admin-only:
+for any other writer, whether an entry comes back kept or dropped would reveal
+whether a study belongs to the record's patient.
 
 An authenticated account with **no role** is meant to be entitled to nothing.
 Accounts are created by an admin (`/api/user`); public self-registration

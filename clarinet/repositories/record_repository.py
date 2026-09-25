@@ -9,6 +9,7 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from itertools import batched
 from typing import Any, assert_never
 from uuid import UUID
 
@@ -48,6 +49,10 @@ from clarinet.utils.pagination import (
     decode_cursor,
     encode_cursor,
 )
+
+# Viewer-UID lookup batch: 2 bind params per UID plus one per patient (a find
+# page holds at most 1000) stays under asyncpg's 32767-parameter cap.
+_VIEWER_UID_CHUNK = 10_000
 
 
 @dataclass
@@ -1840,15 +1845,15 @@ class RecordRepository(BaseRepository[Record]):
         UIDs are globally unique, so one map serves both levels. A UID with no
         anon counterpart is absent, and the caller drops it.
 
-        Viewer lists are user-writable (PATCH), so the two key kinds are scoped
-        differently:
+        The two key kinds are scoped differently, so the masked lists can't be
+        used as an oracle (only admins may write them, but defense in depth):
 
-        - an original UID resolves only for its own patient — otherwise a user
-          could put another patient's raw UID on their record and read its
+        - an original UID resolves only for its own patient — otherwise a
+          writer could put another patient's raw UID on a record and read its
           salted anon UID back;
         - a known anon UID maps to itself for every patient — scoping it too
-          would let a user test whether two anonymized studies share a patient,
-          which per-study patient ids exist to hide.
+          would reveal whether two anonymized studies share a patient, which
+          per-study patient ids exist to hide.
         """
         uid_set, pid_set = set(uids), set(patient_ids)
         if not uid_set or not pid_set:
@@ -1856,29 +1861,30 @@ class RecordRepository(BaseRepository[Record]):
         known_anon: dict[str, str] = {}
         own_raw: dict[str, dict[str, str]] = {}
         in_patients = col(Study.patient_id).in_(pid_set)
-        for query in (
-            select(Study.patient_id, Study.study_uid, Study.anon_uid).where(
-                or_(
-                    and_(in_patients, col(Study.study_uid).in_(uid_set)),
-                    col(Study.anon_uid).in_(uid_set),
-                )
-            ),
-            select(Study.patient_id, Series.series_uid, Series.anon_uid)
-            .join_from(Series, Study)
-            .where(
-                or_(
-                    and_(in_patients, col(Series.series_uid).in_(uid_set)),
-                    col(Series.anon_uid).in_(uid_set),
-                )
-            ),
-        ):
-            for patient_id, uid, anon in (await self.session.execute(query)).all():
-                if not anon:
-                    continue
-                if anon in uid_set:
-                    known_anon[anon] = anon
-                if uid in uid_set and patient_id in pid_set:
-                    own_raw.setdefault(patient_id, {})[uid] = anon
+        for chunk in batched(uid_set, _VIEWER_UID_CHUNK):
+            for query in (
+                select(Study.patient_id, Study.study_uid, Study.anon_uid).where(
+                    or_(
+                        and_(in_patients, col(Study.study_uid).in_(chunk)),
+                        col(Study.anon_uid).in_(chunk),
+                    )
+                ),
+                select(Study.patient_id, Series.series_uid, Series.anon_uid)
+                .join_from(Series, Study)
+                .where(
+                    or_(
+                        and_(in_patients, col(Series.series_uid).in_(chunk)),
+                        col(Series.anon_uid).in_(chunk),
+                    )
+                ),
+            ):
+                for patient_id, uid, anon in (await self.session.execute(query)).all():
+                    if not anon:
+                        continue
+                    if anon in uid_set:
+                        known_anon[anon] = anon
+                    if uid in uid_set and patient_id in pid_set:
+                        own_raw.setdefault(patient_id, {})[uid] = anon
         return {pid: {**known_anon, **own_raw.get(pid, {})} for pid in pid_set}
 
     async def get_available_type_counts(

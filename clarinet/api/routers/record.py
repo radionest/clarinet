@@ -995,12 +995,18 @@ async def update_record(
 ) -> RecordRead:
     """Update a record with partial data.
 
-    Currently supports: viewer_study_uids.
+    Currently supports: viewer_study_uids, viewer_series_uids — admin-only
+    (pipelines write them with the service token). A user-written list would
+    turn the masked response into an oracle: whether an entry is kept or
+    dropped tells if a study belongs to the record's patient (#592). An empty
+    body is a no-op read open to ``MutableRecordDep``.
     Does NOT trigger RecordFlow (use PATCH /status for workflow transitions).
     """
     update_data = record_update.model_dump(exclude_unset=True)
     if not update_data:
         return await mask_record(authorized_record, user, repo)
+    if not is_admin(user):
+        raise AuthorizationError("Only an admin can set a record's viewer lists")
     updated = await repo.update_fields(record_id, update_data)
     return await mask_record(updated, user, repo)
 
