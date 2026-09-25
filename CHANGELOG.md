@@ -588,6 +588,10 @@
   the `SameSite=Lax` cookie — not closed here. `POST /api/pipelines/sync` wrote
   to the DB with no auth and now requires an admin. The caller-visible changes
   are described under Breaking.
+- `clarinet ohif install` extracts the OHIF tarball with `filter="data"`, as the
+  Quarto installer already did, so a malicious or compromised tarball (download
+  or `--from-file`) can no longer write outside the temporary extraction dir;
+  such a tarball now aborts the install. Closes #604.
 - **Security floors now ship in the wheel.** The floors for vulnerable transitive
   dependencies lived only in `[tool.uv] constraint-dependencies`, which binds
   this repo's `uv.lock` but is not written to the wheel's `Requires-Dist`, so a

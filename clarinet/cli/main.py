@@ -883,7 +883,7 @@ def install_ohif(
                 sys.exit(1)
 
         with tarfile.open(tarball, "r:gz") as tf:
-            tf.extractall(tmp_path)
+            tf.extractall(tmp_path, filter="data")  # reject members escaping tmp_path
 
         dist_dir = tmp_path / "package" / "dist"
         if not dist_dir.exists():
