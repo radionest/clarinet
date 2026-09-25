@@ -6,7 +6,7 @@ including input and output file definitions with pattern-based validation.
 
 FileDefinition is a DB table with globally unique names.
 RecordTypeFileLink is a M2M link table binding FileDefinition to RecordType
-with per-binding properties (role, required).
+with per-binding properties (role, required, allow_path_collision).
 FileDefinitionRead is a flat DTO merging identity + binding for API responses.
 """
 
@@ -108,12 +108,12 @@ class FileDefinition(SQLModel, table=True):
 
 
 # Row-level fields of ``FileDefinition`` — shared by every RecordType binding
-# the file (``RecordTypeFileLink`` carries the per-binding ones: role, required,
-# allow_path_collision). The upsert (``FileDefinitionRepository``), the
-# config-load cross-type check (``validate_shared_file_definitions``) and the
-# API merge (``RecordTypeService._merge_with_stored``) iterate this tuple;
+# the file (``RecordTypeFileLink`` carries the per-binding ones,
+# ``FILE_LINK_BINDING_FIELDS``). The upsert (``FileDefinitionRepository``), the
+# config-load cross-type check (``validate_shared_file_definitions``), the
+# reconciler's link diff (``_file_links_differ``) and the API merge
+# (``RecordTypeService._merge_with_stored``) iterate this tuple;
 # ``tests/test_shared_file_definitions.py`` pins it to the model's columns.
-# The reconciler's link diff (``_file_links_differ``) compares a subset — #565.
 FILE_DEFINITION_FIELDS: tuple[str, ...] = (
     "pattern",
     "description",
@@ -123,11 +123,16 @@ FILE_DEFINITION_FIELDS: tuple[str, ...] = (
     "on_grid_mismatch",
 )
 
+# Per-binding fields of ``RecordTypeFileLink``, compared alongside
+# ``FILE_DEFINITION_FIELDS`` by the reconciler's link diff; pinned to the
+# link's columns by ``tests/test_shared_file_definitions.py``.
+FILE_LINK_BINDING_FIELDS: tuple[str, ...] = ("role", "required", "allow_path_collision")
+
 
 class RecordTypeFileLink(SQLModel, table=True):
     """M2M link between RecordType and FileDefinition.
 
-    Carries per-binding properties: role and required.
+    Carries per-binding properties: role, required and allow_path_collision.
 
     Attributes:
         record_type_name: FK to RecordType.name.

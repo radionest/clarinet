@@ -20,6 +20,7 @@ from sqlmodel import select
 from clarinet.exceptions.domain import RecordConstraintViolationError
 from clarinet.models.file_schema import (
     FILE_DEFINITION_FIELDS,
+    FILE_LINK_BINDING_FIELDS,
     FileDefinitionRead,
     RecordTypeFileLink,
 )
@@ -166,44 +167,31 @@ def _file_links_differ(
     existing_links: list[RecordTypeFileLink],
     config_defs: list[FileDefinitionRead],
 ) -> bool:
-    """Check whether the file link set differs from config definitions."""
+    """Check whether the file link set differs from config definitions.
+
+    Compares every row-level field (``FILE_DEFINITION_FIELDS``) plus the binding
+    fields: a field left out here reconciles as ``unchanged`` when it alone
+    changes, so the new value never reaches the DB (#565).
+    """
     if len(existing_links) != len(config_defs):
         return True
 
-    # Build comparable sets (name, role, required, level, allow_path_collision,
-    # grid_conform_to, on_grid_mismatch)
-    ComparableLink = tuple[str, str, bool, str | None, bool, str | None, str | None]
-
-    existing_set: set[ComparableLink] = set()
-    for link in existing_links:
-        level = link.file_definition.level.value if link.file_definition.level else None
-        existing_set.add(
-            (
-                link.file_definition.name,
-                link.role.value,
-                link.required,
-                level,
-                link.allow_path_collision,
-                link.file_definition.grid_conform_to,
-                link.file_definition.on_grid_mismatch,
-            )
+    existing_set = {
+        (
+            link.file_definition.name,
+            *(_normalize(getattr(link, f)) for f in FILE_LINK_BINDING_FIELDS),
+            *(_normalize(getattr(link.file_definition, f)) for f in FILE_DEFINITION_FIELDS),
         )
-
-    config_set: set[ComparableLink] = set()
-    for fd in config_defs:
-        level = fd.level.value if fd.level else None
-        config_set.add(
-            (
-                fd.name,
-                fd.role.value,
-                fd.required,
-                level,
-                fd.allow_path_collision,
-                fd.grid_conform_to,
-                fd.on_grid_mismatch,
-            )
+        for link in existing_links
+    }
+    config_set = {
+        (
+            fd.name,
+            *(_normalize(getattr(fd, f)) for f in FILE_LINK_BINDING_FIELDS),
+            *(_normalize(getattr(fd, f)) for f in FILE_DEFINITION_FIELDS),
         )
-
+        for fd in config_defs
+    }
     return existing_set != config_set
 
 

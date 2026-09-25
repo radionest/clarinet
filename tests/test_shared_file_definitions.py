@@ -1,7 +1,8 @@
 """A FileDefinition row is shared by every RecordType binding it.
 
 Pure-unit coverage of ``validate_shared_file_definitions`` (the config-load
-cross-type check) and of the ``FILE_DEFINITION_FIELDS`` tuple it iterates.
+cross-type check), of the ``FILE_DEFINITION_FIELDS`` tuple it iterates, and of
+``FILE_LINK_BINDING_FIELDS``.
 The DB-backed half — reconcile aborting before any write — lives in
 ``tests/integration/test_config_reconciler.py``.
 """
@@ -10,7 +11,12 @@ import pytest
 
 from clarinet.config.reconciler import validate_shared_file_definitions
 from clarinet.exceptions.domain import RecordConstraintViolationError
-from clarinet.models.file_schema import FILE_DEFINITION_FIELDS, FileDefinition
+from clarinet.models.file_schema import (
+    FILE_DEFINITION_FIELDS,
+    FILE_LINK_BINDING_FIELDS,
+    FileDefinition,
+    RecordTypeFileLink,
+)
 from clarinet.models.record import RecordTypeCreate
 
 _VOLUME: dict[str, object] = {
@@ -98,3 +104,13 @@ def test_file_definition_fields_cover_every_row_column() -> None:
     upsert, the cross-type check and the API merge silently ignore it.
     """
     assert set(FILE_DEFINITION_FIELDS) == set(FileDefinition.model_fields) - {"id", "name"}
+
+
+def test_file_link_binding_fields_cover_every_link_column() -> None:
+    """Drift guard: a column added to RecordTypeFileLink must join the tuple, or
+    the reconciler's link diff reports a change to it as unchanged (#565).
+    """
+    assert set(FILE_LINK_BINDING_FIELDS) == set(RecordTypeFileLink.model_fields) - {
+        "record_type_name",
+        "file_definition_id",
+    }
