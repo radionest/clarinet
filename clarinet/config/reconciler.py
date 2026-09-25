@@ -20,6 +20,7 @@ from sqlmodel import select
 from clarinet.exceptions.domain import RecordConstraintViolationError
 from clarinet.models.file_schema import (
     FILE_DEFINITION_FIELDS,
+    FILE_LINK_BINDING_FIELDS,
     FileDefinitionRead,
     RecordTypeFileLink,
 )
@@ -56,10 +57,6 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "viewer_mode",
     "allowed_viewers",
 )
-
-# Per-binding fields of ``RecordTypeFileLink``; the row-level ones are
-# ``FILE_DEFINITION_FIELDS``.
-_BINDING_FIELDS: tuple[str, ...] = ("role", "required", "allow_path_collision")
 
 
 @dataclass
@@ -182,13 +179,17 @@ def _file_links_differ(
     existing_set = {
         (
             link.file_definition.name,
-            *(_normalize(getattr(link, f)) for f in _BINDING_FIELDS),
+            *(_normalize(getattr(link, f)) for f in FILE_LINK_BINDING_FIELDS),
             *(_normalize(getattr(link.file_definition, f)) for f in FILE_DEFINITION_FIELDS),
         )
         for link in existing_links
     }
     config_set = {
-        (fd.name, *(_normalize(getattr(fd, f)) for f in _BINDING_FIELDS + FILE_DEFINITION_FIELDS))
+        (
+            fd.name,
+            *(_normalize(getattr(fd, f)) for f in FILE_LINK_BINDING_FIELDS),
+            *(_normalize(getattr(fd, f)) for f in FILE_DEFINITION_FIELDS),
+        )
         for fd in config_defs
     }
     return existing_set != config_set
