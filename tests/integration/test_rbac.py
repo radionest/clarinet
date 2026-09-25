@@ -1386,14 +1386,27 @@ async def test_session_cache_invalidated_on_role_remove(superuser_client, test_s
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("method", "suffix", "body"),
-    [("post", "/deactivate", None), ("put", "", {"is_active": False}), ("delete", "", None)],
+    ("method", "suffix", "body", "probe", "expected"),
+    [
+        ("post", "/deactivate", None, AUTH_ME, 401),
+        ("put", "", {"is_active": False}, AUTH_ME, 401),
+        ("put", "", {"is_superuser": False}, f"{USERS_BASE}/", 403),
+        ("delete", "", None, AUTH_ME, 401),
+    ],
 )
 async def test_service_token_dies_with_admin_account(
-    unauthenticated_client, test_session, test_settings, monkeypatch, method, suffix, body
+    unauthenticated_client,
+    test_session,
+    test_settings,
+    monkeypatch,
+    method,
+    suffix,
+    body,
+    probe,
+    expected,
 ):
-    """Deactivating or deleting the admin row ends X-Internal-Token access at
-    once, not when the 5-minute service-user cache expires (#600)."""
+    """Deactivating, demoting or deleting the admin row ends X-Internal-Token
+    access at once, not when the 5-minute service-user cache expires (#600)."""
     monkeypatch.setattr(test_settings, "internal_service_token", SecretStr("tok-600"))
     admin_id = uuid4()
     test_session.add(
@@ -1415,7 +1428,7 @@ async def test_service_token_dies_with_admin_account(
     )
     assert response.is_success
 
-    assert (await unauthenticated_client.get(AUTH_ME, headers=token)).status_code == 401
+    assert (await unauthenticated_client.get(probe, headers=token)).status_code == expected
 
 
 # --- Slicer record endpoints: per-record authorization ---

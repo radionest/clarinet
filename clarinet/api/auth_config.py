@@ -246,12 +246,12 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
     @classmethod
     def invalidate_user_cache(cls, user_id: UUID) -> None:
-        """Drop every cached entry whose value.id == user_id.
+        """Drop ``user_id``'s cached sessions and the cached service-token user.
 
-        Used after role removal / deactivation to make demotions take effect
-        immediately instead of after the TTL expires. Also drops the cached
-        service-token user unconditionally: it is the admin row, and reloading
-        it costs one query.
+        Called after every user update, deletion, deactivation and role change
+        so it takes effect on the next request instead of after the TTL. The
+        service-token entry is the admin row; it is cleared whoever changed,
+        since reloading it is cheap (the user query plus the roles selectin).
         """
         stale = [token for token, cached in cls._user_cache.items() if cached.id == user_id]
         for token in stale:

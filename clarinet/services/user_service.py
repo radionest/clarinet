@@ -83,6 +83,10 @@ class UserService:
     async def update_user(self, user_id: UUID, data: UserUpdate) -> User:
         """Update user information.
 
+        Invalidates the auth-flow user cache so ``is_active`` / ``is_superuser``
+        changes take effect on the next request, for sessions and for the
+        service token (which resolves to the admin row) alike.
+
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
@@ -99,6 +103,10 @@ class UserService:
 
     async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
+
+        Invalidates the auth-flow user cache so a deleted user's cached
+        sessions — and, for the admin, the service token — stop authenticating
+        at once.
 
         Args:
             user_id: User ID to delete
