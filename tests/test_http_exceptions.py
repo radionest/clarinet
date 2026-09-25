@@ -13,4 +13,6 @@ def test_with_context_returns_copy_and_leaves_singleton_intact() -> None:
     assert (a.detail, b.detail) == ("record already finished", "other conflict")
     assert CONFLICT.detail == default
     assert a.status_code == CONFLICT.status_code
-    assert UNAUTHORIZED.with_context("x").headers == UNAUTHORIZED.headers
+    copy = UNAUTHORIZED.with_context("x")
+    assert copy.headers == UNAUTHORIZED.headers
+    assert copy.headers is not UNAUTHORIZED.headers

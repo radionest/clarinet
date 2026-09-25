@@ -3,6 +3,10 @@ HTTP exceptions for API layer.
 
 These exceptions are used ONLY in API routers to return proper HTTP responses.
 They should NOT be used in services or repositories.
+
+The constants below are process-wide templates shared by concurrent requests:
+always raise ``X.with_context(...)``, never the bare constant, since raising
+writes ``__traceback__``/``__context__`` onto the object being raised.
 """
 
 from typing import Self
@@ -15,17 +19,16 @@ class CustomHTTPException(HTTPException):
 
     def with_context(self, detail: str) -> Self:
         """
-        Add context to an HTTP exception.
+        Return a copy of this exception with a new detail; ``self`` is untouched.
 
         Args:
             detail: Additional information about the error
 
         Returns:
-            A new HTTPException with updated details. The module-level
-            constants below are shared across concurrent requests, so they
-            must never be mutated in place.
+            A new exception with the same status code and headers.
         """
-        return type(self)(status_code=self.status_code, detail=detail, headers=self.headers)
+        headers = dict(self.headers) if self.headers else None
+        return type(self)(status_code=self.status_code, detail=detail, headers=headers)
 
 
 # Standard HTTP exceptions for API layer
