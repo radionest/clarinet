@@ -11,6 +11,7 @@ import pytest
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.files import Files
 from clarinet.models.base import DicomQueryLevel
+from clarinet.services.dicom.models import RetrieveResult
 from clarinet.services.pipeline.context import RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.convert_series import (
@@ -94,8 +95,7 @@ class TestConvertSeriesToNifti:
             series_uid="1.2.3.4",
         )
 
-        mock_result = MagicMock()
-        mock_result.num_completed = 3
+        mock_result = RetrieveResult(status="success", num_completed=3)
         mock_dicom_client = AsyncMock()
         mock_dicom_client.get_series = AsyncMock(return_value=mock_result)
         mock_img = MagicMock()
@@ -125,8 +125,7 @@ class TestConvertSeriesToNifti:
             series_uid="1.2.3.4",
         )
 
-        mock_result = MagicMock()
-        mock_result.num_completed = 5
+        mock_result = RetrieveResult(status="success", num_completed=5)
 
         mock_dicom_client = AsyncMock()
         mock_dicom_client.get_series = AsyncMock(return_value=mock_result)
@@ -166,8 +165,7 @@ class TestConvertSeriesToNifti:
             series_uid="1.2.3.4",
         )
 
-        mock_result = MagicMock()
-        mock_result.num_completed = 0
+        mock_result = RetrieveResult(status="success", num_completed=0)
 
         mock_dicom_client = AsyncMock()
         mock_dicom_client.get_series = AsyncMock(return_value=mock_result)
@@ -181,6 +179,33 @@ class TestConvertSeriesToNifti:
             pytest.raises(PipelineStepError, match="0 instances"),
         ):
             await _convert_series_impl(msg, ctx)
+
+    @pytest.mark.asyncio
+    async def test_short_retrieve_raises_before_conversion(self, tmp_path: Path):
+        """#538: a timed-out retrieve is never converted into a truncated volume."""
+        ctx = _build_ctx(tmp_path)
+        msg = PipelineMessage(
+            patient_id="PAT001",
+            study_uid="1.2.3",
+            series_uid="1.2.3.4",
+        )
+
+        mock_dicom_client = AsyncMock()
+        mock_dicom_client.get_series = AsyncMock(
+            return_value=RetrieveResult(status="timeout", num_completed=3)
+        )
+        mock_image_cls = MagicMock()
+
+        with (
+            patch("clarinet.services.dicom.DicomClient", return_value=mock_dicom_client),
+            patch("clarinet.services.dicom.DicomNode"),
+            patch("clarinet.services.image.Image", mock_image_cls),
+            pytest.raises(PipelineStepError, match="incomplete"),
+        ):
+            await _convert_series_impl(msg, ctx)
+
+        mock_image_cls.assert_not_called()
+        assert not ctx.files.resolve(VOLUME_NIFTI).exists()
 
 
 class TestVolumeNiftiFileDef:

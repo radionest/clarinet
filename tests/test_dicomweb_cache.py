@@ -21,7 +21,8 @@ import pytest
 import pytest_asyncio
 from cachetools import TTLCache
 
-from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicom.models import RetrieveResult
+from clarinet.services.dicomweb.cache import DicomWebCache, SeriesRefusedError
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from tests.conftest import create_disk_series
 from tests.utils.session import PassThroughSession
@@ -532,7 +533,8 @@ class TestStudyLevelCache:
             "sop_c1": ds_c1,
         }
         mock_result.num_completed = 3
-        mock_result.status = 0x0000
+        mock_result.status = "success"
+        mock_result.num_failed = 0
 
         # Make get_study_to_memory an AsyncMock
         mock_client.get_study_to_memory = AsyncMock(return_value=mock_result)
@@ -588,7 +590,8 @@ class TestStudyLevelCache:
             "sop_sr1": ds_sr1,
         }
         mock_result.num_completed = 2
-        mock_result.status = 0x0000
+        mock_result.status = "success"
+        mock_result.num_failed = 0
 
         mock_client.get_study_to_memory = AsyncMock(return_value=mock_result)
 
@@ -620,7 +623,7 @@ class TestStudyLevelCache:
         mock_result = MagicMock()
         mock_result.instances = {}
         mock_result.num_completed = 0
-        mock_result.status = 0xA701  # Failed: Out of Resources
+        mock_result.status = "warning_0xa701"  # Failed: Out of Resources
 
         mock_client.get_study_to_memory = AsyncMock(return_value=mock_result)
 
@@ -646,7 +649,8 @@ class TestStudyLevelCache:
         mock_result = MagicMock()
         mock_result.instances = {"sop_a1": ds_a1}
         mock_result.num_completed = 1
-        mock_result.status = 0x0000
+        mock_result.status = "success"
+        mock_result.num_failed = 0
 
         # Create an event to coordinate timing
         first_call_started = asyncio.Event()
@@ -692,6 +696,147 @@ class TestStudyLevelCache:
 
         # Client should have been called exactly once
         assert mock_client.get_study_to_memory.call_count == 1
+
+
+def _series_instances(series_uid: str, count: int) -> dict[str, Any]:
+    """Mock datasets of one series, keyed by SOPInstanceUID."""
+    instances: dict[str, Any] = {}
+    for i in range(count):
+        ds = MagicMock()
+        ds.SOPInstanceUID = f"{series_uid}.{i}"
+        ds.SeriesInstanceUID = series_uid
+        instances[ds.SOPInstanceUID] = ds
+    return instances
+
+
+class TestPartialRetrieve:
+    """#538: a retrieve that came back short must not be cached as a whole one."""
+
+    @pytest.mark.asyncio
+    async def test_series_retrieve_short_raises_and_caches_nothing(
+        self, cache: DicomWebCache
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.get_series_to_memory = AsyncMock(
+            return_value=RetrieveResult(
+                status="warning_0xb000",
+                num_completed=2,
+                num_failed=1,
+                instances=_series_instances("series_a", 2),
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="incomplete"):
+            await cache.ensure_series_cached("study1", "series_a", mock_client, MagicMock())
+
+        assert cache._get_from_memory("study1", "series_a") is None
+
+    @pytest.mark.asyncio
+    async def test_study_retrieve_short_retrieves_left_out_series_on_their_own(
+        self, cache: DicomWebCache
+    ) -> None:
+        """series_a arrived whole and is kept; series_b (short) and series_c (absent)
+        are retrieved on their own; the short unrequested series_sr is dropped."""
+        mock_client = MagicMock()
+        mock_client.get_study_to_memory = AsyncMock(
+            return_value=RetrieveResult(
+                status="timeout",
+                num_completed=4,
+                instances={
+                    **_series_instances("series_a", 2),
+                    **_series_instances("series_b", 1),
+                    **_series_instances("series_sr", 1),
+                },
+            )
+        )
+        whole = {"series_b": 3, "series_c": 4}
+
+        async def per_series(*, study_uid: str, series_uid: str, peer: Any) -> RetrieveResult:
+            return RetrieveResult(
+                status="success",
+                num_completed=whole[series_uid],
+                instances=_series_instances(series_uid, whole[series_uid]),
+            )
+
+        mock_client.get_series_to_memory = AsyncMock(side_effect=per_series)
+
+        result = await cache.ensure_study_cached(
+            study_uid="study1",
+            series_uids=["series_a", "series_b", "series_c"],
+            client=mock_client,
+            pacs=MagicMock(),
+            expected_counts={"series_a": 2, "series_b": 3, "series_c": 4},
+        )
+
+        assert {uid: len(e.instances) for uid, e in result.items()} == {
+            "series_a": 2,
+            "series_b": 3,
+            "series_c": 4,
+        }
+        fetched_alone = [
+            c.kwargs["series_uid"] for c in mock_client.get_series_to_memory.await_args_list
+        ]
+        assert fetched_alone == ["series_b", "series_c"]
+        assert cache._get_from_memory("study1", "series_sr") is None
+
+    @pytest.mark.asyncio
+    async def test_study_served_without_a_series_the_peer_refuses(
+        self, cache: DicomWebCache
+    ) -> None:
+        """A Dose SR on c-get fails every sub-operation, every time — the study is served
+        without it, while a direct request for that series still errors."""
+        mock_client = MagicMock()
+        mock_client.get_study_to_memory = AsyncMock(
+            return_value=RetrieveResult(
+                status="warning_0xb000",
+                num_completed=2,
+                num_failed=1,
+                instances=_series_instances("series_ct", 2),
+            )
+        )
+        mock_client.get_series_to_memory = AsyncMock(
+            return_value=RetrieveResult(status="warning_0xb000", num_completed=0, num_failed=1)
+        )
+
+        result = await cache.ensure_study_cached(
+            study_uid="study1",
+            series_uids=["series_ct", "series_dose_sr"],
+            client=mock_client,
+            pacs=MagicMock(),
+            expected_counts={"series_ct": 2, "series_dose_sr": 1},
+        )
+
+        assert set(result) == {"series_ct"}
+        with pytest.raises(SeriesRefusedError):
+            await cache.ensure_series_cached("study1", "series_dose_sr", mock_client, MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_study_retrieve_series_still_short_on_its_own_raises(
+        self, cache: DicomWebCache
+    ) -> None:
+        """No C-FIND count vouches for series_a, and its own retrieve is short too —
+        the study is not served short."""
+        mock_client = MagicMock()
+        mock_client.get_study_to_memory = AsyncMock(
+            return_value=RetrieveResult(
+                status="timeout", num_completed=2, instances=_series_instances("series_a", 2)
+            )
+        )
+        mock_client.get_series_to_memory = AsyncMock(
+            return_value=RetrieveResult(
+                status="timeout", num_completed=2, instances=_series_instances("series_a", 2)
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="incomplete"):
+            await cache.ensure_study_cached(
+                study_uid="study1",
+                series_uids=["series_a"],
+                client=mock_client,
+                pacs=MagicMock(),
+            )
+
+        assert cache._get_from_memory("study1", "series_a") is None
 
 
 class TestStudyUidValidation:
@@ -744,7 +889,8 @@ class TestStudyUidValidation:
         mock_result = MagicMock()
         mock_result.instances = {"sop1": ds}
         mock_result.num_completed = 1
-        mock_result.status = 0x0000
+        mock_result.status = "success"
+        mock_result.num_failed = 0
 
         mock_client = MagicMock()
         mock_client.get_series_to_memory = AsyncMock(return_value=mock_result)

@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from pydicom import Dataset
 
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import DicomClient, series_instance_counts
 from clarinet.services.dicom.models import (
     DicomNode,
     ImageQuery,
@@ -208,6 +208,7 @@ class DicomWebProxyService:
             series_uids=series_uids,
             client=self._client,
             pacs=self._pacs,
+            expected_counts=series_instance_counts(results),
         )
 
         all_metadata = await asyncio.to_thread(
@@ -308,6 +309,8 @@ class DicomWebProxyService:
 
         Fail-fast: an error on study N leaves studies 1..N-1 warm in cache and
         reports status="error" — a retry resumes faster, no partial-success state.
+        A study with a series that arrives only partially is such an error; a
+        series the PACS refuses outright is left out and the study still ends ready.
         """
         progress = self._cache.get_preload_progress(task_id)
         if progress is None:
@@ -375,6 +378,7 @@ class DicomWebProxyService:
                     self._client,
                     self._pacs,
                     on_progress=on_progress,
+                    expected_counts=series_instance_counts(results),
                 )
                 total_received += sum(len(e.instances) for e in cached_map.values())
             progress.update(status="ready", received=total_received, total=total_received)

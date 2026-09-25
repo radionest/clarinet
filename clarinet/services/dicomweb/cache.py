@@ -5,7 +5,7 @@ import io
 import shutil
 import time
 import zipfile
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import IO, Any
 
@@ -16,10 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from clarinet.files import AnonPathError, Files
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import DicomClient, retrieve_is_complete, retrieve_was_refused
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from clarinet.utils.logger import logger
+
+
+class SeriesRefusedError(RuntimeError):
+    """The peer failed every instance of a series — see ``retrieve_was_refused``.
+
+    Permanent for that series, so a study is served without it rather than not
+    at all; a direct request for the series still fails with it.
+    """
 
 
 class DicomWebCache:
@@ -400,7 +408,9 @@ class DicomWebCache:
             MemoryCachedSeries with instances dict for O(1) lookup
 
         Raises:
-            RuntimeError: If C-GET returns no instances
+            SeriesRefusedError: If the peer failed every instance of the series.
+            RuntimeError: If the retrieve returns no instances, or comes back
+                incomplete — a partial series is never cached.
         """
         # 1. Memory hit (no lock needed for read)
         cached = self._get_from_memory(study_uid, series_uid)
@@ -451,9 +461,21 @@ class DicomWebCache:
                 peer=pacs,
             )
 
+            if retrieve_was_refused(result):
+                raise SeriesRefusedError(
+                    f"PACS failed all {result.num_failed} instances of series {series_uid} "
+                    f"(status: {result.status}) — its SOP class is outside the storage "
+                    f"contexts this side negotiates"
+                )
             if result.num_completed == 0:
                 raise RuntimeError(
                     f"DICOM retrieve returned 0 instances for series {series_uid} (status: {result.status})"
+                )
+            if not retrieve_is_complete(result):
+                raise RuntimeError(
+                    f"DICOM retrieve of series {series_uid} is incomplete (status: "
+                    f"{result.status}, {result.num_completed} received, "
+                    f"{result.num_failed} failed) — not caching a partial series"
                 )
 
             self._validate_series_in_study(study_uid, series_uid, result.instances)
@@ -482,6 +504,7 @@ class DicomWebCache:
         client: DicomClient,
         pacs: DicomNode,
         on_progress: Callable[[int, int | None], None] | None = None,
+        expected_counts: Mapping[str, int] | None = None,
     ) -> dict[str, MemoryCachedSeries]:
         """Ensure all series of a study are cached, using a single study-level C-GET.
 
@@ -496,12 +519,20 @@ class DicomWebCache:
             pacs: Target PACS node
             on_progress: Optional callback(received, total) forwarded to the
                 study-level C-GET. Terminal status reporting belongs to the caller.
+            expected_counts: Instances per series from the C-FIND
+                (``series_instance_counts``). Read only when the retrieve comes
+                back incomplete: a series whose arrivals reach its count is
+                cached from it, every other one is retrieved on its own.
 
         Returns:
-            Dict mapping series_uid → MemoryCachedSeries for all requested series
+            Dict mapping series_uid → MemoryCachedSeries for every requested
+            series, except one the peer refuses outright (``SeriesRefusedError``,
+            logged) — it can never arrive.
 
         Raises:
-            RuntimeError: If C-GET returns no instances for missing series
+            RuntimeError: If the study retrieve returns no instances, or a series
+                it left out — short, or never sent — cannot be retrieved whole
+                on its own either (see ``ensure_series_cached``).
         """
         result: dict[str, MemoryCachedSeries] = {}
         missing_series: list[str] = []
@@ -588,12 +619,30 @@ class DicomWebCache:
                     grouped[ser_uid] = {}
                 grouped[ser_uid][sop_uid] = ds
 
-            logger.info(
-                f"Study C-GET completed: {cget_result.num_completed} instances "
-                f"across {len(grouped)} series"
-            )
+            if retrieve_is_complete(cget_result):
+                logger.info(
+                    f"Study C-GET completed: {cget_result.num_completed} instances "
+                    f"across {len(grouped)} series"
+                )
+            else:
+                # The result cannot say which series fell short — only the C-FIND
+                # count can vouch that one arrived whole.
+                counts = expected_counts or {}
+                grouped = {
+                    ser_uid: instances
+                    for ser_uid, instances in grouped.items()
+                    if ser_uid in counts and len(instances) >= counts[ser_uid]
+                }
+                not_cached = [uid for uid in still_missing if uid not in grouped]
+                logger.warning(
+                    f"Study retrieve for {study_uid} is incomplete (status: "
+                    f"{cget_result.status}, {cget_result.num_completed} received, "
+                    f"{cget_result.num_failed} failed) — caching {len(grouped)} whole "
+                    f"series, retrieving {len(not_cached)} on their own: {not_cached}"
+                )
 
-            # Cache all series from C-GET (including unexpected SR/KO/PR)
+            # Cache every grouped series, including unexpected SR/KO/PR — after
+            # a short retrieve only the whole ones are left in `grouped`
             requested_set = set(series_uids)
             for ser_uid, instances in grouped.items():
                 entry = self._put_to_memory(study_uid, ser_uid, instances, disk_persisted=False)
@@ -613,6 +662,20 @@ class DicomWebCache:
                 )
                 self._disk_write_tasks.add(task)
                 task.add_done_callback(self._disk_write_tasks.discard)
+
+            # A requested series the study retrieve left out — short, or never
+            # sent — gets a retrieve of its own, which raises if it is short
+            # too: no series is served short. One the peer refuses outright can
+            # never arrive, so the study is served without it.
+            for ser_uid in still_missing:
+                if ser_uid in result:
+                    continue
+                try:
+                    result[ser_uid] = await self.ensure_series_cached(
+                        study_uid, ser_uid, client, pacs
+                    )
+                except SeriesRefusedError as e:
+                    logger.warning(f"{e} — serving study {study_uid} without it")
 
         return result
 

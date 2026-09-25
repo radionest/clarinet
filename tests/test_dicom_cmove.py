@@ -2,8 +2,9 @@
 
 Move-to-self itself is dimsechord's ``DicomOperations.retrieve_via_move`` and is
 tested there. What Clarinet owns, and what these cover, is: which process gets a
-listener, the ``dicom_retrieve_mode`` dispatch, and the translation of a
-Clarinet-level call into the request/storage/AET that dimsechord is handed.
+listener, the ``dicom_retrieve_mode`` dispatch, the translation of a
+Clarinet-level call into the request/storage/AET that dimsechord is handed, and
+what counts as a complete retrieve.
 """
 
 from pathlib import Path
@@ -11,10 +12,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from dimsechord import DicomClient as DimsechordClient
-from dimsechord import QueryRetrieveLevel
+from dimsechord import QueryRetrieveLevel, RetrieveResult, SeriesResult
 from dimsechord._models import StorageMode
 
-from clarinet.services.dicom.client import DicomClient
+from clarinet.services.dicom.client import (
+    DicomClient,
+    retrieve_is_complete,
+    retrieve_was_refused,
+    series_instance_counts,
+)
 from clarinet.services.dicom.models import DicomNode
 
 PEER = DicomNode(aet="ORTHANC", host="localhost", port=4242)
@@ -288,3 +294,48 @@ class TestMoveDelegation:
         request = move.call_args.args[1]
         assert request.level is QueryRetrieveLevel.SERIES
         assert request.series_instance_uid == "1.2.4"
+
+
+class TestRetrieveIsComplete:
+    """``num_completed`` cannot tell a short retrieve from a whole one (#538)."""
+
+    @pytest.mark.parametrize(
+        ("status", "num_failed", "complete"),
+        [
+            ("success", 0, True),
+            ("success", 2, False),  # peer claims success over failed sub-operations
+            ("timeout", 0, False),  # C-MOVE whose instances stopped arriving
+            ("warning_0xb000", 3, False),  # C-GET: a SOP class with no accepted context
+            ("pending", 0, False),  # association dropped before a final response
+        ],
+    )
+    def test_status_and_failures_decide(self, status: str, num_failed: int, complete: bool):
+        result = RetrieveResult(status=status, num_completed=5, num_failed=num_failed)
+        assert retrieve_is_complete(result) is complete
+
+
+@pytest.mark.parametrize(
+    ("completed", "failed", "status", "refused"),
+    [
+        (0, 3, "warning_0xb000", True),  # every sub-operation failed: a refused SOP class
+        (2, 1, "warning_0xb000", False),  # partial — something did arrive
+        (0, 0, "timeout", False),  # nothing arrived, nothing failed: transient
+        (0, 0, "success", False),  # nothing to send
+    ],
+)
+def test_retrieve_was_refused(completed: int, failed: int, status: str, refused: bool):
+    result = RetrieveResult(status=status, num_completed=completed, num_failed=failed)
+    assert retrieve_was_refused(result) is refused
+
+
+def test_series_instance_counts_vouches_only_for_positive_counts():
+    """A missing or zero C-FIND count would let any partial arrival pass as whole."""
+    results = [
+        SeriesResult(
+            study_instance_uid="1.2.3",
+            series_instance_uid=uid,
+            number_of_series_related_instances=n,
+        )
+        for uid, n in [("a", 3), ("b", 0), ("c", None)]
+    ]
+    assert series_instance_counts(results) == {"a": 3}

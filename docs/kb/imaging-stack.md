@@ -40,10 +40,22 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   uncompressed); the Storage SCP only *accepts* — matching whatever the peer
   proposes — so it covers pynetdicom's 120 `StoragePresentationContexts` with
   every transfer syntax without spending the budget. c-get needs nothing from
-  the network, but a modality outside those 26 — X-Ray Angiographic, Nuclear
-  Medicine, Digital Mammography, Enhanced XA, Breast Tomosynthesis, the VL
-  family — comes back as a short series rather than an error. c-move needs a
-  route back and drops nothing.
+  the network, but a class outside those 26 — X-Ray Radiation Dose SR, X-Ray
+  Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA, Breast
+  Tomosynthesis, the VL family — comes back as a short series rather than an
+  error. c-move needs a route back and covers pynetdicom's 120 classes; a class
+  outside those — private (Siemens CSA Non-Image) or a newer standard one
+  (Radiopharmaceutical Radiation Dose SR) — is refused in both modes.
+- **Short retrieves.** `num_completed` cannot tell a whole retrieve from a
+  short one — a timed-out C-MOVE and a C-GET with failed sub-operations both
+  return what did arrive. `retrieve_is_complete()` reads `status` and
+  `num_failed` instead, and every cache, prefetch and conversion consumer checks
+  it: a short series is never cached or converted, and a short study keeps only
+  the series whose arrivals reach their C-FIND instance count — the rest are
+  retrieved one series at a time. A series the peer *refuses* (nothing arrived,
+  every instance failed: usually a SOP class this side cannot store) can never
+  arrive, so the viewer is served the study without it, with a warning; prefetch
+  skips it once a per-series run sees it, which needs C-FIND counts.
 - `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
   (`dimsechord.StorageSCP`). It accepts 120 storage classes with every transfer
   syntax, so a PACS may send compressed objects verbatim instead of failing
@@ -111,12 +123,21 @@ Four tiers, checked in order:
 An `asyncio.Lock` per `(study_uid, series_uid)` prevents duplicate C-GETs, and a
 study-level lock does the same for `ensure_study_cached()`, which retrieves all
 missing series in a **single** study-level C-GET instead of N per-series ones.
+Only a series that study retrieve left out — short, or never sent — gets a
+retrieve of its own, and one that is short on its own too raises: the viewer
+gets an error rather than a study with a short series. A refused series is left
+out instead.
 
 Two ways to warm the cache without going through the viewer:
 `POST /dicom-web/preload` (1–20 study UIDs, cached sequentially so the PACS is
 not flooded, progress polled by `task_id`), and the `prefetch_dicom_web`
 pipeline task, which runs in a worker, writes straight to the disk tier and
 bypasses the memory tier entirely — the safe choice for bulk RecordFlow triggers.
+After a short retrieve the task publishes the series that arrived whole and
+fails naming the rest, so its retry fetches only those, one series at a time —
+given C-FIND instance counts, a study too large to arrive within
+`dicom_cmove_timeout` still ends up cached, as long as each of its series fits
+in that budget.
 
 ## 3D Slicer
 
