@@ -173,7 +173,7 @@ that arrives *partially* every time spends the retries and lands in the DLQ.
 | `dicom_port` | `11112` | Local DICOM port |
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
-| `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
+| `dicom_max_concurrent_associations` | `8` | Per-process semaphore limit for concurrent DICOM associations (the API and each worker install their own; not fleet-wide) |
 | `dicom_retrieve_mode` | `c-get` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
 | `dicom_cmove_timeout` | `300.0` | Seconds bounding the C-MOVE *and* the wait for its instances to arrive |
 | `dicom_scp_enabled` | `None` | `None` = the API owns a listener when the mode is c-move (a worker needs `--dicom` or `true`); `false` = never; `true` = always |

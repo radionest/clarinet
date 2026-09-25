@@ -1033,7 +1033,7 @@ class TestLoadTaskModulesFailFast:
         set_cap.assert_called_once_with(3)
 
 
-# ─── Worker signal handling (Windows regression)─────────────────────────────
+# ─── Worker signal handling (Windows regression) ─────────────────────────────
 
 
 class TestWorkerSignalHandling:
