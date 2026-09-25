@@ -845,13 +845,14 @@ def _download_file(url: str, dest: Path) -> None:
 def _extract_tarball(tarball: Path, dest: Path, what: str) -> None:
     """Extract a ``.tar.gz`` into ``dest``; log and exit(1) on a corrupt or unsafe archive.
 
-    ``filter="data"`` rejects members that would land outside ``dest`` (tar-slip),
-    absolute paths and special files — the tarballs come from the network or the operator.
+    ``filter="data"`` rejects members and links that would land outside ``dest``
+    (tar-slip) and special files, and strips leading ``/`` — the tarballs come from
+    the network or the operator. A truncated gzip stream raises ``EOFError``.
     """
     try:
         with tarfile.open(tarball, "r:gz") as tf:
             tf.extractall(dest, filter="data")
-    except (tarfile.TarError, OSError) as e:
+    except (tarfile.TarError, OSError, EOFError) as e:
         logger.error(f"Failed to extract {what} tarball {tarball}: {e}")
         sys.exit(1)
 

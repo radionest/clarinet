@@ -34,3 +34,20 @@ def test_tar_slip_member_aborts_install(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert exc.value.code == 1
     assert not (tmp_path / "t" / "escaped").exists()
     assert (ohif_dir / "sentinel").exists()
+
+
+def test_truncated_tarball_exits_cleanly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A cut-short download raises EOFError from gzip — must be exit(1), not a traceback."""
+    monkeypatch.setattr(type(settings), "ohif_path", property(lambda _self: tmp_path / "ohif"))
+    tarball = tmp_path / "ohif.tgz"
+    with tarfile.open(tarball, "w:gz") as tf:
+        info = tarfile.TarInfo("package/dist/index.html")
+        data = bytes(range(256)) * 200
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    tarball.write_bytes(tarball.read_bytes()[: tarball.stat().st_size // 2])
+
+    with pytest.raises(SystemExit) as exc:
+        install_ohif(version="1.0.0", from_file=str(tarball))
+
+    assert exc.value.code == 1

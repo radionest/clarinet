@@ -590,8 +590,9 @@
   are described under Breaking.
 - `clarinet ohif install` extracts the OHIF tarball with `filter="data"`, as the
   Quarto installer already did, so a malicious or compromised tarball (download
-  or `--from-file`) can no longer write outside the temporary extraction dir;
-  such a tarball now aborts the install. Both `ohif install` and
+  or `--from-file`) can no longer write outside the temporary extraction dir: a
+  `..` member, an escaping link or a special file aborts the install, and a
+  leading `/` is stripped. Both `ohif install` and
   `quarto install` now report an unsafe or corrupt tarball as a logged error
   with exit code 1 instead of a traceback. Closes #604.
 - **Security floors now ship in the wheel.** The floors for vulnerable transitive
