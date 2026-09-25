@@ -50,8 +50,8 @@ uncompressed — broad on syntax, narrow on SOP class. The Storage SCP only
 `StoragePresentationContexts` with every transfer syntax and never spends the
 budget.
 
-So c-get needs nothing from the network, and c-move drops no *standard* SOP
-class. **On c-get, check your modalities first**: a SOP class outside
+So c-get needs nothing from the network, and c-move covers far more classes.
+**On c-get, check your modalities first**: a SOP class outside
 `DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES` gets no
 accepted context, so its instances fail their sub-operations and the retrieve
 returns short — `num_failed > 0` under `warning_0xb000`, not an exception from
@@ -62,8 +62,11 @@ Comprehensive / Comprehensive 3D SR classes. Notably **absent**: X-Ray Radiation
 Dose SR (routine on CT), X-Ray Angiographic, Nuclear Medicine, Digital
 Mammography, Enhanced XA/XRF, Breast Tomosynthesis and the VL/endoscopic family,
 among others. A site with any of those wants c-move until dimsechord takes a
-storage-class argument. **Private** SOP classes — Siemens CSA Non-Image
-(PhoenixZIPReport on MR) — are in neither set, so they are refused in both modes.
+storage-class argument. c-move is not complete either: its 120 classes are
+pynetdicom's `StoragePresentationContexts`, so a class outside them is refused
+in **both** modes — private ones such as Siemens CSA Non-Image (PhoenixZIPReport
+on MR), and newer standard ones such as Radiopharmaceutical Radiation Dose SR
+(PET/CT, NM), Enhanced X-Ray Radiation Dose SR and Parametric Map.
 
 ### Listener ownership
 
@@ -151,12 +154,16 @@ A timed-out C-MOVE (`timeout`), a C-GET whose SOP class got no context
 A series the peer gave no (or a zero) count for is never vouched for by count.
 
 **Refused** (`retrieve_was_refused`): nothing arrived and `num_failed > 0` — the
-peer tried every instance and this side could not store it, a SOP class outside
-the negotiated contexts. Retrying cannot help, so the study is served and
-prefetched without that series. A study-level retrieve cannot tell refused
-from short, so prefetch's first run still fails and its per-series retry
-settles it. A series that arrives *partially* every time still spends the
-retries and lands in the DLQ.
+peer tried every instance and none was stored, usually a SOP class outside the
+negotiated contexts. Retrying cannot help that, so the study is served and
+prefetched without the series. The counts cannot tell it from a total failure
+of another kind — a store handler that cannot write (full disk), an
+unreachable c-move destination — so prefetch treats those as refused too.
+A study-level retrieve cannot tell refused from short, so prefetch's first run
+still fails and a per-series retry settles it — which needs C-FIND counts
+(without them the retry is study-level again and ends in the DLQ), and a study
+whose *only* series is refused still hits the zero-instance guard. A series
+that arrives *partially* every time spends the retries and lands in the DLQ.
 
 ## Settings (`clarinet/settings.py`)
 

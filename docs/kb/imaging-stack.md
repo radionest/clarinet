@@ -43,8 +43,9 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   the network, but a class outside those 26 — X-Ray Radiation Dose SR, X-Ray
   Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA, Breast
   Tomosynthesis, the VL family — comes back as a short series rather than an
-  error. c-move needs a route back and drops no standard class; private ones
-  (Siemens CSA Non-Image) are refused in both modes.
+  error. c-move needs a route back and covers pynetdicom's 120 classes; a class
+  outside those — private (Siemens CSA Non-Image) or a newer standard one
+  (Radiopharmaceutical Radiation Dose SR) — is refused in both modes.
 - **Short retrieves.** `num_completed` cannot tell a whole retrieve from a
   short one — a timed-out C-MOVE and a C-GET with failed sub-operations both
   return what did arrive. `retrieve_is_complete()` reads `status` and
@@ -52,8 +53,9 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
   it: a short series is never cached or converted, and a short study keeps only
   the series whose arrivals reach their C-FIND instance count — the rest are
   retrieved one series at a time. A series the peer *refuses* (nothing arrived,
-  every instance failed: a SOP class this side cannot store) can never arrive,
-  so the study is served and prefetched without it, with a warning.
+  every instance failed: usually a SOP class this side cannot store) can never
+  arrive, so the viewer is served the study without it, with a warning; prefetch
+  skips it once a per-series run sees it, which needs C-FIND counts.
 - `clarinet/services/dicom/scp.py` owns the Storage SCP singleton
   (`dimsechord.StorageSCP`). It accepts 120 storage classes with every transfer
   syntax, so a PACS may send compressed objects verbatim instead of failing

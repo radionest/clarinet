@@ -693,7 +693,8 @@
   (and a DLQ entry once retries run out). A series the PACS *refuses* outright
   (`retrieve_was_refused()`: nothing arrived, every instance failed — X-Ray
   Radiation Dose SR on c-get, Siemens CSA Non-Image in either mode) can never
-  arrive, so both paths go on without it and log a warning;
+  arrive, so the viewer is served the study without it and prefetch skips it
+  once a per-series run sees it, both with a warning;
   `ensure_series_cached` raises `SeriesRefusedError` for it. A PACS that omits
   the C-MOVE sub-operation counters on pending responses makes dimsechord
   report `timeout` on complete retrieves, which now fail `ensure_series_cached`

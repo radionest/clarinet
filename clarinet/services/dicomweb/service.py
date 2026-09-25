@@ -309,7 +309,8 @@ class DicomWebProxyService:
 
         Fail-fast: an error on study N leaves studies 1..N-1 warm in cache and
         reports status="error" — a retry resumes faster, no partial-success state.
-        A study with a series that cannot be retrieved whole is such an error.
+        A study with a series that arrives only partially is such an error; a
+        series the PACS refuses outright is left out and the study still ends ready.
         """
         progress = self._cache.get_preload_progress(task_id)
         if progress is None:

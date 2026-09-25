@@ -281,6 +281,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         PipelineStepError: If ``study_uid`` is missing, the retrieve returns 0
             instances, or any series to fetch did not arrive whole — raised
             after the whole ones are published, so a retry fetches only the rest.
+            A series a per-series retrieve finds refused is skipped, not raised.
     """
     if not msg.study_uid:
         raise PipelineStepError(
@@ -433,8 +434,8 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
     if refused:
         logger.warning(
             f"prefetch_dicom_web: study {msg.study_uid} — PACS failed every instance of "
-            f"{len(refused)} series (SOP class outside the negotiated storage contexts), "
-            f"not cached: {refused}"
+            f"{len(refused)} series (a SOP class outside the negotiated storage contexts, "
+            f"or a local storage failure), not cached: {refused}"
         )
     # Fail after publishing what arrived whole: the retry then fetches only
     # these, where re-running a study-level retrieve that timed out would not.
@@ -474,6 +475,7 @@ async def prefetch_dicom_web(msg: PipelineMessage, ctx: TaskContext) -> None:
 
     Raises:
         PipelineStepError: If ``study_uid`` is missing, or a series to fetch
-            did not arrive whole (the ones that did are still published).
+            did not arrive whole (the ones that did are still published; one
+            the PACS refuses outright is skipped with a warning).
     """
     await _prefetch_dicom_web_impl(msg, ctx)
