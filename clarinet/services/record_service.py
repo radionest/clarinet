@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from fastapi import status
-
 from clarinet.exceptions.domain import (
     AnonPathError,
     BusinessRuleViolationError,
@@ -15,7 +13,7 @@ from clarinet.exceptions.domain import (
     UnsafePathError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
-from clarinet.exceptions.http import CustomHTTPException
+from clarinet.exceptions.http import UNPROCESSABLE_ENTITY
 from clarinet.files import Files, join_within
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.base import DicomQueryLevel
@@ -99,11 +97,6 @@ def _render_output_path(
     disclosed nothing in practice — but #552 relaxing the
     pattern grammar would turn that into a live disclosure with no test
     standing against it.
-
-    Raises a *fresh* ``CustomHTTPException`` rather than the shared
-    ``UNPROCESSABLE_ENTITY`` singleton — that singleton's ``.with_context()``
-    mutates a module-level instance, and this is the one call path that puts
-    PHI through it.
     """
     try:
         return Files.render_for(record, fd.pattern, parent=parent)
@@ -112,12 +105,11 @@ def _render_output_path(
             f"unsafe output path rejected for record {record.id}, "
             f"file definition '{fd.name}': {exc}"
         )
-        raise CustomHTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            # Endpoint-neutral wording on purpose: this helper also runs from
-            # check-files, where nothing was submitted, so "from the submitted
-            # data" would be a lie there.
-            detail=(f"File '{fd.name}' cannot be safely resolved for this record: {exc}"),
+        # Endpoint-neutral wording on purpose: this helper also runs from
+        # check-files, where nothing was submitted, so "from the submitted
+        # data" would be a lie there.
+        raise UNPROCESSABLE_ENTITY.with_context(
+            f"File '{fd.name}' cannot be safely resolved for this record: {exc}"
         ) from exc
 
 
@@ -1408,18 +1400,17 @@ class RecordService:
             )
         except UnsafePathError as exc:
             logger.warning(f"unsafe output path rejected for record {record.id}: {exc}")
-            raise CustomHTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                # No exc.value here either, for the same reason as
-                # _render_output_path — but note the surfaces are NOT identical.
-                # That helper is render-only, so str(exc) there names a
-                # placeholder key. This one catches from Files.checksums, which
-                # reaches join_within, and two of its four messages interpolate
-                # the working directory — which under the unanonymized-path
-                # fallback can itself be built from a raw patient id. That is the
-                # `base`-in-message residual accepted change-wide (see
-                # UnsafePathError's docstring), not something this line closes.
-                detail=f"Output files cannot be safely resolved for this record: {exc}",
+            # No exc.value here either, for the same reason as
+            # _render_output_path — but note the surfaces are NOT identical.
+            # That helper is render-only, so str(exc) there names a
+            # placeholder key. This one catches from Files.checksums, which
+            # reaches join_within, and two of its four messages interpolate
+            # the working directory — which under the unanonymized-path
+            # fallback can itself be built from a raw patient id. That is the
+            # `base`-in-message residual accepted change-wide (see
+            # UnsafePathError's docstring), not something this line closes.
+            raise UNPROCESSABLE_ENTITY.with_context(
+                f"Output files cannot be safely resolved for this record: {exc}"
             ) from exc
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")

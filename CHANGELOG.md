@@ -33,6 +33,10 @@
 
 ### Breaking
 
+- **`ClarinetError.with_context` is removed.** It shared its name with
+  `CustomHTTPException.with_context` but, unlike that method after #548, rewrote
+  the exception in place and returned it. Nothing in clarinet called it; pass
+  the message to the constructor instead (`PipelineError("Broker unreachable")`).
 - **Self-registration is opt-in, and DICOMweb needs a role (security).**
   `POST /api/auth/register` was public and produced an active account, while
   `/dicom-web/*` asked only for an authenticated user and has no per-record
@@ -706,6 +710,13 @@
   reconciled as `unchanged` and the stored row kept the old value until some
   other change on a type binding the file forced a sync. The diff now compares
   every row-level and binding field (#565).
+- **Concurrent requests no longer overwrite each other's error `detail`.**
+  `CustomHTTPException.with_context` set `detail` on the shared module-level
+  exceptions (`CONFLICT`, `NOT_FOUND`, …) and returned them, so two requests
+  raising the same status could swap messages before the response was sent —
+  turning, for example, a recoverable "already finished" 409 into one a client
+  treats as fatal. It now returns a new exception and leaves the shared ones
+  untouched (#548).
 - **A failed Slicer open no longer leaves the previous record's id behind.**
   The record id stored in Slicer survives `mrmlScene.Clear(0)` and was only
   re-set at the end of the open script, so an open that failed part-way left

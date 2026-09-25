@@ -618,13 +618,6 @@ class TestPipelineExceptions:
 
         assert issubclass(PipelineConfigError, PipelineError)
 
-    def test_with_context(self):
-        """PipelineError supports with_context()."""
-        from clarinet.exceptions.domain import PipelineError
-
-        err = PipelineError().with_context("Broker unreachable")
-        assert "Broker unreachable" in str(err)
-
 
 # ─── DeadLetterMiddleware ────────────────────────────────────────────────────
 
