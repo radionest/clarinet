@@ -33,6 +33,10 @@
 
 ### Breaking
 
+- **`ClarinetError.with_context` is removed.** It shared its name with
+  `CustomHTTPException.with_context` but, unlike that method after #548, rewrote
+  the exception in place and returned it. Nothing in clarinet called it; pass
+  the message to the constructor instead (`PipelineError("Broker unreachable")`).
 - **Self-registration is opt-in, and DICOMweb needs a role (security).**
   `POST /api/auth/register` was public and produced an active account, while
   `/dicom-web/*` asked only for an authenticated user and has no per-record

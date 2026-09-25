@@ -8,17 +8,12 @@ business logic errors without coupling to HTTP status codes.
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar
 from uuid import UUID
 
 
 class ClarinetError(Exception):
     """Base exception for all Clarinet-specific errors."""
-
-    def with_context(self, detail: str) -> Self:
-        """Add context information to the exception."""
-        self.args = (detail,)
-        return self
 
 
 # Base domain exceptions
