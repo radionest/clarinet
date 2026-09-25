@@ -650,14 +650,18 @@
 
 - **Entity detail pages are quieter.** On the record and patient pages the
   Activity feed — and, for admins, the record's Workflow graph — now sit at
-  the bottom, after the action buttons, collapsed until clicked. The record
-  page is titled by its record type instead of "Record Execution"; study and
-  series pages by description, date and series number instead of the raw
-  DICOM UID. The Patient (study page) and Parent Study (series page) cards
-  fold into the info card, the "Back to …" and per-row "View" buttons are
-  gone (the id or date is the link), Delete Study / Delete Patient moved from
-  the header to the bottom of the page, and the patient's PACS search lives
-  in the Studies card header.
+  the bottom, after the action buttons, collapsed until clicked; an expanded
+  section stays open while a dialog comes and goes. The record page is
+  titled by its record type instead of "Record Execution"; study and series
+  pages by description, date and series number instead of the raw DICOM
+  UID. The Patient card (study page) folds into the info card as patient
+  link, name and anon ID (the anon ID still hidden in per-study
+  anonymization); the Parent Study card (series page) becomes its Study and
+  Patient rows. The study, series and patient pages drop their "Back to …"
+  buttons (the record page keeps its contextual one) and the per-row "View"
+  buttons (the id or date is the link); Delete Study / Delete Patient moved
+  from the header to the bottom of the page, and the patient's PACS search
+  lives in the Studies card header.
 - Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
   `invalidate_records()`) now always fires `on_status("pending")` flows —
   even when the record was already `pending`. Previously an already-pending
@@ -682,6 +686,13 @@
 
 ### Fixed
 
+- The patient, study, series and record-type info cards lay out as a
+  label/value grid, as the record page always did — every label used to
+  stack above its value (the grid rule only matched a `<dl>` nested inside
+  `.record-metadata`). On phones they stack to one column like the record
+  page.
+- The workflow graph hint (record page, admin Workflow page) says
+  Ctrl+scroll to zoom — a plain wheel scrolls the page, as intended.
 - **A short DICOM retrieve is no longer cached or converted as a whole one.**
   Every consumer of `RetrieveResult` checked only `num_completed == 0`, so a
   C-MOVE that timed out part-way (`status="timeout"`) — or a C-GET whose SOP
