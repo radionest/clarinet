@@ -720,14 +720,14 @@
   page.
 - The workflow graph hint (record page, admin Workflow page) says
   Ctrl+scroll to zoom — a plain wheel scrolls the page, as intended.
-- **`dicom_max_concurrent_associations` now caps the worker too** (#551). The
+- **`dicom_max_concurrent_associations` now caps the worker too.** The
   semaphore is a class attribute on dimsechord's SCU, so the API lifespan's
   call bound only the API process, and `clarinet worker` — where nearly all
   C-MOVE/C-GET traffic originates — opened associations without limit. The
   worker now installs its own cap at startup, so it drops from unlimited to 8
   concurrent associations by default; raise the setting if worker retrieve
   throughput falls. The limit is per process, not fleet-wide: the API plus N
-  workers can hold (N+1) × the setting at once.
+  workers can hold (N+1) × the setting at once (#551).
 - **A short DICOM retrieve is no longer cached or converted as a whole one.**
   Every consumer of `RetrieveResult` checked only `num_completed == 0`, so a
   C-MOVE that timed out part-way (`status="timeout"`) — or a C-GET whose SOP
