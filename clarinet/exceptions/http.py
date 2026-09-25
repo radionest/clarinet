@@ -21,10 +21,11 @@ class CustomHTTPException(HTTPException):
             detail: Additional information about the error
 
         Returns:
-            A new HTTPException with updated details
+            A new HTTPException with updated details. The module-level
+            constants below are shared across concurrent requests, so they
+            must never be mutated in place.
         """
-        self.detail = detail
-        return self
+        return type(self)(status_code=self.status_code, detail=detail, headers=self.headers)
 
 
 # Standard HTTP exceptions for API layer
