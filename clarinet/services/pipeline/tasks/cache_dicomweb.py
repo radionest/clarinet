@@ -305,6 +305,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         DicomNode,
         SeriesQuery,
         retrieve_is_complete,
+        retrieve_was_refused,
         series_instance_counts,
     )
 
@@ -372,6 +373,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
         # If everything is missing, one study-level C-GET avoids N associations.
         # Otherwise, fall back to per-series retrieval to avoid downloading
         # series that are already cached.
+        refused: list[str] = []
         if len(series_to_fetch) == len(series_uids):
             result = await client.get_study(
                 study_uid=msg.study_uid,
@@ -399,7 +401,14 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
                 )
                 for series_uid in series_to_fetch
             ]
-            if not any(r.num_completed for r in results):
+            # A series whose every instance the peer failed can never arrive —
+            # retrying the task would not change that, so it does not fail it.
+            refused = [
+                uid
+                for uid, r in zip(series_to_fetch, results, strict=True)
+                if retrieve_was_refused(r)
+            ]
+            if not any(r.num_completed for r in results) and not refused:
                 raise PipelineStepError(
                     "prefetch_dicom_web",
                     f"Per-series C-GET retrieved 0 instances for study {msg.study_uid} "
@@ -421,9 +430,15 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
             _organize_to_cache, tmp_path, cache_base, msg.study_uid, min_instances
         )
 
+    if refused:
+        logger.warning(
+            f"prefetch_dicom_web: study {msg.study_uid} — PACS failed every instance of "
+            f"{len(refused)} series (SOP class outside the negotiated storage contexts), "
+            f"not cached: {refused}"
+        )
     # Fail after publishing what arrived whole: the retry then fetches only
     # these, where re-running a study-level retrieve that timed out would not.
-    not_cached = [uid for uid in series_to_fetch if uid not in grouped]
+    not_cached = [uid for uid in series_to_fetch if uid not in grouped and uid not in refused]
     if not_cached:
         statuses = ", ".join(sorted({r.status for r in results}))
         raise PipelineStepError(

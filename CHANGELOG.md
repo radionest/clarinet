@@ -679,20 +679,25 @@
   was cached, prefetched or converted as complete, and OHIF showed the study
   short with no error. `retrieve_is_complete()` (exported from
   `clarinet.services.dicom`) now decides: `ensure_series_cached` raises and
-  `convert_series_to_nifti` refuses to convert. After a short study retrieve,
-  `ensure_study_cached` keeps the series whose arrivals reach their C-FIND
-  instance count (`series_instance_counts()`, passed as the new optional
-  `expected_counts=`) and retrieves every other requested series on its own,
-  raising if that is short too — WADO-RS study metadata and the preload widget
-  (`POST /dicom-web/preload`, now ending on `error`, not `ready`) report the
-  failure instead of serving a short study. `prefetch_dicom_web` publishes only
-  the series that arrived whole, then **fails** naming the rest — including
-  per-series retrieves that return nothing, which used to log an error and
-  succeed — so its retry fetches only them; a study that cannot be retrieved
-  whole now shows up as failed task runs (and a DLQ entry once retries run
-  out). A PACS that omits the C-MOVE sub-operation counters on pending
-  responses makes dimsechord report `timeout` on complete retrieves, which now
-  fail the series-level paths; prefetch compensates with the C-FIND count, the
+  `convert_series_to_nifti` refuses to convert. `ensure_study_cached` keeps the
+  series whose arrivals reach their C-FIND instance count
+  (`series_instance_counts()`, passed as the new optional `expected_counts=`)
+  and retrieves every requested series the study retrieve left out — short, or
+  never sent — on its own, raising if that is short too: WADO-RS study metadata
+  and the preload widget (`POST /dicom-web/preload`, now ending on `error`, not
+  `ready`) report the failure instead of serving a short series.
+  `prefetch_dicom_web` publishes only the series that arrived whole, then
+  **fails** naming the rest — including per-series retrieves that return
+  nothing, which used to log an error and succeed — so its retry fetches only
+  them; a study that cannot be retrieved whole now shows up as failed task runs
+  (and a DLQ entry once retries run out). A series the PACS *refuses* outright
+  (`retrieve_was_refused()`: nothing arrived, every instance failed — X-Ray
+  Radiation Dose SR on c-get, Siemens CSA Non-Image in either mode) can never
+  arrive, so both paths go on without it and log a warning;
+  `ensure_series_cached` raises `SeriesRefusedError` for it. A PACS that omits
+  the C-MOVE sub-operation counters on pending responses makes dimsechord
+  report `timeout` on complete retrieves, which now fail `ensure_series_cached`
+  and `convert_series_to_nifti`; the paths with a C-FIND count compensate, the
   rest needs a dimsechord fix (#538).
 - **Anonymization keeps one `FrameOfReferenceUID` per series.** Only Study,
   Series and SOP Instance UIDs were hashed; every other UID dicomanonymizer

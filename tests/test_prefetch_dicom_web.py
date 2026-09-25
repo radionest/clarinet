@@ -964,6 +964,47 @@ class TestPrefetchDicomWebImpl:
         assert (tmp_path / "dicomweb_cache" / "STUDY1" / "SER3" / ".cached_at").exists()
 
     @pytest.mark.asyncio
+    async def test_refused_series_is_skipped_without_failing_the_task(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Every sub-operation of SER2 failed (a SOP class this side cannot store):
+        retrying cannot help, so the task goes on without it."""
+
+        async def get_series(study_uid, series_uid, peer, output_dir):
+            if series_uid == "SER2":
+                return _retrieve_result(num_completed=0, status="warning_0xb000", num_failed=1)
+            _make_dcm(output_dir / "c.dcm", series_uid, "SOP3")
+            return _retrieve_result(num_completed=1)
+
+        await self._run(
+            tmp_path,
+            monkeypatch,
+            [_series_result("SER1"), _series_result("SER2"), _series_result("SER3")],
+            get_series=get_series,
+        )
+
+        study_dir = tmp_path / "dicomweb_cache" / "STUDY1"
+        assert not (study_dir / "SER2").exists()
+        assert (study_dir / "SER3" / ".cached_at").exists()
+
+    @pytest.mark.asyncio
+    async def test_retry_left_with_only_a_refused_series_succeeds(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """The study-level run cannot tell refused from short, so it fails; its retry,
+        left with only the refused series, must not fail on "0 instances"."""
+
+        async def get_series(study_uid, series_uid, peer, output_dir):
+            return _retrieve_result(num_completed=0, status="warning_0xb000", num_failed=1)
+
+        await self._run(
+            tmp_path,
+            monkeypatch,
+            [_series_result("SER1"), _series_result("SER2")],
+            get_series=get_series,
+        )
+
+    @pytest.mark.asyncio
     async def test_timed_out_series_retrieve_vouched_by_cfind_count_is_published(
         self, tmp_path: Path, monkeypatch
     ):

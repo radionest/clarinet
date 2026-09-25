@@ -22,7 +22,7 @@ import pytest_asyncio
 from cachetools import TTLCache
 
 from clarinet.services.dicom.models import RetrieveResult
-from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicomweb.cache import DicomWebCache, SeriesRefusedError
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from tests.conftest import create_disk_series
 from tests.utils.session import PassThroughSession
@@ -778,6 +778,37 @@ class TestPartialRetrieve:
         ]
         assert fetched_alone == ["series_b", "series_c"]
         assert cache._get_from_memory("study1", "series_sr") is None
+
+    @pytest.mark.asyncio
+    async def test_study_served_without_a_series_the_peer_refuses(
+        self, cache: DicomWebCache
+    ) -> None:
+        """A Dose SR on c-get fails every sub-operation, every time — the study is served
+        without it, while a direct request for that series still errors."""
+        mock_client = MagicMock()
+        mock_client.get_study_to_memory = AsyncMock(
+            return_value=RetrieveResult(
+                status="warning_0xb000",
+                num_completed=2,
+                num_failed=1,
+                instances=_series_instances("series_ct", 2),
+            )
+        )
+        mock_client.get_series_to_memory = AsyncMock(
+            return_value=RetrieveResult(status="warning_0xb000", num_completed=0, num_failed=1)
+        )
+
+        result = await cache.ensure_study_cached(
+            study_uid="study1",
+            series_uids=["series_ct", "series_dose_sr"],
+            client=mock_client,
+            pacs=MagicMock(),
+            expected_counts={"series_ct": 2, "series_dose_sr": 1},
+        )
+
+        assert set(result) == {"series_ct"}
+        with pytest.raises(SeriesRefusedError):
+            await cache.ensure_series_cached("study1", "series_dose_sr", mock_client, MagicMock())
 
     @pytest.mark.asyncio
     async def test_study_retrieve_series_still_short_on_its_own_raises(

@@ -6,6 +6,7 @@ from clarinet.services.dicom.anonymizer import DicomAnonymizer
 from clarinet.services.dicom.client import (
     DicomClient,
     retrieve_is_complete,
+    retrieve_was_refused,
     series_instance_counts,
 )
 from clarinet.services.dicom.models import (
@@ -59,5 +60,6 @@ __all__ = [
     "StudyQuery",
     "StudyResult",
     "retrieve_is_complete",
+    "retrieve_was_refused",
     "series_instance_counts",
 ]

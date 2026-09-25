@@ -18,6 +18,7 @@ from dimsechord._models import StorageMode
 from clarinet.services.dicom.client import (
     DicomClient,
     retrieve_is_complete,
+    retrieve_was_refused,
     series_instance_counts,
 )
 from clarinet.services.dicom.models import DicomNode
@@ -311,6 +312,20 @@ class TestRetrieveIsComplete:
     def test_status_and_failures_decide(self, status: str, num_failed: int, complete: bool):
         result = RetrieveResult(status=status, num_completed=5, num_failed=num_failed)
         assert retrieve_is_complete(result) is complete
+
+
+@pytest.mark.parametrize(
+    ("completed", "failed", "status", "refused"),
+    [
+        (0, 3, "warning_0xb000", True),  # every sub-operation failed: a refused SOP class
+        (2, 1, "warning_0xb000", False),  # partial — something did arrive
+        (0, 0, "timeout", False),  # nothing arrived, nothing failed: transient
+        (0, 0, "success", False),  # nothing to send
+    ],
+)
+def test_retrieve_was_refused(completed: int, failed: int, status: str, refused: bool):
+    result = RetrieveResult(status=status, num_completed=completed, num_failed=failed)
+    assert retrieve_was_refused(result) is refused
 
 
 def test_series_instance_counts_vouches_only_for_positive_counts():

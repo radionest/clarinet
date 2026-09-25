@@ -48,6 +48,17 @@ def retrieve_is_complete(result: RetrieveResult) -> bool:
     return result.status == "success" and result.num_failed == 0
 
 
+def retrieve_was_refused(result: RetrieveResult) -> bool:
+    """Whether the peer failed every sub-operation of a retrieve.
+
+    Nothing arrived and something failed: the peer tried and this side could
+    not store it — a SOP class outside the negotiated storage contexts (Dose SR
+    on c-get, a private class such as Siemens CSA Non-Image in either mode).
+    Unlike a timeout, retrying cannot help.
+    """
+    return result.num_completed == 0 and result.num_failed > 0
+
+
 def series_instance_counts(results: Iterable[SeriesResult]) -> dict[str, int]:
     """Instance count per series, as the peer's C-FIND reported it.
 

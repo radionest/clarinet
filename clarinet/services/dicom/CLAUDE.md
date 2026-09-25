@@ -50,17 +50,20 @@ uncompressed — broad on syntax, narrow on SOP class. The Storage SCP only
 `StoragePresentationContexts` with every transfer syntax and never spends the
 budget.
 
-So c-get needs nothing from the network, and c-move never silently drops an
-unusual modality. **On c-get, check your modalities first**: a SOP class outside
+So c-get needs nothing from the network, and c-move drops no *standard* SOP
+class. **On c-get, check your modalities first**: a SOP class outside
 `DEFAULT_IMAGE_STORAGE_CLASSES` / `DEFAULT_OTHER_STORAGE_CLASSES` gets no
 accepted context, so its instances fail their sub-operations and the retrieve
 returns short — `num_failed > 0` under `warning_0xb000`, not an exception from
 the client (see Short retrieves below). The curated set covers CT,
 MR, Enhanced CT/MR, PET, CR, DX-for-presentation, SC, US and US multi-frame,
-plus RT, SEG, SR, KO, PR and encapsulated documents. Notably **absent**: X-Ray
-Angiographic, Nuclear Medicine, Digital Mammography, Enhanced XA/XRF, Breast
-Tomosynthesis and the VL/endoscopic family, among others. A site with any of those wants
-c-move until dimsechord takes a storage-class argument.
+plus RT, SEG, KO, PR, encapsulated documents and the Basic Text / Enhanced /
+Comprehensive / Comprehensive 3D SR classes. Notably **absent**: X-Ray Radiation
+Dose SR (routine on CT), X-Ray Angiographic, Nuclear Medicine, Digital
+Mammography, Enhanced XA/XRF, Breast Tomosynthesis and the VL/endoscopic family,
+among others. A site with any of those wants c-move until dimsechord takes a
+storage-class argument. **Private** SOP classes — Siemens CSA Non-Image
+(PhoenixZIPReport on MR) — are in neither set, so they are refused in both modes.
 
 ### Listener ownership
 
@@ -121,9 +124,11 @@ an otherwise successful retrieve. Both want fixing in dimsechord, not here.
 Clarinet's consumers read either as a short retrieve (below), which makes the
 second fatal rather than slow: a first pending response without counters sums
 to `total_expected == 0`, skipping both `set_expected` and the final-count
-fallback, so every retrieve from such a peer ends `timeout` and every
-series-level consumer fails. Only `prefetch_dicom_web`'s per-series path
-compensates (C-FIND count); the fix belongs in dimsechord.
+fallback, so every retrieve from such a peer ends `timeout`, and
+`ensure_series_cached` and `convert_series_to_nifti` fail on it. Paths with a
+C-FIND count to hand compensate — `ensure_study_cached` and
+`prefetch_dicom_web` — as does `AnonymizationService`, which never reads
+`status`; the fix belongs in dimsechord.
 
 The `-study` suffix does not reach this path at all — it is read by the Slicer
 helper (`helper.py`), which batches its own ctkDICOM retrieves at study level.
@@ -138,16 +143,20 @@ A timed-out C-MOVE (`timeout`), a C-GET whose SOP class got no context
 
 | Consumer | On a short retrieve |
 |---|---|
-| `DicomWebCache.ensure_series_cached`, `convert_series_to_nifti` | raise — nothing is cached or converted |
-| `DicomWebCache.ensure_study_cached` | keep the series whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`), then retrieve every requested series still missing on its own through `ensure_series_cached` — which raises if that is short too. A study is returned whole or not at all |
-| `prefetch_dicom_web` | publish only the series that arrived whole — after the study-level retrieve, by C-FIND count; after per-series ones, by the series' own status or, failing that, its C-FIND count — then raise naming the rest, so the retry fetches only those |
+| `DicomWebCache.ensure_series_cached`, `convert_series_to_nifti` | raise — nothing is cached or converted (`ensure_series_cached` raises `SeriesRefusedError` for a refused series) |
+| `DicomWebCache.ensure_study_cached` | keep the series whose arrivals reach the C-FIND `NumberOfSeriesRelatedInstances` (`series_instance_counts`), then retrieve every requested series still missing — short, or never sent — on its own through `ensure_series_cached`, which raises if that is short too; a refused series is logged and left out |
+| `prefetch_dicom_web` | publish only the series that arrived whole — after the study-level retrieve, by C-FIND count; after per-series ones, by the series' own status or, failing that, its C-FIND count — then raise naming the rest, so the retry fetches only those; a refused series is logged and left out |
 | `AnonymizationService._retrieve_series` | its own check — received vs `Series.instance_count`, retried; does not read `status` |
 
 A series the peer gave no (or a zero) count for is never vouched for by count.
 
-A series that is short *every* time — a SOP class outside c-get's negotiated
-contexts — fails every retrieve: `prefetch_dicom_web` spends its retries and
-lands in the DLQ, and the viewer's study metadata request errors.
+**Refused** (`retrieve_was_refused`): nothing arrived and `num_failed > 0` — the
+peer tried every instance and this side could not store it, a SOP class outside
+the negotiated contexts. Retrying cannot help, so the study is served and
+prefetched without that series. A study-level retrieve cannot tell refused
+from short, so prefetch's first run still fails and its per-series retry
+settles it. A series that arrives *partially* every time still spends the
+retries and lands in the DLQ.
 
 ## Settings (`clarinet/settings.py`)
 

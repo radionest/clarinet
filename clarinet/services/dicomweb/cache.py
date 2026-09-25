@@ -16,10 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from clarinet.files import AnonPathError, Files
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.dicom.client import DicomClient, retrieve_is_complete
+from clarinet.services.dicom.client import DicomClient, retrieve_is_complete, retrieve_was_refused
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from clarinet.utils.logger import logger
+
+
+class SeriesRefusedError(RuntimeError):
+    """The peer failed every instance of a series — see ``retrieve_was_refused``.
+
+    Permanent for that series, so a study is served without it rather than not
+    at all; a direct request for the series still fails with it.
+    """
 
 
 class DicomWebCache:
@@ -400,6 +408,7 @@ class DicomWebCache:
             MemoryCachedSeries with instances dict for O(1) lookup
 
         Raises:
+            SeriesRefusedError: If the peer failed every instance of the series.
             RuntimeError: If the retrieve returns no instances, or comes back
                 incomplete — a partial series is never cached.
         """
@@ -452,6 +461,12 @@ class DicomWebCache:
                 peer=pacs,
             )
 
+            if retrieve_was_refused(result):
+                raise SeriesRefusedError(
+                    f"PACS failed all {result.num_failed} instances of series {series_uid} "
+                    f"(status: {result.status}) — its SOP class is outside the storage "
+                    f"contexts this side negotiates"
+                )
             if result.num_completed == 0:
                 raise RuntimeError(
                     f"DICOM retrieve returned 0 instances for series {series_uid} (status: {result.status})"
@@ -510,7 +525,9 @@ class DicomWebCache:
                 cached from it, every other one is retrieved on its own.
 
         Returns:
-            Dict mapping series_uid → MemoryCachedSeries for every requested series.
+            Dict mapping series_uid → MemoryCachedSeries for every requested
+            series, except one the peer refuses outright (``SeriesRefusedError``,
+            logged) — it can never arrive.
 
         Raises:
             RuntimeError: If the study retrieve returns no instances, or a series
@@ -648,12 +665,17 @@ class DicomWebCache:
 
             # A requested series the study retrieve left out — short, or never
             # sent — gets a retrieve of its own, which raises if it is short
-            # too: a study is served whole or not at all.
+            # too: no series is served short. One the peer refuses outright can
+            # never arrive, so the study is served without it.
             for ser_uid in still_missing:
-                if ser_uid not in result:
+                if ser_uid in result:
+                    continue
+                try:
                     result[ser_uid] = await self.ensure_series_cached(
                         study_uid, ser_uid, client, pacs
                     )
+                except SeriesRefusedError as e:
+                    logger.warning(f"{e} — serving study {study_uid} without it")
 
         return result
 
