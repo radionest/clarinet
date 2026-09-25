@@ -249,11 +249,14 @@ class DatabaseStrategy(Strategy[User, UUID]):
         """Drop every cached entry whose value.id == user_id.
 
         Used after role removal / deactivation to make demotions take effect
-        immediately instead of after the TTL expires.
+        immediately instead of after the TTL expires. Also drops the cached
+        service-token user unconditionally: it is the admin row, and reloading
+        it costs one query.
         """
         stale = [token for token, cached in cls._user_cache.items() if cached.id == user_id]
         for token in stale:
             cls._user_cache.pop(token, None)
+        _service_user_cache.clear()
 
     @classmethod
     def evict_token(cls, token: str) -> None:

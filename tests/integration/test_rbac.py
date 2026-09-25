@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from clarinet.api.app import app
 from clarinet.api.auth_config import current_active_user, current_superuser
@@ -30,6 +31,7 @@ from tests.utils.factories import make_patient, make_record_type
 from tests.utils.test_helpers import PatientFactory, RecordFactory
 from tests.utils.urls import (
     ADMIN_RECORD_EVENTS,
+    AUTH_ME,
     DICOM_BASE,
     DICOM_IMPORT_STUDY,
     PIPELINE_RUNS,
@@ -38,6 +40,7 @@ from tests.utils.urls import (
     RECORDS_FIND,
     SLICER_RECORD_OPEN,
     SLICER_RECORD_VALIDATE,
+    USERS_BASE,
     record_events_url,
 )
 
@@ -1379,6 +1382,40 @@ async def test_session_cache_invalidated_on_role_remove(superuser_client, test_s
         assert fake_token not in DatabaseStrategy._user_cache
     finally:
         DatabaseStrategy._user_cache.pop(fake_token, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    [("post", "/deactivate", None), ("put", "", {"is_active": False}), ("delete", "", None)],
+)
+async def test_service_token_dies_with_admin_account(
+    unauthenticated_client, test_session, test_settings, monkeypatch, method, suffix, body
+):
+    """Deactivating or deleting the admin row ends X-Internal-Token access at
+    once, not when the 5-minute service-user cache expires (#600)."""
+    monkeypatch.setattr(test_settings, "internal_service_token", SecretStr("tok-600"))
+    admin_id = uuid4()
+    test_session.add(
+        User(
+            id=admin_id,
+            email=test_settings.admin_email,
+            hashed_password="unused",
+            is_active=True,
+            is_verified=True,
+            is_superuser=True,
+        )
+    )
+    await test_session.commit()
+    token = {"X-Internal-Token": "tok-600"}
+    assert (await unauthenticated_client.get(AUTH_ME, headers=token)).status_code == 200
+
+    response = await unauthenticated_client.request(
+        method, f"{USERS_BASE}/{admin_id}{suffix}", headers=token, json=body
+    )
+    assert response.is_success
+
+    assert (await unauthenticated_client.get(AUTH_ME, headers=token)).status_code == 401
 
 
 # --- Slicer record endpoints: per-record authorization ---

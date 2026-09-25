@@ -94,6 +94,7 @@ class UserService:
             update_fields["hashed_password"] = get_password_hash(data.password)
 
         await self.user_repo.update(user, update_fields)
+        DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 
     async def delete_user(self, user_id: UUID) -> None:
@@ -107,6 +108,7 @@ class UserService:
         """
         user = await self.user_repo.get(user_id)
         await self.user_repo.delete(user)
+        DatabaseStrategy.invalidate_user_cache(user_id)
 
     async def authenticate(self, username: str, password: str) -> User:
         """Authenticate user with username and password.
