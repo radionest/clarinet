@@ -1835,36 +1835,51 @@ class RecordRepository(BaseRepository[Record]):
     ) -> dict[str, dict[str, str]]:
         """Map study/series UIDs to their anon UID per patient, for viewer-list masking.
 
-        ``{patient_id: {uid: anon_uid}}`` — both the original and the anon UID
-        of every anonymized study/series in ``uids`` are keys, since viewer
-        lists may hold either. DICOM UIDs are globally unique, so one map
-        serves both levels. A UID with no anon counterpart is absent, and the
-        caller drops it.
+        ``{patient_id: {uid: anon_uid}}`` for every id in ``patient_ids`` —
+        viewer lists may hold original or anon UIDs, so both are keys. DICOM
+        UIDs are globally unique, so one map serves both levels. A UID with no
+        anon counterpart is absent, and the caller drops it.
 
-        Scoped per patient: viewer lists are user-writable (PATCH), so an
-        unscoped lookup would hand back the salted anon UID of any other
-        patient's study whose raw UID the user puts on their own record.
+        Viewer lists are user-writable (PATCH), so the two key kinds are scoped
+        differently:
+
+        - an original UID resolves only for its own patient — otherwise a user
+          could put another patient's raw UID on their record and read its
+          salted anon UID back;
+        - a known anon UID maps to itself for every patient — scoping it too
+          would let a user test whether two anonymized studies share a patient,
+          which per-study patient ids exist to hide.
         """
-        anon_uids: dict[str, dict[str, str]] = {}
-        if not uids or not patient_ids:
-            return anon_uids
-        in_patients = col(Study.patient_id).in_(patient_ids)
+        uid_set, pid_set = set(uids), set(patient_ids)
+        if not uid_set or not pid_set:
+            return {}
+        known_anon: dict[str, str] = {}
+        own_raw: dict[str, dict[str, str]] = {}
+        in_patients = col(Study.patient_id).in_(pid_set)
         for query in (
             select(Study.patient_id, Study.study_uid, Study.anon_uid).where(
-                in_patients,
-                or_(col(Study.study_uid).in_(uids), col(Study.anon_uid).in_(uids)),
+                or_(
+                    and_(in_patients, col(Study.study_uid).in_(uid_set)),
+                    col(Study.anon_uid).in_(uid_set),
+                )
             ),
             select(Study.patient_id, Series.series_uid, Series.anon_uid)
             .join_from(Series, Study)
             .where(
-                in_patients,
-                or_(col(Series.series_uid).in_(uids), col(Series.anon_uid).in_(uids)),
+                or_(
+                    and_(in_patients, col(Series.series_uid).in_(uid_set)),
+                    col(Series.anon_uid).in_(uid_set),
+                )
             ),
         ):
             for patient_id, uid, anon in (await self.session.execute(query)).all():
-                if anon:
-                    anon_uids.setdefault(patient_id, {}).update({uid: anon, anon: anon})
-        return anon_uids
+                if not anon:
+                    continue
+                if anon in uid_set:
+                    known_anon[anon] = anon
+                if uid in uid_set and patient_id in pid_set:
+                    own_raw.setdefault(patient_id, {})[uid] = anon
+        return {pid: {**known_anon, **own_raw.get(pid, {})} for pid in pid_set}
 
     async def get_available_type_counts(
         self,

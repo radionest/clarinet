@@ -677,8 +677,9 @@ async def test_viewer_uids_masked_for_non_admin(
     """viewer_*_uids are pipeline- or user-written and may hold raw UIDs (#592).
 
     A non-superuser gets each entry's anon UID; an entry with none known — a
-    study not anonymized yet, a UID absent from the DB, another patient's
-    study (the lookup must not become an anon-UID oracle) — is dropped.
+    study not anonymized yet, a UID absent from the DB, another patient's raw
+    UID (no raw -> anon oracle) — is dropped. Another patient's anon UID is
+    kept, so the response can't tell whether two studies share a patient.
     """
     today = datetime.now(UTC).date()
     test_patient.auto_id = 123
@@ -690,6 +691,7 @@ async def test_viewer_uids_masked_for_non_admin(
         "1.2.3.88",
         "9.9.9",
         "1.2.3.99",
+        "ANON_OTHER_099",
     ]
     record_role_a.viewer_series_uids = [test_series.series_uid]
     test_session.add_all(
@@ -718,7 +720,7 @@ async def test_viewer_uids_masked_for_non_admin(
     by_id = (await role_a_client.get(f"{RECORDS_BASE}/{record_role_a.id}")).json()
     found = (await role_a_client.post(RECORDS_FIND, json={})).json()["items"]
     for data in (by_id, *found):
-        assert data["viewer_study_uids"] == ["ANON_STUDY_001", "ANON_STUDY_077"]
+        assert data["viewer_study_uids"] == ["ANON_STUDY_001", "ANON_STUDY_077", "ANON_OTHER_099"]
         assert data["viewer_series_uids"] == ["ANON_SERIES_001"]
 
 

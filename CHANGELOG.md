@@ -595,10 +595,11 @@
   rewrote `study_uid`, `series_uid` and the nested study/series but returned the
   viewer lists verbatim, so the raw StudyInstanceUIDs / SeriesInstanceUIDs a
   pipeline (or a `PATCH /api/records/{id}`) wrote there reached non-superusers
-  on every record endpoint. Each entry is now replaced by the anon UID of the
-  matching study/series of the record's own patient; an entry with none — not
-  anonymized yet, unknown, or another patient's — is dropped. Scoping to the
-  patient keeps PATCH from becoming a lookup of any study's anon UID. Closes #592.
+  on every record endpoint. A raw entry is now replaced by the anon UID of the
+  matching study/series of the record's own patient, a known anon UID is kept,
+  and anything else — not anonymized yet, unknown, another patient's raw UID —
+  is dropped. Scoping raw UIDs to the patient keeps PATCH from becoming a lookup
+  of any study's anon UID. Closes #592.
 
 ### Added
 
