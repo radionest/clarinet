@@ -26,3 +26,41 @@
     gap: var(--spacing-sm);
     margin-top: var(--spacing-md);
 }
+
+/* Card title with its actions on the right (patient Studies + Search PACS) */
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+
+    & h3 {
+        margin: 0;
+    }
+}
+
+.card-header-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* Secondary section (activity feed, workflow graph) as a native <details>:
+   pages never set `open`, so it starts collapsed and stays however the user
+   left it across re-renders. Collapsed, it shrinks to a single header line. */
+details.card {
+    & > summary {
+        cursor: pointer;
+        font-weight: 600;
+        user-select: none;
+    }
+
+    &:not([open]) {
+        padding-block: var(--spacing-sm);
+    }
+
+    &[open] > summary {
+        margin-bottom: var(--spacing-md);
+    }
+}

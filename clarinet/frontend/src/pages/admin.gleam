@@ -742,14 +742,14 @@ fn records_config(model: Model, shared: Shared) -> records_list.Config(Msg) {
     }),
     // Drill-in: open the record detail. Kept alongside the inline
     // status/user controls rather than replacing them.
-    actions_cell: fn(record) {
+    actions_cell: Some(fn(record) {
       records_list.detail_link(
         record,
         "btn btn-sm btn-outline",
         i18n.BtnView,
         shared.translate,
       )
-    },
+    }),
   )
 }
 

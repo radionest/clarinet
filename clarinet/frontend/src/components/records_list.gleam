@@ -48,11 +48,12 @@ pub type Config(msg) {
     on_remove_filter: fn(String) -> msg,
     on_clear_filters: msg,
     on_column_click: fn(String) -> msg,
-    // Diverging cells. `user_cell` is None when the page has no assigned-user
-    // column at all (patient detail); Some renders both the column and cell.
+    // Diverging cells. `user_cell` / `actions_cell` are None when the page has
+    // no such column at all (patient detail: rows already link via the id);
+    // Some renders both the column and cell.
     status_cell: fn(Record) -> Element(msg),
     user_cell: Option(fn(Record) -> Element(msg)),
-    actions_cell: fn(Record) -> Element(msg),
+    actions_cell: Option(fn(Record) -> Element(msg)),
   )
 }
 
@@ -282,7 +283,10 @@ fn header_row(
         Some(_) -> [sortable(i18n.ThAssignedUser, "user")]
         None -> []
       },
-      [table_sort.th_static(t(i18n.ThActions))],
+      case config.actions_cell {
+        Some(_) -> [table_sort.th_static(t(i18n.ThActions))]
+        None -> []
+      },
     ]),
   )
 }
@@ -338,9 +342,12 @@ fn record_row(
         Some(render) -> [html.td([], [render(record)])]
         None -> []
       },
-      [
-        html.td([attribute.class("cell-actions")], [config.actions_cell(record)]),
-      ],
+      case config.actions_cell {
+        Some(render) -> [
+          html.td([attribute.class("cell-actions")], [render(record)]),
+        ]
+        None -> []
+      },
     ]),
   )
 }

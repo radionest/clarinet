@@ -10,6 +10,7 @@ import cache
 import cache/bucket
 import clarinet_frontend/i18n
 import components/activity_feed
+import components/entity_link
 import components/records_list
 import components/status_badge
 import gleam/dict.{type Dict}
@@ -68,7 +69,6 @@ pub type Msg {
   ClearFilters
   ColumnHeaderClicked(column: String)
   // Navigation
-  NavigateBack
   RequestDelete
   OpenAddRecord
   // Activity section
@@ -313,10 +313,6 @@ pub fn update(
       ])
     }
 
-    NavigateBack -> #(model, effect.none(), [
-      shared.Navigate(router.Patients(dict.new())),
-    ])
-
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("patient", model.patient_id),
     ])
@@ -376,13 +372,6 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Patient: " <> patient.id)]),
       html.div([], [
-        html.button(
-          [
-            attribute.class("btn btn-secondary"),
-            event.on_click(NavigateBack),
-          ],
-          [html.text("Back to Patients")],
-        ),
         case is_admin {
           True ->
             html.button(
@@ -394,26 +383,29 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
             )
           False -> element.none()
         },
-        html.button(
-          [
-            attribute.class("btn btn-danger"),
-            event.on_click(RequestDelete),
-          ],
-          [html.text("Delete Patient")],
-        ),
       ]),
     ]),
     patient_info_card(patient),
-    studies_section(patient.studies),
-    pacs_section(model, patient),
-    activity_section(model, shared),
+    studies_section(model, patient),
     records_section(model, records, records_status, shared),
+    html.div([attribute.class("page-actions")], [
+      html.button(
+        [
+          attribute.class("btn btn-danger"),
+          event.on_click(RequestDelete),
+        ],
+        [html.text("Delete Patient")],
+      ),
+    ]),
+    activity_section(model, shared),
   ])
 }
 
+// Collapsed by default: the view never sets `open`, so a user's expand
+// survives re-renders. Data still loads on init, so expanding is instant.
 fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
-  html.div([attribute.class("card")], [
-    html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+  html.details([attribute.class("card")], [
+    html.summary([], [html.text(shared.translate(i18n.NavActivity))]),
     element.map(
       activity_feed.view(model.activity, shared.translate, [], []),
       ActivityMsg,
@@ -425,8 +417,6 @@ fn patient_info_card(patient: Patient) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Patient Information")]),
     html.dl([attribute.class("record-metadata")], [
-      html.dt([], [html.text("ID:")]),
-      html.dd([], [html.text(patient.id)]),
       html.dt([], [html.text("Name:")]),
       html.dd([], [html.text(option.unwrap(patient.name, "-"))]),
       html.dt([], [html.text("Anonymous ID:")]),
@@ -454,10 +444,14 @@ fn anonymize_button(patient: Patient) -> Element(Msg) {
   }
 }
 
-fn studies_section(studies: Option(List(Study))) -> Element(Msg) {
+/// The patient's studies plus the PACS search that adds more of them.
+fn studies_section(model: Model, patient: Patient) -> Element(Msg) {
   html.div([attribute.class("card")], [
-    html.h3([], [html.text("Studies")]),
-    case studies {
+    html.div([attribute.class("card-header")], [
+      html.h3([], [html.text("Studies")]),
+      pacs_buttons(model),
+    ]),
+    case patient.studies {
       None | Some([]) ->
         html.p([attribute.class("text-muted")], [
           html.text("No studies found for this patient."),
@@ -472,13 +466,13 @@ fn studies_section(studies: Option(List(Study))) -> Element(Msg) {
                 html.th([], [html.text("Description")]),
                 html.th([], [html.text("Series")]),
                 html.th([], [html.text("Anonymized")]),
-                html.th([], [html.text("Actions")]),
               ]),
             ]),
             html.tbody([], list.map(study_list, study_row)),
           ]),
         ])
     },
+    pacs_results(model, patient),
   ])
 }
 
@@ -500,7 +494,7 @@ fn study_row(study: Study) -> Element(Msg) {
   }
 
   html.tr([], [
-    html.td([], [html.text(study.date)]),
+    html.td([], [entity_link.study_labeled(study.study_uid, study.date)]),
     html.td([], [html.text(modalities)]),
     html.td([], [html.text(description)]),
     html.td([], [html.text(series_count)]),
@@ -515,17 +509,6 @@ fn study_row(study: Study) -> Element(Msg) {
             html.text("No"),
           ])
       },
-    ]),
-    html.td([], [
-      html.a(
-        [
-          attribute.href(
-            router.route_to_path(router.StudyDetail(study.study_uid)),
-          ),
-          attribute.class("btn btn-sm btn-outline"),
-        ],
-        [html.text("View")],
-      ),
     ]),
   ])
 }
@@ -550,7 +533,7 @@ fn records_section(
 
 /// Shared-widget config for a patient's records. Scoped to one patient, so
 /// the patient columns and patient/user filters are hidden; rows drill into
-/// the record detail via the View action.
+/// the record detail via the id link, so there is no actions column.
 fn records_config(shared: Shared) -> records_list.Config(Msg) {
   records_list.Config(
     // Type filter hidden: filter_options is RBAC-scoped *globally*, so it
@@ -571,59 +554,53 @@ fn records_config(shared: Shared) -> records_list.Config(Msg) {
       status_badge.render(record.status, shared.translate)
     },
     user_cell: None,
-    actions_cell: fn(record) {
-      records_list.detail_link(
-        record,
-        "btn btn-sm btn-outline",
-        i18n.BtnView,
-        shared.translate,
-      )
-    },
+    actions_cell: None,
   )
 }
 
-fn pacs_section(model: Model, patient: Patient) -> Element(Msg) {
-  html.div([attribute.class("card")], [
-    html.h3([], [html.text("Add Study from PACS")]),
-    html.div([attribute.class("card-actions")], [
-      html.button(
-        [
-          attribute.class("btn btn-primary"),
-          attribute.disabled(model.pacs_loading),
-          event.on_click(SearchPacs),
-        ],
-        [
-          case model.pacs_loading {
-            True -> html.text("Searching...")
-            False -> html.text("Search PACS")
-          },
-        ],
-      ),
-      case model.pacs_studies {
-        [] -> element.none()
-        _ ->
-          html.button(
-            [
-              attribute.class("btn btn-secondary"),
-              event.on_click(ClearPacs),
-            ],
-            [html.text("Clear Results")],
-          )
-      },
-    ]),
-    case model.pacs_loading {
-      True ->
-        html.div([attribute.class("loading-container")], [
-          html.div([attribute.class("spinner")], []),
-          html.p([], [html.text("Searching PACS...")]),
-        ])
-      False ->
-        case model.pacs_studies {
-          [] -> element.none()
-          pacs_studies -> pacs_results_table(model, pacs_studies, patient.id)
-        }
+fn pacs_buttons(model: Model) -> Element(Msg) {
+  html.div([attribute.class("card-header-actions")], [
+    html.button(
+      [
+        attribute.class("btn btn-sm btn-outline"),
+        attribute.disabled(model.pacs_loading),
+        event.on_click(SearchPacs),
+      ],
+      [
+        case model.pacs_loading {
+          True -> html.text("Searching...")
+          False -> html.text("Search PACS")
+        },
+      ],
+    ),
+    case model.pacs_studies {
+      [] -> element.none()
+      _ ->
+        html.button(
+          [
+            attribute.class("btn btn-sm btn-secondary"),
+            event.on_click(ClearPacs),
+          ],
+          [html.text("Clear Results")],
+        )
     },
   ])
+}
+
+fn pacs_results(model: Model, patient: Patient) -> Element(Msg) {
+  case model.pacs_loading, model.pacs_studies {
+    True, _ ->
+      html.div([attribute.class("loading-container")], [
+        html.div([attribute.class("spinner")], []),
+        html.p([], [html.text("Searching PACS...")]),
+      ])
+    False, [] -> element.none()
+    False, pacs_studies ->
+      html.div([attribute.class("pacs-results")], [
+        html.h4([], [html.text("Found in PACS")]),
+        pacs_results_table(model, pacs_studies, patient.id),
+      ])
+  }
 }
 
 fn pacs_results_table(

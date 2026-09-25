@@ -282,16 +282,8 @@
 
 /* --- Inline section on the record page --- */
 
-.workflow-section {
-    margin-top: var(--spacing-md);
-}
-
-.workflow-section-header h3 {
-    margin: 0;
-}
-
-.workflow-section-header p {
-    margin: var(--spacing-xs) 0 var(--spacing-md);
+.workflow-hint {
+    margin-bottom: var(--spacing-md);
 }
 
 .workflow-loading {

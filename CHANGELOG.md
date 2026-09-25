@@ -648,6 +648,16 @@
 
 ### Changed
 
+- **Entity detail pages are quieter.** On the record and patient pages the
+  Activity feed — and, for admins, the record's Workflow graph — now sit at
+  the bottom, after the action buttons, collapsed until clicked. The record
+  page is titled by its record type instead of "Record Execution"; study and
+  series pages by description, date and series number instead of the raw
+  DICOM UID. The Patient (study page) and Parent Study (series page) cards
+  fold into the info card, the "Back to …" and per-row "View" buttons are
+  gone (the id or date is the link), Delete Study / Delete Patient moved from
+  the header to the bottom of the page, and the patient's PACS search lives
+  in the Studies card header.
 - Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
   `invalidate_records()`) now always fires `on_status("pending")` flows —
   even when the record was already `pending`. Previously an already-pending

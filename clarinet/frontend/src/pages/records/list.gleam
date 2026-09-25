@@ -254,7 +254,7 @@ fn list_config(shared: Shared) -> records_list.Config(Msg) {
       True -> Some(fn(record) { user_cell_content(shared, record) })
       False -> None
     },
-    actions_cell: fn(record) { actions_cell(shared, record) },
+    actions_cell: Some(fn(record) { actions_cell(shared, record) }),
   )
 }
 
