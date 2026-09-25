@@ -116,6 +116,19 @@ async def test_startup_pipeline_disabled(startup_settings, capture_logs):
     assert errors == [], f"Unexpected client/login errors during startup: {errors}"
 
 
+@pytest.mark.asyncio
+async def test_startup_installs_dicom_association_cap(startup_settings, monkeypatch):
+    """#551: the cap is process-local, so the API lifespan installs its own."""
+    from clarinet.services.dicom import DicomClient
+
+    monkeypatch.setattr(settings, "dicom_max_concurrent_associations", 3)
+    app = FastAPI(lifespan=lifespan)
+
+    with patch.object(DicomClient, "set_max_concurrent_associations") as set_cap:
+        async with lifespan(app):
+            set_cap.assert_called_once_with(3)
+
+
 # ── Test 2: pipeline enabled + real RabbitMQ ────────────────────────────────
 
 

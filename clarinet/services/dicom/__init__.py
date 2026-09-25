@@ -5,6 +5,7 @@ from pynetdicom import _config as _pynetdicom_config
 from clarinet.services.dicom.anonymizer import DicomAnonymizer
 from clarinet.services.dicom.client import (
     DicomClient,
+    install_association_cap,
     retrieve_is_complete,
     retrieve_was_refused,
     series_instance_counts,
@@ -59,6 +60,7 @@ __all__ = [
     "SkippedSeriesInfo",
     "StudyQuery",
     "StudyResult",
+    "install_association_cap",
     "retrieve_is_complete",
     "retrieve_was_refused",
     "series_instance_counts",

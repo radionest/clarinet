@@ -45,11 +45,12 @@ retrieve_study_metadata()
 
 A `threading.Semaphore` inside dimsechord's SCU limits the total number of
 concurrent DICOM associations across all operations (DICOMweb proxy,
-anonymization, import, etc.). Sized via
-`DicomClient.set_max_concurrent_associations()` in both the app lifespan and
-`run_worker`: the semaphore is a class attribute, so a call binds only the
-process that makes it. The limit is per process, not fleet-wide — the API plus
-N workers can hold (N+1) × `dicom_max_concurrent_associations` at once.
+anonymization, import, etc.). Installed by `install_association_cap()`
+(`clarinet/services/dicom/client.py`), which both the app lifespan and
+`run_worker` call: the semaphore lives in process memory, so every process that
+opens associations must install its own. The limit is per process, not
+fleet-wide — the API plus N workers can hold (N+1) ×
+`dicom_max_concurrent_associations` at once.
 
 **Why `threading.Semaphore`:**
 - It is acquired inside the synchronous SCU, called via `asyncio.to_thread()`

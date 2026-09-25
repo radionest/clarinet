@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, PositiveInt, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -250,7 +250,7 @@ class Settings(BaseSettings):
     dicom_max_pdu: int = 16384
     # Per process — NOT fleet-wide: the API and each worker install their own
     # cap, so the API plus N workers can hold (N+1) x this many associations.
-    dicom_max_concurrent_associations: int = 8
+    dicom_max_concurrent_associations: PositiveInt = 8
     dicom_retrieve_mode: Literal["c-get", "c-get-study", "c-move", "c-move-study"] = "c-get"
     # Which process owns the C-MOVE listener, per process — NOT fleet-wide.
     # None = auto: the API owns one when the retrieve mode is a c-move mode;

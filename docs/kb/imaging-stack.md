@@ -71,8 +71,8 @@ dispatch, the SCP lifecycle, anonymization and the series filter.
 - dimsechord's SCU holds a global **`threading.Semaphore`** (not asyncio — it is
   acquired inside the `to_thread` worker) limiting concurrent associations
   across DICOMweb, anonymization and import; sized from
-  `dicom_max_concurrent_associations` in both the app lifespan and
-  `run_worker`. It is per process, not fleet-wide: the API plus N workers can
+  `dicom_max_concurrent_associations` by `install_association_cap()`, which
+  both the app lifespan and `run_worker` call. It is per process, not fleet-wide: the API plus N workers can
   hold (N+1) × the setting at once.
 - `AssociationError` — an unreachable or refusing PACS — maps to 409 in
   `api/exception_handlers.py`, as it did before. Routers let it propagate.
