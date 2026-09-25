@@ -48,16 +48,25 @@
 
 /* Secondary section (activity feed, workflow graph) as a native <details>:
    pages never set `open`, so it starts collapsed and stays however the user
-   left it across re-renders. Collapsed, it shrinks to a single header line. */
+   left it across re-renders. Collapsed, it shrinks to a single header line;
+   the top padding is the same in both states so the header doesn't jump. */
 details.card {
-    & > summary {
-        cursor: pointer;
-        font-weight: 600;
-        user-select: none;
+    padding-block: var(--spacing-sm);
+
+    &[open] {
+        padding-bottom: var(--spacing-lg);
     }
 
-    &:not([open]) {
-        padding-block: var(--spacing-sm);
+    & > summary {
+        cursor: pointer;
+        user-select: none;
+
+        /* A real heading for screen-reader navigation; inline keeps it on
+           the marker's line. */
+        & > h3 {
+            display: inline;
+            margin: 0;
+        }
     }
 
     &[open] > summary {

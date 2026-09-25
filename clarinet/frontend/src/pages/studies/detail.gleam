@@ -189,7 +189,7 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
         },
       ]),
     ]),
-    study_info_card(shared.viewers, study),
+    study_info_card(shared, study),
     series_section(shared.viewers, study.series),
     records_section(study_records, shared.translate),
     html.div([attribute.class("page-actions")], [
@@ -204,7 +204,7 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   ])
 }
 
-fn study_info_card(viewers: List(ViewerInfo), study: Study) -> Element(Msg) {
+fn study_info_card(shared: Shared, study: Study) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Study Information")]),
     html.dl([attribute.class("record-metadata")], [
@@ -220,10 +220,23 @@ fn study_info_card(viewers: List(ViewerInfo), study: Study) -> Element(Msg) {
           None -> element.none()
         },
       ]),
+      // The per-patient anon_id is stable across the patient's studies, so
+      // per-study anonymization hides it (as the record page does).
+      case
+        shared.anon_per_study,
+        option.then(study.patient, fn(p) { p.anon_id })
+      {
+        False, Some(anon_id) ->
+          element.fragment([
+            html.dt([], [html.text("Patient anon ID:")]),
+            html.dd([], [html.text(anon_id)]),
+          ])
+        _, _ -> element.none()
+      },
     ]),
     html.div([attribute.class("card-actions")], [
       viewer.viewer_buttons(
-        viewers,
+        shared.viewers,
         Some(study.study_uid),
         None,
         "btn btn-primary",

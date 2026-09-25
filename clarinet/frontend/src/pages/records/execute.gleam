@@ -1532,7 +1532,9 @@ fn render_record_execution(
 // survives re-renders. Data still loads on init, so expanding is instant.
 fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
   html.details([attribute.class("card")], [
-    html.summary([], [html.text(shared.translate(i18n.NavActivity))]),
+    html.summary([], [
+      html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+    ]),
     element.map(
       activity_feed.view(model.activity, shared.translate, [], []),
       ActivityMsg,
@@ -1922,10 +1924,7 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             html.dd([], [
               entity_link.study_labeled_if_admin(
                 study.study_uid,
-                option.unwrap(study.study_description, study.study_uid)
-                  <> " ("
-                  <> study.date
-                  <> ")",
+                entity_link.study_title(study),
                 is_admin,
               ),
             ]),
@@ -2110,11 +2109,13 @@ fn render_workflow_section(model: Model, shared: Shared) -> Element(Msg) {
   use <- bool.guard(!is_admin_user(shared), element.none())
   // Collapsed like activity_section.
   html.details([attribute.class("card")], [
-    html.summary([], [html.text(shared.translate(i18n.NavWorkflow))]),
+    html.summary([], [
+      html.h3([], [html.text(shared.translate(i18n.NavWorkflow))]),
+    ]),
     html.p([attribute.class("workflow-hint text-muted")], [
       html.text(
-        "Drag to pan, scroll to zoom. Click a record_type node to choose a "
-        <> "trigger to dry-run, then confirm to fire.",
+        "Drag to pan, Ctrl+scroll to zoom. Click a record_type node to choose "
+        <> "a trigger to dry-run, then confirm to fire.",
       ),
     ]),
     load_status.render(

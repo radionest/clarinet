@@ -386,7 +386,7 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
       ]),
     ]),
     patient_info_card(patient),
-    studies_section(model, patient),
+    studies_section(model, patient.studies),
     records_section(model, records, records_status, shared),
     html.div([attribute.class("page-actions")], [
       html.button(
@@ -405,7 +405,9 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
 // survives re-renders. Data still loads on init, so expanding is instant.
 fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
   html.details([attribute.class("card")], [
-    html.summary([], [html.text(shared.translate(i18n.NavActivity))]),
+    html.summary([], [
+      html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+    ]),
     element.map(
       activity_feed.view(model.activity, shared.translate, [], []),
       ActivityMsg,
@@ -445,13 +447,13 @@ fn anonymize_button(patient: Patient) -> Element(Msg) {
 }
 
 /// The patient's studies plus the PACS search that adds more of them.
-fn studies_section(model: Model, patient: Patient) -> Element(Msg) {
+fn studies_section(model: Model, studies: Option(List(Study))) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.div([attribute.class("card-header")], [
       html.h3([], [html.text("Studies")]),
       pacs_buttons(model),
     ]),
-    case patient.studies {
+    case studies {
       None | Some([]) ->
         html.p([attribute.class("text-muted")], [
           html.text("No studies found for this patient."),
@@ -472,7 +474,7 @@ fn studies_section(model: Model, patient: Patient) -> Element(Msg) {
           ]),
         ])
     },
-    pacs_results(model, patient),
+    pacs_results(model),
   ])
 }
 
@@ -587,7 +589,7 @@ fn pacs_buttons(model: Model) -> Element(Msg) {
   ])
 }
 
-fn pacs_results(model: Model, patient: Patient) -> Element(Msg) {
+fn pacs_results(model: Model) -> Element(Msg) {
   case model.pacs_loading, model.pacs_studies {
     True, _ ->
       html.div([attribute.class("loading-container")], [
@@ -598,7 +600,7 @@ fn pacs_results(model: Model, patient: Patient) -> Element(Msg) {
     False, pacs_studies ->
       html.div([attribute.class("pacs-results")], [
         html.h4([], [html.text("Found in PACS")]),
-        pacs_results_table(model, pacs_studies, patient.id),
+        pacs_results_table(model, pacs_studies),
       ])
   }
 }
@@ -606,7 +608,6 @@ fn pacs_results(model: Model, patient: Patient) -> Element(Msg) {
 fn pacs_results_table(
   model: Model,
   pacs_studies: List(PacsStudyWithSeries),
-  patient_id: String,
 ) -> Element(Msg) {
   html.div([attribute.class("table-responsive")], [
     html.table([attribute.class("table")], [
@@ -621,19 +622,13 @@ fn pacs_results_table(
       ]),
       html.tbody(
         [],
-        list.flat_map(pacs_studies, fn(ps) {
-          pacs_study_rows(model, ps, patient_id)
-        }),
+        list.flat_map(pacs_studies, fn(ps) { pacs_study_rows(model, ps) }),
       ),
     ]),
   ])
 }
 
-fn pacs_study_rows(
-  model: Model,
-  ps: PacsStudyWithSeries,
-  _patient_id: String,
-) -> List(Element(Msg)) {
+fn pacs_study_rows(model: Model, ps: PacsStudyWithSeries) -> List(Element(Msg)) {
   let study_date = format_dicom_date(ps.study.study_date)
   let modalities = option.unwrap(ps.study.modalities_in_study, "-")
   let description = option.unwrap(ps.study.study_description, "-")

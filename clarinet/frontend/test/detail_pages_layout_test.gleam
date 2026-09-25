@@ -38,9 +38,16 @@ pub fn record_page_collapses_activity_and_workflow_after_actions_test() {
   tags |> list.length |> should.equal(2)
   tags |> list.any(string.contains(_, "open")) |> should.be_false
   let assert Ok(#(_, after_activity)) =
-    string.split_once(tail, "<summary>Activity</summary>")
+    string.split_once(tail, "<summary><h3>Activity</h3></summary>")
   after_activity
-  |> string.contains("<summary>Workflow</summary>")
+  |> string.contains("<summary><h3>Workflow</h3></summary>")
+  |> should.be_true
+}
+
+pub fn record_page_names_study_without_description_test() {
+  models.Record(..make_record(42), study: Some(make_study(None)))
+  |> render_record
+  |> string.contains(">Study (2024-03-01)<")
   |> should.be_true
 }
 
@@ -68,7 +75,7 @@ pub fn patient_page_ends_with_delete_then_collapsed_activity_test() {
   tags |> list.length |> should.equal(1)
   tags |> list.any(string.contains(_, "open")) |> should.be_false
   after_delete
-  |> string.contains("<summary>Activity</summary>")
+  |> string.contains("<summary><h3>Activity</h3></summary>")
   |> should.be_true
 }
 
@@ -108,6 +115,16 @@ pub fn study_page_puts_delete_after_records_test() {
   let assert Ok(#(_, after_records)) =
     string.split_once(render_study(Some("CT Chest")), "<h3>Records</h3>")
   after_records |> string.contains("Delete Study") |> should.be_true
+}
+
+pub fn study_page_shows_patient_anon_id_unless_per_study_test() {
+  render_study_anon(anon_per_study: False)
+  |> string.contains("ANON_7")
+  |> should.be_true
+  // Stable across a patient's studies, so per-study mode hides it.
+  render_study_anon(anon_per_study: True)
+  |> string.contains("ANON_7")
+  |> should.be_false
 }
 
 pub fn study_page_shows_viewer_column_only_with_viewers_test() {
@@ -188,6 +205,22 @@ fn render_study(description: Option(String)) -> String {
     |> cache.put_study(make_study(description))
     |> with_bucket(key, [make_record(7), make_record(8)])
     |> make_shared
+  study_detail.view(
+    study_detail.Model(study_uid: "1.2.3", load_status: load_status.Loaded),
+    ctx,
+  )
+  |> element.to_string
+}
+
+fn render_study_anon(anon_per_study anon_per_study: Bool) -> String {
+  let patient = models.Patient(..base_patient(), anon_id: Some("ANON_7"))
+  let study =
+    models.Study(..make_study(Some("CT Chest")), patient: Some(patient))
+  let ctx =
+    shared.Shared(
+      ..make_shared(cache.put_study(cache.init(), study)),
+      anon_per_study: anon_per_study,
+    )
   study_detail.view(
     study_detail.Model(study_uid: "1.2.3", load_status: load_status.Loaded),
     ctx,
