@@ -33,6 +33,9 @@
 }
 
 .record-metadata {
+    /* The class sits on a wrapper (record page) or on the <dl> itself
+       (patient/study/series info cards). */
+    &:is(dl),
     & dl {
         display: grid;
         grid-template-columns: auto 1fr;
