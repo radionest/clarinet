@@ -700,6 +700,13 @@
   report `timeout` on complete retrieves, which now fail `ensure_series_cached`
   and `convert_series_to_nifti`; the paths with a C-FIND count compensate, the
   rest needs a dimsechord fix (#538).
+- **A failed Slicer open no longer leaves the previous record's id behind.**
+  The record id stored in Slicer survives `mrmlScene.Clear(0)` and was only
+  re-set at the end of the open script, so an open that failed part-way left
+  the previous record's id guarding a cleared or half-loaded scene, and
+  validating that record passed the record-mismatch guard. The pre-open scene
+  reset now drops the id first; validating after a failed open fails with
+  "No record was opened" until the record is reopened (#608).
 - **Anonymization keeps one `FrameOfReferenceUID` per series.** Only Study,
   Series and SOP Instance UIDs were hashed; every other UID dicomanonymizer
   replaces got a fresh random value per instance, so each slice claimed its own

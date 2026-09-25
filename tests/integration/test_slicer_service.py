@@ -7,6 +7,7 @@ placed here silently skips in CI.
 
 import pytest
 
+from clarinet.exceptions import SlicerError
 from clarinet.services.slicer.service import SlicerService
 
 pytestmark = [
@@ -41,3 +42,13 @@ async def test_execute_raw(slicer_service: SlicerService, slicer_url: str) -> No
 async def test_ping(slicer_service: SlicerService, slicer_url: str) -> None:
     """Ping should succeed against a running Slicer."""
     assert await slicer_service.ping(slicer_url) is True
+
+
+async def test_reset_scene_drops_stored_record_id(
+    slicer_service: SlicerService, slicer_url: str
+) -> None:
+    """A record open that fails after the reset must not leave the previous id behind (#608)."""
+    await slicer_service.execute(slicer_url, "store_record_id(42)")
+    await slicer_service.reset_scene(slicer_url)
+    with pytest.raises(SlicerError, match="No record was opened"):
+        await slicer_service.execute(slicer_url, "validate_record_id(42)")
