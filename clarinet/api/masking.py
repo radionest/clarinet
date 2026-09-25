@@ -58,8 +58,9 @@ def mask_record_patient_data(
     Args:
         record: RecordRead to potentially mask.
         user: Current user.
-        viewer_anon_uids: UID -> anon UID map of the record's own patient, for
-            the viewer lists (see ``RecordRepository.get_viewer_anon_uids``).
+        viewer_anon_uids: UID -> anon UID map for the viewer lists: the
+            record's own patient's raw UIDs plus any known anon UID (see
+            ``RecordRepository.get_viewer_anon_uids``).
             Entries it lacks are dropped, so omitting it empties the lists —
             use ``mask_record`` when the response carries them.
 

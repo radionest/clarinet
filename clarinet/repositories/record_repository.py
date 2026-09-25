@@ -1835,8 +1835,8 @@ class RecordRepository(BaseRepository[Record]):
     ) -> dict[str, dict[str, str]]:
         """Map study/series UIDs to their anon UID per patient, for viewer-list masking.
 
-        ``{patient_id: {uid: anon_uid}}`` for every id in ``patient_ids`` —
-        viewer lists may hold original or anon UIDs, so both are keys. DICOM
+        ``{patient_id: {uid: anon_uid}}``; a missing patient resolves nothing.
+        Viewer lists may hold original or anon UIDs, so both are keys. DICOM
         UIDs are globally unique, so one map serves both levels. A UID with no
         anon counterpart is absent, and the caller drops it.
 
