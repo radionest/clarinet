@@ -52,7 +52,7 @@ from clarinet.api.dependencies import (
     is_admin,
     require_mutable_config,
 )
-from clarinet.api.masking import mask_record_patient_data, mask_records
+from clarinet.api.masking import mask_record, mask_record_patient_data, mask_records
 from clarinet.config.toml_exporter import (
     delete_record_type_files,
     export_data_schema_sidecar,
@@ -303,16 +303,17 @@ async def claim_next_record(
     record = await service.claim_random_from_pool(criteria, user.id, actor_id=actor)
     if record is None:
         raise NOT_FOUND.with_context(f"No available record of type '{record_type_name}' to claim")
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, service.repo)
 
 
 @router.get("/{record_id}", response_model=RecordRead)
 async def get_record(
     record: AuthorizedRecordDep,
+    repo: RecordRepositoryDep,
     user: CurrentUserDep,
 ) -> RecordRead:
     """Get a record by ID."""
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, repo)
 
 
 @router.get(
@@ -452,7 +453,7 @@ async def add_record(
     enabled and no explicit ``user_id`` is provided.
     """
     record = await service.create_record(Record(**new_record.model_dump()), actor_id=actor)
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, service.repo)
 
 
 @router.patch(
@@ -504,7 +505,7 @@ async def update_record_status(
     record, _ = await service.update_status(
         record_id, record_status, acting_user=user, actor_id=actor
     )
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, service.repo)
 
 
 @router.patch("/{record_id}/user", response_model=RecordRead)
@@ -539,7 +540,7 @@ async def assign_record_to_user(
             "or claim one that is not pending or inwork"
         )
     record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, service.repo)
 
 
 @router.patch("/{record_id}/context-info", response_model=RecordRead)
@@ -559,7 +560,7 @@ async def update_record_context_info(
     available on the response as ``context_info_html``.
     """
     record = await service.update_context_info(record_id, body.context_info, actor_id=actor)
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, service.repo)
 
 
 async def _process_submission(
@@ -694,7 +695,7 @@ async def _process_submission(
             actor_id=actor_id,
         )
 
-    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+    return await mask_record(updated, user, repo)
 
 
 _SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
@@ -813,7 +814,7 @@ async def _do_prefill(
         )
     validated = await rt_service.validate_record_data_partial(record, data)
     updated, _ = await service.prefill_data(record_id, validated)
-    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+    return await mask_record(updated, user, service.repo)
 
 
 @router.post("/{record_id}/data/prefill", response_model=RecordRead)
@@ -994,14 +995,20 @@ async def update_record(
 ) -> RecordRead:
     """Update a record with partial data.
 
-    Currently supports: viewer_study_uids.
+    Currently supports: viewer_study_uids, viewer_series_uids — admin-only
+    (pipelines write them with the service token). A user-written list would
+    turn the masked response into an oracle: whether an entry is kept or
+    dropped tells if a study belongs to the record's patient (#592). An empty
+    body is a no-op read open to ``MutableRecordDep``.
     Does NOT trigger RecordFlow (use PATCH /status for workflow transitions).
     """
     update_data = record_update.model_dump(exclude_unset=True)
     if not update_data:
-        return mask_record_patient_data(RecordRead.model_validate(authorized_record), user)
+        return await mask_record(authorized_record, user, repo)
+    if not is_admin(user):
+        raise AuthorizationError("Only an admin can set a record's viewer lists")
     updated = await repo.update_fields(record_id, update_data)
-    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+    return await mask_record(updated, user, repo)
 
 
 @router.post("/{record_id}/validate-files")
@@ -1179,7 +1186,7 @@ async def fail_record(
         )
 
     updated = await service.fail_record(record_id, reason, actor_id=actor)
-    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+    return await mask_record(updated, user, service.repo)
 
 
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
@@ -1220,7 +1227,7 @@ async def invalidate_record(
         acting_user=user,
         actor_id=actor,
     )
-    return mask_record_patient_data(RecordRead.model_validate(record), user)
+    return await mask_record(record, user, service.repo)
 
 
 def _build_record_search_criteria(
@@ -1313,7 +1320,7 @@ async def find_random_record(
     record = await repo.find_random(criteria)
     if record is None:
         return None
-    return mask_records([record], user)[0]
+    return await mask_record(record, user, repo)
 
 
 @router.post("/find", response_model=RecordPage)
@@ -1333,7 +1340,7 @@ async def find_records(
         sort=query.sort,
     )
     return RecordPage(
-        items=mask_records(result.records, user),
+        items=await mask_records(result.records, user, repo),
         next_cursor=result.next_cursor,
         limit=query.limit,
         sort=query.sort,

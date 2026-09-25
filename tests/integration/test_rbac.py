@@ -22,10 +22,11 @@ from clarinet.api.dependencies import current_admin_user, get_dicom_client, get_
 from clarinet.models import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
 from clarinet.models.record_event import RecordEvent
+from clarinet.models.study import Study
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.database import get_async_session
-from tests.utils.factories import make_record_type
+from tests.utils.factories import make_patient, make_record_type
 from tests.utils.test_helpers import PatientFactory, RecordFactory
 from tests.utils.urls import (
     ADMIN_RECORD_EVENTS,
@@ -34,6 +35,7 @@ from tests.utils.urls import (
     PIPELINE_RUNS,
     RECORDS_BASE,
     RECORDS_BULK_STATUS,
+    RECORDS_FIND,
     SLICER_RECORD_OPEN,
     SLICER_RECORD_VALIDATE,
     record_events_url,
@@ -646,21 +648,127 @@ async def test_admin_role_may_fail_and_invalidate_other_users_record(
 
 
 @pytest.mark.asyncio
+async def test_patch_record_viewer_lists_admin_only(role_a_client, record_role_a, test_study):
+    """A role-holder may not write viewer_*_uids (#592).
+
+    Whether a written entry comes back kept or dropped from the masked response
+    would tell if a study belongs to the record's patient.
+    """
+    response = await role_a_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}", json={"viewer_study_uids": [test_study.study_uid]}
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_patch_record_update_masks_patient(
-    test_session, role_a_client, record_role_a, test_patient
+    test_session,
+    admin_role_client,
+    admin_role_user,
+    role_a,
+    record_role_a,
+    test_patient,
+    test_study,
 ):
     """Non-empty PATCH /api/records/{id} returns the masked record, not the raw ORM row."""
+    test_session.add(UserRolesLink(user_id=admin_role_user.id, role_name=role_a.name))
     test_patient.auto_id = 123
     test_session.add(test_patient)
     await test_session.commit()
+    await test_session.refresh(admin_role_user, ["roles"])
 
-    response = await role_a_client.patch(
-        f"/api/records/{record_role_a.id}", json={"viewer_study_uids": ["1.2.3"]}
+    response = await admin_role_client.patch(
+        f"{RECORDS_BASE}/{record_role_a.id}", json={"viewer_study_uids": [test_study.study_uid]}
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["viewer_study_uids"] == ["1.2.3"]
+    assert data["viewer_study_uids"] == ["ANON_STUDY_001"]
     assert data["patient_id"] == "CLARINET_123"
+
+
+@pytest.mark.asyncio
+async def test_viewer_uids_masked_for_non_admin(
+    test_session,
+    role_a_client,
+    record_role_a,
+    record_type_role_a,
+    test_patient,
+    test_study,
+    test_series,
+):
+    """viewer_*_uids are pipeline-written and may hold raw UIDs (#592).
+
+    A non-superuser gets each entry's anon UID; an entry with none known — a
+    study not anonymized yet, a UID absent from the DB, another patient's raw
+    UID (no raw -> anon oracle) — is dropped. Another patient's anon UID is
+    kept, so the response can't tell whether two studies share a patient. The
+    record's own study stays as study_uid shows it, raw in the race window.
+    """
+    today = datetime.now(UTC).date()
+    test_patient.auto_id = 123
+    test_series.anon_uid = "ANON_SERIES_001"
+    other_patient = make_patient("OTHER_PAT", "Other Patient", anon_name="ANON_OTHER")
+    record_role_a.viewer_study_uids = [
+        test_study.study_uid,
+        "ANON_STUDY_077",
+        "1.2.3.88",
+        "9.9.9",
+        "1.2.3.99",
+        "ANON_OTHER_099",
+    ]
+    record_role_a.viewer_series_uids = [test_series.series_uid]
+    # Same page, other patient: test_patient's 1.2.3.77 must not resolve here.
+    other_record = Record(
+        patient_id=other_patient.id,
+        study_uid="1.2.3.99",
+        record_type_name=record_type_role_a.name,
+        status="pending",
+        viewer_study_uids=["1.2.3.99", "1.2.3.77"],
+    )
+    # Race window: the record's own study is not anonymized yet.
+    fresh_record = Record(
+        patient_id=test_patient.id,
+        study_uid="1.2.3.88",
+        record_type_name=record_type_role_a.name,
+        status="pending",
+        viewer_study_uids=["1.2.3.88", "1.2.3.77"],
+    )
+    test_session.add_all(
+        [
+            test_patient,
+            other_patient,
+            Study(
+                patient_id=other_patient.id,
+                study_uid="1.2.3.99",
+                date=today,
+                anon_uid="ANON_OTHER_099",
+            ),
+            test_series,
+            record_role_a,
+            Study(
+                patient_id=test_patient.id,
+                study_uid="1.2.3.77",
+                date=today,
+                anon_uid="ANON_STUDY_077",
+            ),
+            Study(patient_id=test_patient.id, study_uid="1.2.3.88", date=today),
+            other_record,
+            fresh_record,
+        ]
+    )
+    await test_session.commit()
+
+    by_id = (await role_a_client.get(f"{RECORDS_BASE}/{record_role_a.id}")).json()
+    items = (await role_a_client.post(RECORDS_FIND, json={})).json()["items"]
+    found = {item["id"]: item for item in items}
+    assert len(found) == 3
+    for data in (by_id, found[record_role_a.id]):
+        assert data["viewer_study_uids"] == ["ANON_STUDY_001", "ANON_STUDY_077", "ANON_OTHER_099"]
+        assert data["viewer_series_uids"] == ["ANON_SERIES_001"]
+    assert found[other_record.id]["viewer_study_uids"] == ["ANON_OTHER_099"]
+    fresh = found[fresh_record.id]
+    assert fresh["study_uid"] == "1.2.3.88"
+    assert fresh["viewer_study_uids"] == ["1.2.3.88", "ANON_STUDY_077"]
 
 
 @pytest.mark.asyncio
