@@ -1,6 +1,6 @@
 // Study detail page — self-contained MVU module
 import api/info.{type ViewerInfo}
-import api/models.{type Patient, type Record, type Series, type Study}
+import api/models.{type Record, type Series, type Study}
 import cache
 import cache/bucket
 import api/studies
@@ -36,7 +36,6 @@ pub type Msg {
   StudyLoaded(Result(Study, ApiError))
   Delete
   DeleteResult(Result(Nil, ApiError))
-  NavigateBack
   RequestDelete
   RetryLoad
   OpenAddRecord
@@ -110,8 +109,6 @@ pub fn update(
       handle_error(err, "Failed to delete study"),
     )
 
-    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Studies(dict.new()))])
-
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("study", model.study_uid),
     ])
@@ -177,15 +174,8 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   }
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
-      html.h1([], [html.text("Study: " <> study.study_uid)]),
+      html.h1([], [html.text(entity_link.study_title(study))]),
       html.div([], [
-        html.button(
-          [
-            attribute.class("btn btn-secondary"),
-            event.on_click(NavigateBack),
-          ],
-          [html.text("Back to Studies")],
-        ),
         case is_admin {
           True ->
             html.button(
@@ -197,84 +187,61 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
             )
           False -> element.none()
         },
-        html.button(
-          [
-            attribute.class("btn btn-danger"),
-            event.on_click(RequestDelete),
-          ],
-          [html.text("Delete Study")],
-        ),
       ]),
     ]),
-    study_info_card(shared.viewers, study),
-    patient_section(study.patient, study.patient_id),
+    study_info_card(shared, study),
     series_section(shared.viewers, study.series),
     records_section(study_records, shared.translate),
-  ])
-}
-
-fn study_info_card(viewers: List(ViewerInfo), study: Study) -> Element(Msg) {
-  html.div([attribute.class("card")], [
-    html.h3([], [html.text("Study Information")]),
-    html.dl([attribute.class("record-metadata")], [
-      html.dt([], [html.text("Study UID:")]),
-      html.dd([], [html.text(study.study_uid)]),
-      html.dt([], [html.text("Date:")]),
-      html.dd([], [html.text(study.date)]),
-      html.dt([], [html.text("Anonymous UID:")]),
-      html.dd([], [html.text(option.unwrap(study.anon_uid, "-"))]),
-      html.dt([], [html.text("Patient ID:")]),
-      html.dd([], [entity_link.patient(study.patient_id)]),
-    ]),
-    html.div([attribute.class("card-actions")], [
-      viewer.viewer_buttons(
-        viewers,
-        Some(study.study_uid),
-        None,
-        "btn btn-primary",
+    html.div([attribute.class("page-actions")], [
+      html.button(
+        [
+          attribute.class("btn btn-danger"),
+          event.on_click(RequestDelete),
+        ],
+        [html.text("Delete Study")],
       ),
     ]),
   ])
 }
 
-fn patient_section(patient: Option(Patient), patient_id: String) -> Element(Msg) {
+fn study_info_card(shared: Shared, study: Study) -> Element(Msg) {
   html.div([attribute.class("card")], [
-    html.h3([], [html.text("Patient")]),
-    case patient {
-      None ->
-        html.p([], [
-          html.a(
-            [
-              attribute.href(
-                router.route_to_path(router.PatientDetail(patient_id)),
-              ),
-              attribute.class("link"),
-            ],
-            [html.text(patient_id)],
-          ),
-        ])
-      Some(p) ->
-        html.div([], [
-          html.dl([attribute.class("record-metadata")], [
-            html.dt([], [html.text("ID:")]),
-            html.dd([], [
-              html.a(
-                [
-                  attribute.href(
-                    router.route_to_path(router.PatientDetail(p.id)),
-                  ),
-                  attribute.class("link"),
-                ],
-                [html.text(p.id)],
-              ),
-            ]),
-            html.dt([], [html.text("Name:")]),
-            html.dd([], [html.text(option.unwrap(p.name, "-"))]),
-            html.dt([], [html.text("Anon ID:")]),
-            html.dd([], [html.text(option.unwrap(p.anon_id, "-"))]),
-          ]),
-        ])
-    },
+    html.h3([], [html.text("Study Information")]),
+    html.dl([attribute.class("record-metadata")], [
+      html.dt([], [html.text("Study UID:")]),
+      html.dd([], [html.text(study.study_uid)]),
+      html.dt([], [html.text("Anonymous UID:")]),
+      html.dd([], [html.text(option.unwrap(study.anon_uid, "-"))]),
+      html.dt([], [html.text("Patient:")]),
+      html.dd([], [
+        entity_link.patient(study.patient_id),
+        case option.then(study.patient, fn(p) { p.name }) {
+          Some(name) -> html.text(" — " <> name)
+          None -> element.none()
+        },
+      ]),
+      // The per-patient anon_id is stable across the patient's studies, so
+      // per-study anonymization hides it (as the record page does).
+      case
+        shared.anon_per_study,
+        option.then(study.patient, fn(p) { p.anon_id })
+      {
+        False, Some(anon_id) ->
+          element.fragment([
+            html.dt([], [html.text("Patient anon ID:")]),
+            html.dd([], [html.text(anon_id)]),
+          ])
+        _, _ -> element.none()
+      },
+    ]),
+    html.div([attribute.class("card-actions")], [
+      viewer.viewer_buttons(
+        shared.viewers,
+        Some(study.study_uid),
+        None,
+        "btn btn-primary",
+      ),
+    ]),
   ])
 }
 
@@ -298,7 +265,12 @@ fn series_section(
                 html.th([], [html.text("Description")]),
                 html.th([], [html.text("Number")]),
                 html.th([], [html.text("Anon UID")]),
-                html.th([], [html.text("Actions")]),
+                // The column holds only viewer buttons — none configured,
+                // no column.
+                case viewers {
+                  [] -> element.none()
+                  _ -> html.th([], [html.text("Actions")])
+                },
               ]),
             ]),
             html.tbody(
@@ -317,25 +289,18 @@ fn series_row(viewers: List(ViewerInfo), s: Series) -> Element(Msg) {
     html.td([], [html.text(option.unwrap(s.series_description, "-"))]),
     html.td([], [html.text(int.to_string(s.series_number))]),
     html.td([], [html.text(option.unwrap(s.anon_uid, "-"))]),
-    html.td([], [
-      element.fragment([
-        html.a(
-          [
-            attribute.href(
-              router.route_to_path(router.SeriesDetail(s.series_uid)),
-            ),
-            attribute.class("btn btn-sm btn-outline"),
-          ],
-          [html.text("View")],
-        ),
-        viewer.viewer_buttons(
-          viewers,
-          Some(s.study_uid),
-          Some(s.series_uid),
-          "btn btn-sm btn-outline",
-        ),
-      ]),
-    ]),
+    case viewers {
+      [] -> element.none()
+      _ ->
+        html.td([], [
+          viewer.viewer_buttons(
+            viewers,
+            Some(s.study_uid),
+            Some(s.series_uid),
+            "btn btn-sm btn-outline",
+          ),
+        ])
+    },
   ])
 }
 
@@ -355,7 +320,6 @@ fn records_section(records: List(Record), translate: fn(Key) -> String) -> Eleme
                 html.th([], [html.text("ID")]),
                 html.th([], [html.text("Type")]),
                 html.th([], [html.text("Status")]),
-                html.th([], [html.text("Actions")]),
               ]),
             ]),
             html.tbody([], list.map(records, record_row(_, translate))),
@@ -366,29 +330,15 @@ fn records_section(records: List(Record), translate: fn(Key) -> String) -> Eleme
 }
 
 fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
-  let record_id = option.unwrap(record.id, 0)
-  let record_id_str = int.to_string(record_id)
-
   let type_label = case record.record_type {
     Some(rt) -> option.unwrap(rt.label, rt.name)
     None -> record.record_type_name
   }
 
   html.tr([], [
-    html.td([], [entity_link.record(record_id)]),
+    html.td([], [entity_link.record(option.unwrap(record.id, 0))]),
     html.td([], [html.text(type_label)]),
     html.td([], [status_badge.render(record.status, translate)]),
-    html.td([], [
-      html.a(
-        [
-          attribute.href(
-            router.route_to_path(router.RecordDetail(record_id_str)),
-          ),
-          attribute.class("btn btn-sm btn-outline"),
-        ],
-        [html.text("View")],
-      ),
-    ]),
   ])
 }
 

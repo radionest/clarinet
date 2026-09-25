@@ -6,11 +6,13 @@
 // (`router.requires_admin_role`). On pages a non-admin can also reach (the
 // shared records widget, the record detail page) callers use `patient_if_admin`,
 // which falls back to plain text rather than emit a link that would dead-end on
-// the redirect to Home. On admin-only pages the plain `patient`/`study`/`series`
-// helpers are safe — the route guard guarantees the viewer is an admin, matching
-// the existing inline links on the study/series detail pages. The record detail
-// route is open to any authenticated user, so `record` is always a live link.
+// the redirect to Home. On admin-only pages (patient/study/series detail) the
+// plain `patient`/`study`/`study_labeled`/`series` helpers are safe — the route
+// guard guarantees the viewer is an admin. The record detail route is open to
+// any authenticated user, so `record` is always a live link.
+import api/models.{type Study}
 import gleam/int
+import gleam/option
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -36,6 +38,17 @@ pub fn study(study_uid: String) -> Element(msg) {
   anchor(router.route_to_path(router.StudyDetail(study_uid)), study_uid)
 }
 
+/// Study link with custom text, e.g. a date or `study_title` (admin-only route).
+pub fn study_labeled(study_uid: String, label: String) -> Element(msg) {
+  anchor(router.route_to_path(router.StudyDetail(study_uid)), label)
+}
+
+/// Readable name for a study — "CT Chest (2024-03-01)", or "Study (date)"
+/// without a description — used instead of the raw DICOM UID.
+pub fn study_title(study: Study) -> String {
+  option.unwrap(study.study_description, "Study") <> " (" <> study.date <> ")"
+}
+
 /// Link to a series' detail page (admin-only route).
 pub fn series(series_uid: String) -> Element(msg) {
   anchor(router.route_to_path(router.SeriesDetail(series_uid)), series_uid)
@@ -58,7 +71,7 @@ pub fn study_labeled_if_admin(
   is_admin: Bool,
 ) -> Element(msg) {
   case is_admin {
-    True -> anchor(router.route_to_path(router.StudyDetail(study_uid)), label)
+    True -> study_labeled(study_uid, label)
     False -> html.text(label)
   }
 }

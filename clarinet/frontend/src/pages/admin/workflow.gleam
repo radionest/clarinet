@@ -209,7 +209,7 @@ pub fn view(model: Model, _shared: Shared) -> Element(Msg) {
       html.h1([], [html.text("Workflow")]),
       html.p([attribute.class("text-muted")], [
         html.text(
-          "Project-wide schema graph. Drag to pan, scroll to zoom. "
+          "Project-wide schema graph. Drag to pan, Ctrl+scroll to zoom. "
           <> "Click a pipeline node to expand it.",
         ),
       ]),

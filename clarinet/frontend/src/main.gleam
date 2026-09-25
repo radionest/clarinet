@@ -1537,22 +1537,22 @@ fn view_content(model: Model) -> Element(Msg) {
     _ -> layout.view(model, content)
   }
 
-  case preload.is_active(model.preload) {
+  let overlay = case preload.is_active(model.preload) {
     True ->
       case model.preload.progress {
-        Some(state) ->
-          html.div([], [
-            page,
-            element.map(preload.view_modal(state), store.PreloadMsg),
-          ])
-        None -> page
+        Some(state) -> element.map(preload.view_modal(state), store.PreloadMsg)
+        None -> element.none()
       }
     False ->
       case model.modal_open {
-        True -> html.div([], [page, render_modal(model)])
-        False -> page
+        True -> render_modal(model)
+        False -> element.none()
       }
   }
+  // Same root shape with or without an overlay: if the page moved within the
+  // tree, Lustre would rebuild its whole DOM on every modal open/close,
+  // resetting expanded <details> sections.
+  html.div([], [page, overlay])
 }
 
 fn loading_placeholder() -> Element(Msg) {

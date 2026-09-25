@@ -54,7 +54,9 @@
         align-items: flex-start;
     }
 
-    /* Record metadata */
+    /* Record metadata (wrapper on the record page, the <dl> itself on the
+       patient/study/series info cards) */
+    .record-metadata:is(dl),
     .record-metadata dl {
         grid-template-columns: 1fr;
     }

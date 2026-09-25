@@ -47,7 +47,7 @@ Adding/removing a field on a `Route` variant (e.g. `Studies` → `Studies(filter
 rg -n 'router\.(Studies|Patients|...)\b' clarinet/frontend/src/
 ```
 
-Typical hits beyond `router.gleam` itself: `main.gleam` (`init_page_for_route`), `components/layout.gleam` (`nav_link`), `pages/<area>/{detail,new}.gleam` (`shared.Navigate(router.X)`, `NavigateBack`), `pages/home.gleam` (stat-card routes). Plans listing only "files to edit" routinely miss these — verify yourself, don't trust the list.
+Typical hits beyond `router.gleam` itself: `main.gleam` (`init_page_for_route`), `components/layout.gleam` (`nav_link`), `pages/<area>/{detail,new}.gleam` (`shared.Navigate(router.X)` after a delete or submit), `pages/records/execute.gleam` (`back_target` for `NavigateBack`), `pages/home.gleam` (stat-card routes). Plans listing only "files to edit" routinely miss these — verify yourself, don't trust the list.
 
 **Inside `router.gleam` itself (the grep above doesn't catch these — they pattern-match on the constructor without a `router.` prefix):**
 

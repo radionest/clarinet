@@ -21,6 +21,7 @@
     display: flex;
     gap: var(--spacing-sm);
     margin-top: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
 }
 
 .record-info {
@@ -33,6 +34,9 @@
 }
 
 .record-metadata {
+    /* The class sits on a wrapper (record page) or on the <dl> itself
+       (patient/study/series info cards). */
+    &:is(dl),
     & dl {
         display: grid;
         grid-template-columns: auto 1fr;
@@ -100,6 +104,11 @@
         margin: 0;
         word-break: break-word;
     }
+}
+
+/* PACS search results, under the patient's studies table */
+.pacs-results {
+    margin-top: var(--spacing-lg);
 }
 
 /* PACS series details */

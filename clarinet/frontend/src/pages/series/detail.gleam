@@ -16,7 +16,6 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
-import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
 import utils/permissions
@@ -32,7 +31,6 @@ pub type Model {
 
 pub type Msg {
   SeriesLoaded(Result(Series, ApiError))
-  NavigateBack(study_uid: String)
   RetryLoad
   OpenAddRecord
 }
@@ -79,10 +77,6 @@ pub fn update(
       load_series_effect(model.series_uid),
       [],
     )
-
-    NavigateBack(study_uid) -> #(model, effect.none(), [
-      shared.Navigate(router.StudyDetail(study_uid)),
-    ])
 
     OpenAddRecord -> {
       // The Add Record button is rendered only inside `render_detail`, which
@@ -141,17 +135,17 @@ fn render_detail(s: Series, shared: Shared) -> Element(Msg) {
     Some(u) -> permissions.is_admin_user(u)
     None -> False
   }
+  let title =
+    "Series "
+    <> int.to_string(s.series_number)
+    <> case s.series_description {
+      Some(description) -> " — " <> description
+      None -> ""
+    }
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
-      html.h1([], [html.text("Series: " <> s.series_uid)]),
+      html.h1([], [html.text(title)]),
       html.div([], [
-        html.button(
-          [
-            attribute.class("btn btn-secondary"),
-            event.on_click(NavigateBack(s.study_uid)),
-          ],
-          [html.text("Back to Study")],
-        ),
         case is_admin {
           True ->
             html.button(
@@ -166,7 +160,6 @@ fn render_detail(s: Series, shared: Shared) -> Element(Msg) {
       ]),
     ]),
     series_info_card(shared.viewers, s),
-    parent_study_section(s),
     records_section(s.records, shared.translate),
   ])
 }
@@ -180,24 +173,29 @@ fn series_info_card(
     html.dl([attribute.class("record-metadata")], [
       html.dt([], [html.text("Series UID:")]),
       html.dd([], [html.text(s.series_uid)]),
-      html.dt([], [html.text("Description:")]),
-      html.dd([], [html.text(option.unwrap(s.series_description, "-"))]),
-      html.dt([], [html.text("Number:")]),
-      html.dd([], [html.text(int.to_string(s.series_number))]),
       html.dt([], [html.text("Anonymous UID:")]),
       html.dd([], [html.text(option.unwrap(s.anon_uid, "-"))]),
-      html.dt([], [html.text("Study UID:")]),
+      html.dt([], [html.text("Study:")]),
+      // The eager-loaded parent study names the link and supplies the
+      // patient; without it, fall back to the bare study UID.
       html.dd([], [
-        html.a(
-          [
-            attribute.href(
-              router.route_to_path(router.StudyDetail(s.study_uid)),
-            ),
-            attribute.class("link"),
-          ],
-          [html.text(s.study_uid)],
-        ),
+        case s.study {
+          Some(study) ->
+            entity_link.study_labeled(
+              study.study_uid,
+              entity_link.study_title(study),
+            )
+          None -> entity_link.study(s.study_uid)
+        },
       ]),
+      case s.study {
+        Some(study) ->
+          element.fragment([
+            html.dt([], [html.text("Patient:")]),
+            html.dd([], [entity_link.patient(study.patient_id)]),
+          ])
+        None -> element.none()
+      },
     ]),
     html.div([attribute.class("card-actions")], [
       viewer.viewer_buttons(
@@ -208,44 +206,6 @@ fn series_info_card(
       ),
     ]),
   ])
-}
-
-fn parent_study_section(s: Series) -> Element(Msg) {
-  case s.study {
-    None -> element.none()
-    Some(study) ->
-      html.div([attribute.class("card")], [
-        html.h3([], [html.text("Parent Study")]),
-        html.dl([attribute.class("record-metadata")], [
-          html.dt([], [html.text("Study UID:")]),
-          html.dd([], [
-            html.a(
-              [
-                attribute.href(
-                  router.route_to_path(router.StudyDetail(study.study_uid)),
-                ),
-                attribute.class("link"),
-              ],
-              [html.text(study.study_uid)],
-            ),
-          ]),
-          html.dt([], [html.text("Date:")]),
-          html.dd([], [html.text(study.date)]),
-          html.dt([], [html.text("Patient ID:")]),
-          html.dd([], [
-            html.a(
-              [
-                attribute.href(
-                  router.route_to_path(router.PatientDetail(study.patient_id)),
-                ),
-                attribute.class("link"),
-              ],
-              [html.text(study.patient_id)],
-            ),
-          ]),
-        ]),
-      ])
-  }
 }
 
 fn records_section(records: Option(List(Record)), translate: fn(Key) -> String) -> Element(Msg) {
@@ -264,8 +224,6 @@ fn records_section(records: Option(List(Record)), translate: fn(Key) -> String) 
                 html.th([], [html.text("ID")]),
                 html.th([], [html.text("Type")]),
                 html.th([], [html.text("Status")]),
-                html.th([], [html.text("Patient")]),
-                html.th([], [html.text("Actions")]),
               ]),
             ]),
             html.tbody([], list.map(record_list, record_row(_, translate))),
@@ -276,25 +234,10 @@ fn records_section(records: Option(List(Record)), translate: fn(Key) -> String) 
 }
 
 fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
-  let record_id = option.unwrap(record.id, 0)
-  let record_id_str = int.to_string(record_id)
-
   html.tr([], [
-    html.td([], [entity_link.record(record_id)]),
+    html.td([], [entity_link.record(option.unwrap(record.id, 0))]),
     html.td([], [html.text(record.record_type_name)]),
     html.td([], [status_badge.render(record.status, translate)]),
-    html.td([], [entity_link.patient(record.patient_id)]),
-    html.td([], [
-      html.a(
-        [
-          attribute.href(
-            router.route_to_path(router.RecordDetail(record_id_str)),
-          ),
-          attribute.class("btn btn-sm btn-outline"),
-        ],
-        [html.text("View")],
-      ),
-    ]),
   ])
 }
 

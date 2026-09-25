@@ -1411,27 +1411,25 @@ fn render_record_execution(
   shared: Shared,
 ) -> Element(Msg) {
   html.div([attribute.class("record-execution-page")], [
-    // Header
+    // Header: the record type names the page
     html.div([attribute.class("page-header")], [
-      html.h2([], [html.text("Record Execution")]),
+      html.h1([], [
+        html.text(case record.record_type {
+          Some(rt) -> option.unwrap(rt.label, rt.name)
+          None -> record.record_type_name
+        }),
+      ]),
       status_badge.render(record.status, shared.translate),
     ]),
     // Record information
     html.div([attribute.class("record-info card")], [
-      html.h3([], [
-        html.text(
-          option.map(record.record_type, fn(d) { d.label })
-          |> option.flatten
-          |> option.unwrap("Record"),
-        ),
-      ]),
-      html.p([attribute.class("record-description")], [
-        html.text(
-          option.map(record.record_type, fn(d) { d.description })
-          |> option.flatten
-          |> option.unwrap("Complete the record form below"),
-        ),
-      ]),
+      case option.then(record.record_type, fn(rt) { rt.description }) {
+        Some(description) ->
+          html.p([attribute.class("record-description")], [
+            html.text(description),
+          ])
+        None -> element.none()
+      },
       render_record_metadata(record, shared),
       viewer.record_viewer_buttons(
         shared.viewers,
@@ -1453,8 +1451,6 @@ fn render_record_execution(
     render_slicer_toolbar(model, record, shared.translate),
     // Output files (only if record type defines any OUTPUT file_registry entries)
     render_output_files(record),
-    // Admin workflow section (instance-mode dry-run / fire)
-    render_workflow_section(model, shared),
     // Dynamic form based on record type's data_schema
     html.div([attribute.class("record-form-container card")], [
       case record.record_type {
@@ -1525,13 +1521,20 @@ fn render_record_execution(
         False -> element.none()
       },
     ]),
+    // Secondary sections: collapsed until asked for
     activity_section(model, shared),
+    // Admin workflow section (instance-mode dry-run / fire)
+    render_workflow_section(model, shared),
   ])
 }
 
+// Collapsed by default: the view never sets `open`, so a user's expand
+// survives re-renders. Data still loads on init, so expanding is instant.
 fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
-  html.div([attribute.class("card")], [
-    html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+  html.details([attribute.class("card")], [
+    html.summary([], [
+      html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+    ]),
     element.map(
       activity_feed.view(model.activity, shared.translate, [], []),
       ActivityMsg,
@@ -1921,10 +1924,7 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             html.dd([], [
               entity_link.study_labeled_if_admin(
                 study.study_uid,
-                option.unwrap(study.study_description, study.study_uid)
-                  <> " ("
-                  <> study.date
-                  <> ")",
+                entity_link.study_title(study),
                 is_admin,
               ),
             ]),
@@ -2107,15 +2107,16 @@ fn retry_error_view(message: String) -> Element(Msg) {
 
 fn render_workflow_section(model: Model, shared: Shared) -> Element(Msg) {
   use <- bool.guard(!is_admin_user(shared), element.none())
-  html.div([attribute.class("workflow-section card")], [
-    html.div([attribute.class("workflow-section-header")], [
-      html.h3([], [html.text("Workflow (admin)")]),
-      html.p([attribute.class("text-muted")], [
-        html.text(
-          "Drag to pan, scroll to zoom. Click a record_type node to choose a "
-          <> "trigger to dry-run, then confirm to fire.",
-        ),
-      ]),
+  // Collapsed like activity_section.
+  html.details([attribute.class("card")], [
+    html.summary([], [
+      html.h3([], [html.text(shared.translate(i18n.NavWorkflow))]),
+    ]),
+    html.p([attribute.class("workflow-hint text-muted")], [
+      html.text(
+        "Drag to pan, Ctrl+scroll to zoom. Click a record_type node to choose "
+        <> "a trigger to dry-run, then confirm to fire.",
+      ),
     ]),
     load_status.render(
       model.workflow_load_status,
