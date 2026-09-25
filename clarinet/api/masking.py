@@ -24,21 +24,32 @@ across studies. Patient-level records (no study) have no per-study context and
 keep the per-patient anon_id.
 """
 
-from collections.abc import Sequence
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from clarinet.files import Files
 from clarinet.models import Record, RecordRead, User
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
+if TYPE_CHECKING:
+    from clarinet.repositories.record_repository import RecordRepository
+
 # Sentinel shown in place of the real study acquisition date for masked
 # (anonymized, non-superuser) records — neither the date nor its year leaks.
 _MASKED_STUDY_DATE = date(1976, 1, 1)
 
 
-def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
+def _mask_viewer_uids(uids: list[str] | None, anon_uids: Mapping[str, str]) -> list[str] | None:
+    return None if uids is None else [anon_uids[uid] for uid in uids if uid in anon_uids]
+
+
+def mask_record_patient_data(
+    record: RecordRead, user: User, viewer_anon_uids: Mapping[str, str] | None = None
+) -> RecordRead:
     """Mask patient data in a RecordRead for non-superusers.
 
     Superusers always see real data. Non-superusers see anonymized identifiers
@@ -47,6 +58,10 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
     Args:
         record: RecordRead to potentially mask.
         user: Current user.
+        viewer_anon_uids: UID -> anon UID map for the viewer lists (see
+            ``RecordRepository.get_viewer_anon_uids``). Entries it lacks are
+            dropped, so omitting it empties the lists — use ``mask_record``
+            when the response carries them.
 
     Returns:
         Original or masked RecordRead.
@@ -108,7 +123,14 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
 
     masked_patient = record.patient.model_copy(update=patient_update)
 
-    updates: dict[str, Any] = {"patient": masked_patient}
+    # Viewer lists are written by pipelines and may hold raw UIDs of any study
+    # or series, not just the record's own (#592).
+    anon_uids = viewer_anon_uids or {}
+    updates: dict[str, Any] = {
+        "patient": masked_patient,
+        "viewer_study_uids": _mask_viewer_uids(record.viewer_study_uids, anon_uids),
+        "viewer_series_uids": _mask_viewer_uids(record.viewer_series_uids, anon_uids),
+    }
     if masked_id is not None:
         updates["patient_id"] = masked_id
 
@@ -171,14 +193,31 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
     return record.model_copy(update=updates)
 
 
-def mask_records(records: Sequence[Record], user: User) -> list[RecordRead]:
+async def mask_records(
+    records: Sequence[Record], user: User, repo: RecordRepository
+) -> list[RecordRead]:
     """Convert Records to RecordRead and apply patient data masking.
+
+    The anon UIDs of every viewer-list entry in the batch are looked up at once.
 
     Args:
         records: Sequence of Record ORM objects.
         user: Current user.
+        repo: Record repository, for the viewer-list anon UID lookup.
 
     Returns:
         List of masked RecordRead objects.
     """
-    return [mask_record_patient_data(RecordRead.model_validate(r), user) for r in records]
+    reads = [RecordRead.model_validate(r) for r in records]
+    if user.is_superuser:
+        return reads
+    uids = {
+        uid for r in reads for uid in (r.viewer_study_uids or []) + (r.viewer_series_uids or [])
+    }
+    anon_uids = await repo.get_viewer_anon_uids(uids)
+    return [mask_record_patient_data(r, user, anon_uids) for r in reads]
+
+
+async def mask_record(record: Record, user: User, repo: RecordRepository) -> RecordRead:
+    """Single-record :func:`mask_records`."""
+    return (await mask_records([record], user, repo))[0]

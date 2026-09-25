@@ -176,7 +176,9 @@ capability implicitly. Non-superusers see patient identifiers masked by `mask_re
 (`clarinet/api/masking.py`) — but this is **not** an unconditional guarantee.
 Masking is skipped when the patient has no `anon_name`, and when the record
 type sets `mask_patient_data=False`, the deliberate opt-out for roles that need
-real identifiers (every such access is audit-logged).
+real identifiers (every such access is audit-logged). The pipeline-written
+`viewer_study_uids` / `viewer_series_uids` may name any study or series, so each
+entry is looked up and replaced by its anon UID; an entry with none is dropped.
 
 An authenticated account with **no role** is meant to be entitled to nothing.
 Accounts are created by an admin (`/api/user`); public self-registration

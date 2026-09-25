@@ -25,6 +25,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `find_by_criteria(criteria)` | Complex search via `RecordSearchCriteria` (legacy, offset pagination) |
 | `find_page(criteria, *, cursor, limit, sort)` | Cursor-based keyset pagination via `RecordSearchCriteria` |
 | `find_random(criteria, *, for_update=False)` | Single random record (`ORDER BY random() LIMIT 1`) matching criteria. `for_update=True` adds `FOR UPDATE OF record SKIP LOCKED` (PG) so concurrent claim-from-pool callers can't select the same row (no-op on SQLite) |
+| `get_viewer_anon_uids(uids)` | Study/series UID → anon UID map (original and anon UIDs both keyed) for masking the viewer lists; UIDs with no anon counterpart are absent |
 | `get_record_type(name, *, with_files=True)` | RecordType by name with `file_links` eagerly loaded (raises `RecordTypeNotFoundError`). `with_files=False` → `session.get` by PK (identity-map hit, no eager `file_links` — scalars only) |
 
 ### Mutations

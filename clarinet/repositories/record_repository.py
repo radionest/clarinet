@@ -5,7 +5,7 @@ SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
 """
 
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -1829,6 +1829,29 @@ class RecordRepository(BaseRepository[Record]):
                 f"collides with anon_id_prefix={settings.anon_id_prefix!r}"
             )
         return sorted(masked)
+
+    async def get_viewer_anon_uids(self, uids: Collection[str]) -> dict[str, str]:
+        """Map study/series UIDs to their anon UID, for viewer-list masking.
+
+        Both the original and the anon UID of every anonymized study/series in
+        ``uids`` are keys — viewer lists may hold either. DICOM UIDs are
+        globally unique, so one map serves both levels. A UID with no anon
+        counterpart is absent, and the caller drops it.
+        """
+        anon_uids: dict[str, str] = {}
+        if not uids:
+            return anon_uids
+        for uid_col, anon_col in (
+            (col(Study.study_uid), col(Study.anon_uid)),
+            (col(Series.series_uid), col(Series.anon_uid)),
+        ):
+            rows = await self.session.execute(
+                select(uid_col, anon_col).where(or_(uid_col.in_(uids), anon_col.in_(uids)))
+            )
+            for uid, anon in rows.all():
+                if anon:
+                    anon_uids[uid] = anon_uids[anon] = anon
+        return anon_uids
 
     async def get_available_type_counts(
         self,

@@ -22,6 +22,7 @@ from clarinet.api.dependencies import current_admin_user, get_dicom_client, get_
 from clarinet.models import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
 from clarinet.models.record_event import RecordEvent
+from clarinet.models.study import Study
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.database import get_async_session
@@ -34,6 +35,7 @@ from tests.utils.urls import (
     PIPELINE_RUNS,
     RECORDS_BASE,
     RECORDS_BULK_STATUS,
+    RECORDS_FIND,
     SLICER_RECORD_OPEN,
     SLICER_RECORD_VALIDATE,
     record_events_url,
@@ -647,7 +649,7 @@ async def test_admin_role_may_fail_and_invalidate_other_users_record(
 
 @pytest.mark.asyncio
 async def test_patch_record_update_masks_patient(
-    test_session, role_a_client, record_role_a, test_patient
+    test_session, role_a_client, record_role_a, test_patient, test_study
 ):
     """Non-empty PATCH /api/records/{id} returns the masked record, not the raw ORM row."""
     test_patient.auto_id = 123
@@ -655,12 +657,54 @@ async def test_patch_record_update_masks_patient(
     await test_session.commit()
 
     response = await role_a_client.patch(
-        f"/api/records/{record_role_a.id}", json={"viewer_study_uids": ["1.2.3"]}
+        f"/api/records/{record_role_a.id}", json={"viewer_study_uids": [test_study.study_uid]}
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["viewer_study_uids"] == ["1.2.3"]
+    assert data["viewer_study_uids"] == ["ANON_STUDY_001"]
     assert data["patient_id"] == "CLARINET_123"
+
+
+@pytest.mark.asyncio
+async def test_viewer_uids_masked_for_non_admin(
+    test_session,
+    role_a_client,
+    record_role_a,
+    test_patient,
+    test_study,
+    test_series,
+):
+    """viewer_*_uids are pipeline-written and may hold raw UIDs (#592).
+
+    A non-superuser gets each entry's anon UID; an entry with none known — a
+    study not anonymized yet, a UID absent from the DB — is dropped.
+    """
+    today = datetime.now(UTC).date()
+    test_patient.auto_id = 123
+    test_series.anon_uid = "ANON_SERIES_001"
+    record_role_a.viewer_study_uids = [test_study.study_uid, "ANON_STUDY_077", "1.2.3.88", "9.9.9"]
+    record_role_a.viewer_series_uids = [test_series.series_uid]
+    test_session.add_all(
+        [
+            test_patient,
+            test_series,
+            record_role_a,
+            Study(
+                patient_id=test_patient.id,
+                study_uid="1.2.3.77",
+                date=today,
+                anon_uid="ANON_STUDY_077",
+            ),
+            Study(patient_id=test_patient.id, study_uid="1.2.3.88", date=today),
+        ]
+    )
+    await test_session.commit()
+
+    by_id = (await role_a_client.get(f"{RECORDS_BASE}/{record_role_a.id}")).json()
+    found = (await role_a_client.post(RECORDS_FIND, json={})).json()["items"]
+    for data in (by_id, *found):
+        assert data["viewer_study_uids"] == ["ANON_STUDY_001", "ANON_STUDY_077"]
+        assert data["viewer_series_uids"] == ["ANON_SERIES_001"]
 
 
 @pytest.mark.asyncio

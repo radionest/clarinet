@@ -4,7 +4,7 @@ import hashlib
 from collections.abc import Generator
 from datetime import UTC, date, datetime
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -20,6 +20,7 @@ from clarinet.models.record import RecordRead
 from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
 from clarinet.models.user import User
+from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
@@ -61,6 +62,13 @@ def _make_user(*, is_superuser: bool = False) -> User:
         is_active=True,
         is_superuser=is_superuser,
     )
+
+
+def _stub_repo() -> RecordRepository:
+    """Repository stub whose viewer-UID lookup knows no anon UIDs."""
+    repo = AsyncMock(spec=RecordRepository)
+    repo.get_viewer_anon_uids.return_value = {}
+    return repo
 
 
 def _make_record_read(
@@ -649,7 +657,8 @@ class TestMaskRecordPatientData:
 class TestMaskRecords:
     """Tests for mask_records function."""
 
-    def test_mask_records_batch(self) -> None:
+    @pytest.mark.asyncio
+    async def test_mask_records_batch(self) -> None:
         """mask_records processes a list of Record ORM objects."""
         user = _make_user(is_superuser=False)
 
@@ -715,7 +724,7 @@ class TestMaskRecords:
         # mask_records expects Record objects, but since we're using RecordRead
         # in this test (to avoid DB dependency), we cast them
         # In real usage, these would be Record ORM objects from a query
-        results = mask_records([record1, record2], user)  # type: ignore[arg-type, list-item]
+        results = await mask_records([record1, record2], user, _stub_repo())  # type: ignore[arg-type, list-item]
 
         assert len(results) == 2
 
@@ -729,7 +738,8 @@ class TestMaskRecords:
         assert results[1].patient.name == "Anon Two"
         assert results[1].study_uid == "9.8.7.6.5.4.3.2.2"
 
-    def test_mask_records_masks_study_date_and_description(self) -> None:
+    @pytest.mark.asyncio
+    async def test_mask_records_masks_study_date_and_description(self) -> None:
         """Batch mask_records masks study date + description, not just identifiers.
 
         mask_records is the list-path used by /records/find and the list
@@ -747,17 +757,18 @@ class TestMaskRecords:
             series_anon_uid=None,
         )
 
-        results = mask_records([record], user)  # type: ignore[arg-type, list-item]
+        results = await mask_records([record], user, _stub_repo())  # type: ignore[arg-type, list-item]
 
         assert len(results) == 1
         assert results[0].study is not None
         assert results[0].study.date == _MASKED_STUDY_DATE
         assert results[0].study.study_description is None
 
-    def test_mask_records_empty_list(self) -> None:
+    @pytest.mark.asyncio
+    async def test_mask_records_empty_list(self) -> None:
         """mask_records handles empty list correctly."""
         user = _make_user(is_superuser=False)
-        results = mask_records([], user)
+        results = await mask_records([], user, _stub_repo())
         assert results == []
 
     def test_per_study_mode_replaces_patient_id_with_hash(self) -> None:
@@ -989,7 +1000,8 @@ class TestMaskRecords:
         assert result.study_uid == "9.8.7.6.5.4.3.2"
         assert revalidated.display_anon_id == expected_id
 
-    def test_mask_records_with_superuser(self) -> None:
+    @pytest.mark.asyncio
+    async def test_mask_records_with_superuser(self) -> None:
         """mask_records with superuser returns unmasked data."""
         superuser = _make_user(is_superuser=True)
 
@@ -1024,7 +1036,7 @@ class TestMaskRecords:
             record_type=record_type,
         )
 
-        results = mask_records([record], superuser)  # type: ignore[arg-type, list-item]
+        results = await mask_records([record], superuser, _stub_repo())  # type: ignore[arg-type, list-item]
 
         assert len(results) == 1
         # Superuser sees original data
