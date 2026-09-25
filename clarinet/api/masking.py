@@ -208,7 +208,7 @@ async def mask_records(
 ) -> list[RecordRead]:
     """Convert Records to RecordRead and apply patient data masking.
 
-    The anon UIDs of every viewer-list entry in the batch are looked up at once.
+    The anon UIDs of the batch's viewer-list entries are looked up at once.
 
     Args:
         records: Sequence of Record ORM objects.

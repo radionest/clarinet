@@ -1843,7 +1843,7 @@ class RecordRepository(BaseRepository[Record]):
         ``{patient_id: {uid: anon_uid}}``; a missing patient resolves nothing.
         Viewer lists may hold original or anon UIDs, so both are keys. DICOM
         UIDs are globally unique, so one map serves both levels. A UID with no
-        anon counterpart is absent, and the caller drops it.
+        anon counterpart is absent.
 
         The two key kinds are scoped differently, so the masked lists can't be
         used as an oracle (only admins may write them, but defense in depth):

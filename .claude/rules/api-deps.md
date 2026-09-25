@@ -83,7 +83,7 @@ analyst = ["reports"]
 ```
 Roles named here are auto-created at startup; unknown capabilities fail-fast.
 
-- `await mask_records(records, user, repo)` / `await mask_record(record, user, repo)` — converts `Record` -> `RecordRead` + masks patient data for non-superusers; `repo` resolves the viewer-list anon UIDs. Lives in `clarinet/api/masking.py` (not `dependencies.py`); used by `record.py`. The sync `mask_record_patient_data` without a UID map empties the viewer lists — use it only where they are not returned
+- `await mask_records(records, user, repo)` / `await mask_record(record, user, repo)` — converts `Record` -> `RecordRead` + masks patient data for non-superusers; `repo` resolves the viewer-list anon UIDs. Lives in `clarinet/api/masking.py` (not `dependencies.py`); used by `record.py`. The sync `mask_record_patient_data` without a UID map all but empties the viewer lists (only the record's own study/series stay) — use it only where they are not returned
 
 ### Factory pattern for new repos/services
 

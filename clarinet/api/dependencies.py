@@ -492,7 +492,8 @@ def is_admin(user: User) -> bool:
     inline rather than gate a whole route read it directly — the
     ``clarinet_storage_path`` guard and the create-time
     ``check_record_type_role``, the owner bypass in
-    ``authorize_mutable_record_access`` and on record assign, the actor-email
+    ``authorize_mutable_record_access`` and on record assign, the viewer-list
+    write guard on record PATCH, the actor-email
     masking in the record audit feed, and ``SseConnection.is_admin``, which
     decides whether a live event stream may carry admin-only frames.
 
