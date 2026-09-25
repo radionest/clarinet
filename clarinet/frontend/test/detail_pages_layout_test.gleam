@@ -2,7 +2,9 @@
 // secondary sections (activity feed, workflow graph) sit after the page's
 // actions as collapsed <details>, titles name the entity instead of its raw
 // UID, and each related entity is linked once — no duplicate parent cards or
-// per-row "View" buttons. Views are rendered to HTML; effects never run.
+// per-row "View" buttons. Plus the app-root invariant that keeps those
+// sections open when a modal appears. Views are rendered to HTML; effects
+// never run.
 import api/info
 import api/models
 import api/types
@@ -15,12 +17,14 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleeunit/should
 import lustre/element
+import main
 import pages/patients/detail as patient_detail
 import pages/records/execute
 import pages/series/detail as series_detail
 import pages/studies/detail as study_detail
 import router
 import shared
+import store
 import utils/load_status
 import utils/records_query
 
@@ -129,6 +133,21 @@ pub fn series_page_links_study_and_patient_once_test() {
   let html = render_series(Some("T2 AX"))
   links_to(html, "/studies/1.2.3") |> should.equal(1)
   links_to(html, "/patients/P001") |> should.equal(1)
+}
+
+// --- App root ---
+
+// Opening a modal must not move the page within the root: Lustre would
+// rebuild the whole page DOM, collapsing every expanded <details> above.
+pub fn modal_keeps_page_at_the_same_root_position_test() {
+  let closed = store.Model(..store.init(), checking_session: False)
+  let open = store.Model(..closed, modal_open: True)
+  [closed, open]
+  |> list.each(fn(model) {
+    element.to_string(main.view(model))
+    |> string.starts_with("<div><div class=\"app-layout\">")
+    |> should.be_true
+  })
 }
 
 // --- Rendering ---
