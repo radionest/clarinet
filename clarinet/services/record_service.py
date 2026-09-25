@@ -99,11 +99,6 @@ def _render_output_path(
     disclosed nothing in practice — but #552 relaxing the
     pattern grammar would turn that into a live disclosure with no test
     standing against it.
-
-    Raises a *fresh* ``CustomHTTPException`` rather than the shared
-    ``UNPROCESSABLE_ENTITY`` singleton — that singleton's ``.with_context()``
-    mutates a module-level instance, and this is the one call path that puts
-    PHI through it.
     """
     try:
         return Files.render_for(record, fd.pattern, parent=parent)
