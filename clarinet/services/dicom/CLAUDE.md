@@ -226,7 +226,7 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 
 ## Association Semaphore
 
-dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in the app lifespan via `DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)`. It is a `threading.Semaphore` (not `asyncio.Semaphore`) because it is acquired inside the `asyncio.to_thread()` worker — size it with the loop's other `to_thread` work in mind.
+dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized via `DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)` in **both** the app lifespan and `run_worker` — a class attribute binds only the process that sets it, so each process that opens associations must install its own (#551). The limit is therefore per process, not fleet-wide: the API plus N workers can hold (N+1) × the setting at once. It is a `threading.Semaphore` (not `asyncio.Semaphore`) because it is acquired inside the `asyncio.to_thread()` worker — size it with the loop's other `to_thread` work in mind.
 
 ## Errors
 

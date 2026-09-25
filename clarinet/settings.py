@@ -248,6 +248,8 @@ class Settings(BaseSettings):
     dicom_port: int = 11112
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
+    # Per process — NOT fleet-wide: the API and each worker install their own
+    # cap, so the API plus N workers can hold (N+1) x this many associations.
     dicom_max_concurrent_associations: int = 8
     dicom_retrieve_mode: Literal["c-get", "c-get-study", "c-move", "c-move-study"] = "c-get"
     # Which process owns the C-MOVE listener, per process — NOT fleet-wide.

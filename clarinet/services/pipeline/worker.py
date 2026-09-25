@@ -202,6 +202,12 @@ async def run_worker(
 
     reconfigure_for_worker(log_file=log_file)
 
+    # The cap is process-local: the API lifespan's call does not bind this
+    # process, which issues nearly all C-MOVE/C-GET traffic.
+    from clarinet.services.dicom import DicomClient
+
+    DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
+
     # Start Storage SCP before loading tasks (they may use C-MOVE immediately)
     scp = None
     if start_scp:
