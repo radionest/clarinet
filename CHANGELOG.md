@@ -33,6 +33,12 @@
 
 ### Breaking
 
+- **`clarinet.api.masking.mask_records` is async and takes a repository.**
+  `await mask_records(records, user, repo)` (and the new single-record
+  `mask_record`) resolve the viewer-list anon UIDs through
+  `RecordRepository.get_viewer_anon_uids`. `mask_record_patient_data` gains an
+  optional UID map; called without one it empties the viewer lists, so use it
+  only where they are not returned.
 - **`ClarinetError.with_context` is removed.** It shared its name with
   `CustomHTTPException.with_context` but, unlike that method after #548, rewrote
   the exception in place and returned it. Nothing in clarinet called it; pass
@@ -585,6 +591,14 @@
   `starlette>=1.3.1`, `tornado>=6.5.8`; `fastapi` rises to `>=0.133.0`, the first
   release that allows starlette 1.x. A downstream environment pinned below any
   of these no longer resolves until it upgrades.
+- **`viewer_study_uids` / `viewer_series_uids` are masked.** Record masking
+  rewrote `study_uid`, `series_uid` and the nested study/series but returned the
+  viewer lists verbatim, so the raw StudyInstanceUIDs / SeriesInstanceUIDs a
+  pipeline (or a `PATCH /api/records/{id}`) wrote there reached non-superusers
+  on every record endpoint. Each entry is now replaced by the anon UID of the
+  matching study/series of the record's own patient; an entry with none — not
+  anonymized yet, unknown, or another patient's — is dropped. Scoping to the
+  patient keeps PATCH from becoming a lookup of any study's anon UID. Closes #592.
 
 ### Added
 

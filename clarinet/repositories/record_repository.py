@@ -1830,27 +1830,40 @@ class RecordRepository(BaseRepository[Record]):
             )
         return sorted(masked)
 
-    async def get_viewer_anon_uids(self, uids: Collection[str]) -> dict[str, str]:
-        """Map study/series UIDs to their anon UID, for viewer-list masking.
+    async def get_viewer_anon_uids(
+        self, uids: Collection[str], patient_ids: Collection[str]
+    ) -> dict[str, dict[str, str]]:
+        """Map study/series UIDs to their anon UID per patient, for viewer-list masking.
 
-        Both the original and the anon UID of every anonymized study/series in
-        ``uids`` are keys — viewer lists may hold either. DICOM UIDs are
-        globally unique, so one map serves both levels. A UID with no anon
-        counterpart is absent, and the caller drops it.
+        ``{patient_id: {uid: anon_uid}}`` — both the original and the anon UID
+        of every anonymized study/series in ``uids`` are keys, since viewer
+        lists may hold either. DICOM UIDs are globally unique, so one map
+        serves both levels. A UID with no anon counterpart is absent, and the
+        caller drops it.
+
+        Scoped per patient: viewer lists are user-writable (PATCH), so an
+        unscoped lookup would hand back the salted anon UID of any other
+        patient's study whose raw UID the user puts on their own record.
         """
-        anon_uids: dict[str, str] = {}
-        if not uids:
+        anon_uids: dict[str, dict[str, str]] = {}
+        if not uids or not patient_ids:
             return anon_uids
-        for uid_col, anon_col in (
-            (col(Study.study_uid), col(Study.anon_uid)),
-            (col(Series.series_uid), col(Series.anon_uid)),
+        in_patients = col(Study.patient_id).in_(patient_ids)
+        for query in (
+            select(Study.patient_id, Study.study_uid, Study.anon_uid).where(
+                in_patients,
+                or_(col(Study.study_uid).in_(uids), col(Study.anon_uid).in_(uids)),
+            ),
+            select(Study.patient_id, Series.series_uid, Series.anon_uid)
+            .join_from(Series, Study)
+            .where(
+                in_patients,
+                or_(col(Series.series_uid).in_(uids), col(Series.anon_uid).in_(uids)),
+            ),
         ):
-            rows = await self.session.execute(
-                select(uid_col, anon_col).where(or_(uid_col.in_(uids), anon_col.in_(uids)))
-            )
-            for uid, anon in rows.all():
+            for patient_id, uid, anon in (await self.session.execute(query)).all():
                 if anon:
-                    anon_uids[uid] = anon_uids[anon] = anon
+                    anon_uids.setdefault(patient_id, {}).update({uid: anon, anon: anon})
         return anon_uids
 
     async def get_available_type_counts(

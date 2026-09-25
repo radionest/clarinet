@@ -26,7 +26,7 @@ from clarinet.models.study import Study
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.database import get_async_session
-from tests.utils.factories import make_record_type
+from tests.utils.factories import make_patient, make_record_type
 from tests.utils.test_helpers import PatientFactory, RecordFactory
 from tests.utils.urls import (
     ADMIN_RECORD_EVENTS,
@@ -674,19 +674,34 @@ async def test_viewer_uids_masked_for_non_admin(
     test_study,
     test_series,
 ):
-    """viewer_*_uids are pipeline-written and may hold raw UIDs (#592).
+    """viewer_*_uids are pipeline- or user-written and may hold raw UIDs (#592).
 
     A non-superuser gets each entry's anon UID; an entry with none known — a
-    study not anonymized yet, a UID absent from the DB — is dropped.
+    study not anonymized yet, a UID absent from the DB, another patient's
+    study (the lookup must not become an anon-UID oracle) — is dropped.
     """
     today = datetime.now(UTC).date()
     test_patient.auto_id = 123
     test_series.anon_uid = "ANON_SERIES_001"
-    record_role_a.viewer_study_uids = [test_study.study_uid, "ANON_STUDY_077", "1.2.3.88", "9.9.9"]
+    other_patient = make_patient("OTHER_PAT", "Other Patient", anon_name="ANON_OTHER")
+    record_role_a.viewer_study_uids = [
+        test_study.study_uid,
+        "ANON_STUDY_077",
+        "1.2.3.88",
+        "9.9.9",
+        "1.2.3.99",
+    ]
     record_role_a.viewer_series_uids = [test_series.series_uid]
     test_session.add_all(
         [
             test_patient,
+            other_patient,
+            Study(
+                patient_id=other_patient.id,
+                study_uid="1.2.3.99",
+                date=today,
+                anon_uid="ANON_OTHER_099",
+            ),
             test_series,
             record_role_a,
             Study(

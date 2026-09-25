@@ -58,10 +58,10 @@ def mask_record_patient_data(
     Args:
         record: RecordRead to potentially mask.
         user: Current user.
-        viewer_anon_uids: UID -> anon UID map for the viewer lists (see
-            ``RecordRepository.get_viewer_anon_uids``). Entries it lacks are
-            dropped, so omitting it empties the lists — use ``mask_record``
-            when the response carries them.
+        viewer_anon_uids: UID -> anon UID map of the record's own patient, for
+            the viewer lists (see ``RecordRepository.get_viewer_anon_uids``).
+            Entries it lacks are dropped, so omitting it empties the lists —
+            use ``mask_record`` when the response carries them.
 
     Returns:
         Original or masked RecordRead.
@@ -214,8 +214,8 @@ async def mask_records(
     uids = {
         uid for r in reads for uid in (r.viewer_study_uids or []) + (r.viewer_series_uids or [])
     }
-    anon_uids = await repo.get_viewer_anon_uids(uids)
-    return [mask_record_patient_data(r, user, anon_uids) for r in reads]
+    anon_uids = await repo.get_viewer_anon_uids(uids, {r.patient_id for r in reads})
+    return [mask_record_patient_data(r, user, anon_uids.get(r.patient_id)) for r in reads]
 
 
 async def mask_record(record: Record, user: User, repo: RecordRepository) -> RecordRead:
