@@ -252,15 +252,24 @@ integer literal breaks PG — the PR #149 v1 trap, fixed in #150); `text("true")
 (SQLite rejects it inside `ALTER TABLE` in some versions); plain `"1"` (works on
 PG via implicit cast but causes spurious alembic autogen diffs).
 
+Autogenerate compiles them with the database it runs against — generated on
+SQLite, `false()` lands in the migration as `sa.text('0')` and PostgreSQL rejects
+it (#450). The generated `env.py` passes `render_item` from
+`clarinet/utils/migrations.py`, which renders them as `sa.true()`/`sa.false()`
+instead; projects whose `env.py` predates the hook add it by hand (CHANGELOG,
+"Downstream migration").
+
 **Alternatives:** nullable `Optional[X]` — only if `None` is domain-meaningful;
 or a hand-written add-nullable → backfill → `alter_column(nullable=False)`
 migration for values inexpressible as a single SQL literal.
 
 **Regression tests:** `tests/migration/test_schema_integrity.py::TestServerDefaultsForAdditiveMigrations`
-(metadata scan) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
-(real `ALTER TABLE` on populated SQLite + PG; the PG leg = stage 6 of
-`make test-all-stages`, or `make test-migration` with `CLARINET_TEST_DATABASE_URL`
-pointing at any PG instance; see `tests/migration/conftest.py`).
+(metadata scan), `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
+(real `ALTER TABLE` on populated SQLite + PG) and
+`tests/migration/test_cli_functions.py::TestCrossDialectRegression` (autogenerate on
+SQLite, apply on PG). The PG leg = stage 6 of `make test-all-stages`, or
+`make test-migration` with `CLARINET_TEST_DATABASE_URL` pointing at any PG
+instance; see `tests/migration/conftest.py`.
 
 ## Type Aliases (`clarinet/types.py`)
 

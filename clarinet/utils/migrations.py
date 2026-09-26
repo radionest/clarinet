@@ -3,13 +3,16 @@
 import asyncio
 from pathlib import Path
 from textwrap import dedent
+from typing import Literal
 
 from alembic import command
+from alembic.autogenerate.api import AutogenContext
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import Script, ScriptDirectory
-from sqlalchemy import create_engine, text
+from sqlalchemy import DefaultClause, create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.sql.expression import False_, True_
 
 from clarinet.exceptions import MigrationError
 from clarinet.settings import settings
@@ -154,6 +157,29 @@ def generate_alembic_ini(project_path: Path | None = None) -> str:
     return content.strip()
 
 
+def render_item(
+    type_: str,
+    obj: object,
+    autogen_context: AutogenContext,  # noqa: ARG001
+) -> str | Literal[False]:
+    """Alembic ``render_item`` hook that keeps boolean ``server_default`` portable.
+
+    Autogenerate compiles a ``server_default`` with the dialect it is connected
+    to, so ``sql_expression.false()`` generated on SQLite lands in the migration
+    as ``sa.text('0')`` — and PostgreSQL rejects ``BOOLEAN DEFAULT 0`` (#450).
+    ``sa.false()`` is compiled by whichever database applies the migration.
+
+    Everything else returns ``False`` (Alembic's own rendering); returning
+    ``None`` would silently drop the default.
+    """
+    if type_ == "server_default" and isinstance(obj, DefaultClause):
+        if isinstance(obj.arg, True_):
+            return "sa.true()"
+        if isinstance(obj.arg, False_):
+            return "sa.false()"
+    return False
+
+
 def generate_alembic_env(
     project_path: Path | None = None,  # noqa: ARG001
 ) -> str:
@@ -180,6 +206,7 @@ def generate_alembic_env(
 
     # Import all models from the framework
     from clarinet.models import *  # noqa: F403, F401
+    from clarinet.utils.migrations import render_item
     from sqlmodel import SQLModel
 
     # this is the Alembic Config object, which provides
@@ -240,7 +267,9 @@ def generate_alembic_env(
 
         with connectable.connect() as connection:
             context.configure(
-                connection=connection, target_metadata=target_metadata
+                connection=connection,
+                target_metadata=target_metadata,
+                render_item=render_item,
             )
 
             with context.begin_transaction():
