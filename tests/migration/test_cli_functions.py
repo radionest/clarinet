@@ -349,12 +349,21 @@ class TestEnvPyWithoutRenderItem:
             if r.levelname == "WARNING" and "render_item" in r.getMessage()
         ]
 
+    def test_current_env_py_does_not_warn(
+        self, migration_project: tuple[Path, str, Engine], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        project_path, _db_url, _engine = migration_project
+        init_and_apply(project_path)
+
+        create_migration("next", autogenerate=True, project_path=project_path)
+
+        assert not self._render_item_warnings(caplog)
+
     def test_create_migration_warns(
         self, migration_project: tuple[Path, str, Engine], caplog: pytest.LogCaptureFixture
     ) -> None:
         project_path, _db_url, _engine = migration_project
         init_and_apply(project_path)
-        assert not self._render_item_warnings(caplog)
 
         env_py = project_path / "alembic" / "env.py"
         env_py.write_text(env_py.read_text().replace("render_item=render_item,", ""))
