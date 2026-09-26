@@ -83,6 +83,10 @@ class UserService:
     async def update_user(self, user_id: UUID, data: UserUpdate) -> User:
         """Update user information.
 
+        Invalidates the auth-flow user cache so ``is_active`` / ``is_superuser``
+        changes take effect on the next request, for sessions and for the
+        service token (which resolves to the admin row) alike.
+
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
@@ -94,10 +98,15 @@ class UserService:
             update_fields["hashed_password"] = get_password_hash(data.password)
 
         await self.user_repo.update(user, update_fields)
+        DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 
     async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
+
+        Invalidates the auth-flow user cache so a deleted user's cached
+        sessions — and, for the admin, the service token — stop authenticating
+        at once.
 
         Args:
             user_id: User ID to delete
@@ -107,6 +116,7 @@ class UserService:
         """
         user = await self.user_repo.get(user_id)
         await self.user_repo.delete(user)
+        DatabaseStrategy.invalidate_user_cache(user_id)
 
     async def authenticate(self, username: str, password: str) -> User:
         """Authenticate user with username and password.

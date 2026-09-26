@@ -461,6 +461,13 @@
 
 ### Security
 
+- **Deactivating or deleting the admin ends `X-Internal-Token` access at once.**
+  The service token resolves to the admin row, which was cached for 5 minutes
+  and never invalidated, so a deactivated, demoted or deleted admin kept full
+  service-token superuser access until the TTL ran out. Every user update,
+  deletion, deactivation and role change now drops that cache; `PUT` and
+  `DELETE /api/user/{id}` also start evicting the target's cached sessions, as
+  role changes and deactivation already did (#600).
 - **Failed logins and `X-Internal-Token` guesses are throttled.** Login had no
   rate limit or lockout, and the service token — derived from `admin_password`,
   accepted on every endpoint — was a second, cheaper oracle for the same secret.
