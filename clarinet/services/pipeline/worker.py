@@ -202,6 +202,10 @@ async def run_worker(
 
     reconfigure_for_worker(log_file=log_file)
 
+    from clarinet.services.dicom import install_association_cap
+
+    install_association_cap()
+
     # Start Storage SCP before loading tasks (they may use C-MOVE immediately)
     scp = None
     if start_scp:

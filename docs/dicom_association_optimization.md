@@ -45,8 +45,12 @@ retrieve_study_metadata()
 
 A `threading.Semaphore` inside dimsechord's SCU limits the total number of
 concurrent DICOM associations across all operations (DICOMweb proxy,
-anonymization, import, etc.). Sized from the app lifespan via
-`DicomClient.set_max_concurrent_associations()`.
+anonymization, import, etc.). Installed by `install_association_cap()`
+(`clarinet/services/dicom/client.py`), which both the app lifespan and
+`run_worker` call: the semaphore lives in process memory, so every process that
+opens associations must install its own. The limit is per process, not
+fleet-wide — the API plus N workers can hold (N+1) ×
+`dicom_max_concurrent_associations` at once.
 
 **Why `threading.Semaphore`:**
 - It is acquired inside the synchronous SCU, called via `asyncio.to_thread()`
@@ -88,6 +92,8 @@ to be increased, or the PACS server needs more resources.
 
 - **`dicom_max_concurrent_associations=8`**: Good default for Orthanc on modest
   hardware. Increase to 16-32 for dedicated PACS servers with high throughput.
-  Decrease to 4 if PACS is shared or resource-constrained.
+  Decrease to 4 if PACS is shared or resource-constrained. The limit applies to
+  each process separately, so against a PACS or proxy with its own inbound
+  ceiling, divide that ceiling by the number of processes (API + workers).
 - **`dicomweb_memory_cache_max_entries=200`**: Supports ~4-5 large studies
   simultaneously. Increase for multi-user environments with many concurrent viewers.

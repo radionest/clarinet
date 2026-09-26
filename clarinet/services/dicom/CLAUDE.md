@@ -173,7 +173,7 @@ that arrives *partially* every time spends the retries and lands in the DLQ.
 | `dicom_port` | `11112` | Local DICOM port |
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
-| `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
+| `dicom_max_concurrent_associations` | `8` | Per-process semaphore limit for concurrent DICOM associations (the API and each worker install their own; not fleet-wide) |
 | `dicom_retrieve_mode` | `c-get` | `c-get` / `c-get-study` / `c-move` / `c-move-study` — see Retrieve modes below |
 | `dicom_cmove_timeout` | `300.0` | Seconds bounding the C-MOVE *and* the wait for its instances to arrive |
 | `dicom_scp_enabled` | `None` | `None` = the API owns a listener when the mode is c-move (a worker needs `--dicom` or `true`); `false` = never; `true` = always |
@@ -226,7 +226,7 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 
 ## Association Semaphore
 
-dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in the app lifespan via `DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)`. It is a `threading.Semaphore` (not `asyncio.Semaphore`) because it is acquired inside the `asyncio.to_thread()` worker — size it with the loop's other `to_thread` work in mind.
+dimsechord's SCU enforces a process-global `threading.Semaphore` limiting concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Installed by `install_association_cap()` (`client.py`), which **both** the app lifespan and `run_worker` call — the semaphore lives in process memory, so each process that opens associations must install its own, and a new entry point that talks DICOM must call it too (#551). The limit is therefore per process, not fleet-wide: the API plus N workers can hold (N+1) × the setting at once. It is a `threading.Semaphore` (not `asyncio.Semaphore`) because it is acquired inside the `asyncio.to_thread()` worker — size it with the loop's other `to_thread` work in mind.
 
 ## Errors
 

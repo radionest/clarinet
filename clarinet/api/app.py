@@ -434,9 +434,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("Session cleanup service started")
 
     # Cap concurrent DICOM associations process-wide
-    from clarinet.services.dicom import DicomClient
+    from clarinet.services.dicom import install_association_cap
 
-    DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
+    install_association_cap()
 
     # Start Storage SCP when this process owns the C-MOVE listener
     from clarinet.services.dicom.scp import start_storage_scp, storage_scp_wanted

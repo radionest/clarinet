@@ -163,7 +163,7 @@ secret_key = "change-this-secret-key-in-production"
 # dicom_port = 11112
 # dicom_ip = ""
 # dicom_max_pdu = 16384
-# dicom_max_concurrent_associations = 8
+# dicom_max_concurrent_associations = 8 # per process: API + each worker
 # dicom_log_identifiers = false
 
 # ── PACS remote (backend DICOM service) ──────────────

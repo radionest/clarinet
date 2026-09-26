@@ -74,6 +74,17 @@ def series_instance_counts(results: Iterable[SeriesResult]) -> dict[str, int]:
     }
 
 
+def install_association_cap() -> None:
+    """Cap concurrent DICOM associations in the calling process.
+
+    The semaphore lives in process memory, so every process that opens
+    associations must call this at startup — the API lifespan and
+    ``run_worker`` both do (#551). The cap is therefore per process, never a
+    fleet-wide budget.
+    """
+    DicomClient.set_max_concurrent_associations(settings.dicom_max_concurrent_associations)
+
+
 class DicomClient(DimsechordClient):
     """DICOM SCU with Clarinet's ``dicom_retrieve_mode`` dispatch.
 
