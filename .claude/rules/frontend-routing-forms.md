@@ -89,7 +89,8 @@ them in the page.
 - `utils/url.gleam` — `replace_route` for silent URL sync (serialises the route via `router.route_to_href`).
 - `utils/storage.gleam` — `save_dict` / `load_dict_sync` for localStorage. Keys are
   scoped per project (`clarinet{base_path}:`) because localStorage is per-origin;
-  never write raw localStorage keys — they leak between sub-path projects on one host.
+  never write raw localStorage keys — they leak between sub-path projects on one host
+  (except `clarinet_locale`, intentionally host-wide).
 
 **Model field:**
 
