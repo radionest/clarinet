@@ -23,6 +23,22 @@ export function set_cookie(name, value, path, max_age) {
   return undefined;
 }
 
+// URL-decoded value of a cookie visible to this page, "" when absent. First
+// match wins: browsers list the most specific path first, so a sub-path cookie
+// shadows a same-named one set by a root deploy on the same host.
+export function get_cookie(name) {
+  if (typeof document === "undefined") return "";
+  const hit = document.cookie
+    .split("; ")
+    .find((c) => c.startsWith(name + "="));
+  if (!hit) return "";
+  try {
+    return decodeURIComponent(hit.slice(name.length + 1));
+  } catch {
+    return "";
+  }
+}
+
 export function delete_cookie(name, path) {
   if (typeof document === "undefined") return undefined;
   document.cookie = name + "=; path=" + path + "; max-age=0; SameSite=Lax";

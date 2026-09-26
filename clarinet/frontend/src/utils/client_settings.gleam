@@ -13,7 +13,7 @@ import lustre/effect.{type Effect}
 import utils/cookie
 import utils/storage
 
-/// localStorage key (without the `clarinet:` prefix) under which these
+/// localStorage key (without the per-project storage prefix) under which these
 /// per-device settings live. Exposed so the logout flow can preserve it
 /// while clearing the rest of the namespace.
 pub const settings_key = "client_settings"
@@ -38,14 +38,17 @@ pub fn default() -> ClientSettings {
   ClientSettings(storage_path_client: None)
 }
 
-/// Read settings from localStorage. Returns `default()` on any error
-/// (missing key, malformed JSON, empty value, etc.) so callers never
-/// need a Result.
+/// Read settings from localStorage, falling back to the path-scoped cookie
+/// when the key is missing — after storage keys became per-project the cookie
+/// still holds this project's value, and without the fallback `/settings`
+/// would show a blank field (a blank Save would then delete the cookie).
+/// Returns `default()` when neither has a value, so callers never need a
+/// Result.
 pub fn load_sync() -> ClientSettings {
   let data = storage.load_dict_sync(storage.Local, settings_key)
   ClientSettings(
     storage_path_client: dict.get(data, storage_path_field)
-      |> result.unwrap("")
+      |> result.lazy_unwrap(fn() { cookie.get_cookie(cookie_name) })
       |> non_empty,
   )
 }
