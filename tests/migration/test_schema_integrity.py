@@ -191,8 +191,8 @@ class TestMigrationOperations:
 # declare ``server_default`` — see ``test_not_null_bool_columns_have_server_default``.
 #
 # Do not extend this list lightly. The right fix for any newly added Boolean
-# column is to declare ``sa_column_kwargs={"server_default": text("1")}`` (or
-# ``text("0")``) on the SQLModel ``Field``. Only fields that genuinely shipped
+# column is to declare ``sa_column_kwargs={"server_default": sql_expression.true()}``
+# (or ``.false()``) on the SQLModel ``Field``. Only fields that genuinely shipped
 # in the day-1 schema belong here.
 GRANDFATHERED_BOOL_COLUMNS_WITHOUT_SERVER_DEFAULT: set[tuple[str, str]] = {
     # File registry — initial schema (M2M for record type files).
