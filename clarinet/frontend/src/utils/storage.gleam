@@ -1,5 +1,7 @@
 // Persistent key-value storage abstraction over plinth/javascript/storage.
-// All keys are namespaced per project: "clarinet{base_path}:".
+// Keys written through this module are namespaced per project (`prefix_for`).
+// `clarinet_locale` (main.gleam) deliberately bypasses it: UI language is a
+// per-user choice shared by every project on the host.
 
 import config
 import gleam/dict.{type Dict}
@@ -19,11 +21,21 @@ pub type Backend {
   Session
 }
 
-// localStorage is per-origin, not per-path: sibling projects deployed under
-// sub-paths of one host (`/nir_liver`, `/rtk_lung_seg`) would otherwise share
-// every key. Root deploy keeps the historical "clarinet:" prefix.
+/// Key prefix for a deploy base path (`config.base_path()` form: "" or
+/// "/nir_liver"). localStorage is per-origin, not per-path, so sibling
+/// projects under sub-paths of one host would otherwise share every key.
+/// Root keeps the historical "clarinet:"; the ":" terminator keeps "/a",
+/// "/a_b" and "/a/b" disjoint for the logout sweep.
+///
+/// Unscoped "clarinet:*" keys left by sub-path deploys before this scoping
+/// are never swept: on a shared origin they are indistinguishable from a
+/// root deploy's live keys.
+pub fn prefix_for(base_path: String) -> String {
+  "clarinet" <> base_path <> ":"
+}
+
 fn prefix() -> String {
-  "clarinet" <> config.base_path() <> ":"
+  prefix_for(config.base_path())
 }
 
 /// Save a Dict(String, String) as JSON. Fire-and-forget effect.
@@ -121,13 +133,15 @@ fn get_storage(backend: Backend) -> Result(plinth_storage.Storage, Nil) {
 // Reverse order avoids index shifting when removing items.
 fn do_clear_prefixed(s: plinth_storage.Storage, keep: List(String)) -> Nil {
   let count = plinth_storage.length(s)
-  let keep_full = list.map(keep, fn(k) { prefix() <> k })
-  do_clear_prefixed_loop(s, count - 1, keep_full)
+  let p = prefix()
+  let keep_full = list.map(keep, fn(k) { p <> k })
+  do_clear_prefixed_loop(s, count - 1, p, keep_full)
 }
 
 fn do_clear_prefixed_loop(
   s: plinth_storage.Storage,
   index: Int,
+  p: String,
   keep_full: List(String),
 ) -> Nil {
   case index < 0 {
@@ -135,17 +149,13 @@ fn do_clear_prefixed_loop(
     False -> {
       case plinth_storage.key(s, index) {
         Ok(k) ->
-          case starts_with_prefix(k) && !list.contains(keep_full, k) {
+          case string.starts_with(k, p) && !list.contains(keep_full, k) {
             True -> plinth_storage.remove_item(s, k)
             False -> Nil
           }
         Error(_) -> Nil
       }
-      do_clear_prefixed_loop(s, index - 1, keep_full)
+      do_clear_prefixed_loop(s, index - 1, p, keep_full)
     }
   }
-}
-
-fn starts_with_prefix(key: String) -> Bool {
-  string.starts_with(key, prefix())
 }

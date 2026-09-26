@@ -1,5 +1,5 @@
-// Same-origin cookie writer. Mirrors a per-device setting (the Slicer storage
-// path) into a cookie alongside localStorage so it rides on requests the
+// Same-origin cookie reader/writer. Mirrors a per-device setting (the Slicer
+// storage path) into a cookie alongside localStorage so it rides on requests the
 // frontend's own HTTP client does not build — notably formosh's `rsvp.post`,
 // which drops custom headers. The browser auto-attaches same-origin cookies to
 // every request, including those, so the value survives form-submit with no
@@ -20,6 +20,13 @@ fn do_set_cookie(
 @external(javascript, "./cookie.ffi.mjs", "delete_cookie")
 fn do_delete_cookie(_name: String, _path: String) -> Nil {
   Nil
+}
+
+/// URL-decoded value of a cookie visible to this page; "" when absent or
+/// off-DOM. Synchronous — it only reads `document.cookie`.
+@external(javascript, "./cookie.ffi.mjs", "get_cookie")
+pub fn get_cookie(_name: String) -> String {
+  ""
 }
 
 /// Write a cookie scoped to `path`. The value is `encodeURIComponent`-escaped

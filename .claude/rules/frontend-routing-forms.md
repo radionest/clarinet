@@ -32,7 +32,7 @@ When adding an endpoint: add the function to the matching `api/<resource>.gleam`
 
 ## 8. Routing — `config.base_path()`
 
-The app is deployed behind a sub-path (`/liver_nir/`, `/lung_ct/`, ...). `config.base_path()` reads the prefix from a `<meta>` tag injected at serve time.
+The app is deployed behind a sub-path (`/liver_nir/`, `/lung_ct/`, ...). `config.base_path()` reads the prefix from the `<base href>` tag injected at serve time.
 
 - **Always** build URLs via `router.route_to_path(router.SomeRoute(args))`. It prepends the prefix.
 - **Never** construct anchor hrefs by string concatenation — you'll break sub-path deploys.
@@ -87,7 +87,9 @@ them in the page.
     (`router.filters_to_query`, page `save_filters`).
 - `utils/table_sort.gleam` — sortable column headers, URL-persisted sort.
 - `utils/url.gleam` — `replace_route` for silent URL sync (serialises the route via `router.route_to_href`).
-- `utils/storage.gleam` — `save_dict` / `load_dict_sync` for localStorage.
+- `utils/storage.gleam` — `save_dict` / `load_dict_sync` for localStorage. Keys are
+  scoped per project (`clarinet{base_path}:`) because localStorage is per-origin;
+  never write raw localStorage keys — they leak between sub-path projects on one host.
 
 **Model field:**
 

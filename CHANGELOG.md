@@ -727,6 +727,16 @@
 
 ### Fixed
 
+- **Projects deployed under sub-paths of one host no longer share browser
+  settings.** localStorage is per-origin, so `/nir_liver`, `/rtk_lung_seg`, …
+  all read and wrote the same `clarinet:*` keys: the Slicer storage path saved
+  in one project was sent to every other, along with records-list filters and
+  home-page group state. Keys are now prefixed `clarinet{root_url}:`; root
+  deploys keep `clarinet:` and are unaffected. After upgrading, sub-path
+  projects start with fresh filters and group state once; the Settings page
+  picks the storage path up from the per-project cookie — check it once per
+  project, since a value saved while the leak was live may belong to another
+  project.
 - The patient, study, series and record-type info cards lay out as a
   label/value grid, as the record page always did — every label used to
   stack above its value (the grid rule only matched a `<dl>` nested inside
