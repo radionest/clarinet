@@ -842,6 +842,21 @@ def _download_file(url: str, dest: Path) -> None:
         shutil.copyfileobj(resp, f)
 
 
+def _extract_tarball(tarball: Path, dest: Path, what: str) -> None:
+    """Extract a ``.tar.gz`` into ``dest``; log and exit(1) on a corrupt or unsafe archive.
+
+    ``filter="data"`` rejects members and links that would land outside ``dest``
+    (tar-slip) and special files, and strips leading ``/`` — the tarballs come from
+    the network or the operator. A truncated gzip stream raises ``EOFError``.
+    """
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            tf.extractall(dest, filter="data")
+    except (tarfile.TarError, OSError, EOFError) as e:
+        logger.error(f"Failed to extract {what} tarball {tarball}: {e}")
+        sys.exit(1)
+
+
 def install_ohif(
     version: str | None = None,
     force_config: bool = False,
@@ -882,8 +897,7 @@ def install_ohif(
                 logger.error(f"Failed to download OHIF v{version}: {e}")
                 sys.exit(1)
 
-        with tarfile.open(tarball, "r:gz") as tf:
-            tf.extractall(tmp_path)
+        _extract_tarball(tarball, tmp_path, "OHIF")
 
         dist_dir = tmp_path / "package" / "dist"
         if not dist_dir.exists():
@@ -1036,8 +1050,7 @@ def install_quarto(version: str | None = None, from_file: str | None = None) -> 
                 logger.error(f"Failed to download Quarto v{version}: {e}")
                 sys.exit(1)
 
-        with tarfile.open(tarball, "r:gz") as tf:
-            tf.extractall(tmp_path, filter="data")  # reject members escaping tmp_path
+        _extract_tarball(tarball, tmp_path, "Quarto")
 
         # The tarball's top-level directory is ``quarto-<version>/`` (bin/, share/).
         extracted = next(
