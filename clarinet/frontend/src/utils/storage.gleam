@@ -89,12 +89,12 @@ pub fn remove(backend: Backend, key: String) -> Effect(msg) {
   })
 }
 
-/// Remove all keys with the "clarinet:" prefix (for logout cleanup).
+/// Remove all keys under this project's prefix (for logout cleanup).
 pub fn clear_prefixed(backend: Backend) -> Effect(msg) {
   clear_prefixed_except(backend, [])
 }
 
-/// Remove all keys with the "clarinet:" prefix EXCEPT the given keys
+/// Remove all keys under this project's prefix EXCEPT the given keys
 /// (without prefix). Use for logout flows that need to preserve
 /// per-device settings (e.g. `client_settings` — Slicer storage path
 /// is bound to this machine, not to the session).
