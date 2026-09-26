@@ -118,7 +118,8 @@ as `sa.text('0')`, which PostgreSQL rejects (#450). The generated `env.py`
 therefore passes the `render_item` hook from `clarinet/utils/migrations.py`,
 which renders these literals as `sa.true()` / `sa.false()` so that the database
 applying the migration compiles them. `env.py` is only written when missing:
-older projects add the hook by hand (CHANGELOG, "Downstream migration"). The
+older projects add the hook by hand (CHANGELOG entry for #450), and
+`clarinet init-migrations` / `clarinet db migrate create` warn until they do. The
 hook sees model defaults only — a downgrade that re-adds a dropped boolean
 column still renders the reflected `sa.text('0')`.
 

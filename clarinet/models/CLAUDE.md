@@ -256,8 +256,8 @@ Autogenerate compiles them with the database it runs against — generated on
 SQLite, `false()` lands in the migration as `sa.text('0')` and PostgreSQL rejects
 it (#450). The generated `env.py` passes `render_item` from
 `clarinet/utils/migrations.py`, which renders them as `sa.true()`/`sa.false()`
-instead; projects whose `env.py` predates the hook add it by hand (CHANGELOG,
-"Downstream migration").
+instead; projects whose `env.py` predates the hook add it by hand (CHANGELOG
+entry for #450) — `init-migrations` and `db migrate create` warn until they do.
 
 **Alternatives:** nullable `Optional[X]` — only if `None` is domain-meaningful;
 or a hand-written add-nullable → backfill → `alter_column(nullable=False)`

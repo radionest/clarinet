@@ -740,7 +740,9 @@
   written when missing, so an existing project adds
   `from clarinet.utils.migrations import render_item` and passes
   `render_item=render_item` to `context.configure(...)` in
-  `run_migrations_online()`. In migrations already generated on SQLite, replace
+  `run_migrations_online()`; `clarinet init-migrations` and
+  `clarinet db migrate create` warn while it is missing. In migrations already
+  generated on SQLite, replace
   `server_default=sa.text('0')` / `sa.text('1')` on `sa.Boolean()` columns with
   `sa.false()` / `sa.true()` before running them on PostgreSQL — editing an
   applied revision is safe, Alembic tracks revision ids, not file contents.
