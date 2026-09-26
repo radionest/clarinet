@@ -1,6 +1,7 @@
 // Persistent key-value storage abstraction over plinth/javascript/storage.
-// All keys are namespaced with "clarinet:" prefix.
+// All keys are namespaced per project: "clarinet{base_path}:".
 
+import config
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/json
@@ -18,7 +19,12 @@ pub type Backend {
   Session
 }
 
-const prefix = "clarinet:"
+// localStorage is per-origin, not per-path: sibling projects deployed under
+// sub-paths of one host (`/nir_liver`, `/rtk_lung_seg`) would otherwise share
+// every key. Root deploy keeps the historical "clarinet:" prefix.
+fn prefix() -> String {
+  "clarinet" <> config.base_path() <> ":"
+}
 
 /// Save a Dict(String, String) as JSON. Fire-and-forget effect.
 pub fn save_dict(
@@ -34,7 +40,7 @@ pub fn save_dict(
       |> json.object()
       |> json.to_string()
     let _ = case get_storage(backend) {
-      Ok(s) -> plinth_storage.set_item(s, prefix <> key, json_str)
+      Ok(s) -> plinth_storage.set_item(s, prefix() <> key, json_str)
       Error(_) -> Error(Nil)
     }
     Nil
@@ -50,7 +56,7 @@ pub fn load_dict(
   effect.from(fn(dispatch) {
     let data =
       get_storage(backend)
-      |> result.try(plinth_storage.get_item(_, prefix <> key))
+      |> result.try(plinth_storage.get_item(_, prefix() <> key))
       |> result.try(fn(raw) {
         json.parse(raw, decode.dict(decode.string, decode.string))
         |> result.map_error(fn(_) { Nil })
@@ -65,7 +71,7 @@ pub fn load_dict(
 /// the value is needed immediately (not via Effect).
 pub fn load_dict_sync(backend: Backend, key: String) -> Dict(String, String) {
   get_storage(backend)
-  |> result.try(plinth_storage.get_item(_, prefix <> key))
+  |> result.try(plinth_storage.get_item(_, prefix() <> key))
   |> result.try(fn(raw) {
     json.parse(raw, decode.dict(decode.string, decode.string))
     |> result.map_error(fn(_) { Nil })
@@ -77,7 +83,7 @@ pub fn load_dict_sync(backend: Backend, key: String) -> Dict(String, String) {
 pub fn remove(backend: Backend, key: String) -> Effect(msg) {
   effect.from(fn(_dispatch) {
     case get_storage(backend) {
-      Ok(s) -> plinth_storage.remove_item(s, prefix <> key)
+      Ok(s) -> plinth_storage.remove_item(s, prefix() <> key)
       Error(_) -> Nil
     }
   })
@@ -115,7 +121,7 @@ fn get_storage(backend: Backend) -> Result(plinth_storage.Storage, Nil) {
 // Reverse order avoids index shifting when removing items.
 fn do_clear_prefixed(s: plinth_storage.Storage, keep: List(String)) -> Nil {
   let count = plinth_storage.length(s)
-  let keep_full = list.map(keep, fn(k) { prefix <> k })
+  let keep_full = list.map(keep, fn(k) { prefix() <> k })
   do_clear_prefixed_loop(s, count - 1, keep_full)
 }
 
@@ -141,5 +147,5 @@ fn do_clear_prefixed_loop(
 }
 
 fn starts_with_prefix(key: String) -> Bool {
-  string.starts_with(key, prefix)
+  string.starts_with(key, prefix())
 }

@@ -13,7 +13,7 @@ import lustre/effect.{type Effect}
 import utils/cookie
 import utils/storage
 
-/// localStorage key (without the `clarinet:` prefix) under which these
+/// localStorage key (without the per-project storage prefix) under which these
 /// per-device settings live. Exposed so the logout flow can preserve it
 /// while clearing the rest of the namespace.
 pub const settings_key = "client_settings"
