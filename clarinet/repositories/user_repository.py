@@ -155,7 +155,12 @@ class UserRepository(BaseRepository[User]):
         return list(result.scalars().all())
 
     async def update_password(self, user: User, hashed_password: str) -> User:
-        """Update user's password.
+        """Set a new password hash and revoke all of the user's sessions (#651).
+
+        One commit covers both: ``revoke_user_sessions`` commits the pending
+        hash together with its DELETE, so a failed revoke leaves the old
+        password in place rather than a new password with the old sessions
+        still valid.
 
         Args:
             user: User to update
@@ -165,13 +170,8 @@ class UserRepository(BaseRepository[User]):
             Updated user
         """
         user.hashed_password = hashed_password
-        await self.session.commit()
-        await self.session.refresh(user)
+        await revoke_user_sessions(self.session, user.id)
         return user
-
-    async def revoke_sessions(self, user_id: UUID) -> int:
-        """Delete all of the user's sessions and commit; returns how many."""
-        return await revoke_user_sessions(self.session, user_id)
 
     async def activate(self, user: User) -> User:
         """Activate user account.
