@@ -696,7 +696,8 @@ async def test_custom_record_types_path(
             description="Loaded from subdirectory",
             level="SERIES",
         )
-        """)
+        """),
+        encoding="utf-8",
     )
 
     from clarinet.settings import settings
@@ -724,7 +725,8 @@ async def test_custom_files_catalog_path(
         from clarinet.config.primitives import FileDef
 
         custom_file = FileDef(pattern="custom.nrrd", level="SERIES", description="Custom file")
-        """)
+        """),
+        encoding="utf-8",
     )
     (tmp_path / "definitions" / "record_types.py").write_text(
         textwrap.dedent("""\
@@ -737,7 +739,8 @@ async def test_custom_files_catalog_path(
             level="SERIES",
             files=[FileRef(custom_file, "input")],
         )
-        """)
+        """),
+        encoding="utf-8",
     )
 
     from clarinet.settings import settings

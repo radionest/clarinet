@@ -28,7 +28,7 @@ from clarinet.models.study import Series, Study
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.settings import settings
-from tests.utils.test_helpers import RecordFactory
+from tests.utils.test_helpers import RecordFactory, host_root
 
 # ---------------------------------------------------------------------------
 # Local fixtures
@@ -318,7 +318,7 @@ async def test_working_dir_uses_per_record_clarinet_storage_path_override(
     Per-record override exists only on ``Record`` — ``Series``-derived paths
     always use ``settings.storage_path`` (intentional asymmetry).
     """
-    custom_storage = f"{Path.cwd().drive}/custom/storage/root"  # absolute on Windows too
+    custom_storage = host_root("/custom/storage/root")
     record_read = await RecordFactory.create_record_with_relations(
         test_session,
         patient=patient_with_anon,

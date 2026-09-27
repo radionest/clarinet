@@ -22,6 +22,7 @@ from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.patient import PatientRead
 from clarinet.models.record import RecordRead
 from clarinet.models.study import SeriesRead, StudyRead
+from tests.utils.test_helpers import host_root
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -264,7 +265,7 @@ class TestFileRepositoryConfiguration:
     @patch("clarinet.files._resolver.settings")
     def test_clarinet_storage_path_override_applied(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/default"
-        custom = f"{Path.cwd().drive}/custom"  # absolute on Windows too
+        custom = host_root("/custom")
         record = _make_record_mock(clarinet_storage_path=custom)
 
         repo = FileRepository(record)
@@ -302,7 +303,9 @@ class TestFileRepositoryConfiguration:
         """An absolute but non-normalized override (embedded ``..``) is
         rejected too — absoluteness alone isn't sufficient."""
         mock_settings.storage_path = "/default"
-        record = _make_record_mock(clarinet_storage_path="/custom/../etc")
+        # host_root: otherwise a 3.13+ Windows host refuses it as relative and
+        # the ``..`` check this test exists for never runs.
+        record = _make_record_mock(clarinet_storage_path=host_root("/custom/../etc"))
 
         with pytest.raises(UnsafePathError):
             FileRepository(record)
@@ -320,8 +323,7 @@ class TestFileRepositoryConfiguration:
         not just writes. Only absoluteness and ``..`` components are checked.
         """
         mock_settings.storage_path = "/default"
-        # The drive prefix keeps the root absolute on Windows without collapsing the shape.
-        record = _make_record_mock(clarinet_storage_path=Path.cwd().drive + override)
+        record = _make_record_mock(clarinet_storage_path=host_root(override))
 
         FileRepository(record)  # must not raise
 

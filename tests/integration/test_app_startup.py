@@ -262,7 +262,9 @@ async def test_startup_broken_plan_file_raises_config_startup_error(
 
     plan_dir = tmp_path / "plan"
     plan_dir.mkdir()
-    (plan_dir / "validators.py").write_text("from utils.nonexistent import nothing\n")
+    (plan_dir / "validators.py").write_text(
+        "from utils.nonexistent import nothing\n", encoding="utf-8"
+    )
     monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))
 
     app = FastAPI(lifespan=lifespan)
@@ -302,7 +304,8 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
         "\n"
         "@slicer_context_hydrator('startup_order_probe')\n"
         "async def startup_order_probe(record, context, ctx):\n"
-        "    return {}\n"
+        "    return {}\n",
+        encoding="utf-8",
     )
     (plan_dir / "record_types.py").write_text(
         "from clarinet.config.primitives import RecordDef\n"
@@ -311,7 +314,8 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
         "    name='rt-hydrator-order',\n"
         "    level='SERIES',\n"
         "    slicer_context_hydrators=['startup_order_probe'],\n"
-        ")\n"
+        ")\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(settings, "config_mode", "python")
     monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))

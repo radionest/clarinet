@@ -26,11 +26,10 @@ from clarinet.models.record import RecordRead
 from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
 from clarinet.services.slicer.context import build_slicer_context, build_slicer_context_async
+from tests.utils.test_helpers import host_root
 
 TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
-# A driveless "/storage" is not absolute on Windows from Python 3.13, so the
-# storage-root guard in Files refuses it; the cwd drive ("" on POSIX) fixes that.
-STORAGE = f"{Path.cwd().drive}/storage"
+STORAGE = host_root("/storage")
 
 
 def _make_record_read(
@@ -109,7 +108,7 @@ def _make_record_read(
 @patch("clarinet.services.slicer.context.settings")
 def test_pacs_settings_in_context(mock_settings):
     """PACS connection params from settings are injected into context."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
     mock_settings.pacs_host = "pacs.local"
     mock_settings.pacs_port = 4242
@@ -207,7 +206,7 @@ def test_pacs_helper_rejects_invalid_retrieve_mode():
 @patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_study_level(mock_settings):
     """STUDY level → working_folder + study_uid present."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
@@ -221,7 +220,7 @@ def test_standard_vars_study_level(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_series_level(mock_settings):
     """SERIES level → working_folder + study_uid + series_uid present."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -241,7 +240,7 @@ def test_standard_vars_series_level(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_patient_level(mock_settings):
     """PATIENT level → working_folder only (no study_uid/series_uid)."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -262,7 +261,7 @@ def test_study_level_falls_back_for_unanon_study(mock_settings):
     instead of refusing the request, so the inspector can review data that
     has not been anonymized yet.
     """
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY, study_anon_uid=None)
@@ -274,7 +273,7 @@ def test_study_level_falls_back_for_unanon_study(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_series_level_falls_back_for_unanon_series(mock_settings):
     """SERIES-level Slicer context falls back to the raw series UID too."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -292,7 +291,7 @@ def test_series_level_falls_back_for_unanon_series(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_record_id_in_context(mock_settings):
     """record_id is always present in context regardless of DICOM level."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
@@ -309,7 +308,7 @@ def test_record_id_in_context(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_file_paths_from_registry(mock_settings):
     """FileDefinition names → resolved absolute paths in context."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     seg_fd = FileDefinitionRead(
@@ -352,7 +351,7 @@ def test_collection_definition_does_not_break_the_context(mock_settings):
         role=FileRole.INPUT,
         multiple=True,
     )
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -381,7 +380,7 @@ def test_vanishing_collection_pattern_does_not_break_the_context(mock_settings):
         role=FileRole.INPUT,
         multiple=True,
     )
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -397,7 +396,7 @@ def test_vanishing_collection_pattern_does_not_break_the_context(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_output_file_alias(mock_settings):
     """First OUTPUT file → output_file convenience alias."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     input_fd = FileDefinitionRead(
@@ -429,7 +428,7 @@ def test_output_file_alias(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_cross_level_file_resolution(mock_settings):
     """master_model (PATIENT level) resolved from SERIES-level record."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     master_fd = FileDefinitionRead(
@@ -459,7 +458,7 @@ def test_cross_level_file_resolution(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_custom_args_override(mock_settings):
     """Custom slicer_script_args override auto-injected values."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -485,7 +484,7 @@ def test_custom_args_override(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_unresolved_template_skipped(mock_settings):
     """Unknown placeholder in custom args → key skipped (warning logged via loguru)."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(
@@ -511,7 +510,7 @@ def test_unresolved_template_skipped(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_no_output_file_when_no_outputs(mock_settings):
     """No OUTPUT files in registry → output_file key absent."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     input_fd = FileDefinitionRead(
@@ -537,7 +536,7 @@ def test_no_output_file_when_no_outputs(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 def test_origin_type_from_parent(mock_settings):
     """origin_type in file patterns resolved from parent when provided."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
     mock_settings.pacs_host = "localhost"
     mock_settings.pacs_port = 4242
@@ -574,7 +573,7 @@ def test_origin_type_from_parent(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 async def test_build_slicer_context_async_no_hydrators(mock_settings):
     """build_slicer_context_async without hydrators returns same as sync."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
@@ -645,7 +644,7 @@ async def test_client_path_translation_drive_letter(mock_settings):
 @patch("clarinet.services.slicer.context.settings")
 async def test_client_path_translation_disabled(mock_settings):
     """No translation when storage_path_client is None."""
-    mock_settings.storage_path = STORAGE
+    mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
