@@ -12,7 +12,6 @@ from clarinet.exceptions.domain import (
 from clarinet.models import User, UserCreate, UserRole, UserUpdate
 from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.auth import get_password_hash, verify_password
-from clarinet.utils.session import revoke_user_sessions
 
 
 class UserService:
@@ -101,9 +100,13 @@ class UserService:
             update_fields["hashed_password"] = get_password_hash(data.password)
 
         await self.user_repo.update(user, update_fields)
-        if data.password is not None:
-            await revoke_user_sessions(self.user_repo.session, user_id)
-        DatabaseStrategy.invalidate_user_cache(user_id)
+        # Evict after the revoke, not before: evicting first would let a
+        # concurrent request re-cache a token whose row is about to go.
+        try:
+            if data.password is not None:
+                await self.user_repo.revoke_sessions(user_id)
+        finally:
+            DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 
     async def delete_user(self, user_id: UUID) -> None:

@@ -8,6 +8,7 @@ from sqlmodel import col, select
 
 from clarinet.models import User, UserRole
 from clarinet.repositories.base import BaseRepository
+from clarinet.utils.session import revoke_user_sessions
 
 
 class UserRepository(BaseRepository[User]):
@@ -167,6 +168,10 @@ class UserRepository(BaseRepository[User]):
         await self.session.commit()
         await self.session.refresh(user)
         return user
+
+    async def revoke_sessions(self, user_id: UUID) -> int:
+        """Delete all of the user's sessions and commit; returns how many."""
+        return await revoke_user_sessions(self.session, user_id)
 
     async def activate(self, user: User) -> User:
         """Activate user account.

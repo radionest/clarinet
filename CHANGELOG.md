@@ -461,6 +461,14 @@
 
 ### Security
 
+- **Changing a password logs out the user's existing sessions.** `PUT
+  /api/user/{id}` with a `password` and `clarinet admin reset-password` rehashed
+  the password but left every session valid, so a reset never locked out
+  whoever held the old one. Both now revoke all of the user's sessions —
+  including the caller's own when admins change their own password. The CLI
+  runs outside the API process, so a session the API has already cached keeps
+  working for up to `session_cache_ttl_seconds`, as with `clarinet session
+  revoke-user` (#651).
 - **Deactivating or deleting the admin ends `X-Internal-Token` access at once.**
   The service token resolves to the admin row, which was cached for 5 minutes
   and never invalidated, so a deactivated, demoted or deleted admin kept full
