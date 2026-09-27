@@ -151,9 +151,9 @@ location = /_clarinet_authz {
 Notes:
 - The auth target `GET {base_path}/api/auth/dicomweb-access` is read-only and returns
   200/401/403; `auth_request` inspects status only. It answers 200 on purpose — that is
-  the only status `proxy_cache_valid 200 10s` caches. `read_token` commits `last_accessed`,
-  so a cached check every ~10 s keeps an actively-viewing session non-idle and visible
-  in presence.
+  the only status `proxy_cache_valid 200 10s` caches. `read_token` records `last_accessed`
+  (at most once a minute), so a cached check every ~10 s keeps an actively-viewing session
+  non-idle and visible in presence.
 - **Do not point `auth_request` at `/api/auth/session/validate`.** That endpoint admits
   any active session; `dicomweb-access` applies the same gate as the builtin `/dicom-web`
   router — an admin, or a user holding at least one role — so a role-less account (e.g.
@@ -169,11 +169,11 @@ Notes:
   browser IP, not nginx's loopback address (uvicorn trusts the loopback proxy's forwarded
   IP by default). With the check off, forwarding these headers is harmless
   (logging / future use), not a functional auth requirement.
-- **Revocation window.** The `proxy_cache_valid 200 10s` authz cache, plus Clarinet's
-  in-memory session cache (`session_cache_ttl_seconds`, default 30 s), mean a just-revoked
-  or just-expired session can still pull images from Orthanc for up to
-  ~max(10 s, `session_cache_ttl_seconds`). This is a deliberate latency/load tradeoff on the
-  image hot path; lower both values if you need near-instant revocation.
+- **Revocation window.** The `proxy_cache_valid 200 10s` authz cache means a just-revoked
+  or just-expired session can still pull images from Orthanc for up to ~10 s
+  (`/api/auth/dicomweb-access` itself checks the DB on every call). This is a deliberate
+  latency/load tradeoff on the image hot path; lower `proxy_cache_valid` if you need
+  near-instant revocation.
 - **Cookie name.** `proxy_cache_key $cookie_clarinet_session` assumes the default
   `settings.cookie_name = "clarinet_session"`. If you override `cookie_name`, update the
   cache key to match.

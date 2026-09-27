@@ -18,6 +18,7 @@ CurrentUserDep      = Annotated[User, Depends(current_active_user)]
 OptionalUserDep     = Annotated[User | None, Depends(optional_current_user)]
 SuperUserDep        = Annotated[User, Depends(current_superuser)]
 AdminUserDep        = Annotated[User, Depends(current_admin_user)]   # is_superuser OR 'admin' role
+DicomWebUserDep     = Annotated[User, Depends(current_dicomweb_user)]  # /dicom-web only: current_role_holder + TTL-only cookie cache
 
 # Session & pagination
 SessionDep          = Annotated[AsyncSession, Depends(get_async_session)]
@@ -67,7 +68,8 @@ AuditActorDep       = Annotated[UUID | None, Depends(get_audit_actor)]  # curren
 - `authorize_mutable_record_access` (`MutableRecordDep`) — builds on `AuthorizedRecordDep`; mutation allowed for an admin (`is_admin` — superuser or `admin` role; a non-superuser admin still needs the type's role for the read gate), the assigned user, or an unassigned record. Additionally bypasses the owner check when `record.record_type.shared_editing` is `True`; any role-holder may then mutate the record regardless of `user_id`
 - `require_mutable_config(request)` — raises `AuthorizationError` when `app.state.config_mode == "python"` (RecordType mutations disabled — Python files are the single source of truth)
 - `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
-- `current_role_holder` — passes an admin (`is_admin`) or a user with at least one role; 403 otherwise. For routers with no per-object authorization of their own (router-level on `dicomweb.py`): a role-less account — e.g. freshly self-registered — must not reach patient data just by being authenticated.
+- `current_role_holder` — passes an admin (`is_admin`) or a user with at least one role; 403 otherwise. For routers with no per-object authorization of their own (the `/dicom-web` router uses its cached twin, `current_dicomweb_user`): a role-less account — e.g. freshly self-registered — must not reach patient data just by being authenticated.
+- `current_dicomweb_user` (`DicomWebUserDep`) — `current_role_holder` for `/dicom-web`: a session cookie that passed is reused for `session_cache_ttl_seconds` (`0` disables), never evicted. Caches only cookie-resolved users (never the `X-Internal-Token` admin) and never 401/403. The only auth cache in the app — do not add eviction calls. Tests that override `current_active_user` for `/dicom-web` must override this too.
 - `require_capability(capability)` — dependency factory; `capability` is a
   `Capability` enum member. Admits a user whose effective capabilities
   (`resolve_capabilities`, `clarinet/models/capability.py`) include it.
@@ -97,7 +99,7 @@ XRepositoryDep = Annotated[XRepository, Depends(get_X_repository)]
 ## DICOMweb Proxy Router Endpoints (dicomweb.py)
 
 Mounted at `/dicom-web` (outside `/api` prefix for OHIF compatibility).
-Conditional on `settings.dicomweb_enabled`. All endpoints require `CurrentUserDep`, and the router requires `current_role_holder` (admin or ≥1 role).
+Conditional on `settings.dicomweb_enabled`. All endpoints and the router use `DicomWebUserDep` / `current_dicomweb_user` (admin or ≥1 role; a passed session cookie is reused for `session_cache_ttl_seconds`).
 
 | Endpoint | DICOMweb | Backend |
 |---|---|---|

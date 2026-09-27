@@ -104,7 +104,7 @@ secret_key = "change-this-secret-key-in-production"
 # session_concurrent_limit = 5
 # session_ip_check = false
 # session_secure_cookie = true
-# session_cache_ttl_seconds = 30
+# session_cache_ttl_seconds = 30   # /dicom-web auth cache (0 = off)
 
 # ── Failed-login throttling (also covers X-Internal-Token guessing) ──
 # login_max_failures_per_account = 5

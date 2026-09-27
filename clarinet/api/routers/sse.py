@@ -38,8 +38,8 @@ async def _revalidate(token: str | None, request: Request) -> bool:
     minute), so this is NOT read-only — revalidating every
     ``sse_revalidate_seconds`` keeps the session non-idle.
 
-    Security implication (intentional): because every revalidation refreshes
-    ``last_accessed``, an open stream keeps the session non-idle for its whole
+    Security implication (intentional): because revalidation keeps recording
+    activity, an open stream keeps the session non-idle for its whole
     lifetime — a tab left open will not hit ``session_idle_timeout_minutes``.
     This mirrors any other active session and is still bounded by the hard
     ``session_absolute_timeout_days`` cap. A truly idle-respecting revalidation

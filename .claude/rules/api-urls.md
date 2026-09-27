@@ -181,7 +181,7 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 
 ### DICOMweb (`/dicom-web`)
 
-Router-level `current_role_holder`: **403** for an authenticated account with no role (admins pass).
+Router-level `current_dicomweb_user` (same gate as `current_role_holder`): **403** for an authenticated account with no role (admins pass). A passed session cookie is reused for `session_cache_ttl_seconds`, so a revocation reaches `/dicom-web` up to that late.
 
 | URL | Method | Status | Description |
 |---|---|---|---|

@@ -1402,7 +1402,7 @@ async def test_service_token_dies_with_admin_account(
     expected,
 ):
     """Deactivating, demoting or deleting the admin row ends X-Internal-Token
-    access at once, not when the 5-minute service-user cache expires (#600)."""
+    access at once (#600)."""
     monkeypatch.setattr(test_settings, "internal_service_token", SecretStr("tok-600"))
     admin_id = uuid4()
     test_session.add(
