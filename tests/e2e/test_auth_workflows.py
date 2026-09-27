@@ -23,6 +23,7 @@ from clarinet.models.auth import AccessToken
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.settings import settings
 from clarinet.utils.auth import get_password_hash
+from tests.utils.cookies import patch_cookie_forwarding
 from tests.utils.urls import (
     AUTH_LOGIN,
     AUTH_ME,
@@ -43,6 +44,15 @@ CONCURRENT_REQUESTS_COUNT = 10
 # Expected status codes
 LOGIN_SUCCESS_CODES = [200, 204]
 LOGOUT_SUCCESS_CODES = [200, 204]
+
+LOGIN_CLIENT_IP = "127.0.0.1"  # ASGITransport's default client address
+OTHER_CLIENT_IP = "10.0.0.2"
+
+
+def _patch_auth_setting(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    """Patch both objects: conftest client fixtures may have rebound auth_config.settings."""
+    monkeypatch.setattr(settings, name, value)
+    monkeypatch.setattr(auth_config_module.settings, name, value)
 
 
 @pytest.fixture(autouse=True)
@@ -103,9 +113,7 @@ class TestSessionManagement:
         """#660: a session pushed out by session_concurrent_limit is dead on its next request."""
         from clarinet.api.app import app
 
-        # Both objects: conftest client fixtures may have rebound auth_config.settings.
-        monkeypatch.setattr(settings, "session_concurrent_limit", 1)
-        monkeypatch.setattr(auth_config_module.settings, "session_concurrent_limit", 1)
+        _patch_auth_setting(monkeypatch, "session_concurrent_limit", 1)
         creds = {"username": test_user.email, "password": "testpassword"}
 
         assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
@@ -163,7 +171,6 @@ class TestSessionManagement:
     ):
         """#651: an admin password change kills the user's live session."""
         from clarinet.api.app import app
-        from tests.conftest import patch_cookie_forwarding
 
         password = "SecurePassword123!"
         reg = await client.post(
@@ -432,11 +439,7 @@ class TestSessionLifecycle:
         monkeypatch: pytest.MonkeyPatch,
     ):
         """A session idle for longer than session_idle_timeout_minutes is rejected."""
-        # Both objects: conftest client fixtures may have rebound auth_config.settings.
-        monkeypatch.setattr(settings, "session_idle_timeout_minutes", IDLE_TIMEOUT_MINUTES)
-        monkeypatch.setattr(
-            auth_config_module.settings, "session_idle_timeout_minutes", IDLE_TIMEOUT_MINUTES
-        )
+        _patch_auth_setting(monkeypatch, "session_idle_timeout_minutes", IDLE_TIMEOUT_MINUTES)
         creds = {"username": test_user.email, "password": "testpassword"}
 
         assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
@@ -449,8 +452,43 @@ class TestSessionLifecycle:
             idle_since = idle_since.replace(tzinfo=None)
         access_token.last_accessed = idle_since
         await test_session.commit()
+        # The app shares test_session: make read_token reload the row, as a fresh
+        # per-request session would, instead of reusing this in-memory object.
+        test_session.expire_all()
 
         assert (await client.get(AUTH_ME)).status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_session_ip_validation(
+        self,
+        client: AsyncClient,
+        test_user: User,
+        test_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """With session_ip_check on, the session cookie is rejected from another IP."""
+        from clarinet.api.app import app
+
+        _patch_auth_setting(monkeypatch, "session_ip_check", False)
+        creds = {"username": test_user.email, "password": "testpassword"}
+
+        assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
+        stmt = select(AccessToken.ip_address).where(AccessToken.user_id == test_user.id)
+        assert (await test_session.execute(stmt)).scalar_one() == LOGIN_CLIENT_IP
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app, client=(OTHER_CLIENT_IP, 123)),
+            base_url="http://test",
+            cookies=client.cookies,
+        ) as other_ip:
+            patch_cookie_forwarding(other_ip)
+            # The cookie does reach the app from the other IP, so the 401 is the IP check.
+            assert (await other_ip.get(AUTH_ME)).status_code == 200
+
+            _patch_auth_setting(monkeypatch, "session_ip_check", True)
+            assert (await other_ip.get(AUTH_ME)).status_code == 401
+
+        assert (await client.get(AUTH_ME)).status_code == 200
 
     @pytest.mark.asyncio
     async def test_expired_session_cleanup(
@@ -824,31 +862,6 @@ class TestCookieAuthentication:
         # Try to access with expired session
         response = await client.get("/api/auth/me")
         assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_session_ip_validation(
-    client: AsyncClient, test_user: User, monkeypatch: pytest.MonkeyPatch
-):
-    """With session_ip_check on, the session cookie is rejected from another IP."""
-    from clarinet.api.app import app
-    from tests.conftest import patch_cookie_forwarding
-
-    # Both objects: conftest client fixtures may have rebound auth_config.settings.
-    monkeypatch.setattr(settings, "session_ip_check", True)
-    monkeypatch.setattr(auth_config_module.settings, "session_ip_check", True)
-    creds = {"username": test_user.email, "password": "testpassword"}
-
-    assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
-    assert (await client.get(AUTH_ME)).status_code == 200
-
-    async with AsyncClient(
-        transport=ASGITransport(app=app, client=("10.0.0.2", 123)),
-        base_url="http://test",
-        cookies=client.cookies,
-    ) as other_ip:
-        patch_cookie_forwarding(other_ip)
-        assert (await other_ip.get(AUTH_ME)).status_code == 401
 
 
 @pytest.mark.asyncio
