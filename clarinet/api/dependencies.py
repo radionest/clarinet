@@ -3,14 +3,16 @@ Dependencies for FastAPI application with enhanced dependency injection.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated
+from typing import Annotated, cast
 from urllib.parse import unquote
 from uuid import UUID
 
+from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.auth_config import (
+    DatabaseStrategy,
     current_active_user,
     current_superuser,
     is_service_request,
@@ -538,6 +540,44 @@ def require_role_holder(user: User) -> User:
     if is_admin(user) or get_user_role_names(user):
         return user
     raise HTTPException(status_code=403, detail="No role assigned")
+
+
+# ponytail: TTL-only, never evicted — after a revoke, deactivation, password
+# change or role removal the user keeps /dicom-web access for up to
+# session_cache_ttl_seconds. Only this read-only image path is cached (OHIF
+# sends a request per frame); every other route checks the DB. Per-process,
+# like the SSE bus: a second API worker keeps its own copy.
+_dicomweb_user_cache: TTLCache[str, User] = TTLCache(
+    maxsize=1000, ttl=max(settings.session_cache_ttl_seconds, 1)
+)
+
+
+async def current_dicomweb_user(request: Request, session: SessionDep) -> User:
+    """``current_role_holder`` for ``/dicom-web``, reusing a cookie's verdict for the TTL.
+
+    Same checks — service token, session cookie, active account, at least one
+    role — but a session cookie that passed them is trusted for
+    ``session_cache_ttl_seconds`` without another DB read (``0`` disables it).
+    Only a user resolved from the cookie is cached: a request that also carries
+    a valid ``X-Internal-Token`` resolves to the admin row, which must never be
+    stored under the caller's cookie. Rejections are never cached.
+
+    Raises:
+        HTTPException: 401 without a valid session, 403 without a role.
+    """
+    token = request.cookies.get(settings.cookie_name)
+    cacheable = settings.session_cache_ttl_seconds > 0
+    if token and cacheable and (cached := _dicomweb_user_cache.get(token)) is not None:
+        return cast(User, cached)
+    cookie_user = await DatabaseStrategy(session, request).read_token(token, None)  # type: ignore[arg-type]
+    user = require_role_holder(await current_active_user(request, session, cookie_user))
+    if token and cacheable and user is cookie_user:
+        session.expunge(user)
+        _dicomweb_user_cache[token] = user
+    return user
+
+
+DicomWebUserDep = Annotated[User, Depends(current_dicomweb_user)]
 
 
 def require_capability(capability: Capability) -> Callable[[User], Awaitable[User]]:

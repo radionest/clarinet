@@ -6,14 +6,18 @@ checks the DB on every call, so nothing has to remember to evict anything
 """
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException, Request
 
+from clarinet.api import dependencies as deps
 from clarinet.api.auth_config import DatabaseStrategy
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User
+from tests.utils.factories import make_user
 
 
 def _make_user(*, active: bool = True) -> User:
@@ -93,3 +97,77 @@ class TestReadTokenHitsTheDatabase:
         strategy = _make_strategy()
         assert await strategy.read_token(None, AsyncMock()) is None
         assert strategy.session.execute.call_count == 0
+
+
+def _dicomweb_request(*, internal_token: str | None = None) -> MagicMock:
+    request = MagicMock(spec=Request)
+    request.cookies = {deps.settings.cookie_name: "tok-dw"}
+    request.headers = {"X-Internal-Token": internal_token} if internal_token else {}
+    request.client = SimpleNamespace(host="10.0.0.1")
+    request.url = SimpleNamespace(path="/dicom-web/studies")
+    return request
+
+
+class TestDicomWebUserCache:
+    """current_dicomweb_user: TTL-only reuse of a session cookie's verdict."""
+
+    @pytest.fixture(autouse=True)
+    def service_user(self):
+        with patch(
+            "clarinet.api.auth_config._get_service_user", AsyncMock(return_value=None)
+        ) as service:
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_cookie_verdict_is_reused_within_ttl(self):
+        user = make_user(is_superuser=True)
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
+            for _ in range(2):
+                assert await deps.current_dicomweb_user(_dicomweb_request(), MagicMock()) is user
+        assert read.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ttl_zero_disables_reuse(self, monkeypatch):
+        monkeypatch.setattr(deps.settings, "session_cache_ttl_seconds", 0)
+        user = make_user(is_superuser=True)
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
+            for _ in range(2):
+                await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert read.await_count == 2
+        assert "tok-dw" not in deps._dicomweb_user_cache
+
+    @pytest.mark.asyncio
+    async def test_service_token_user_is_never_cached_under_the_cookie(self, service_user):
+        admin = make_user(is_superuser=True)
+        cookie_owner = make_user(roles=[])
+        service_user.return_value = admin
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=cookie_owner)):
+            request = _dicomweb_request(internal_token="tok-service")
+            assert await deps.current_dicomweb_user(request, MagicMock()) is admin
+            assert "tok-dw" not in deps._dicomweb_user_cache
+
+            service_user.return_value = None
+            with pytest.raises(HTTPException) as denied:
+                await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert denied.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_is_401_and_not_cached(self):
+        with (
+            patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=None)),
+            pytest.raises(HTTPException) as denied,
+        ):
+            await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert denied.value.status_code == 401
+        assert "tok-dw" not in deps._dicomweb_user_cache
+
+    @pytest.mark.asyncio
+    async def test_role_less_user_is_403_and_not_cached(self):
+        role_less = make_user(roles=[])
+        with (
+            patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=role_less)),
+            pytest.raises(HTTPException) as denied,
+        ):
+            await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert denied.value.status_code == 403
+        assert "tok-dw" not in deps._dicomweb_user_cache

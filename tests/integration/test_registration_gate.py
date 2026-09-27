@@ -13,7 +13,8 @@ from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
-from sqlmodel import select
+from sqlalchemy import delete
+from sqlmodel import col, select
 
 from clarinet.api.app import app
 from clarinet.api.dependencies import get_dicomweb_proxy_service
@@ -109,6 +110,26 @@ async def test_superuser_can_query_dicomweb(test_session, test_settings):
         response = await client.get(DICOMWEB_STUDIES)
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_dicomweb_keeps_a_removed_role_for_the_cache_ttl(
+    unauthenticated_client, test_user, test_session
+):
+    """Accepted trade-off: /dicom-web reuses a passed verdict for
+    session_cache_ttl_seconds; every other route re-checks the DB."""
+    await _grant_role(test_session, test_user, "doctor")
+    await _login(unauthenticated_client)
+    assert (await unauthenticated_client.get(DICOMWEB_STUDIES)).status_code == 200
+
+    await test_session.execute(
+        delete(UserRolesLink).where(col(UserRolesLink.user_id) == test_user.id)
+    )
+    await test_session.commit()
+    test_session.expire_all()
+
+    assert (await unauthenticated_client.get(DICOMWEB_STUDIES)).status_code == 200
+    assert (await unauthenticated_client.get(AUTH_DICOMWEB_ACCESS)).status_code == 403
 
 
 # --- nginx auth_request target for the external DICOMweb backend ---
