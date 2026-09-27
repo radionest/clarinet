@@ -64,6 +64,8 @@ if [ -z "$DB_PASS" ]; then
     exit 1
 fi
 
+VM_ENV=$(bash "$SCRIPT_DIR/vm-test-env.sh" "$VM_IP") || exit 1
+
 # Create test database on VM
 log "Creating test database '$TEST_DB' on VM..."
 # shellcheck disable=SC2029
@@ -108,13 +110,10 @@ fi
 log "Tunnel active (PID $TUNNEL_PID)."
 
 export CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet:${DB_PASS}@localhost:${LOCAL_PORT}/${TEST_DB}"
-# The VM also hosts Orthanc; without this the DICOM tests probe localhost and
-# skip, so they would never run against PostgreSQL. Forced, like stage 5: an
-# operator's CLARINET_TEST_PACS_HOST / _SSH is meant for the slicer stage, and
-# honouring it here would seed and C-STORE into their PACS, or make the C-MOVE
-# probe ask the wrong host and skip. "" = assume the NAT VM can reach the host.
-export CLARINET_TEST_PACS_HOST="$VM_IP"
-export CLARINET_TEST_PACS_SSH=""
+# The VM also hosts Orthanc and RabbitMQ; without these the DICOM tests probe
+# localhost and skip, and the pipeline tests hit localhost as clarinet_test.
+# Forced like stage 5 — see vm-test-env.sh.
+eval "$VM_ENV"
 
 cd "$PROJECT_DIR"
 

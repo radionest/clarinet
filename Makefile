@@ -306,6 +306,9 @@ _test-all-stages-impl:
 	@echo "  Stage 4/8: vm-test-lib (deploy scripts)  "
 	@echo "=========================================="
 	@uv run pytest deploy/test/test_deploy_lib.py -v
+    # With the VM up, stage 5 forces it as PACS and as RabbitMQ broker via
+    # scripts/vm-test-env.sh (shared with the PostgreSQL pass; see there for why
+    # an operator's CLARINET_TEST_PACS_HOST/_SSH and _RABBITMQ_* are overridden).
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
 		echo "=========================================="; \
@@ -319,8 +322,9 @@ _test-all-stages-impl:
 		echo "=========================================="; \
 		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
 		[ -n "$$VM_IP" ] || { echo "Cannot determine VM IP — is the VM running?"; exit 1; }; \
-		CLARINET_TEST_PACS_HOST="$$VM_IP" CLARINET_TEST_PACS_SSH="" \
-			./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
+		VM_ENV=$$(bash scripts/vm-test-env.sh "$$VM_IP") || exit 1; \
+		eval "$$VM_ENV"; \
+		./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
 	fi
 	@echo ""
 	@echo "=========================================="

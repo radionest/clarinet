@@ -17,13 +17,12 @@ from clarinet.services.slicer.client import SlicerClient
 from clarinet.services.slicer.service import SlicerService
 from clarinet.utils.logger import logger
 from tests.config import (
-    RABBITMQ_HOST,
     RABBITMQ_MANAGEMENT_AUTH,
-    RABBITMQ_PORT,
     RABBITMQ_URL,
     SLICER_HOST,
     SLICER_PORT,
 )
+from tests.utils.rabbitmq import skip_unless_rabbitmq_reachable
 
 # ─── Pipeline / RabbitMQ fixtures ────────────────────────────────────────────
 
@@ -36,12 +35,8 @@ def rabbitmq_url() -> str:
 
 @pytest.fixture(scope="session")
 def _check_rabbitmq() -> None:
-    """Skip all pipeline tests if RabbitMQ is unreachable."""
-    try:
-        sock = socket.create_connection((RABBITMQ_HOST, RABBITMQ_PORT), timeout=3)
-        sock.close()
-    except OSError:
-        pytest.skip(f"RabbitMQ not reachable at {RABBITMQ_HOST}:{RABBITMQ_PORT}")
+    """Skip all pipeline tests if RabbitMQ is unreachable (fail if it is required)."""
+    skip_unless_rabbitmq_reachable()
 
 
 @pytest.fixture(scope="session")
