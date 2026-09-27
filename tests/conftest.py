@@ -138,12 +138,13 @@ def _reset_fingerprint_cache():
 @pytest.fixture(autouse=True)
 def _reset_auth_throttle():
     """Failed-auth counters are process-global; clear them so tests that log in
-    with bad credentials cannot lock later tests out. The cached service-token
-    user goes too: it outlives the DB row that ``clear_database`` deletes."""
-    from clarinet.api.auth_config import _auth_failures, _service_user_cache
+    with bad credentials cannot lock later tests out. The /dicom-web user cache
+    goes too: its entries outlive the users that ``clear_database`` deletes."""
+    from clarinet.api.auth_config import _auth_failures
+    from clarinet.api.dependencies import _dicomweb_user_cache
 
     _auth_failures.clear()
-    _service_user_cache.clear()
+    _dicomweb_user_cache.clear()
     yield
 
 
@@ -379,6 +380,7 @@ def setup_auth_overrides(
         test_settings: Test settings object.
     """
     from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.api.dependencies import current_dicomweb_user
 
     async def override_get_session():
         yield test_session
@@ -388,6 +390,7 @@ def setup_auth_overrides(
 
     app.dependency_overrides[get_async_session] = override_get_session
     app.dependency_overrides[current_active_user] = lambda: mock_user
+    app.dependency_overrides[current_dicomweb_user] = lambda: mock_user
     app.dependency_overrides[current_superuser] = lambda: mock_user
 
     try:

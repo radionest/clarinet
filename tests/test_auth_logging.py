@@ -92,9 +92,7 @@ class TestReadTokenFailureLogStructure:
         request = _make_request(path="/api/records/42")
         strategy = _strategy_with_no_token(request=request)
 
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 0
-            result = await strategy.read_token("deadbeef" * 4, AsyncMock())
+        result = await strategy.read_token("deadbeef" * 4, AsyncMock())
 
         assert result is None
 
@@ -116,9 +114,7 @@ class TestReadTokenFailureLogStructure:
         """When self.request is None, locals must default to None, not crash."""
         strategy = _strategy_with_no_token(request=None)
 
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 0
-            await strategy.read_token("token-xyz", AsyncMock())
+        await strategy.read_token("token-xyz", AsyncMock())
 
         warnings = _records_for(captured_records, "Token validation failed")
         assert len(warnings) == 1

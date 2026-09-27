@@ -3,14 +3,16 @@ Dependencies for FastAPI application with enhanced dependency injection.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated
+from typing import Annotated, cast
 from urllib.parse import unquote
 from uuid import UUID
 
+from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.auth_config import (
+    DatabaseStrategy,
     current_active_user,
     current_superuser,
     is_service_request,
@@ -522,9 +524,9 @@ async def current_role_holder(
     """Require an admin or a user holding at least one role.
 
     A role-less account (e.g. freshly self-registered) is authenticated but
-    entitled to nothing. Routers with no finer-grained check of their own — the
-    DICOMweb proxy reads straight from the PACS — use this so such an account
-    cannot reach patient data.
+    entitled to nothing. Routers with no finer-grained check of their own use
+    this so such an account cannot reach patient data. The DICOMweb proxy uses
+    its cached twin, ``current_dicomweb_user``.
     """
     return require_role_holder(user)
 
@@ -538,6 +540,47 @@ def require_role_holder(user: User) -> User:
     if is_admin(user) or get_user_role_names(user):
         return user
     raise HTTPException(status_code=403, detail="No role assigned")
+
+
+# ponytail: TTL-only, never evicted — after a revoke, deactivation, password
+# change, role removal, session expiry or idle timeout the user keeps /dicom-web
+# access for up to session_cache_ttl_seconds. Only this read-only image path is cached (OHIF
+# sends a request per frame); every other route checks the DB. Per-process,
+# like the SSE bus: a second API worker keeps its own copy. Keyed by
+# (token, client IP), not the token alone — otherwise a cookie replayed from
+# another IP would be served from the entry the owner's own requests keep
+# warm, bypassing read_token's session_ip_check for the TTL.
+_dicomweb_user_cache: TTLCache[tuple[str, str | None], User] = TTLCache(
+    maxsize=1000, ttl=max(settings.session_cache_ttl_seconds, 1)
+)
+
+
+async def current_dicomweb_user(request: Request, session: SessionDep) -> User:
+    """``current_role_holder`` for ``/dicom-web``, reusing a cookie's verdict for the TTL.
+
+    Same checks — service token, session cookie, active account, at least one
+    role — but a session cookie that passed them is trusted for
+    ``session_cache_ttl_seconds`` without another DB read (``0`` disables it).
+    Only a user resolved from the cookie is cached: a request that also carries
+    a valid ``X-Internal-Token`` resolves to the admin row, which must never be
+    stored under the caller's cookie. Rejections are never cached.
+
+    Raises:
+        HTTPException: 401 without a valid session, 403 without a role.
+    """
+    token = request.cookies.get(settings.cookie_name)
+    cacheable = settings.session_cache_ttl_seconds > 0
+    cache_key = (token, request.client.host if request.client else None) if token else None
+    if cache_key and cacheable and (cached := _dicomweb_user_cache.get(cache_key)) is not None:
+        return cast(User, cached)
+    cookie_user = await DatabaseStrategy(session, request).read_token(token, None)  # type: ignore[arg-type]
+    user = require_role_holder(await current_active_user(request, session, cookie_user))
+    if cache_key and cacheable and user is cookie_user:
+        _dicomweb_user_cache[cache_key] = user  # read_token returns it detached
+    return user
+
+
+DicomWebUserDep = Annotated[User, Depends(current_dicomweb_user)]
 
 
 def require_capability(capability: Capability) -> Callable[[User], Awaitable[User]]:

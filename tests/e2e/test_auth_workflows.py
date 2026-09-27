@@ -57,27 +57,15 @@ def _enable_registration(test_settings, monkeypatch):
 class TestSessionManagement:
     """User-facing active-session listing + per-session revoke.
 
-    Guards the fix where revoking a session deleted the DB row but left the
-    token valid in ``DatabaseStrategy._user_cache`` until the TTL expired —
-    so a "revoked" session kept working until the cache entry aged out.
+    ``read_token`` checks the DB on every request, so a revoked or evicted
+    session is dead on its next request — there is no in-memory copy to evict.
     """
 
-    @pytest.fixture(autouse=True)
-    def _clear_session_cache(self):
-        # _user_cache is a process-wide class-level TTLCache; clear it around
-        # each test so cache assertions aren't polluted by tokens that other
-        # tests validated.
-        cache = auth_config_module.DatabaseStrategy._user_cache
-        cache.clear()
-        yield
-        cache.clear()
-
     @pytest.mark.asyncio
-    async def test_revoke_session_evicts_user_cache(
+    async def test_revoked_session_is_rejected_on_next_request(
         self, client: AsyncClient, test_session: AsyncSession
     ):
-        """Revoking a session removes its token from the in-memory cache too."""
-        cache = auth_config_module.DatabaseStrategy._user_cache
+        """Revoking a session kills it for the very next request."""
         email = "revoke_cache@example.com"
         password = "SecurePassword123!"
 
@@ -88,9 +76,7 @@ class TestSessionManagement:
         assert login.status_code in LOGIN_SUCCESS_CODES
         token = login.cookies[settings.cookie_name]
 
-        # An authenticated request primes the in-memory validation cache.
         assert (await client.get(AUTH_ME)).status_code == 200
-        assert token in cache
 
         listed = await client.get(AUTH_SESSIONS_ACTIVE)
         assert listed.status_code == 200
@@ -103,15 +89,34 @@ class TestSessionManagement:
         revoke = await client.delete(AUTH_SESSIONS_REVOKE.format(token_preview=preview))
         assert revoke.status_code == 200
 
-        # The fix: token evicted from the cache, not merely deleted from the DB.
-        assert token not in cache
-
         row = (
             await test_session.execute(select(AccessToken).where(AccessToken.token == token))
         ).scalar_one_or_none()
         assert row is None
 
-        # Session is truly dead — no longer served from a stale cache entry.
+        assert (await client.get(AUTH_ME)).status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_session_evicted_by_limit_is_rejected(
+        self, client: AsyncClient, test_user: User, monkeypatch: pytest.MonkeyPatch
+    ):
+        """#660: a session pushed out by session_concurrent_limit is dead on its next request."""
+        from clarinet.api.app import app
+
+        # Both objects: conftest client fixtures may have rebound auth_config.settings.
+        monkeypatch.setattr(settings, "session_concurrent_limit", 1)
+        monkeypatch.setattr(auth_config_module.settings, "session_concurrent_limit", 1)
+        creds = {"username": test_user.email, "password": "testpassword"}
+
+        assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
+        assert (await client.get(AUTH_ME)).status_code == 200
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as other_device:
+            login_b = await other_device.post(AUTH_LOGIN, data=creds)
+            assert login_b.status_code in LOGIN_SUCCESS_CODES
+
         assert (await client.get(AUTH_ME)).status_code == 401
 
     @pytest.mark.asyncio
@@ -153,10 +158,10 @@ class TestSessionManagement:
         assert row is None
 
     @pytest.mark.asyncio
-    async def test_password_change_logs_out_cached_session(
+    async def test_password_change_logs_out_live_session(
         self, client: AsyncClient, test_session: AsyncSession
     ):
-        """#651: an admin password change kills the user's live, cached session."""
+        """#651: an admin password change kills the user's live session."""
         from clarinet.api.app import app
         from tests.conftest import patch_cookie_forwarding
 
@@ -168,7 +173,7 @@ class TestSessionManagement:
         await client.post(
             AUTH_LOGIN, data={"username": "pw_change@example.com", "password": password}
         )
-        # Primes the in-memory cache, so only the eviction can make the next /me fail.
+        # The session is live before the password change.
         assert (await client.get(AUTH_ME)).status_code == 200
 
         admin = User(
@@ -356,10 +361,6 @@ class TestSessionLifecycle:
         with (
             patch.object(settings, "session_sliding_refresh", True),
             patch.object(settings, "session_idle_timeout_minutes", 0),  # Disable idle timeout
-            patch.object(settings, "session_cache_ttl_seconds", 0),  # Disable session cache
-            patch.object(
-                auth_config_module.settings, "session_cache_ttl_seconds", 0
-            ),  # Disable in auth module too
         ):
             # Login
             response = await client.post(

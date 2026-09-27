@@ -6,7 +6,7 @@ Following KISS principle - minimal configuration.
 import hmac
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from typing import Any, ClassVar
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -19,7 +19,7 @@ from fastapi_users.authentication import (
     CookieTransport,
     Strategy,
 )
-from sqlalchemy import CursorResult, delete, func, select
+from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col
@@ -36,7 +36,7 @@ from clarinet.utils.session import emit_offline_if_last
 
 # ponytail: in-memory counters — per-process and reset on restart. Fine while the
 # API is a single uvicorn process (the SSE bus assumes the same); move to the DB
-# if that changes. TTL is fixed at import, like DatabaseStrategy._user_cache.
+# if that changes. TTL is fixed at import.
 #
 # Counts live in one-element lists so they can be bumped in place: re-assigning
 # a TTLCache key restarts its TTL, which would turn the fixed window into one
@@ -235,38 +235,14 @@ cookie_transport = CookieTransport(
 )
 
 
+# How often read_token records session activity: a write on every request would
+# put an UPDATE + COMMIT on every API call. Idle timeout and presence are minute-scale.
+_LAST_ACCESSED_WRITE_INTERVAL = timedelta(seconds=60)
+
+
 # Enhanced database session storage strategy with lifecycle management
 class DatabaseStrategy(Strategy[User, UUID]):
     """Enhanced database strategy with session lifecycle management."""
-
-    _user_cache: ClassVar[TTLCache] = TTLCache(
-        maxsize=1000,
-        ttl=max(settings.session_cache_ttl_seconds, 1),
-    )
-
-    @classmethod
-    def invalidate_user_cache(cls, user_id: UUID) -> None:
-        """Drop ``user_id``'s cached sessions and the cached service-token user.
-
-        Called after every user update, deletion, deactivation and role change
-        so it takes effect on the next request instead of after the TTL. The
-        service-token entry is the admin row; it is cleared whoever changed,
-        since reloading it is cheap (the user query plus the roles selectin).
-        """
-        stale = [token for token, cached in cls._user_cache.items() if cached.id == user_id]
-        for token in stale:
-            cls._user_cache.pop(token, None)
-        _service_user_cache.clear()
-
-    @classmethod
-    def evict_token(cls, token: str) -> None:
-        """Drop a single token from the in-memory validation cache.
-
-        Lets callers outside this class (e.g. the session-revoke endpoint)
-        invalidate one session immediately without reaching into the private
-        cache or deleting the DB row (which ``destroy_token`` also does).
-        """
-        cls._user_cache.pop(token, None)
 
     def __init__(self, session: AsyncSession, request: Request | None = None) -> None:
         """Initialize strategy with database session and optional request."""
@@ -322,23 +298,10 @@ class DatabaseStrategy(Strategy[User, UUID]):
     async def read_token(
         self, token: str | None, user_manager: BaseUserManager[User, UUID]
     ) -> User | None:
-        """Validate token with comprehensive checks and in-memory caching."""
+        """Validate the session token against the DB on every call — no in-process cache."""
         del user_manager  # Unused but required by interface
         if not token:
             return None
-
-        # Check in-memory cache for recent validations
-        ttl = settings.session_cache_ttl_seconds
-        if ttl > 0 and token in self._user_cache:
-            logger.debug(
-                f"Token {token[:8]}... validated from cache",
-                extra={
-                    "token_preview": token[:8],
-                    "cache_hit": True,
-                    "request_path": self.request.url.path if self.request is not None else None,
-                },
-            )
-            return self._user_cache[token]  # type: ignore[no-any-return]
 
         # Query token with expiration check
         stmt = select(AccessToken).where(
@@ -367,7 +330,6 @@ class DatabaseStrategy(Strategy[User, UUID]):
                     "reason": "not_found_or_expired",
                 },
             )
-            self._user_cache.pop(token, None)
             return None
 
         # Optional IP validation
@@ -386,17 +348,23 @@ class DatabaseStrategy(Strategy[User, UUID]):
                         "reason": "ip_mismatch",
                     },
                 )
-                self._user_cache.pop(token, None)
                 return None
+
+        now = datetime.now(UTC)
+        last_accessed = access_token.last_accessed
+        if last_accessed.tzinfo is None:
+            last_accessed = last_accessed.replace(tzinfo=UTC)
+        write_interval = _LAST_ACCESSED_WRITE_INTERVAL
 
         # Check idle timeout
         if settings.session_idle_timeout_minutes > 0:
-            # Ensure last_accessed is timezone-aware
-            last_accessed = access_token.last_accessed
-            if last_accessed.tzinfo is None:
-                last_accessed = last_accessed.replace(tzinfo=UTC)
-            idle_duration = datetime.now(UTC) - last_accessed
+            idle_duration = now - last_accessed
             max_idle = timedelta(minutes=settings.session_idle_timeout_minutes)
+            # A flat 60 s interval would let a short idle timeout expire an active
+            # session. /dicom-web reuses a verdict for session_cache_ttl_seconds
+            # without calling read_token, so that time comes out of the budget (#680).
+            cache_ttl = timedelta(seconds=max(settings.session_cache_ttl_seconds, 0))
+            write_interval = min(write_interval, max(max_idle - cache_ttl, timedelta(0)) / 2)
             if idle_duration > max_idle:
                 logger.warning(
                     f"Session idle timeout: token={token[:8]}..., "
@@ -412,40 +380,45 @@ class DatabaseStrategy(Strategy[User, UUID]):
                         "reason": "idle_timeout",
                     },
                 )
-                self._user_cache.pop(token, None)
                 return None
 
-        # Update last accessed and optionally refresh
-        access_token.last_accessed = datetime.now(UTC)
-
+        # Sliding refresh: extend the expiry once less than half the lifetime is left
+        new_expiry: datetime | None = None
         if settings.session_sliding_refresh:
-            # Ensure expires_at is timezone-aware
             expires_at = access_token.expires_at
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=UTC)
-            time_left = expires_at - datetime.now(UTC)
             total_duration = timedelta(hours=settings.session_expire_hours)
-
-            # Refresh if less than 50% time remaining
-            if time_left < total_duration / 2:
-                new_expiry = datetime.now(UTC) + total_duration
-
-                # Check absolute timeout
+            if expires_at - now < total_duration / 2:
+                new_expiry = now + total_duration
                 if settings.session_absolute_timeout_days > 0:
-                    max_age = timedelta(days=settings.session_absolute_timeout_days)
-                    # Ensure created_at is timezone-aware
                     created_at = access_token.created_at
                     if created_at.tzinfo is None:
                         created_at = created_at.replace(tzinfo=UTC)
-                    absolute_limit = created_at + max_age
+                    absolute_limit = created_at + timedelta(
+                        days=settings.session_absolute_timeout_days
+                    )
                     new_expiry = min(new_expiry, absolute_limit)
+                if new_expiry == expires_at:
+                    # Already capped at this value (e.g. the absolute limit) — no
+                    # new expires_at to write, so this must not force an UPDATE
+                    # on every request for the rest of the session.
+                    new_expiry = None
+                else:
+                    logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
 
-                access_token.expires_at = new_expiry
-                logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
+        if new_expiry is not None or now - last_accessed >= write_interval:
+            # Core UPDATE, not an ORM flush: a row deleted meanwhile (logout, revoke,
+            # session limit) matches 0 rows instead of raising StaleDataError -> 500 (#665).
+            update_stmt = (
+                update(AccessToken).where(col(AccessToken.token) == token).values(last_accessed=now)
+            )
+            if new_expiry is not None:
+                update_stmt = update_stmt.values(expires_at=new_expiry)
+            await self.session.execute(update_stmt)
+            await self.session.commit()
 
-        await self.session.commit()
-
-        # Get user with roles eagerly loaded (survives expunge for caching)
+        # Roles eager-loaded: the user is returned detached, so role checks can't lazy-load them.
         user_stmt = (
             select(User)
             .where(User.id == access_token.user_id)  # type: ignore[arg-type]
@@ -470,37 +443,25 @@ class DatabaseStrategy(Strategy[User, UUID]):
                     "reason": "user_not_found" if not user else "user_inactive",
                 },
             )
-            self._user_cache.pop(token, None)
             return None
 
-        # Cache the validated user (detach from SQLAlchemy session first)
-        if ttl > 0:
-            self.session.expunge(user)
-            self._user_cache[token] = user
-            logger.debug(
-                f"Token {token[:8]}... validated successfully and cached",
-                extra={
-                    "token_preview": token[:8],
-                    "user_id": str(user.id),
-                    "request_path": self.request.url.path if self.request is not None else None,
-                    "cache_stored": True,
-                },
-            )
-        else:
-            logger.debug(
-                f"Token {token[:8]}... validated successfully (no cache)",
-                extra={
-                    "token_preview": token[:8],
-                    "user_id": str(user.id),
-                    "request_path": self.request.url.path if self.request is not None else None,
-                },
-            )
+        logger.debug(
+            f"Token {token[:8]}... validated successfully",
+            extra={
+                "token_preview": token[:8],
+                "user_id": str(user.id),
+                "request_path": self.request.url.path if self.request is not None else None,
+            },
+        )
 
+        # Detach: a later rollback in this request (e.g. add_file_links losing an
+        # IntegrityError race) would expire an attached user, and the next
+        # attribute read would lazy-load outside a greenlet -> MissingGreenlet -> 500.
+        self.session.expunge(user)
         return user
 
     async def destroy_token(self, token: str, user: User) -> None:
         """Remove session token on logout."""
-        self._user_cache.pop(token, None)
         stmt = delete(AccessToken).where(AccessToken.token == token)  # type: ignore[arg-type]
         result: CursorResult[Any] = await self.session.execute(stmt)  # type: ignore[assignment]
         await self.session.commit()
@@ -580,8 +541,6 @@ fastapi_users = FastAPIUsers[User, UUID](
 
 # --- Internal service token auth (RecordFlow, pipeline tasks) ---
 
-_service_user_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
-
 
 def is_service_request(request: Request) -> bool:
     """True when the request carries a valid ``X-Internal-Token`` from an IP
@@ -637,22 +596,15 @@ async def _get_service_user(request: Request, session: AsyncSession) -> User | N
     if not is_service_request(request):
         return None
 
-    cache_key = "service_user"
-    if cache_key in _service_user_cache:
-        return _service_user_cache[cache_key]  # type: ignore[no-any-return]
-
     stmt = (
         select(User).where(User.email == settings.admin_email).options(selectinload(User.roles))  # type: ignore[arg-type]
     )
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
-
-    if user and user.is_active:
-        session.expunge(user)
-        _service_user_cache[cache_key] = user
-        return user
-
-    return None
+    if user is None or not user.is_active:
+        return None
+    session.expunge(user)  # same reason as read_token: survive a rollback in the request
+    return user
 
 
 # --- Public auth dependencies (service token → cookie fallback) ---

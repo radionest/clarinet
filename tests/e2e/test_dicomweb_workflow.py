@@ -153,9 +153,11 @@ def pacs_instance_uid(pacs_series_uid: str) -> str:
 async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Override e2e conftest's unauthenticated client with an authenticated one.
 
-    DICOMweb endpoints require CurrentUserDep, so we need auth bypass.
+    DICOMweb endpoints require current_dicomweb_user, so we need auth bypass
+    (both current_active_user and current_dicomweb_user are overridden below).
     """
     from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.api.dependencies import current_dicomweb_user
     from clarinet.models.user import User
     from clarinet.utils.auth import get_password_hash
 
@@ -179,6 +181,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 
     app.dependency_overrides[get_async_session] = override_get_session
     app.dependency_overrides[current_active_user] = lambda: mock_user
+    app.dependency_overrides[current_dicomweb_user] = lambda: mock_user
     app.dependency_overrides[current_superuser] = lambda: mock_user
 
     try:

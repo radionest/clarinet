@@ -193,10 +193,12 @@ Accounts are created by an admin (`/api/user`); public self-registration
 and an account made that way starts role-less. Record list/find endpoints
 filter by role and single-record endpoints use `AuthorizedRecordDep`, but the
 DICOMweb proxy (`/dicom-web/*`) has no per-record check — it reads straight
-from the PACS — so its router requires `current_role_holder` (admin, or at
-least one role). With `dicomweb_backend = "external"` images bypass that router
-entirely; nginx must authorize them through `GET /api/auth/dicomweb-access`,
-which carries the same gate (see `docs/orthanc-dicomweb-proxy.md`).
+from the PACS — so its router uses `current_dicomweb_user`, the same gate as
+`current_role_holder` (admin, or at least one role), whose passed
+session-cookie verdict is reused for `session_cache_ttl_seconds`. With
+`dicomweb_backend = "external"` images bypass that router entirely; nginx must
+authorize them through `GET /api/auth/dicomweb-access`, which carries the same
+gate (see `docs/orthanc-dicomweb-proxy.md`).
 
 This is a per-router property, not a global guarantee: any router without its
 own per-object authorization needs the same gate, because "authenticated" alone

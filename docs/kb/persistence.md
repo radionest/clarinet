@@ -56,6 +56,12 @@ Async SQLAlchemy cannot lazy-load, so a missed `selectinload()` surfaces as
   (#567; mechanism in `clarinet/repositories/CLAUDE.md`, "M2M Link Lifecycle").
 - For aggregates, batch-fetch instead of looping:
   `select(RecordType).where(RecordType.name.in_(names))` → build a dict.
+- The authenticated `User` (`read_token`, the `X-Internal-Token` admin row, the
+  `/dicom-web` cache) is returned **detached**, with only `roles` eager-loaded, so
+  a rollback later in the request cannot expire it into `MissingGreenlet`. The
+  role rows themselves stay in the session (the default cascade has no
+  `expunge`): read role names before any rollback. Do not touch the user's other
+  relationships; re-fetch through the user repository.
 
 ## Model schema naming
 
@@ -156,3 +162,9 @@ migration for each new framework table (`record_event`, `pipeline_task_run`, …
   in the identity map. In tests, call `session.expire_all()` between passes, or
   use the `fresh_session` fixture, which starts with an empty identity map and
   therefore reproduces production behaviour.
+- **Write rows another request may delete with a Core `update()`, not ORM
+  assignment + commit.** An ORM flush emits `UPDATE … WHERE pk` and raises
+  `StaleDataError` when 0 rows match, so a concurrent delete (logout, revoke,
+  session limit) turns the request into a 500. `update(Model).where(...).values(...)`
+  matches 0 rows silently. Example: `DatabaseStrategy.read_token`'s
+  `last_accessed` write (#665).

@@ -169,7 +169,7 @@ for f in FILES; do grep '^{' "$f" | jq -c 'select(.msg | contains("ENTITY_ID")) 
 
 ### Auth flow analysis
 ```bash
-# Token lifecycle: write → read (cache hit/miss) → warning (expired/invalid)
+# Token lifecycle: write → read (validated) → warning (expired/invalid)
 for f in FILES; do grep '^{' "$f" | jq -c 'select(.mod == "clarinet.api.auth_config") | {t, l, fn, msg}'; done | head -30
 
 # Unique tokens

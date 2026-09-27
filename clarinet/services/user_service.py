@@ -2,7 +2,6 @@
 
 from uuid import UUID, uuid4
 
-from clarinet.api.auth_config import DatabaseStrategy
 from clarinet.exceptions.domain import (
     InvalidCredentialsError,
     RoleAlreadyExistsError,
@@ -83,10 +82,7 @@ class UserService:
     async def update_user(self, user_id: UUID, data: UserUpdate) -> User:
         """Update user information.
 
-        Invalidates the auth-flow user cache so ``is_active`` / ``is_superuser``
-        changes take effect on the next request, for sessions and for the
-        service token (which resolves to the admin row) alike. A password
-        change also revokes every existing session of the user — a reset is
+        A password change also revokes every existing session of the user — a reset is
         meant to lock out whoever held the old password.
 
         Raises:
@@ -98,27 +94,17 @@ class UserService:
         # Hash before any write: a password bcrypt rejects must not leave the
         # other fields committed behind an error response.
         new_hash = get_password_hash(data.password) if data.password is not None else None
-        # Evict after the revoke, not before, to narrow the window in which a
-        # concurrent request re-caches a revoked token; one that still slips
-        # through lives at most session_cache_ttl_seconds.
-        try:
-            if new_hash is None:
-                await self.user_repo.update(user, update_fields)
-            else:
-                # Staged, not committed: update_password's single commit covers
-                # these fields, the new hash and the session DELETE together.
-                user.sqlmodel_update(update_fields)
-                await self.user_repo.update_password(user, new_hash)
-        finally:
-            DatabaseStrategy.invalidate_user_cache(user_id)
+        if new_hash is None:
+            await self.user_repo.update(user, update_fields)
+        else:
+            # Staged, not committed: update_password's single commit covers
+            # these fields, the new hash and the session DELETE together.
+            user.sqlmodel_update(update_fields)
+            await self.user_repo.update_password(user, new_hash)
         return await self.user_repo.get_with_roles(user_id)
 
     async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
-
-        Invalidates the auth-flow user cache so a deleted user's cached
-        sessions — and, for the admin, the service token — stop authenticating
-        at once.
 
         Args:
             user_id: User ID to delete
@@ -128,7 +114,6 @@ class UserService:
         """
         user = await self.user_repo.get(user_id)
         await self.user_repo.delete(user)
-        DatabaseStrategy.invalidate_user_cache(user_id)
 
     async def authenticate(self, username: str, password: str) -> User:
         """Authenticate user with username and password.
@@ -196,9 +181,6 @@ class UserService:
     async def assign_role(self, user_id: UUID, role_name: str) -> User:
         """Assign role to user.
 
-        Invalidates the auth-flow user cache so the new role takes effect on
-        the next request instead of waiting up to ``session_cache_ttl_seconds``.
-
         Args:
             user_id: User ID
             role_name: Role name to assign
@@ -218,14 +200,10 @@ class UserService:
             raise UserAlreadyHasRoleError(user_id, role_name)
 
         await self.user_repo.add_role(user, role)
-        DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 
     async def remove_role(self, user_id: UUID, role_name: str) -> User:
         """Remove role from user.
-
-        Invalidates the auth-flow user cache so the demotion takes effect
-        immediately instead of after the TTL expires.
 
         Args:
             user_id: User ID
@@ -241,7 +219,6 @@ class UserService:
         role = await self.user_repo.get_role(role_name)
 
         await self.user_repo.remove_role(user, role)
-        DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 
     async def create_role(self, name: str) -> UserRole:
@@ -296,10 +273,6 @@ class UserService:
     async def deactivate_user(self, user_id: UUID) -> User:
         """Deactivate user account.
 
-        Invalidates the auth-flow user cache so the deactivation takes effect
-        immediately — otherwise the next request within the TTL would still
-        accept the now-disabled session.
-
         Args:
             user_id: User ID
 
@@ -311,5 +284,4 @@ class UserService:
         """
         user = await self.user_repo.get(user_id)
         await self.user_repo.deactivate(user)
-        DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)

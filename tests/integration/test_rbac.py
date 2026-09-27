@@ -16,6 +16,8 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
+from sqlalchemy import delete
+from sqlmodel import col
 
 from clarinet.api.app import app
 from clarinet.api.auth_config import current_active_user, current_superuser
@@ -31,6 +33,7 @@ from tests.utils.factories import make_patient, make_record_type
 from tests.utils.test_helpers import PatientFactory, RecordFactory
 from tests.utils.urls import (
     ADMIN_RECORD_EVENTS,
+    AUTH_LOGIN,
     AUTH_ME,
     DICOM_BASE,
     DICOM_IMPORT_STUDY,
@@ -1354,42 +1357,35 @@ async def test_activate_user_returns_role_names(superuser_client, test_session):
 
 
 @pytest.mark.asyncio
-async def test_session_cache_invalidated_on_role_remove(superuser_client, test_session):
-    """remove_role must drop the demoted user's entries from DatabaseStrategy._user_cache.
-
-    Without invalidation the cache (TTL 30s) keeps serving the stale User with
-    'admin' in roles — admin endpoints would still pass for the demoted user
-    until expiry.
-    """
-    from clarinet.api.auth_config import DatabaseStrategy
-
+async def test_role_removal_takes_effect_on_next_request(unauthenticated_client, test_session):
+    """The general API keeps no user cache: a demoted admin's next request is
+    judged against the DB, however the role was removed (#650)."""
     test_session.add(UserRole(name="admin"))
-    await test_session.commit()
-
-    user_id = uuid4()
-    target = User(
-        id=user_id,
-        email="cache_target@test.com",
+    user = User(
+        id=uuid4(),
+        email="demoted_admin@test.com",
         hashed_password=get_password_hash("password"),
         is_active=True,
         is_verified=True,
         is_superuser=False,
     )
-    test_session.add(target)
+    test_session.add(user)
     await test_session.commit()
-    test_session.add(UserRolesLink(user_id=user_id, role_name="admin"))
+    test_session.add(UserRolesLink(user_id=user.id, role_name="admin"))
     await test_session.commit()
 
-    fake_token = "tok-cache-test"
-    DatabaseStrategy._user_cache[fake_token] = target
-    assert fake_token in DatabaseStrategy._user_cache
+    login = await unauthenticated_client.post(
+        AUTH_LOGIN, data={"username": "demoted_admin@test.com", "password": "password"}
+    )
+    assert login.status_code in (200, 204)
+    assert (await unauthenticated_client.get(f"{USERS_BASE}/")).status_code == 200
 
-    try:
-        response = await superuser_client.delete(f"/api/user/{user_id}/roles/admin")
-        assert response.status_code == 200
-        assert fake_token not in DatabaseStrategy._user_cache
-    finally:
-        DatabaseStrategy._user_cache.pop(fake_token, None)
+    # Straight to the DB, bypassing UserService: no code path is trusted to evict anything.
+    await test_session.execute(delete(UserRolesLink).where(col(UserRolesLink.user_id) == user.id))
+    await test_session.commit()
+    test_session.expire_all()
+
+    assert (await unauthenticated_client.get(f"{USERS_BASE}/")).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -1414,7 +1410,7 @@ async def test_service_token_dies_with_admin_account(
     expected,
 ):
     """Deactivating, demoting or deleting the admin row ends X-Internal-Token
-    access at once, not when the 5-minute service-user cache expires (#600)."""
+    access at once (#600)."""
     monkeypatch.setattr(test_settings, "internal_service_token", SecretStr("tok-600"))
     admin_id = uuid4()
     test_session.add(

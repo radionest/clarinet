@@ -57,6 +57,11 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 `session.expire_all()`. Without expunge, accessing `user.is_superuser` in an
 endpoint triggers a lazy-load on the expired object in async context.
 
+`create_authenticated_client` (via `setup_auth_overrides`) also overrides
+`current_dicomweb_user`. A fixture that sets `app.dependency_overrides` by hand
+and hits `/dicom-web` must override it alongside `current_active_user`, or
+DICOMweb requests return 401.
+
 ## Pitfalls
 
 ### MagicMock Auto-Creates Attributes

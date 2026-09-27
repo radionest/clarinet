@@ -13,20 +13,21 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from clarinet.api.dependencies import (
-    CurrentUserDep,
     DicomClientDep,
     DicomWebCacheDep,
     DicomWebProxyServiceDep,
+    DicomWebUserDep,
     PacsNodeDep,
-    current_role_holder,
+    current_dicomweb_user,
 )
 from clarinet.utils.dicom import parse_frame_numbers
 from clarinet.utils.logger import logger
 
 # The proxy has no per-record authorization — it reads straight from the PACS —
-# so a role-less account must not get past the router.
+# so a role-less account must not get past the router. OHIF sends a request per
+# frame, so current_dicomweb_user reuses a cookie's verdict for the cache TTL.
 router = APIRouter(
-    dependencies=[Depends(current_role_holder)],
+    dependencies=[Depends(current_dicomweb_user)],
     responses={403: {"description": "No role assigned"}},
 )
 
@@ -41,7 +42,7 @@ def _dicomweb_base_url(request: Request) -> str:
 @router.get("/studies")
 async def search_studies(
     request: Request,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """QIDO-RS: Search for studies.
@@ -63,7 +64,7 @@ async def search_studies(
 async def retrieve_study_metadata(
     study_uid: str,
     request: Request,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """WADO-RS: Retrieve metadata for all instances in a study.
@@ -86,7 +87,7 @@ async def retrieve_study_metadata(
 async def search_series(
     study_uid: str,
     request: Request,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """QIDO-RS: Search for series within a study.
@@ -110,7 +111,7 @@ async def search_instances(
     study_uid: str,
     series_uid: str,
     request: Request,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """QIDO-RS: Search for instances within a series.
@@ -135,7 +136,7 @@ async def retrieve_series_metadata(
     study_uid: str,
     series_uid: str,
     request: Request,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """WADO-RS: Retrieve metadata for all instances in a series.
@@ -164,7 +165,7 @@ async def retrieve_frames(
     series_uid: str,
     instance_uid: str,
     frames: str,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> Response:
     """WADO-RS: Retrieve pixel data frames for a specific instance.
@@ -196,7 +197,7 @@ async def retrieve_frames(
 async def download_series_archive(
     study_uid: str,
     series_uid: str,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     cache: DicomWebCacheDep,
     client: DicomClientDep,
     pacs: PacsNodeDep,
@@ -230,7 +231,7 @@ class PreloadRequest(BaseModel):
 @router.post("/preload")
 async def preload_studies(
     body: PreloadRequest,
-    user: CurrentUserDep,
+    user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """Start background preloading of one or more studies into the DICOMweb cache.
@@ -244,7 +245,7 @@ async def preload_studies(
 @router.get("/preload/progress/{task_id}")
 async def preload_progress(
     task_id: str,
-    _user: CurrentUserDep,
+    _user: DicomWebUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """Poll preload progress for a preload task."""

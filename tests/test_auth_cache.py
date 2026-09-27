@@ -1,34 +1,26 @@
-"""Unit tests for DatabaseStrategy in-memory session cache.
+"""Session authentication caching.
 
-Tests cover:
-- Cache hit returns user without DB query
-- Cache miss on TTL expiry
-- Cache eviction when max size reached
-- Cache invalidation on logout (destroy_token)
-- Cache invalidation on invalid/expired token
-- Cache disabled when TTL = 0
+The general API keeps no in-process user cache: ``DatabaseStrategy.read_token``
+checks the DB on every call, so nothing has to remember to evict anything
+(#650, #660). The one cache left is ``current_dicomweb_user`` on /dicom-web.
 """
 
-import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from cachetools import TTLCache
+from fastapi import HTTPException, Request
+from sqlalchemy import delete
+from sqlmodel import col
 
+from clarinet.api import auth_config
+from clarinet.api import dependencies as deps
 from clarinet.api.auth_config import DatabaseStrategy
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User
-
-
-@pytest.fixture(autouse=True)
-def clear_cache():
-    """Clear the class-level cache before and after each test."""
-    original_cache = DatabaseStrategy._user_cache
-    DatabaseStrategy._user_cache.clear()
-    yield
-    DatabaseStrategy._user_cache = original_cache
+from tests.utils.factories import make_user
 
 
 def _make_user(*, active: bool = True) -> User:
@@ -40,272 +32,322 @@ def _make_user(*, active: bool = True) -> User:
     return user
 
 
-def _make_token(user: User, *, expired: bool = False) -> AccessToken:
-    """Create a mock AccessToken object."""
+def _make_token(user: User) -> AccessToken:
+    """A mock AccessToken accessed just now, so no activity write is due."""
     token = MagicMock(spec=AccessToken)
     token.user_id = user.id
     token.ip_address = None
     token.last_accessed = datetime.now(UTC)
     token.created_at = datetime.now(UTC) - timedelta(hours=1)
-    if expired:
-        token.expires_at = datetime.now(UTC) - timedelta(hours=1)
-    else:
-        token.expires_at = datetime.now(UTC) + timedelta(hours=24)
+    token.expires_at = datetime.now(UTC) + timedelta(hours=24)
     return token
 
 
-def _make_strategy(*, token_obj: AccessToken | None = None, user: User | None = None):
-    """Create a DatabaseStrategy with mocked session."""
+def _make_strategy(
+    *, token_obj: AccessToken | None = None, user: User | None = None
+) -> DatabaseStrategy:
+    """DatabaseStrategy whose session answers the token query, then the user query."""
     session = AsyncMock()
     session.expunge = MagicMock()  # expunge is sync, not async
-
-    # Mock session.execute to return token query, then user query
     if token_obj is not None:
         token_result = MagicMock()
         token_result.scalar_one_or_none.return_value = token_obj
-
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-
         session.execute = AsyncMock(side_effect=[token_result, user_result])
     else:
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         session.execute = AsyncMock(return_value=result)
-
-    strategy = DatabaseStrategy(session=session, request=None)
-    return strategy
+    return DatabaseStrategy(session=session, request=None)
 
 
-class TestCacheHit:
-    """Test that cached tokens are returned without DB query."""
+@pytest.fixture
+def auth_settings():
+    with patch("clarinet.api.auth_config.settings") as mock_settings:
+        # a configured TTL must not make read_token cache
+        mock_settings.session_cache_ttl_seconds = 30
+        mock_settings.session_ip_check = False
+        mock_settings.session_idle_timeout_minutes = 0
+        mock_settings.session_sliding_refresh = False
+        yield mock_settings
 
+
+class TestReadTokenHitsTheDatabase:
     @pytest.mark.asyncio
-    async def test_cache_hit_skips_db(self):
-        """Second read_token call should return cached user, no DB query."""
+    async def test_every_call_queries_the_db(self, auth_settings):
+        """A second call with the same token is not served from memory."""
         user = _make_user()
-        token_obj = _make_token(user)
-        token_str = "test-token-abc"
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 30
-            mock_settings.session_ip_check = False
-            mock_settings.session_idle_timeout_minutes = 0
-            mock_settings.session_sliding_refresh = False
-
-            # First call — goes to DB, populates cache
-            strategy = _make_strategy(token_obj=token_obj, user=user)
-            result = await strategy.read_token(token_str, AsyncMock())
-            assert result is user
-            assert strategy.session.execute.call_count == 2  # token query + user query
-
-            # Second call — new strategy (same class cache), should hit cache
-            strategy2 = _make_strategy()  # DB returns None (shouldn't be called)
-            result2 = await strategy2.read_token(token_str, AsyncMock())
-            assert result2 is user
-            assert strategy2.session.execute.call_count == 0  # no DB calls
-
-
-class TestCacheTTLExpiry:
-    """Test that expired cache entries are not returned."""
+        for _ in range(2):
+            strategy = _make_strategy(token_obj=_make_token(user), user=user)
+            assert await strategy.read_token("tok-repeat", AsyncMock()) is user
+            assert strategy.session.execute.call_count == 2  # token + user
 
     @pytest.mark.asyncio
-    async def test_expired_cache_entry_triggers_db_query(self):
-        """After TTL expires, read_token should query DB again."""
-        user = _make_user()
-        token_str = "test-token-ttl"
-
-        # Create a short-TTL cache so entries expire quickly
-        DatabaseStrategy._user_cache = TTLCache(maxsize=1000, ttl=0.01)
-        DatabaseStrategy._user_cache[token_str] = user
-        await asyncio.sleep(0.02)  # let entry expire
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 30
-
-            # Should NOT return cached user — TTL expired
-            token_obj = _make_token(user)
-            strategy = _make_strategy(token_obj=token_obj, user=user)
-            mock_settings.session_ip_check = False
-            mock_settings.session_idle_timeout_minutes = 0
-            mock_settings.session_sliding_refresh = False
-
-            result = await strategy.read_token(token_str, AsyncMock())
-            assert result is user
-            # DB was queried (2 calls: token + user)
-            assert strategy.session.execute.call_count == 2
+    async def test_unknown_token_returns_none(self, auth_settings):
+        strategy = _make_strategy(token_obj=None)
+        assert await strategy.read_token("tok-unknown", AsyncMock()) is None
 
     @pytest.mark.asyncio
-    async def test_fresh_cache_entry_does_not_trigger_db(self):
-        """Within TTL, read_token should return cached user without DB."""
-        user = _make_user()
-        token_str = "test-token-fresh"
-
-        # Insert a fresh cache entry
-        DatabaseStrategy._user_cache[token_str] = user
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 30
-
-            strategy = _make_strategy()
-            result = await strategy.read_token(token_str, AsyncMock())
-            assert result is user
-            assert strategy.session.execute.call_count == 0
-
-
-class TestCacheEviction:
-    """Test LRU eviction when cache is full."""
-
-    @pytest.mark.asyncio
-    async def test_oldest_entry_evicted_when_full(self):
-        """When cache reaches max size, oldest entry is evicted."""
-        # Replace cache with a small-capacity one
-        DatabaseStrategy._user_cache = TTLCache(maxsize=3, ttl=60)
-
-        user = _make_user()
-
-        # Fill cache with 3 entries
-        DatabaseStrategy._user_cache["token-old"] = user
-        DatabaseStrategy._user_cache["token-mid"] = user
-        DatabaseStrategy._user_cache["token-new"] = user
-
-        assert len(DatabaseStrategy._user_cache) == 3
-
-        # Add a 4th entry via read_token — should evict "token-old" (LRU)
-        new_user = _make_user()
-        token_obj = _make_token(new_user)
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 60
-            mock_settings.session_ip_check = False
-            mock_settings.session_idle_timeout_minutes = 0
-            mock_settings.session_sliding_refresh = False
-
-            strategy = _make_strategy(token_obj=token_obj, user=new_user)
-            await strategy.read_token("token-4th", AsyncMock())
-
-        assert "token-old" not in DatabaseStrategy._user_cache
-        assert "token-mid" in DatabaseStrategy._user_cache
-        assert "token-new" in DatabaseStrategy._user_cache
-        assert "token-4th" in DatabaseStrategy._user_cache
-        assert len(DatabaseStrategy._user_cache) == 3
-
-
-class TestCacheInvalidation:
-    """Test cache invalidation on logout and invalid tokens."""
-
-    @pytest.mark.asyncio
-    async def test_destroy_token_removes_from_cache(self):
-        """Logout (destroy_token) should remove cached entry."""
-        user = _make_user()
-        token_str = "token-to-destroy"
-
-        DatabaseStrategy._user_cache[token_str] = user
-        assert token_str in DatabaseStrategy._user_cache
-
-        session = AsyncMock()
-        result = MagicMock()
-        result.rowcount = 1
-        session.execute = AsyncMock(return_value=result)
-
-        strategy = DatabaseStrategy(session=session, request=None)
-        await strategy.destroy_token(token_str, user)
-
-        assert token_str not in DatabaseStrategy._user_cache
-
-    @pytest.mark.asyncio
-    async def test_invalid_token_removed_from_cache(self):
-        """If token is not found in DB, it should be removed from cache."""
-        user = _make_user()
-        token_str = "token-invalid"
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 1
-
-            # Create a short-TTL cache so the entry expires, forcing DB lookup
-            DatabaseStrategy._user_cache = TTLCache(maxsize=1000, ttl=0.01)
-            DatabaseStrategy._user_cache[token_str] = user
-            await asyncio.sleep(0.02)  # let entry expire
-
-            mock_settings.session_ip_check = False
-
-            # DB returns no token
-            strategy = _make_strategy(token_obj=None)
-            result = await strategy.read_token(token_str, AsyncMock())
-
-            assert result is None
-            assert token_str not in DatabaseStrategy._user_cache
-
-    @pytest.mark.asyncio
-    async def test_inactive_user_removed_from_cache(self):
-        """If user is inactive, cache entry should be removed."""
+    async def test_inactive_user_returns_none(self, auth_settings):
         user = _make_user(active=False)
-        token_str = "token-inactive-user"
-
-        # Create a short-TTL cache so entry expires, forcing DB lookup
-        DatabaseStrategy._user_cache = TTLCache(maxsize=1000, ttl=0.01)
-        DatabaseStrategy._user_cache[token_str] = _make_user()
-        await asyncio.sleep(0.02)  # let entry expire
-
-        token_obj = _make_token(user)
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 30
-            mock_settings.session_ip_check = False
-            mock_settings.session_idle_timeout_minutes = 0
-            mock_settings.session_sliding_refresh = False
-
-            strategy = _make_strategy(token_obj=token_obj, user=user)
-            result = await strategy.read_token(token_str, AsyncMock())
-
-            assert result is None
-            assert token_str not in DatabaseStrategy._user_cache
-
-
-class TestCacheDisabled:
-    """Test behavior when caching is disabled (TTL = 0)."""
+        strategy = _make_strategy(token_obj=_make_token(user), user=user)
+        assert await strategy.read_token("tok-inactive", AsyncMock()) is None
 
     @pytest.mark.asyncio
-    async def test_ttl_zero_disables_cache(self):
-        """With TTL=0, cache should never be used."""
-        user = _make_user()
-        token_obj = _make_token(user)
-        token_str = "token-no-cache"
-
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 0
-            mock_settings.session_ip_check = False
-            mock_settings.session_idle_timeout_minutes = 0
-            mock_settings.session_sliding_refresh = False
-
-            # First call
-            strategy = _make_strategy(token_obj=token_obj, user=user)
-            await strategy.read_token(token_str, AsyncMock())
-
-            # Cache should remain empty
-            assert token_str not in DatabaseStrategy._user_cache
-
-            # Second call should still query DB
-            token_obj2 = _make_token(user)
-            strategy2 = _make_strategy(token_obj=token_obj2, user=user)
-            result = await strategy2.read_token(token_str, AsyncMock())
-            assert result is user
-            assert strategy2.session.execute.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_none_token_returns_none(self):
-        """read_token with None token should return None immediately."""
+    async def test_none_token_returns_none_without_db(self):
         strategy = _make_strategy()
-        result = await strategy.read_token(None, AsyncMock())
-        assert result is None
+        assert await strategy.read_token(None, AsyncMock()) is None
         assert strategy.session.execute.call_count == 0
 
-    @pytest.mark.asyncio
-    async def test_empty_token_returns_none(self):
-        """read_token with empty string should query DB and find nothing."""
-        with patch("clarinet.api.auth_config.settings") as mock_settings:
-            mock_settings.session_cache_ttl_seconds = 0
 
-            strategy = _make_strategy(token_obj=None)
-            result = await strategy.read_token("", AsyncMock())
-            assert result is None
+def _dicomweb_request(*, internal_token: str | None = None, host: str = "10.0.0.1") -> MagicMock:
+    request = MagicMock(spec=Request)
+    request.cookies = {deps.settings.cookie_name: "tok-dw"}
+    request.headers = {"X-Internal-Token": internal_token} if internal_token else {}
+    request.client = SimpleNamespace(host=host)
+    request.url = SimpleNamespace(path="/dicom-web/studies")
+    return request
+
+
+class TestDicomWebUserCache:
+    """current_dicomweb_user: TTL-only reuse of a session cookie's verdict."""
+
+    @pytest.fixture(autouse=True)
+    def service_user(self):
+        with patch(
+            "clarinet.api.auth_config._get_service_user", AsyncMock(return_value=None)
+        ) as service:
+            yield service
+
+    @pytest.mark.asyncio
+    async def test_cookie_verdict_is_reused_within_ttl(self):
+        user = make_user(is_superuser=True)
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
+            for _ in range(2):
+                assert await deps.current_dicomweb_user(_dicomweb_request(), MagicMock()) is user
+        assert read.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cached_verdict_is_not_reused_from_another_ip(self):
+        """A cookie replayed from another IP must not ride the owner's warm
+        cache entry — that would bypass read_token's session_ip_check for the
+        TTL."""
+        user = make_user(is_superuser=True)
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
+            assert (
+                await deps.current_dicomweb_user(_dicomweb_request(host="10.0.0.1"), MagicMock())
+                is user
+            )
+            assert (
+                await deps.current_dicomweb_user(_dicomweb_request(host="10.0.0.2"), MagicMock())
+                is user
+            )
+        assert read.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_ttl_zero_disables_reuse(self, monkeypatch):
+        monkeypatch.setattr(deps.settings, "session_cache_ttl_seconds", 0)
+        user = make_user(is_superuser=True)
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
+            for _ in range(2):
+                await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert read.await_count == 2
+        assert not deps._dicomweb_user_cache
+
+    @pytest.mark.asyncio
+    async def test_service_token_user_is_never_cached_under_the_cookie(self, service_user):
+        admin = make_user(is_superuser=True)
+        cookie_owner = make_user(roles=[])
+        service_user.return_value = admin
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=cookie_owner)):
+            request = _dicomweb_request(internal_token="tok-service")
+            assert await deps.current_dicomweb_user(request, MagicMock()) is admin
+            assert not deps._dicomweb_user_cache
+
+            service_user.return_value = None
+            with pytest.raises(HTTPException) as denied:
+                await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert denied.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_is_401_and_not_cached(self):
+        with (
+            patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=None)),
+            pytest.raises(HTTPException) as denied,
+        ):
+            await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert denied.value.status_code == 401
+        assert not deps._dicomweb_user_cache
+
+    @pytest.mark.asyncio
+    async def test_role_less_user_is_403_and_not_cached(self):
+        role_less = make_user(roles=[])
+        with (
+            patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=role_less)),
+            pytest.raises(HTTPException) as denied,
+        ):
+            await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
+        assert denied.value.status_code == 403
+        assert not deps._dicomweb_user_cache
+
+
+def _aware(value: datetime) -> datetime:
+    """SQLite hands timestamps back naive; compare them as UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+async def _session_row(session, user_id, *, idle_for: timedelta) -> AccessToken:
+    now = datetime.now(UTC)
+    row = AccessToken(
+        token=f"tok-{uuid4().hex}",
+        user_id=user_id,
+        expires_at=now + timedelta(hours=24),
+        last_accessed=now - idle_for,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def _read(session, token: str) -> User | None:
+    return await DatabaseStrategy(session, None).read_token(token, None)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_read_token_user_survives_a_request_rollback(test_session, test_user):
+    """A rollback later in the request (add_file_links losing an IntegrityError
+    race) expires every attached instance — the user must come back detached, or
+    reading it lazy-loads outside a greenlet: MissingGreenlet -> 500."""
+    row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=10))
+    user = await _read(test_session, row.token)
+    assert user is not None
+
+    await test_session.rollback()
+
+    assert user.is_active
+
+
+class TestReadTokenActivityWrites:
+    """read_token records activity at most once per interval, as a Core UPDATE (#665)."""
+
+    @pytest.fixture(autouse=True)
+    def _session_settings(self, monkeypatch):
+        monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 60)
+        monkeypatch.setattr(auth_config.settings, "session_sliding_refresh", False)
+        monkeypatch.setattr(auth_config.settings, "session_ip_check", False)
+
+    @pytest.mark.asyncio
+    async def test_recent_activity_is_not_rewritten(self, test_session, test_user):
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=10))
+        before = row.last_accessed
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert row.last_accessed == before
+
+    @pytest.mark.asyncio
+    async def test_stale_activity_is_refreshed(self, test_session, test_user):
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(minutes=5))
+        before = _aware(row.last_accessed)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) > before
+
+    @pytest.mark.asyncio
+    async def test_one_minute_idle_timeout_still_sees_activity(
+        self, test_session, test_user, monkeypatch
+    ):
+        """A flat 60 s throttle would log out a user who is active every 40 s."""
+        monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 1)
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=40))
+        before = _aware(row.last_accessed)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) > before
+
+    @pytest.mark.asyncio
+    async def test_dicomweb_cache_ttl_comes_out_of_the_idle_budget(
+        self, test_session, test_user, monkeypatch
+    ):
+        """#680: /dicom-web reuses a verdict for the TTL without calling read_token,
+        so the write interval must leave room for it. With a 1-minute idle timeout
+        and a 30 s TTL it is 15 s: activity 20 s old is due. Under the old 30 s
+        interval a write skipped just under 30 s plus the 30 s TTL reached the
+        full minute of idleness on the next cache miss."""
+        monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 1)
+        monkeypatch.setattr(auth_config.settings, "session_cache_ttl_seconds", 30)
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=20))
+        before = _aware(row.last_accessed)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) > before
+
+    @pytest.mark.asyncio
+    async def test_session_deleted_mid_request_does_not_raise(
+        self, test_session, test_user, monkeypatch
+    ):
+        """#665: another transaction deletes the row between read_token's SELECT
+        and its activity write — the write must not raise StaleDataError (a 500)."""
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(minutes=5))
+        token = row.token
+        execute = test_session.execute
+        calls = 0
+
+        async def execute_then_revoke(statement, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            result = await execute(statement, *args, **kwargs)
+            if calls == 1:  # the token SELECT is done; a concurrent logout lands now
+                await execute(
+                    delete(AccessToken)
+                    .where(col(AccessToken.token) == token)
+                    .execution_options(synchronize_session=False)
+                )
+            return result
+
+        monkeypatch.setattr(test_session, "execute", execute_then_revoke)
+
+        assert await _read(test_session, token) is not None
+        assert await _read(test_session, token) is None
+
+    @pytest.mark.asyncio
+    async def test_capped_sliding_refresh_is_not_rewritten_every_request(
+        self, test_session, test_user, monkeypatch
+    ):
+        """Once expires_at already equals created_at + absolute_timeout_days, the
+        sliding-refresh recompute lands on the same value — that must not force
+        an UPDATE + COMMIT on every request for the rest of the session."""
+        monkeypatch.setattr(auth_config.settings, "session_sliding_refresh", True)
+        monkeypatch.setattr(auth_config.settings, "session_absolute_timeout_days", 1)
+        monkeypatch.setattr(auth_config.settings, "session_expire_hours", 24)
+
+        now = datetime.now(UTC)
+        created_at = now - timedelta(hours=23, minutes=50)  # < half of 24h left to expiry
+        absolute_limit = created_at + timedelta(days=1)
+        row = AccessToken(
+            token=f"tok-{uuid4().hex}",
+            user_id=test_user.id,
+            created_at=created_at,
+            expires_at=absolute_limit,  # already capped at the absolute limit
+            last_accessed=now - timedelta(seconds=10),
+        )
+        test_session.add(row)
+        await test_session.commit()
+        await test_session.refresh(row)
+        before_last_accessed = _aware(row.last_accessed)
+        before_expires_at = _aware(row.expires_at)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) == before_last_accessed
+        assert _aware(row.expires_at) == before_expires_at

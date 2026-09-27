@@ -433,6 +433,12 @@
   `cors_origins` (`CLARINET_CORS_ORIGINS`, exact origins only). Anonymous
   `POST /api/pipelines/sync` answers 401; the `X-Internal-Token` service token
   qualifies as admin. Rationale under Security.
+- **`DatabaseStrategy.invalidate_user_cache` and `DatabaseStrategy.evict_token`
+  are gone.** The general API keeps no user cache to evict; drop the calls.
+  `session_cache_ttl_seconds` now governs only the `/dicom-web` cache. Test
+  fixtures that override `current_active_user` (or `current_role_holder`) to
+  reach `/dicom-web` must also override
+  `clarinet.api.dependencies.current_dicomweb_user`.
 
 ### Deprecated
 
@@ -461,21 +467,33 @@
 
 ### Security
 
+- **The general API no longer caches authenticated users.** Every route outside
+  `/dicom-web` checks the session and the `X-Internal-Token` admin row against
+  the database on each request, so a revoked, limit-evicted or deactivated
+  session and a removed role take effect on the next request — no code path has
+  to remember to evict a cache any more (#650, #660), and `clarinet session
+  revoke-user` / `clarinet admin reset-password` reach the API at once.
+  `/dicom-web`, where OHIF sends a request per frame, keeps a TTL-only cache: a
+  session cookie that passed is reused for `session_cache_ttl_seconds` (30 s;
+  `0` disables) and never evicted early, so image access outlives a revocation,
+  deactivation, role removal, expiry or idle timeout by up to that long. Session activity (`last_accessed`)
+  is written at most every
+  `min(60 s, max(idle_timeout − session_cache_ttl_seconds, 0) / 2)` (60 s with
+  the idle timeout off; the TTL comes out of the idle budget so an image-only
+  session is not logged out under a short idle timeout while the TTL stays below
+  it, #680) as a plain
+  `UPDATE`, so a session deleted mid-request no longer turns that request into
+  a 500 (#665).
 - **Changing a password logs out the user's existing sessions.** `PUT
   /api/user/{id}` with a `password` and `clarinet admin reset-password` rehashed
   the password but left every session valid, so a reset never locked out
   whoever held the old one. Both now revoke all of the user's sessions —
-  including the caller's own when admins change their own password. The CLI
-  runs outside the API process, so a session the API has already cached keeps
-  working for up to `session_cache_ttl_seconds`, as with `clarinet session
-  revoke-user` (#651).
+  including the caller's own when admins change their own password (#651).
 - **Deactivating or deleting the admin ends `X-Internal-Token` access at once.**
   The service token resolves to the admin row, which was cached for 5 minutes
   and never invalidated, so a deactivated, demoted or deleted admin kept full
-  service-token superuser access until the TTL ran out. Every user update,
-  deletion, deactivation and role change now drops that cache; `PUT` and
-  `DELETE /api/user/{id}` also start evicting the target's cached sessions, as
-  role changes and deactivation already did (#600).
+  service-token superuser access until the TTL ran out. The service token now
+  re-reads the admin row on every request (#600).
 - **Failed logins and `X-Internal-Token` guesses are throttled.** Login had no
   rate limit or lockout, and the service token — derived from `admin_password`,
   accepted on every endpoint — was a second, cheaper oracle for the same secret.

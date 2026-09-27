@@ -21,9 +21,6 @@ session_idle_timeout_minutes = 0
 
 # Отключить IP validation
 session_ip_check = false
-
-# Увеличить TTL кэша (опционально)
-session_cache_ttl_seconds = 300
 ```
 
 2. Перезапустите приложение:
@@ -109,6 +106,7 @@ jq 'select(.t > "'$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S)'"Z")' clarin
 **Признаки:**
 - Backend лог: `Session idle timeout` с детальными метриками
 - `idle_duration_seconds` > `max_idle_seconds`
+- `last_accessed` пишется не чаще раза в минуту (чаще при коротком idle timeout), а попадание в кэш `/dicom-web` не вызывает `read_token` ещё до `session_cache_ttl_seconds`, поэтому `idle_duration` в логе может превышать реальный простой до суммы этих интервалов (~90 с по умолчанию)
 
 **Пример:**
 ```json
@@ -164,29 +162,15 @@ jq 'select(.t > "'$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S)'"Z")' clarin
 
 ---
 
-### Гипотеза 5: TTL кэш возвращает устаревшие данные
+### Гипотеза 5: кэш `/dicom-web` ещё пускает отозванную сессию
+
+Кэш есть только у `/dicom-web` (`current_dicomweb_user`); остальной API проверяет сессию по БД на каждый запрос.
 
 **Признаки:**
-- Backend лог: `Token validated from cache` → затем следующий запрос дает `Token validation failed`
-- Между событиями < `session_cache_ttl_seconds` (по умолчанию 300 секунд)
+- Изображения в OHIF продолжают грузиться после logout/отзыва сессии, а `/api/*` уже отвечает 401
+- Между отзывом и последним успешным кадром меньше `session_cache_ttl_seconds` (по умолчанию 30 секунд)
 
-**Пример:**
-```json
-{
-  "t": "2024-03-15T10:00:00Z",
-  "l": "DEBUG",
-  "msg": "Token abcdef12... validated from cache",
-  "cache_hit": true
-}
-{
-  "t": "2024-03-15T10:01:00Z",
-  "l": "WARNING",
-  "msg": "Token validation failed: token=abcdef12...",
-  "reason": "not_found_or_expired"
-}
-```
-
-**Решение:** Уменьшить `session_cache_ttl_seconds` или отключить кэш для Slicer endpoint.
+**Решение:** это ожидаемое окно. Уменьшить `session_cache_ttl_seconds` (`0` — выключить кэш ценой запроса к БД на каждый кадр).
 
 ---
 
@@ -200,7 +184,7 @@ session_idle_timeout_minutes = 0       # Отключить idle timeout
 session_ip_check = false                # Отключить IP validation
 session_concurrent_limit = 0            # Отключить лимит сессий
 session_expire_hours = 48               # Увеличить срок жизни сессии
-session_cache_ttl_seconds = 0           # Отключить кэш (может снизить производительность!)
+session_cache_ttl_seconds = 0           # Отключить кэш /dicom-web (запрос к БД на каждый кадр)
 ```
 
 ## Отчёт о баге
