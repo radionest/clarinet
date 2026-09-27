@@ -156,7 +156,8 @@ correlatable. Prefill writes are deliberately not audited.
 record type's role; `MutableRecordDep` adds mutation for admins (`is_admin`),
 the assigned user or an unassigned record (and bypasses the owner check when
 `shared_editing` is set). Every record mutation goes through it — including
-`/fail`, `/invalidate` and, per target record, `PATCH /bulk/status`.
+`/fail`, `/invalidate`, `/check-files` (it can unblock a record and fire
+file-change flows) and, per target record, `PATCH /bulk/status`.
 Assignment (`PATCH /api/records/{id}/user`) is stricter, since it decides who
 the owner is and forces `inwork`: a non-admin may only claim for themselves an
 unassigned `pending`/`inwork` record, even on a `shared_editing` type —

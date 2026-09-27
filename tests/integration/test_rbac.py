@@ -616,9 +616,13 @@ async def test_role_holder_may_fail_own_record(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("action", "body"),
-    [("fail", {"reason": "test"}), ("invalidate", {"mode": "soft", "reason": "test"})],
+    [
+        ("fail", {"reason": "test"}),
+        ("invalidate", {"mode": "soft", "reason": "test"}),
+        ("check-files", None),
+    ],
 )
-async def test_fail_and_invalidate_other_users_record_forbidden(
+async def test_mutations_on_other_users_record_forbidden(
     test_session, role_a_client, record_role_a, superuser, action, body
 ):
     record_role_a.user_id = superuser.id
@@ -632,9 +636,13 @@ async def test_fail_and_invalidate_other_users_record_forbidden(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("action", "body"),
-    [("fail", {"reason": "test"}), ("invalidate", {"mode": "soft", "reason": "test"})],
+    [
+        ("fail", {"reason": "test"}),
+        ("invalidate", {"mode": "soft", "reason": "test"}),
+        ("check-files", None),
+    ],
 )
-async def test_admin_role_may_fail_and_invalidate_other_users_record(
+async def test_admin_role_may_mutate_other_users_record(
     test_session, admin_role_client, admin_role_user, role_a, record_role_a, superuser, action, body
 ):
     """A non-superuser admin holding the type's role keeps the frontend's Fail/Restart."""

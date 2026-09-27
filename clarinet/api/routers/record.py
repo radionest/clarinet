@@ -1039,7 +1039,7 @@ async def validate_files_endpoint(
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)
 async def check_record_files(
     record_id: int,
-    _authorized_record: AuthorizedRecordDep,
+    _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     actor: AuditActorDep,
 ) -> FileCheckResult:

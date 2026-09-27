@@ -522,6 +522,14 @@
   (superuser or `admin` role) past the owner check, not only superusers,
   matching what the frontend already offered them. Closes #620; closes the
   non-admin path of #629.
+- `POST /api/records/{id}/check-files` now requires `MutableRecordDep` rights
+  too. It writes — unblocks a `blocked` record (audited as the caller), stores
+  checksums and output-file links, fires `on_file_change` flows — but only
+  checked read access, so a role-holder could run it on a colleague's record.
+  They now get **403**; pipelines and RecordFlow call it with the service
+  token and are unaffected. An unassigned record — which a `blocked` one
+  usually is — stays open to every role-holder, so the auto-unblock is not
+  owner-only. `validate-files` stays the read-only report (#632).
 - Rendered file paths are now confined to the record's working directory. A
   substituted value containing `/`, `\`, or NUL is rejected, and a value that
   is exactly `.` or `..` is rejected separately; the joined path is then
