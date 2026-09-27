@@ -538,21 +538,31 @@ def test_strip_preserves_extra_namespaces(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_generate_default_reference_writes_stdout(
+def test_generate_default_reference_lets_pandoc_write_dest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Pandoc writes the docx itself via ``-o`` (before the print flag): Quarto
+    1.4.557's ``quarto pandoc`` sends stdout to stderr, corrupted (#684)."""
     captured: dict[str, list[str]] = {}
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         captured["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout=b"PKdocxbytes", stderr=b"")
+        with zipfile.ZipFile(cmd[cmd.index("-o") + 1], "w") as z:
+            z.writestr("word/document.xml", "<doc/>")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     dest = tmp_path / "reference.docx"
     generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
 
-    assert dest.read_bytes() == b"PKdocxbytes"
-    assert captured["cmd"][1:] == ["pandoc", "--print-default-data-file", "reference.docx"]
+    assert zipfile.is_zipfile(dest)
+    assert captured["cmd"][1:] == [
+        "pandoc",
+        "-o",
+        str(dest),
+        "--print-default-data-file",
+        "reference.docx",
+    ]
 
 
 def test_generate_default_reference_raises_on_failure(
@@ -566,12 +576,15 @@ def test_generate_default_reference_raises_on_failure(
         generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
 
 
-def test_generate_default_reference_raises_on_empty_stdout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("written", [None, b"", b"PK not really a zip"])
+def test_generate_default_reference_raises_without_valid_docx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, written: bytes | None
 ) -> None:
-    """Zero exit but empty stdout must error instead of writing a 0-byte file."""
+    """Zero exit but no / empty / corrupt file must error and leave no file."""
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if written is not None:
+            Path(cmd[cmd.index("-o") + 1]).write_bytes(written)
         return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)

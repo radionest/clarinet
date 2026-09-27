@@ -365,16 +365,25 @@ def generate_default_reference(dest: Path, quarto_executable: Path) -> None:
     """Write the bundled pandoc default ``reference.docx`` to ``dest``.
 
     ``quarto pandoc`` proxies Quarto's bundled pandoc, so no separate pandoc
-    install is needed. ``--print-default-data-file reference.docx`` emits the
-    docx bytes on stdout.
+    install is needed. Pandoc writes the file itself (``-o``, which must precede
+    ``--print-default-data-file``): Quarto 1.4.x's ``quarto pandoc`` sends the
+    docx bytes to stderr, corrupted, instead of stdout.
 
     Raises:
-        QuartoScaffoldError: the subprocess exits non-zero or emits no bytes.
+        QuartoScaffoldError: the subprocess exits non-zero or leaves no valid
+            docx at ``dest``.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         proc = subprocess.run(
-            [str(quarto_executable), "pandoc", "--print-default-data-file", "reference.docx"],
+            [
+                str(quarto_executable),
+                "pandoc",
+                "-o",
+                str(dest),
+                "--print-default-data-file",
+                "reference.docx",
+            ],
             capture_output=True,
             timeout=60,
         )
@@ -385,11 +394,11 @@ def generate_default_reference(dest: Path, quarto_executable: Path) -> None:
     if proc.returncode != 0:
         detail = proc.stderr.decode(errors="replace").strip()[:500]
         raise QuartoScaffoldError(f"failed to generate default reference.docx: {detail}")
-    if not proc.stdout:
+    if not zipfile.is_zipfile(dest):
+        dest.unlink(missing_ok=True)
         raise QuartoScaffoldError(
-            "failed to generate default reference.docx: pandoc produced no output"
+            "failed to generate default reference.docx: pandoc did not write a valid .docx"
         )
-    dest.write_bytes(proc.stdout)
 
 
 def scaffold_quarto_report(

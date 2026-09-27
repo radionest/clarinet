@@ -57,8 +57,9 @@ the **whole letterhead**: headers, footers, and embedded media (the org logo).
 Review the produced `reference.docx` before committing it.
 
 **Default `reference.docx`** (when `--from-docx` is omitted) is generated via
-`quarto pandoc --print-default-data-file reference.docx`. Quarto must be
-installed (`clarinet quarto install`) for this branch.
+`quarto pandoc -o reference.docx --print-default-data-file reference.docx`
+(pandoc writes the file itself — Quarto 1.4.x's `quarto pandoc` corrupts binary
+stdout). Quarto must be installed (`clarinet quarto install`) for this branch.
 
 ## Authoring a report
 
