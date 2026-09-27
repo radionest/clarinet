@@ -158,10 +158,10 @@ class TestSessionManagement:
         assert row is None
 
     @pytest.mark.asyncio
-    async def test_password_change_logs_out_cached_session(
+    async def test_password_change_logs_out_live_session(
         self, client: AsyncClient, test_session: AsyncSession
     ):
-        """#651: an admin password change kills the user's live, cached session."""
+        """#651: an admin password change kills the user's live session."""
         from clarinet.api.app import app
         from tests.conftest import patch_cookie_forwarding
 

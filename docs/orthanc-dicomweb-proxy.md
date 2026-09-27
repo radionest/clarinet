@@ -152,7 +152,7 @@ Notes:
 - The auth target `GET {base_path}/api/auth/dicomweb-access` is read-only and returns
   200/401/403; `auth_request` inspects status only. It answers 200 on purpose — that is
   the only status `proxy_cache_valid 200 10s` caches. `read_token` records `last_accessed`
-  (at most once a minute), so a cached check every ~10 s keeps an actively-viewing session
+  (at most every `min(60 s, idle_timeout / 2)`), so a cached check every ~10 s keeps an actively-viewing session
   non-idle and visible in presence.
 - **Do not point `auth_request` at `/api/auth/session/validate`.** That endpoint admits
   any active session; `dicomweb-access` applies the same gate as the builtin `/dicom-web`
