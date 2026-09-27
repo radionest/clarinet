@@ -543,8 +543,8 @@ def require_role_holder(user: User) -> User:
 
 
 # ponytail: TTL-only, never evicted — after a revoke, deactivation, password
-# change or role removal the user keeps /dicom-web access for up to
-# session_cache_ttl_seconds. Only this read-only image path is cached (OHIF
+# change, role removal, session expiry or idle timeout the user keeps /dicom-web
+# access for up to session_cache_ttl_seconds. Only this read-only image path is cached (OHIF
 # sends a request per frame); every other route checks the DB. Per-process,
 # like the SSE bus: a second API worker keeps its own copy. Keyed by
 # (token, client IP), not the token alone — otherwise a cookie replayed from
