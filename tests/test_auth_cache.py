@@ -65,9 +65,8 @@ def _make_strategy(
 @pytest.fixture
 def auth_settings():
     with patch("clarinet.api.auth_config.settings") as mock_settings:
-        mock_settings.session_cache_ttl_seconds = (
-            30  # a configured TTL must not make read_token cache
-        )
+        # a configured TTL must not make read_token cache
+        mock_settings.session_cache_ttl_seconds = 30
         mock_settings.session_ip_check = False
         mock_settings.session_idle_timeout_minutes = 0
         mock_settings.session_sliding_refresh = False
@@ -102,11 +101,11 @@ class TestReadTokenHitsTheDatabase:
         assert strategy.session.execute.call_count == 0
 
 
-def _dicomweb_request(*, internal_token: str | None = None) -> MagicMock:
+def _dicomweb_request(*, internal_token: str | None = None, host: str = "10.0.0.1") -> MagicMock:
     request = MagicMock(spec=Request)
     request.cookies = {deps.settings.cookie_name: "tok-dw"}
     request.headers = {"X-Internal-Token": internal_token} if internal_token else {}
-    request.client = SimpleNamespace(host="10.0.0.1")
+    request.client = SimpleNamespace(host=host)
     request.url = SimpleNamespace(path="/dicom-web/studies")
     return request
 
@@ -130,6 +129,23 @@ class TestDicomWebUserCache:
         assert read.await_count == 1
 
     @pytest.mark.asyncio
+    async def test_cached_verdict_is_not_reused_from_another_ip(self):
+        """A cookie replayed from another IP must not ride the owner's warm
+        cache entry — that would bypass read_token's session_ip_check for the
+        TTL (M2)."""
+        user = make_user(is_superuser=True)
+        with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
+            assert (
+                await deps.current_dicomweb_user(_dicomweb_request(host="10.0.0.1"), MagicMock())
+                is user
+            )
+            assert (
+                await deps.current_dicomweb_user(_dicomweb_request(host="10.0.0.2"), MagicMock())
+                is user
+            )
+        assert read.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_ttl_zero_disables_reuse(self, monkeypatch):
         monkeypatch.setattr(deps.settings, "session_cache_ttl_seconds", 0)
         user = make_user(is_superuser=True)
@@ -137,7 +153,7 @@ class TestDicomWebUserCache:
             for _ in range(2):
                 await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
         assert read.await_count == 2
-        assert "tok-dw" not in deps._dicomweb_user_cache
+        assert not deps._dicomweb_user_cache
 
     @pytest.mark.asyncio
     async def test_service_token_user_is_never_cached_under_the_cookie(self, service_user):
@@ -147,7 +163,7 @@ class TestDicomWebUserCache:
         with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=cookie_owner)):
             request = _dicomweb_request(internal_token="tok-service")
             assert await deps.current_dicomweb_user(request, MagicMock()) is admin
-            assert "tok-dw" not in deps._dicomweb_user_cache
+            assert not deps._dicomweb_user_cache
 
             service_user.return_value = None
             with pytest.raises(HTTPException) as denied:
@@ -162,7 +178,7 @@ class TestDicomWebUserCache:
         ):
             await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
         assert denied.value.status_code == 401
-        assert "tok-dw" not in deps._dicomweb_user_cache
+        assert not deps._dicomweb_user_cache
 
     @pytest.mark.asyncio
     async def test_role_less_user_is_403_and_not_cached(self):
@@ -173,7 +189,7 @@ class TestDicomWebUserCache:
         ):
             await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
         assert denied.value.status_code == 403
-        assert "tok-dw" not in deps._dicomweb_user_cache
+        assert not deps._dicomweb_user_cache
 
 
 def _aware(value: datetime) -> datetime:
@@ -269,3 +285,36 @@ class TestReadTokenActivityWrites:
 
         assert await _read(test_session, token) is not None
         assert await _read(test_session, token) is None
+
+    @pytest.mark.asyncio
+    async def test_capped_sliding_refresh_is_not_rewritten_every_request(
+        self, test_session, test_user, monkeypatch
+    ):
+        """Once expires_at already equals created_at + absolute_timeout_days, the
+        sliding-refresh recompute lands on the same value — that must not force
+        an UPDATE + COMMIT on every request for the rest of the session (M1/D6)."""
+        monkeypatch.setattr(auth_config.settings, "session_sliding_refresh", True)
+        monkeypatch.setattr(auth_config.settings, "session_absolute_timeout_days", 1)
+        monkeypatch.setattr(auth_config.settings, "session_expire_hours", 24)
+
+        now = datetime.now(UTC)
+        created_at = now - timedelta(hours=23, minutes=50)  # < half of 24h left to expiry
+        absolute_limit = created_at + timedelta(days=1)
+        row = AccessToken(
+            token=f"tok-{uuid4().hex}",
+            user_id=test_user.id,
+            created_at=created_at,
+            expires_at=absolute_limit,  # already capped at the absolute limit
+            last_accessed=now - timedelta(seconds=10),
+        )
+        test_session.add(row)
+        await test_session.commit()
+        await test_session.refresh(row)
+        before_last_accessed = _aware(row.last_accessed)
+        before_expires_at = _aware(row.expires_at)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) == before_last_accessed
+        assert _aware(row.expires_at) == before_expires_at

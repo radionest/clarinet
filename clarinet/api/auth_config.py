@@ -396,7 +396,13 @@ class DatabaseStrategy(Strategy[User, UUID]):
                         days=settings.session_absolute_timeout_days
                     )
                     new_expiry = min(new_expiry, absolute_limit)
-                logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
+                if new_expiry == expires_at:
+                    # Already capped at this value (e.g. the absolute limit) — no
+                    # new expires_at to write, so this must not force an UPDATE
+                    # on every request for the rest of the session (D6).
+                    new_expiry = None
+                else:
+                    logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
 
         if new_expiry is not None or now - last_accessed >= write_interval:
             # Core UPDATE, not an ORM flush: a row deleted meanwhile (logout, revoke,

@@ -361,9 +361,8 @@ class Settings(BaseSettings):
     session_concurrent_limit: int = 5  # Max sessions per user (0 = unlimited)
     session_ip_check: bool = False  # Validate IP consistency
     session_secure_cookie: bool = True  # HTTPS only in production
-    session_cache_ttl_seconds: int = (
-        30  # /dicom-web only: reuse a passed session cookie this long (0 = off)
-    )
+    # /dicom-web only: reuse a passed session cookie this long (0 = off)
+    session_cache_ttl_seconds: int = 30
 
     # Failed-auth throttling (login + X-Internal-Token); see api/auth_config.py.
     # Per-IP is looser than per-account: hospital users often share one NAT address.

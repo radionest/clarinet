@@ -546,8 +546,11 @@ def require_role_holder(user: User) -> User:
 # change or role removal the user keeps /dicom-web access for up to
 # session_cache_ttl_seconds. Only this read-only image path is cached (OHIF
 # sends a request per frame); every other route checks the DB. Per-process,
-# like the SSE bus: a second API worker keeps its own copy.
-_dicomweb_user_cache: TTLCache[str, User] = TTLCache(
+# like the SSE bus: a second API worker keeps its own copy. Keyed by
+# (token, client IP), not the token alone — otherwise a cookie replayed from
+# another IP would be served from the entry the owner's own requests keep
+# warm, bypassing read_token's session_ip_check for the TTL.
+_dicomweb_user_cache: TTLCache[tuple[str, str | None], User] = TTLCache(
     maxsize=1000, ttl=max(settings.session_cache_ttl_seconds, 1)
 )
 
@@ -567,13 +570,14 @@ async def current_dicomweb_user(request: Request, session: SessionDep) -> User:
     """
     token = request.cookies.get(settings.cookie_name)
     cacheable = settings.session_cache_ttl_seconds > 0
-    if token and cacheable and (cached := _dicomweb_user_cache.get(token)) is not None:
+    cache_key = (token, request.client.host if request.client else None) if token else None
+    if cache_key and cacheable and (cached := _dicomweb_user_cache.get(cache_key)) is not None:
         return cast(User, cached)
     cookie_user = await DatabaseStrategy(session, request).read_token(token, None)  # type: ignore[arg-type]
     user = require_role_holder(await current_active_user(request, session, cookie_user))
-    if token and cacheable and user is cookie_user:
+    if cache_key and cacheable and user is cookie_user:
         session.expunge(user)
-        _dicomweb_user_cache[token] = user
+        _dicomweb_user_cache[cache_key] = user
     return user
 
 
