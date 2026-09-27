@@ -12,7 +12,10 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, Request
+from sqlalchemy import delete
+from sqlmodel import col
 
+from clarinet.api import auth_config
 from clarinet.api import dependencies as deps
 from clarinet.api.auth_config import DatabaseStrategy
 from clarinet.models.auth import AccessToken
@@ -171,3 +174,98 @@ class TestDicomWebUserCache:
             await deps.current_dicomweb_user(_dicomweb_request(), MagicMock())
         assert denied.value.status_code == 403
         assert "tok-dw" not in deps._dicomweb_user_cache
+
+
+def _aware(value: datetime) -> datetime:
+    """SQLite hands timestamps back naive; compare them as UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+async def _session_row(session, user_id, *, idle_for: timedelta) -> AccessToken:
+    now = datetime.now(UTC)
+    row = AccessToken(
+        token=f"tok-{uuid4().hex}",
+        user_id=user_id,
+        expires_at=now + timedelta(hours=24),
+        last_accessed=now - idle_for,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def _read(session, token: str) -> User | None:
+    return await DatabaseStrategy(session, None).read_token(token, None)  # type: ignore[arg-type]
+
+
+class TestReadTokenActivityWrites:
+    """read_token records activity at most once per interval, as a Core UPDATE (#665)."""
+
+    @pytest.fixture(autouse=True)
+    def _session_settings(self, monkeypatch):
+        monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 60)
+        monkeypatch.setattr(auth_config.settings, "session_sliding_refresh", False)
+        monkeypatch.setattr(auth_config.settings, "session_ip_check", False)
+
+    @pytest.mark.asyncio
+    async def test_recent_activity_is_not_rewritten(self, test_session, test_user):
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=10))
+        before = row.last_accessed
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert row.last_accessed == before
+
+    @pytest.mark.asyncio
+    async def test_stale_activity_is_refreshed(self, test_session, test_user):
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(minutes=5))
+        before = _aware(row.last_accessed)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) > before
+
+    @pytest.mark.asyncio
+    async def test_one_minute_idle_timeout_still_sees_activity(
+        self, test_session, test_user, monkeypatch
+    ):
+        """A flat 60 s throttle would log out a user who is active every 40 s."""
+        monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 1)
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=40))
+        before = _aware(row.last_accessed)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) > before
+
+    @pytest.mark.asyncio
+    async def test_session_deleted_mid_request_does_not_raise(
+        self, test_session, test_user, monkeypatch
+    ):
+        """#665: another transaction deletes the row between read_token's SELECT
+        and its activity write — the write must not raise StaleDataError (a 500)."""
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(minutes=5))
+        token = row.token
+        execute = test_session.execute
+        calls = 0
+
+        async def execute_then_revoke(statement, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            result = await execute(statement, *args, **kwargs)
+            if calls == 1:  # the token SELECT is done; a concurrent logout lands now
+                await execute(
+                    delete(AccessToken)
+                    .where(col(AccessToken.token) == token)
+                    .execution_options(synchronize_session=False)
+                )
+            return result
+
+        monkeypatch.setattr(test_session, "execute", execute_then_revoke)
+
+        assert await _read(test_session, token) is not None
+        assert await _read(test_session, token) is None

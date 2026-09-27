@@ -19,7 +19,7 @@ from fastapi_users.authentication import (
     CookieTransport,
     Strategy,
 )
-from sqlalchemy import CursorResult, delete, func, select
+from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col
@@ -235,6 +235,11 @@ cookie_transport = CookieTransport(
 )
 
 
+# How often read_token records session activity: a write on every request would
+# put an UPDATE + COMMIT on every API call. Idle timeout and presence are minute-scale.
+_LAST_ACCESSED_WRITE_INTERVAL = timedelta(seconds=60)
+
+
 # Enhanced database session storage strategy with lifecycle management
 class DatabaseStrategy(Strategy[User, UUID]):
     """Enhanced database strategy with session lifecycle management."""
@@ -345,14 +350,18 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 )
                 return None
 
+        now = datetime.now(UTC)
+        last_accessed = access_token.last_accessed
+        if last_accessed.tzinfo is None:
+            last_accessed = last_accessed.replace(tzinfo=UTC)
+        write_interval = _LAST_ACCESSED_WRITE_INTERVAL
+
         # Check idle timeout
         if settings.session_idle_timeout_minutes > 0:
-            # Ensure last_accessed is timezone-aware
-            last_accessed = access_token.last_accessed
-            if last_accessed.tzinfo is None:
-                last_accessed = last_accessed.replace(tzinfo=UTC)
-            idle_duration = datetime.now(UTC) - last_accessed
+            idle_duration = now - last_accessed
             max_idle = timedelta(minutes=settings.session_idle_timeout_minutes)
+            # A flat 60 s interval would let a short idle timeout expire an active session.
+            write_interval = min(write_interval, max_idle / 2)
             if idle_duration > max_idle:
                 logger.warning(
                     f"Session idle timeout: token={token[:8]}..., "
@@ -370,35 +379,35 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 )
                 return None
 
-        # Update last accessed and optionally refresh
-        access_token.last_accessed = datetime.now(UTC)
-
+        # Sliding refresh: extend the expiry once less than half the lifetime is left
+        new_expiry: datetime | None = None
         if settings.session_sliding_refresh:
-            # Ensure expires_at is timezone-aware
             expires_at = access_token.expires_at
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=UTC)
-            time_left = expires_at - datetime.now(UTC)
             total_duration = timedelta(hours=settings.session_expire_hours)
-
-            # Refresh if less than 50% time remaining
-            if time_left < total_duration / 2:
-                new_expiry = datetime.now(UTC) + total_duration
-
-                # Check absolute timeout
+            if expires_at - now < total_duration / 2:
+                new_expiry = now + total_duration
                 if settings.session_absolute_timeout_days > 0:
-                    max_age = timedelta(days=settings.session_absolute_timeout_days)
-                    # Ensure created_at is timezone-aware
                     created_at = access_token.created_at
                     if created_at.tzinfo is None:
                         created_at = created_at.replace(tzinfo=UTC)
-                    absolute_limit = created_at + max_age
+                    absolute_limit = created_at + timedelta(
+                        days=settings.session_absolute_timeout_days
+                    )
                     new_expiry = min(new_expiry, absolute_limit)
-
-                access_token.expires_at = new_expiry
                 logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
 
-        await self.session.commit()
+        if new_expiry is not None or now - last_accessed >= write_interval:
+            # Core UPDATE, not an ORM flush: a row deleted meanwhile (logout, revoke,
+            # session limit) matches 0 rows instead of raising StaleDataError -> 500 (#665).
+            update_stmt = (
+                update(AccessToken).where(col(AccessToken.token) == token).values(last_accessed=now)
+            )
+            if new_expiry is not None:
+                update_stmt = update_stmt.values(expires_at=new_expiry)
+            await self.session.execute(update_stmt)
+            await self.session.commit()
 
         # Roles eager-loaded: role checks read them, and current_dicomweb_user caches the user detached.
         user_stmt = (
