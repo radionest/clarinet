@@ -257,6 +257,31 @@ class TestAdminUtils:
         assert any(u.email == "admin_util@test.com" for u in admins)
         assert not any(u.email == "regular_util@test.com" for u in admins)
 
+    @pytest.mark.asyncio
+    async def test_reset_admin_password_revokes_sessions(self, env, monkeypatch):
+        """#651: the CLI reset must log out the admin's existing sessions."""
+        from contextlib import asynccontextmanager
+
+        from clarinet.utils import admin as admin_utils
+        from clarinet.utils.session import get_user_sessions
+
+        @asynccontextmanager
+        async def _session_ctx():
+            yield env["session"]
+
+        monkeypatch.setattr(admin_utils.db_manager, "get_async_session_context", _session_ctx)
+        env["session"].add(
+            AccessToken(
+                token="tok-651-cli",
+                user_id=env["admin"].id,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        await env["session"].commit()
+
+        assert await admin_utils.reset_admin_password("admin_util@test.com", "newadminpass")
+        assert await get_user_sessions(env["session"], env["admin"].id) == []
+
 
 # ===================================================================
 # Migration template
