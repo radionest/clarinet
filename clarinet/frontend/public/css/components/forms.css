@@ -308,13 +308,17 @@ formosh-form::part(label) {
     margin-bottom: 0.4rem;
 }
 
-formosh-form::part(radio-group) {
+/* checkbox-list/-item: formosh 0.9.0 renders uniqueItems option arrays as a
+   checkbox group with the same structure as a radio group. */
+formosh-form::part(radio-group),
+formosh-form::part(checkbox-list) {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
 }
 
-formosh-form::part(radio-item) {
+formosh-form::part(radio-item),
+formosh-form::part(checkbox-item) {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
@@ -400,8 +404,8 @@ formosh-form::part(readonly-td) {
 
    Styled by class, not ::part(): Lustre clones the host stylesheet into the
    component's shadow root, so these match formosh's internal classes with
-   ordinary selector semantics — which the `:not(:last-child)` divider rule
-   below relies on, and which ::part() does not reliably give. Several row
+   ordinary selector semantics — which the `[data-collapsed]` divider rule
+   below relies on (a child combinator), and which ::part() does not reliably give. Several row
    controls (remove, move up/down) also expose no `part` at all, so class is
    the only surface that reaches them. Reach for ::part() to outrank an adopted
    rule (the outer context wins for normal declarations regardless of
@@ -416,17 +420,17 @@ formosh-form::part(readonly-td) {
 
 /* Move up/down followed by remove, right-aligned.
 
-   `:not(:last-child)` is what keeps the divider honest. Since formosh 0.8.7 a
-   collapsed row renders summary + header and drops its fields, which would
-   leave the border hanging under the buttons over nothing; when the header is
-   last, there is nothing to divide. */
+   `:not([data-collapsed])` is what keeps the divider honest. Since formosh
+   0.9.0 a collapsed row keeps its body in the DOM, folded to zero height so
+   the fold can animate, so the header is never the last child; the border
+   would hang under the buttons over nothing. */
 .array-item-header {
     display: flex;
     justify-content: flex-end;
     gap: 0.375rem;
 }
 
-.array-item-header:not(:last-child) {
+.array-item:not([data-collapsed]) > .array-item-header {
     margin-bottom: 0.5rem;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--hairline);
