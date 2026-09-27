@@ -318,7 +318,7 @@ async def test_working_dir_uses_per_record_clarinet_storage_path_override(
     Per-record override exists only on ``Record`` — ``Series``-derived paths
     always use ``settings.storage_path`` (intentional asymmetry).
     """
-    custom_storage = "/custom/storage/root"
+    custom_storage = f"{Path.cwd().drive}/custom/storage/root"  # absolute on Windows too
     record_read = await RecordFactory.create_record_with_relations(
         test_session,
         patient=patient_with_anon,

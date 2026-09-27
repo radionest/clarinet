@@ -21,12 +21,12 @@ from clarinet.models.record import RecordType
 
 def _write_files_catalog(tmp_path, content: str) -> None:
     """Write files_catalog.py to tmp_path."""
-    (tmp_path / "files_catalog.py").write_text(textwrap.dedent(content))
+    (tmp_path / "files_catalog.py").write_text(textwrap.dedent(content), encoding="utf-8")
 
 
 def _write_record_types(tmp_path, content: str) -> None:
     """Write record_types.py to tmp_path."""
-    (tmp_path / "record_types.py").write_text(textwrap.dedent(content))
+    (tmp_path / "record_types.py").write_text(textwrap.dedent(content), encoding="utf-8")
 
 
 @pytest.mark.asyncio

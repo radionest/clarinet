@@ -264,10 +264,11 @@ class TestFileRepositoryConfiguration:
     @patch("clarinet.files._resolver.settings")
     def test_clarinet_storage_path_override_applied(self, mock_settings: MagicMock) -> None:
         mock_settings.storage_path = "/default"
-        record = _make_record_mock(clarinet_storage_path="/custom")
+        custom = f"{Path.cwd().drive}/custom"  # absolute on Windows too
+        record = _make_record_mock(clarinet_storage_path=custom)
 
         repo = FileRepository(record)
-        assert repo.dir().is_relative_to(Path("/custom"))
+        assert repo.dir().is_relative_to(Path(custom))
 
     @patch("clarinet.files._resolver.settings")
     def test_relative_clarinet_storage_path_rejected(self, mock_settings: MagicMock) -> None:
@@ -319,7 +320,8 @@ class TestFileRepositoryConfiguration:
         not just writes. Only absoluteness and ``..`` components are checked.
         """
         mock_settings.storage_path = "/default"
-        record = _make_record_mock(clarinet_storage_path=override)
+        # The drive prefix keeps the root absolute on Windows without collapsing the shape.
+        record = _make_record_mock(clarinet_storage_path=Path.cwd().drive + override)
 
         FileRepository(record)  # must not raise
 
