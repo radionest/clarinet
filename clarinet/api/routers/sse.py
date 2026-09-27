@@ -36,8 +36,7 @@ async def _revalidate(token: str | None, request: Request) -> bool:
     (session_ip_check) stays in force — parity with the production cookie path.
     NB: ``read_token`` always commits ``access_token.last_accessed``, so this is
     NOT read-only — it refreshes idle-timeout state every
-    ``sse_revalidate_seconds``; its validation TTL cache
-    (``session_cache_ttl_seconds``) can delay revoke detection by up to the TTL.
+    ``sse_revalidate_seconds``.
 
     Security implication (intentional): because every revalidation refreshes
     ``last_accessed``, an open stream keeps the session non-idle for its whole

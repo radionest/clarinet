@@ -146,8 +146,7 @@ async def test_dicomweb_access_ignores_the_service_token(
     assert response.status_code == 401
 
 
-# nginx re-checks every ~10 s, inside the 30 s session cache: the second request
-# is served from DatabaseStrategy._user_cache with a detached User.
+# nginx re-checks every ~10 s: both requests go to the DB and must agree.
 @pytest.mark.asyncio
 async def test_dicomweb_access_rejects_role_less_user(unauthenticated_client, test_user):
     await _login(unauthenticated_client)
