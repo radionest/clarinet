@@ -399,7 +399,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 if new_expiry == expires_at:
                     # Already capped at this value (e.g. the absolute limit) — no
                     # new expires_at to write, so this must not force an UPDATE
-                    # on every request for the rest of the session (D6).
+                    # on every request for the rest of the session.
                     new_expiry = None
                 else:
                     logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
@@ -415,7 +415,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
             await self.session.execute(update_stmt)
             await self.session.commit()
 
-        # Roles eager-loaded: role checks read them, and current_dicomweb_user caches the user detached.
+        # Roles eager-loaded: the user is returned detached, so role checks can't lazy-load them.
         user_stmt = (
             select(User)
             .where(User.id == access_token.user_id)  # type: ignore[arg-type]
@@ -451,6 +451,10 @@ class DatabaseStrategy(Strategy[User, UUID]):
             },
         )
 
+        # Detach: a later rollback in this request (e.g. add_file_links losing an
+        # IntegrityError race) would expire an attached user, and the next
+        # attribute read would lazy-load outside a greenlet -> MissingGreenlet -> 500.
+        self.session.expunge(user)
         return user
 
     async def destroy_token(self, token: str, user: User) -> None:
@@ -594,7 +598,10 @@ async def _get_service_user(request: Request, session: AsyncSession) -> User | N
     )
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
-    return user if user is not None and user.is_active else None
+    if user is None or not user.is_active:
+        return None
+    session.expunge(user)  # same reason as read_token: survive a rollback in the request
+    return user
 
 
 # --- Public auth dependencies (service token → cookie fallback) ---

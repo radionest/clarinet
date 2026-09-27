@@ -132,7 +132,7 @@ class TestDicomWebUserCache:
     async def test_cached_verdict_is_not_reused_from_another_ip(self):
         """A cookie replayed from another IP must not ride the owner's warm
         cache entry — that would bypass read_token's session_ip_check for the
-        TTL (M2)."""
+        TTL."""
         user = make_user(is_superuser=True)
         with patch.object(DatabaseStrategy, "read_token", AsyncMock(return_value=user)) as read:
             assert (
@@ -215,6 +215,20 @@ async def _read(session, token: str) -> User | None:
     return await DatabaseStrategy(session, None).read_token(token, None)  # type: ignore[arg-type]
 
 
+@pytest.mark.asyncio
+async def test_read_token_user_survives_a_request_rollback(test_session, test_user):
+    """A rollback later in the request (add_file_links losing an IntegrityError
+    race) expires every attached instance — the user must come back detached, or
+    reading it lazy-loads outside a greenlet: MissingGreenlet -> 500."""
+    row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=10))
+    user = await _read(test_session, row.token)
+    assert user is not None
+
+    await test_session.rollback()
+
+    assert user.is_active
+
+
 class TestReadTokenActivityWrites:
     """read_token records activity at most once per interval, as a Core UPDATE (#665)."""
 
@@ -292,7 +306,7 @@ class TestReadTokenActivityWrites:
     ):
         """Once expires_at already equals created_at + absolute_timeout_days, the
         sliding-refresh recompute lands on the same value — that must not force
-        an UPDATE + COMMIT on every request for the rest of the session (M1/D6)."""
+        an UPDATE + COMMIT on every request for the rest of the session."""
         monkeypatch.setattr(auth_config.settings, "session_sliding_refresh", True)
         monkeypatch.setattr(auth_config.settings, "session_absolute_timeout_days", 1)
         monkeypatch.setattr(auth_config.settings, "session_expire_hours", 24)

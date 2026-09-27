@@ -524,9 +524,9 @@ async def current_role_holder(
     """Require an admin or a user holding at least one role.
 
     A role-less account (e.g. freshly self-registered) is authenticated but
-    entitled to nothing. Routers with no finer-grained check of their own — the
-    DICOMweb proxy reads straight from the PACS — use this so such an account
-    cannot reach patient data.
+    entitled to nothing. Routers with no finer-grained check of their own use
+    this so such an account cannot reach patient data. The DICOMweb proxy uses
+    its cached twin, ``current_dicomweb_user``.
     """
     return require_role_holder(user)
 
@@ -576,8 +576,7 @@ async def current_dicomweb_user(request: Request, session: SessionDep) -> User:
     cookie_user = await DatabaseStrategy(session, request).read_token(token, None)  # type: ignore[arg-type]
     user = require_role_holder(await current_active_user(request, session, cookie_user))
     if cache_key and cacheable and user is cookie_user:
-        session.expunge(user)
-        _dicomweb_user_cache[cache_key] = user
+        _dicomweb_user_cache[cache_key] = user  # read_token returns it detached
     return user
 
 
