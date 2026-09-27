@@ -175,8 +175,8 @@ every request; there is no user cache to evict. The one cache is
 `current_dicomweb_user` (`api/dependencies.py`) on `/dicom-web`: a session cookie
 that passed the role check is reused for `session_cache_ttl_seconds` (`0`
 disables), keyed by `(token, client IP)` so a hit cannot bypass
-`session_ip_check`, and never evicted — a revoked, expired or idle-timed-out
-session keeps image access for up to that long. Never add eviction calls to it;
+`session_ip_check`, and never evicted — a revoked, deactivated, de-roled, expired
+or idle-timed-out session keeps image access for up to that long. Never add eviction calls to it;
 that is the design. `read_token` writes `last_accessed` at most every
 `min(60 s, max(idle_timeout − session_cache_ttl_seconds, 0) / 2)` (60 s with the
 idle timeout off), as a Core `UPDATE` — the TTL comes out of the idle budget

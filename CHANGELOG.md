@@ -476,7 +476,7 @@
   `/dicom-web`, where OHIF sends a request per frame, keeps a TTL-only cache: a
   session cookie that passed is reused for `session_cache_ttl_seconds` (30 s;
   `0` disables) and never evicted early, so image access outlives a revocation,
-  expiry or idle timeout by up to that long. Session activity (`last_accessed`)
+  deactivation, role removal, expiry or idle timeout by up to that long. Session activity (`last_accessed`)
   is written at most every
   `min(60 s, max(idle_timeout − session_cache_ttl_seconds, 0) / 2)` (60 s with
   the idle timeout off; the TTL comes out of the idle budget so an image-only
