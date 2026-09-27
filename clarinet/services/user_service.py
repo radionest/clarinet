@@ -12,6 +12,7 @@ from clarinet.exceptions.domain import (
 from clarinet.models import User, UserCreate, UserRole, UserUpdate
 from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.auth import get_password_hash, verify_password
+from clarinet.utils.session import revoke_user_sessions
 
 
 class UserService:
@@ -85,7 +86,9 @@ class UserService:
 
         Invalidates the auth-flow user cache so ``is_active`` / ``is_superuser``
         changes take effect on the next request, for sessions and for the
-        service token (which resolves to the admin row) alike.
+        service token (which resolves to the admin row) alike. A password
+        change also revokes every existing session of the user — a reset is
+        meant to lock out whoever held the old password.
 
         Raises:
             EntityNotFoundError: If user doesn't exist
@@ -98,6 +101,8 @@ class UserService:
             update_fields["hashed_password"] = get_password_hash(data.password)
 
         await self.user_repo.update(user, update_fields)
+        if data.password is not None:
+            await revoke_user_sessions(self.user_repo.session, user_id)
         DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 

@@ -9,6 +9,7 @@ from clarinet.models.user import User
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
+from clarinet.utils.session import revoke_user_sessions
 
 
 async def reset_admin_password(username: str, new_password: str) -> bool:
@@ -36,6 +37,7 @@ async def reset_admin_password(username: str, new_password: str) -> bool:
 
         user.hashed_password = get_password_hash(new_password)
         await session.commit()
+        await revoke_user_sessions(session, user.id)
 
         logger.info(f"Password reset for user '{username}'")
         return True
