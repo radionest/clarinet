@@ -1,6 +1,6 @@
 """Integration tests for service layer — real SQLite, no mocks."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -13,6 +13,7 @@ from clarinet.exceptions.domain import (
     UserAlreadyHasRoleError,
     ValidationError,
 )
+from clarinet.models.auth import AccessToken
 from clarinet.models.base import RecordStatus
 from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
 from clarinet.models.study import Study
@@ -27,6 +28,7 @@ from clarinet.services.admin_service import AdminService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.user_service import UserService
 from clarinet.utils.auth import get_password_hash, verify_password
+from clarinet.utils.session import get_user_sessions
 from tests.utils.factories import (
     make_patient,
     make_record_type,
@@ -111,6 +113,61 @@ class TestUserService:
         updated = await env["service"].update_user(user.id, UserUpdate(is_active=False))
         assert updated.is_active is False
         assert verify_password("keepthis", updated.hashed_password)
+
+    @pytest.mark.asyncio
+    async def test_update_user_password_revokes_sessions(self, env):
+        """#651: a password change must log out every existing session."""
+        user = await env["service"].create_user(
+            UserCreate(email="revoke@test.com", password="oldpassw")
+        )
+        env["session"].add(
+            AccessToken(
+                token="tok-651",
+                user_id=user.id,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        await env["session"].commit()
+
+        await env["service"].update_user(user.id, UserUpdate(is_verified=True))
+        assert len(await get_user_sessions(env["session"], user.id)) == 1
+
+        await env["service"].update_user(user.id, UserUpdate(password="newpasswd"))
+        assert await get_user_sessions(env["session"], user.id) == []
+
+    @pytest.mark.asyncio
+    async def test_update_user_rejected_password_writes_nothing(self, env):
+        """A password bcrypt rejects (>72 bytes) must not commit the other fields."""
+        user = await env["service"].create_user(
+            UserCreate(email="longpw@test.com", password="oldpassw")
+        )
+        with pytest.raises(ValueError):
+            await env["service"].update_user(
+                user.id, UserUpdate(is_verified=True, password="x" * 80)
+            )
+        await env["session"].refresh(user)
+        assert user.is_verified is False
+
+    @pytest.mark.asyncio
+    async def test_update_user_failed_revoke_writes_nothing(self, env, monkeypatch):
+        """A failed session revoke must not leave the other fields committed."""
+        user = await env["service"].create_user(
+            UserCreate(email="failrevoke@test.com", password="oldpassw")
+        )
+        await env["session"].commit()
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("revoke failed")
+
+        monkeypatch.setattr("clarinet.repositories.user_repository.revoke_user_sessions", boom)
+        with pytest.raises(RuntimeError):
+            await env["service"].update_user(
+                user.id, UserUpdate(is_verified=True, password="newpasswd")
+            )
+        await env["session"].rollback()  # what the request's session teardown does
+        await env["session"].refresh(user)
+        assert user.is_verified is False
+        assert verify_password("oldpassw", user.hashed_password)
 
     @pytest.mark.asyncio
     async def test_assign_role(self, env):

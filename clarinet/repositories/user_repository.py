@@ -8,6 +8,7 @@ from sqlmodel import col, select
 
 from clarinet.models import User, UserRole
 from clarinet.repositories.base import BaseRepository
+from clarinet.utils.session import revoke_user_sessions
 
 
 class UserRepository(BaseRepository[User]):
@@ -154,7 +155,12 @@ class UserRepository(BaseRepository[User]):
         return list(result.scalars().all())
 
     async def update_password(self, user: User, hashed_password: str) -> User:
-        """Update user's password.
+        """Set a new password hash and revoke all of the user's sessions (#651).
+
+        One commit covers both: ``revoke_user_sessions`` commits the pending
+        hash together with its DELETE, so a failed revoke leaves the old
+        password in place rather than a new password with the old sessions
+        still valid.
 
         Args:
             user: User to update
@@ -164,8 +170,7 @@ class UserRepository(BaseRepository[User]):
             Updated user
         """
         user.hashed_password = hashed_password
-        await self.session.commit()
-        await self.session.refresh(user)
+        await revoke_user_sessions(self.session, user.id)
         return user
 
     async def activate(self, user: User) -> User:

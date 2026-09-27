@@ -11,6 +11,7 @@ Tests cover:
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -21,12 +22,14 @@ import clarinet.api.auth_config as auth_config_module
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.settings import settings
+from clarinet.utils.auth import get_password_hash
 from tests.utils.urls import (
     AUTH_LOGIN,
     AUTH_ME,
     AUTH_REGISTER,
     AUTH_SESSIONS_ACTIVE,
     AUTH_SESSIONS_REVOKE,
+    USERS_BASE,
 )
 
 # Test constants
@@ -148,6 +151,50 @@ class TestSessionManagement:
             await test_session.execute(select(AccessToken).where(AccessToken.token == token_a))
         ).scalar_one_or_none()
         assert row is None
+
+    @pytest.mark.asyncio
+    async def test_password_change_logs_out_cached_session(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        """#651: an admin password change kills the user's live, cached session."""
+        from clarinet.api.app import app
+        from tests.conftest import patch_cookie_forwarding
+
+        password = "SecurePassword123!"
+        reg = await client.post(
+            AUTH_REGISTER, json={"email": "pw_change@example.com", "password": password}
+        )
+        assert reg.status_code == 201
+        await client.post(
+            AUTH_LOGIN, data={"username": "pw_change@example.com", "password": password}
+        )
+        # Primes the in-memory cache, so only the eviction can make the next /me fail.
+        assert (await client.get(AUTH_ME)).status_code == 200
+
+        admin = User(
+            id=uuid4(),
+            email="pw_change_admin@example.com",
+            hashed_password=get_password_hash(password),
+            is_active=True,
+            is_superuser=True,
+        )
+        test_session.add(admin)
+        await test_session.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport, base_url="http://test", cookies={}
+        ) as admin_client:
+            patch_cookie_forwarding(admin_client)
+            await admin_client.post(
+                AUTH_LOGIN, data={"username": admin.email, "password": password}
+            )
+            response = await admin_client.put(
+                f"{USERS_BASE}/{reg.json()['id']}", json={"password": "NewPassword456!"}
+            )
+            assert response.status_code == 200
+
+        assert (await client.get(AUTH_ME)).status_code == 401
 
 
 class TestCompleteRegistrationFlow:

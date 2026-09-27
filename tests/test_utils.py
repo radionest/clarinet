@@ -8,7 +8,7 @@ import pytest_asyncio
 
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User
-from clarinet.utils.auth import get_password_hash
+from clarinet.utils.auth import get_password_hash, verify_password
 
 # ===================================================================
 # Common utilities
@@ -256,6 +256,55 @@ class TestAdminUtils:
         admins = await list_admin_users(env["session"])
         assert any(u.email == "admin_util@test.com" for u in admins)
         assert not any(u.email == "regular_util@test.com" for u in admins)
+
+    @pytest_asyncio.fixture
+    async def with_sessions(self, env, monkeypatch):
+        """Route ``reset_admin_password`` to ``test_session``; one live session per user."""
+        from contextlib import asynccontextmanager
+
+        from clarinet.utils import admin as admin_utils
+
+        @asynccontextmanager
+        async def _session_ctx():
+            yield env["session"]
+
+        monkeypatch.setattr(admin_utils.db_manager, "get_async_session_context", _session_ctx)
+        for user in (env["admin"], env["regular"]):
+            env["session"].add(
+                AccessToken(
+                    token=f"tok-651-{user.id}",
+                    user_id=user.id,
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                )
+            )
+        await env["session"].commit()
+        return env
+
+    @pytest.mark.asyncio
+    async def test_reset_admin_password_revokes_sessions(self, with_sessions):
+        """#651: the CLI reset must log out the admin's existing sessions."""
+        from clarinet.utils.admin import reset_admin_password
+        from clarinet.utils.session import get_user_sessions
+
+        env = with_sessions
+        assert await reset_admin_password("admin_util@test.com", "newadminpass")
+
+        await env["session"].refresh(env["admin"])
+        assert verify_password("newadminpass", env["admin"].hashed_password)
+        assert await get_user_sessions(env["session"], env["admin"].id) == []
+        assert len(await get_user_sessions(env["session"], env["regular"].id)) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("username", ["nobody@test.com", "regular_util@test.com"])
+    async def test_reset_admin_password_refused_keeps_sessions(self, with_sessions, username):
+        """Unknown or non-superuser targets change nothing, sessions included."""
+        from clarinet.utils.admin import reset_admin_password
+        from clarinet.utils.session import get_user_sessions
+
+        env = with_sessions
+        assert not await reset_admin_password(username, "newpassword")
+        for user in (env["admin"], env["regular"]):
+            assert len(await get_user_sessions(env["session"], user.id)) == 1
 
 
 # ===================================================================

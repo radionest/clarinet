@@ -85,20 +85,32 @@ class UserService:
 
         Invalidates the auth-flow user cache so ``is_active`` / ``is_superuser``
         changes take effect on the next request, for sessions and for the
-        service token (which resolves to the admin row) alike.
+        service token (which resolves to the admin row) alike. A password
+        change also revokes every existing session of the user — a reset is
+        meant to lock out whoever held the old password.
 
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
 
-        update_fields = data.model_dump(exclude_unset=True, exclude={"password"})
-
-        if data.password is not None:
-            update_fields["hashed_password"] = get_password_hash(data.password)
-
-        await self.user_repo.update(user, update_fields)
-        DatabaseStrategy.invalidate_user_cache(user_id)
+        update_fields = data.model_dump(exclude_unset=True, exclude_none=True, exclude={"password"})
+        # Hash before any write: a password bcrypt rejects must not leave the
+        # other fields committed behind an error response.
+        new_hash = get_password_hash(data.password) if data.password is not None else None
+        # Evict after the revoke, not before, to narrow the window in which a
+        # concurrent request re-caches a revoked token; one that still slips
+        # through lives at most session_cache_ttl_seconds.
+        try:
+            if new_hash is None:
+                await self.user_repo.update(user, update_fields)
+            else:
+                # Staged, not committed: update_password's single commit covers
+                # these fields, the new hash and the session DELETE together.
+                user.sqlmodel_update(update_fields)
+                await self.user_repo.update_password(user, new_hash)
+        finally:
+            DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)
 
     async def delete_user(self, user_id: UUID) -> None:

@@ -37,7 +37,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/user/roles` | POST | 201 | Create role |
 | `/api/user/roles/{role_name}` | GET | 200 | Role details |
 | `/api/user/{user_id}` | GET | 200 | Get user |
-| `/api/user/{user_id}` | PUT | 200 | Update user |
+| `/api/user/{user_id}` | PUT | 200 | Update user. A `password` in the body revokes all of that user's sessions — including the caller's own when admins change their own password (next request → **401**) |
 | `/api/user/{user_id}` | DELETE | 204 | Delete user |
 | `/api/user/{user_id}/roles` | GET | 200 | User roles |
 | `/api/user/{user_id}/roles/{role_name}` | POST | 200 | Add role |

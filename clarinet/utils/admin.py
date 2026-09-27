@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from clarinet.models.user import User
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
@@ -34,8 +35,7 @@ async def reset_admin_password(username: str, new_password: str) -> bool:
             logger.error(f"User '{username}' is not a superuser")
             return False
 
-        user.hashed_password = get_password_hash(new_password)
-        await session.commit()
+        await UserRepository(session).update_password(user, get_password_hash(new_password))
 
         logger.info(f"Password reset for user '{username}'")
         return True
