@@ -64,6 +64,15 @@ if [ -z "$DB_PASS" ]; then
     exit 1
 fi
 
+# The VM's broker user `clarinet` is an administrator, so it also serves the
+# management API the pipeline tests purge queues through.
+RMQ_USER=$(bash "$PROJECT_DIR/deploy/lib/vm-setting.sh" "$VM_IP" rabbitmq_login || true)
+RMQ_PASS=$(bash "$PROJECT_DIR/deploy/lib/vm-setting.sh" "$VM_IP" rabbitmq_password || true)
+if [ -z "$RMQ_USER" ] || [ -z "$RMQ_PASS" ]; then
+    err "Cannot read rabbitmq_login/rabbitmq_password from VM settings"
+    exit 1
+fi
+
 # Create test database on VM
 log "Creating test database '$TEST_DB' on VM..."
 # shellcheck disable=SC2029
@@ -115,6 +124,13 @@ export CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet:${DB_PASS}@loca
 # probe ask the wrong host and skip. "" = assume the NAT VM can reach the host.
 export CLARINET_TEST_PACS_HOST="$VM_IP"
 export CLARINET_TEST_PACS_SSH=""
+# Same for RabbitMQ: left to tests/config.py the pipeline tests hit localhost
+# as clarinet_test — ACCESS_REFUSED on any host that runs its own broker there.
+export CLARINET_TEST_RABBITMQ_HOST="$VM_IP"
+export CLARINET_TEST_RABBITMQ_USER="$RMQ_USER"
+export CLARINET_TEST_RABBITMQ_PASS="$RMQ_PASS"
+export CLARINET_TEST_RABBITMQ_MANAGEMENT_USER="$RMQ_USER"
+export CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS="$RMQ_PASS"
 
 cd "$PROJECT_DIR"
 

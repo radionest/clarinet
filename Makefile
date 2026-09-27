@@ -306,6 +306,10 @@ _test-all-stages-impl:
 	@echo "  Stage 4/8: vm-test-lib (deploy scripts)  "
 	@echo "=========================================="
 	@uv run pytest deploy/test/test_deploy_lib.py -v
+    # With the VM up, stage 5 forces it as PACS and as RabbitMQ broker (its
+    # `clarinet` admin user, read off the VM). Left to tests/config.py, the
+    # pipeline tests would hit localhost as clarinet_test — ACCESS_REFUSED on any
+    # box running its own broker there.
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
 		echo "=========================================="; \
@@ -319,7 +323,13 @@ _test-all-stages-impl:
 		echo "=========================================="; \
 		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
 		[ -n "$$VM_IP" ] || { echo "Cannot determine VM IP — is the VM running?"; exit 1; }; \
+		RMQ_USER=$$(bash deploy/lib/vm-setting.sh "$$VM_IP" rabbitmq_login); \
+		RMQ_PASS=$$(bash deploy/lib/vm-setting.sh "$$VM_IP" rabbitmq_password); \
+		[ -n "$$RMQ_USER" ] && [ -n "$$RMQ_PASS" ] || { echo "Cannot read RabbitMQ credentials from the VM"; exit 1; }; \
 		CLARINET_TEST_PACS_HOST="$$VM_IP" CLARINET_TEST_PACS_SSH="" \
+		CLARINET_TEST_RABBITMQ_HOST="$$VM_IP" \
+		CLARINET_TEST_RABBITMQ_USER="$$RMQ_USER" CLARINET_TEST_RABBITMQ_PASS="$$RMQ_PASS" \
+		CLARINET_TEST_RABBITMQ_MANAGEMENT_USER="$$RMQ_USER" CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS="$$RMQ_PASS" \
 			./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
 	fi
 	@echo ""
