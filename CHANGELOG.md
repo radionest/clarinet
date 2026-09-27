@@ -473,9 +473,9 @@
   `/dicom-web`, where OHIF sends a request per frame, keeps a TTL-only cache: a
   session cookie that passed is reused for `session_cache_ttl_seconds` (30 s;
   `0` disables) and never evicted early, so image access outlives a revocation by
-  up to that long. Session activity (`last_accessed`) is written at most once a
-  minute as a plain `UPDATE`, so a session deleted mid-request no longer turns
-  that request into a 500 (#665).
+  up to that long. Session activity (`last_accessed`) is written at most every
+  `min(60 s, session_idle_timeout_minutes / 2)` as a plain `UPDATE`, so a
+  session deleted mid-request no longer turns that request into a 500 (#665).
 - **Changing a password logs out the user's existing sessions.** `PUT
   /api/user/{id}` with a `password` and `clarinet admin reset-password` rehashed
   the password but left every session valid, so a reset never locked out
