@@ -149,6 +149,27 @@ class TestUserService:
         assert user.is_verified is False
 
     @pytest.mark.asyncio
+    async def test_update_user_failed_revoke_writes_nothing(self, env, monkeypatch):
+        """A failed session revoke must not leave the other fields committed."""
+        user = await env["service"].create_user(
+            UserCreate(email="failrevoke@test.com", password="oldpassw")
+        )
+        await env["session"].commit()
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("revoke failed")
+
+        monkeypatch.setattr("clarinet.repositories.user_repository.revoke_user_sessions", boom)
+        with pytest.raises(RuntimeError):
+            await env["service"].update_user(
+                user.id, UserUpdate(is_verified=True, password="newpasswd")
+            )
+        await env["session"].rollback()  # what the request's session teardown does
+        await env["session"].refresh(user)
+        assert user.is_verified is False
+        assert verify_password("oldpassw", user.hashed_password)
+
+    @pytest.mark.asyncio
     async def test_assign_role(self, env):
         user = await env["service"].create_user(
             UserCreate(email="role@test.com", password="pass1234")
