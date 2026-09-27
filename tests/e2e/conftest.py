@@ -1,6 +1,5 @@
 """E2E test configuration — uses unauthenticated client for auth workflow tests."""
 
-import socket
 from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import uuid4
@@ -10,12 +9,11 @@ import pytest_asyncio
 from httpx import AsyncClient
 
 from tests.config import (
-    RABBITMQ_HOST,
     RABBITMQ_MANAGEMENT_AUTH,
     RABBITMQ_MANAGEMENT_URL,
-    RABBITMQ_PORT,
     RABBITMQ_URL,
 )
+from tests.utils.rabbitmq import skip_unless_rabbitmq_reachable
 
 
 @pytest_asyncio.fixture
@@ -61,12 +59,8 @@ async def _cleanup_orphaned_e2e_resources() -> AsyncGenerator[None]:
 
 @pytest.fixture(scope="session")
 def _check_rabbitmq() -> None:
-    """Skip all pipeline tests if RabbitMQ is unreachable."""
-    try:
-        sock = socket.create_connection((RABBITMQ_HOST, RABBITMQ_PORT), timeout=3)
-        sock.close()
-    except OSError:
-        pytest.skip(f"RabbitMQ not reachable at {RABBITMQ_HOST}:{RABBITMQ_PORT}")
+    """Skip all pipeline tests if RabbitMQ is unreachable (fail if it is required)."""
+    skip_unless_rabbitmq_reachable()
 
 
 @pytest.fixture(scope="session")
