@@ -424,15 +424,33 @@ class TestSessionLifecycle:
             assert access_token.expires_at > near_expiry  # Should have been extended
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Idle timeout test requires different session handling")
     async def test_session_idle_timeout(
-        self, client: AsyncClient, test_user: User, test_session: AsyncSession
+        self,
+        client: AsyncClient,
+        test_user: User,
+        test_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
     ):
-        """Test session expiry due to inactivity."""
-        # NOTE: This test is skipped because it requires modifying the database
-        # in a way that's visible to the authentication system, which uses
-        # its own database session. The feature is tested manually.
-        pass
+        """A session idle for longer than session_idle_timeout_minutes is rejected."""
+        # Both objects: conftest client fixtures may have rebound auth_config.settings.
+        monkeypatch.setattr(settings, "session_idle_timeout_minutes", IDLE_TIMEOUT_MINUTES)
+        monkeypatch.setattr(
+            auth_config_module.settings, "session_idle_timeout_minutes", IDLE_TIMEOUT_MINUTES
+        )
+        creds = {"username": test_user.email, "password": "testpassword"}
+
+        assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
+        assert (await client.get(AUTH_ME)).status_code == 200
+
+        stmt = select(AccessToken).where(AccessToken.user_id == test_user.id)
+        access_token = (await test_session.execute(stmt)).scalar_one()
+        idle_since = datetime.now(UTC) - timedelta(minutes=IDLE_TIMEOUT_MINUTES + 1)
+        if access_token.last_accessed.tzinfo is None:
+            idle_since = idle_since.replace(tzinfo=None)
+        access_token.last_accessed = idle_since
+        await test_session.commit()
+
+        assert (await client.get(AUTH_ME)).status_code == 401
 
     @pytest.mark.asyncio
     async def test_expired_session_cleanup(
@@ -809,15 +827,28 @@ class TestCookieAuthentication:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="IP validation requires get_client_ip function")
 async def test_session_ip_validation(
-    client: AsyncClient, test_user: User, test_session: AsyncSession
+    client: AsyncClient, test_user: User, monkeypatch: pytest.MonkeyPatch
 ):
-    """Test IP address validation when enabled."""
-    # NOTE: This test requires a get_client_ip function which is not present
-    # in the current implementation. The IP is extracted from request.client
-    # directly in the auth_config module.
-    pass
+    """With session_ip_check on, the session cookie is rejected from another IP."""
+    from clarinet.api.app import app
+    from tests.conftest import patch_cookie_forwarding
+
+    # Both objects: conftest client fixtures may have rebound auth_config.settings.
+    monkeypatch.setattr(settings, "session_ip_check", True)
+    monkeypatch.setattr(auth_config_module.settings, "session_ip_check", True)
+    creds = {"username": test_user.email, "password": "testpassword"}
+
+    assert (await client.post(AUTH_LOGIN, data=creds)).status_code in LOGIN_SUCCESS_CODES
+    assert (await client.get(AUTH_ME)).status_code == 200
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, client=("10.0.0.2", 123)),
+        base_url="http://test",
+        cookies=client.cookies,
+    ) as other_ip:
+        patch_cookie_forwarding(other_ip)
+        assert (await other_ip.get(AUTH_ME)).status_code == 401
 
 
 @pytest.mark.asyncio
