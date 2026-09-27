@@ -360,8 +360,11 @@ class DatabaseStrategy(Strategy[User, UUID]):
         if settings.session_idle_timeout_minutes > 0:
             idle_duration = now - last_accessed
             max_idle = timedelta(minutes=settings.session_idle_timeout_minutes)
-            # A flat 60 s interval would let a short idle timeout expire an active session.
-            write_interval = min(write_interval, max_idle / 2)
+            # A flat 60 s interval would let a short idle timeout expire an active
+            # session. /dicom-web reuses a verdict for session_cache_ttl_seconds
+            # without calling read_token, so that time comes out of the budget (#680).
+            cache_ttl = timedelta(seconds=max(settings.session_cache_ttl_seconds, 0))
+            write_interval = min(write_interval, max(max_idle - cache_ttl, timedelta(0)) / 2)
             if idle_duration > max_idle:
                 logger.warning(
                     f"Session idle timeout: token={token[:8]}..., "

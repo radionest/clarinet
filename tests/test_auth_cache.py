@@ -273,6 +273,23 @@ class TestReadTokenActivityWrites:
         assert _aware(row.last_accessed) > before
 
     @pytest.mark.asyncio
+    async def test_dicomweb_cache_ttl_comes_out_of_the_idle_budget(
+        self, test_session, test_user, monkeypatch
+    ):
+        """#680: /dicom-web reuses a verdict for the TTL without calling read_token.
+        With a 1-minute idle timeout and a 30 s TTL, activity 20 s old is already
+        due — skipping it lets the next cache miss see a full minute of idleness."""
+        monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 1)
+        monkeypatch.setattr(auth_config.settings, "session_cache_ttl_seconds", 30)
+        row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=20))
+        before = _aware(row.last_accessed)
+
+        assert await _read(test_session, row.token) is not None
+
+        await test_session.refresh(row)
+        assert _aware(row.last_accessed) > before
+
+    @pytest.mark.asyncio
     async def test_session_deleted_mid_request_does_not_raise(
         self, test_session, test_user, monkeypatch
     ):
