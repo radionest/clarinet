@@ -31,6 +31,7 @@ from clarinet.services.pipeline.sync_wrappers import (
     SyncRecordQuery,
     _call_async,
 )
+from tests.utils.test_helpers import host_root
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -256,11 +257,13 @@ class TestBuildWorkingDirs:
     def test_custom_storage_path(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/default"
         record = _make_record_read()
-        record.clarinet_storage_path = "/custom"
+        record.clarinet_storage_path = host_root("/custom")
 
         dirs = Files(record)._dirs
 
-        assert str(dirs[DicomQueryLevel.PATIENT]).startswith(str(Path("/custom")))
+        assert str(dirs[DicomQueryLevel.PATIENT]).startswith(
+            str(Path(record.clarinet_storage_path))
+        )
 
 
 # ── build_working_dirs_from_patient (_resolver leaf) ───────────────────────

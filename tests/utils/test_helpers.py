@@ -22,6 +22,17 @@ from clarinet.utils.auth import get_password_hash
 Z_FLIP = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
 
 
+def host_root(posix_root: str) -> str:
+    """Make a POSIX-style storage root absolute on this host.
+
+    From Python 3.13 ``ntpath.isabs("/storage")`` is False (a driveless root is
+    drive-relative), so the storage-root guard in ``Files`` refuses it on
+    Windows. Prefixing the cwd drive (``""`` on POSIX) fixes that without
+    normalising the rest, so shapes like a trailing ``/`` or ``//`` survive.
+    """
+    return Path.cwd().drive + posix_root
+
+
 def write_grid_image(
     path: Path,
     *,

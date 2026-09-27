@@ -26,8 +26,10 @@ from clarinet.models.record import RecordRead
 from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
 from clarinet.services.slicer.context import build_slicer_context, build_slicer_context_async
+from tests.utils.test_helpers import host_root
 
 TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+STORAGE = host_root("/storage")
 
 
 def _make_record_read(
@@ -94,7 +96,7 @@ def _make_record_read(
         record_type=record_type,
         status="pending",
         user_id=user_id,
-        clarinet_storage_path="/storage",
+        clarinet_storage_path=STORAGE,
     )
 
 
@@ -210,7 +212,7 @@ def test_standard_vars_study_level(mock_settings):
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     ctx = build_slicer_context(record)
 
-    assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY"))
+    assert ctx["working_folder"] == str(Path(f"{STORAGE}/CLARINET_1/ANON_STUDY"))
     assert ctx["study_uid"] == "ANON_STUDY"
     assert "series_uid" not in ctx
 
@@ -230,7 +232,7 @@ def test_standard_vars_series_level(mock_settings):
     )
     ctx = build_slicer_context(record)
 
-    assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY/ANON_SERIES"))
+    assert ctx["working_folder"] == str(Path(f"{STORAGE}/CLARINET_1/ANON_STUDY/ANON_SERIES"))
     assert ctx["study_uid"] == "ANON_STUDY"
     assert ctx["series_uid"] == "ANON_SERIES"
 
@@ -248,7 +250,7 @@ def test_standard_vars_patient_level(mock_settings):
     )
     ctx = build_slicer_context(record)
 
-    assert ctx["working_folder"] == str(Path("/storage/CLARINET_1"))
+    assert ctx["working_folder"] == str(Path(f"{STORAGE}/CLARINET_1"))
     assert "study_uid" not in ctx
     assert "series_uid" not in ctx
 
@@ -321,7 +323,7 @@ def test_file_paths_from_registry(mock_settings):
     ctx = build_slicer_context(record)
 
     expected = str(
-        Path(f"/storage/CLARINET_1/ANON_STUDY/segmentation_single_{TEST_USER_ID}.seg.nrrd")
+        Path(f"{STORAGE}/CLARINET_1/ANON_STUDY/segmentation_single_{TEST_USER_ID}.seg.nrrd")
     )
     assert ctx["segmentation_single"] == expected
 
@@ -417,7 +419,7 @@ def test_output_file_alias(mock_settings):
     ctx = build_slicer_context(record)
 
     expected_output = str(
-        Path("/storage/CLARINET_1/ANON_STUDY/ANON_SERIES/master_projection.seg.nrrd")
+        Path(f"{STORAGE}/CLARINET_1/ANON_STUDY/ANON_SERIES/master_projection.seg.nrrd")
     )
     assert ctx["output_file"] == expected_output
     assert ctx["master_projection"] == expected_output
@@ -444,7 +446,7 @@ def test_cross_level_file_resolution(mock_settings):
     ctx = build_slicer_context(record)
 
     # master_model is PATIENT level, so resolved at patient dir
-    expected = str(Path("/storage/CLARINET_1/master_model.seg.nii"))
+    expected = str(Path(f"{STORAGE}/CLARINET_1/master_model.seg.nii"))
     assert ctx["master_model"] == expected
 
 
@@ -562,7 +564,7 @@ def test_origin_type_from_parent(mock_settings):
     ctx = build_slicer_context(record, parent=parent)
 
     expected = str(
-        Path(f"/storage/CLARINET_1/ANON_STUDY/segmentation_parent-seg_{TEST_USER_ID}.seg.nrrd")
+        Path(f"{STORAGE}/CLARINET_1/ANON_STUDY/segmentation_parent-seg_{TEST_USER_ID}.seg.nrrd")
     )
     assert ctx["segmentation"] == expected
 
@@ -579,7 +581,7 @@ async def test_build_slicer_context_async_no_hydrators(mock_settings):
 
     ctx = await build_slicer_context_async(record, mock_session)
 
-    assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY"))
+    assert ctx["working_folder"] == str(Path(f"{STORAGE}/CLARINET_1/ANON_STUDY"))
     assert ctx["study_uid"] == "ANON_STUDY"
     assert "series_uid" not in ctx
 
@@ -648,7 +650,7 @@ async def test_client_path_translation_disabled(mock_settings):
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     ctx = await build_slicer_context_async(record, AsyncMock())
 
-    assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY"))
+    assert ctx["working_folder"] == str(Path(f"{STORAGE}/CLARINET_1/ANON_STUDY"))
 
 
 @_skip_windows

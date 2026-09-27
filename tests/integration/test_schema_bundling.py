@@ -33,7 +33,8 @@ async def test_python_mode_json_path_bundles_external_def(tmp_path: Path) -> Non
 
             lesion = RecordDef(name="lesion", level="SERIES", data_schema="schemas/lesion.schema.json")
             """
-        )
+        ),
+        encoding="utf-8",
     )
 
     items = await load_python_config(tmp_path)
@@ -57,7 +58,8 @@ async def test_python_mode_sidecar_bundles_external_def(tmp_path: Path) -> None:
 
             lesion = RecordDef(name="lesion", level="SERIES")
             """
-        )
+        ),
+        encoding="utf-8",
     )
 
     items = await load_python_config(tmp_path)
