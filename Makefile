@@ -308,7 +308,7 @@ _test-all-stages-impl:
 	@uv run pytest deploy/test/test_deploy_lib.py -v
     # With the VM up, stage 5 forces it as PACS and as RabbitMQ broker via
     # scripts/vm-test-env.sh (shared with the PostgreSQL pass; see there for why
-    # an operator's CLARINET_TEST_* values are overridden).
+    # an operator's CLARINET_TEST_PACS_HOST/_SSH and _RABBITMQ_* are overridden).
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
 		echo "=========================================="; \

@@ -4,13 +4,18 @@
 # test-all-stages` stage 5 and scripts/vm-run-tests.sh (the PostgreSQL pass)
 # both `eval` this output, so the two cannot drift apart again (#624).
 #
-# Forced, not defaulted: an operator's CLARINET_TEST_PACS_* / _RABBITMQ_* (from
-# the environment or .env.test, which tests/config.py loads with setdefault)
-# are meant for their own services. Honouring them here would seed and C-STORE
-# into their PACS, make the C-MOVE probe ask the wrong host and skip, or send
-# the pipeline tests to a broker that rejects them with ACCESS_REFUSED.
+# Forced, not defaulted: an operator's CLARINET_TEST_PACS_HOST / _SSH and
+# CLARINET_TEST_RABBITMQ_* (from the environment or .env.test, which
+# tests/config.py loads with setdefault) are meant for their own services.
+# Honouring them here would seed and C-STORE into their PACS, make the C-MOVE
+# probe ask the wrong host and skip, or send the pipeline tests to a broker
+# that rejects them with ACCESS_REFUSED. Every other CLARINET_TEST_* passes
+# through untouched.
 #
-# Usage: eval "$(vm-test-env.sh <vm_ip>)"   (values are POSIX-quoted: sh or bash)
+# Usage (values are POSIX-quoted, so sh or bash):
+#   VM_ENV=$(vm-test-env.sh <vm_ip>) || exit 1; eval "$VM_ENV"
+# Not `eval "$(vm-test-env.sh <vm_ip>)"`: eval of the empty output of a failed
+# run succeeds, and the tests would silently fall back to localhost.
 set -euo pipefail
 
 IP="${1:?usage: vm-test-env.sh <vm_ip>}"
