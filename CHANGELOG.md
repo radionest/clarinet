@@ -435,7 +435,10 @@
   qualifies as admin. Rationale under Security.
 - **`DatabaseStrategy.invalidate_user_cache` and `DatabaseStrategy.evict_token`
   are gone.** The general API keeps no user cache to evict; drop the calls.
-  `session_cache_ttl_seconds` now governs only the `/dicom-web` cache.
+  `session_cache_ttl_seconds` now governs only the `/dicom-web` cache. Test
+  fixtures that override `current_active_user` (or `current_role_holder`) to
+  reach `/dicom-web` must also override
+  `clarinet.api.dependencies.current_dicomweb_user`.
 
 ### Deprecated
 
@@ -474,8 +477,9 @@
   session cookie that passed is reused for `session_cache_ttl_seconds` (30 s;
   `0` disables) and never evicted early, so image access outlives a revocation by
   up to that long. Session activity (`last_accessed`) is written at most every
-  `min(60 s, session_idle_timeout_minutes / 2)` as a plain `UPDATE`, so a
-  session deleted mid-request no longer turns that request into a 500 (#665).
+  `min(60 s, session_idle_timeout_minutes / 2)` (60 s with the idle timeout off)
+  as a plain `UPDATE`, so a session deleted mid-request no longer turns that
+  request into a 500 (#665).
 - **Changing a password logs out the user's existing sessions.** `PUT
   /api/user/{id}` with a `password` and `clarinet admin reset-password` rehashed
   the password but left every session valid, so a reset never locked out

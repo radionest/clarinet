@@ -106,6 +106,7 @@ jq 'select(.t > "'$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S)'"Z")' clarin
 **Признаки:**
 - Backend лог: `Session idle timeout` с детальными метриками
 - `idle_duration_seconds` > `max_idle_seconds`
+- `last_accessed` пишется не чаще раза в `min(60 с, idle/2)`, поэтому `idle_duration` в логе может превышать реальный простой на этот интервал
 
 **Пример:**
 ```json

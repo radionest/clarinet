@@ -1,5 +1,10 @@
 # Update Log
 
+## 2026-09-27
+
+* **Update**: [Domain model](./domain-model.md) — the DICOMweb proxy gate is now `current_dicomweb_user`: the same admin-or-role check as `current_role_holder`, with a passed session cookie reused for `session_cache_ttl_seconds`.
+* **Update**: [Persistence](./persistence.md) — added the Core-`update()` pitfall for rows another request may delete (#665), and the detached authenticated-`User` contract.
+
 ## 2026-09-04
 
 * **Update**: [Files and anonymization](./files-and-anonymization.md) — `report_record_files` joins `validate_record_files` as a `Files.for_reader` caller: it backs the read-only `validate-files` report, which now also classifies every declared OUTPUT grid pair present on disk without repairing or deleting anything.
