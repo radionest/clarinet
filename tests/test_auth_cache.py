@@ -276,9 +276,11 @@ class TestReadTokenActivityWrites:
     async def test_dicomweb_cache_ttl_comes_out_of_the_idle_budget(
         self, test_session, test_user, monkeypatch
     ):
-        """#680: /dicom-web reuses a verdict for the TTL without calling read_token.
-        With a 1-minute idle timeout and a 30 s TTL, activity 20 s old is already
-        due — skipping it lets the next cache miss see a full minute of idleness."""
+        """#680: /dicom-web reuses a verdict for the TTL without calling read_token,
+        so the write interval must leave room for it. With a 1-minute idle timeout
+        and a 30 s TTL it is 15 s: activity 20 s old is due. Under the old 30 s
+        interval a write skipped just under 30 s plus the 30 s TTL reached the
+        full minute of idleness on the next cache miss."""
         monkeypatch.setattr(auth_config.settings, "session_idle_timeout_minutes", 1)
         monkeypatch.setattr(auth_config.settings, "session_cache_ttl_seconds", 30)
         row = await _session_row(test_session, test_user.id, idle_for=timedelta(seconds=20))

@@ -477,9 +477,11 @@
   session cookie that passed is reused for `session_cache_ttl_seconds` (30 s;
   `0` disables) and never evicted early, so image access outlives a revocation by
   up to that long. Session activity (`last_accessed`) is written at most every
-  `min(60 s, (session_idle_timeout_minutes − session_cache_ttl_seconds) / 2)`
-  (60 s with the idle timeout off) as a plain `UPDATE`, so a session deleted mid-request no longer turns that
-  request into a 500 (#665).
+  `min(60 s, max(idle_timeout − session_cache_ttl_seconds, 0) / 2)` (60 s with
+  the idle timeout off; the TTL comes out of the idle budget so an image-only
+  session is not logged out under a short idle timeout, #680) as a plain
+  `UPDATE`, so a session deleted mid-request no longer turns that request into
+  a 500 (#665).
 - **Changing a password logs out the user's existing sessions.** `PUT
   /api/user/{id}` with a `password` and `clarinet admin reset-password` rehashed
   the password but left every session valid, so a reset never locked out
