@@ -361,7 +361,8 @@ class Settings(BaseSettings):
     session_concurrent_limit: int = 5  # Max sessions per user (0 = unlimited)
     session_ip_check: bool = False  # Validate IP consistency
     session_secure_cookie: bool = True  # HTTPS only in production
-    # /dicom-web only: reuse a passed session cookie this long (0 = off)
+    # /dicom-web only: reuse a passed session cookie this long (0 = off). Keep it
+    # below the idle timeout: read_token subtracts it from the idle budget (#680)
     session_cache_ttl_seconds: int = 30
 
     # Failed-auth throttling (login + X-Internal-Token); see api/auth_config.py.

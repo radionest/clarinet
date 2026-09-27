@@ -3,7 +3,7 @@
 ## 2026-09-27
 
 * **Update**: [Domain model](./domain-model.md) — the DICOMweb proxy gate is now `current_dicomweb_user`: the same admin-or-role check as `current_role_holder`, with a passed session cookie reused for `session_cache_ttl_seconds`.
-* **Update**: [Persistence](./persistence.md) — added the Core-`update()` pitfall for rows another request may delete (#665), and the detached authenticated-`User` contract.
+* **Update**: [Persistence conventions](./persistence.md) — added the Core-`update()` pitfall for rows another request may delete (#665), and the detached authenticated-`User` contract.
 
 ## 2026-09-04
 
