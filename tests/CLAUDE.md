@@ -160,7 +160,7 @@ POST create → 201, DELETE → 204, everything else → 200. Not found → 404,
 
 pytest-xdist: each worker gets its own in-memory SQLite DB (`StaticPool`). Session-scoped engine, data cleaned via `DELETE FROM` after each test.
 
-Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, `xdist_group`; seeds its dataset and registers its AET, see below), `slicer` (`xdist_group`). Unreachable services auto-skip — but a reachable broker that rejects the login fails every `pipeline` test with `ACCESS_REFUSED`. `make test-all-stages` therefore forces the pipeline VM's RabbitMQ (host plus its `clarinet` admin user, read off the VM) in stage 5 and the PostgreSQL pass; `CLARINET_TEST_RABBITMQ_*` apply everywhere else.
+Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, `xdist_group`; seeds its dataset and registers its AET, see below), `slicer` (`xdist_group`). Unreachable services auto-skip — but a reachable broker that rejects the login fails every `pipeline` test with `ACCESS_REFUSED`. `make test-all-stages` therefore forces the pipeline VM's RabbitMQ in stage 5 and the PostgreSQL pass: `CLARINET_TEST_RABBITMQ_HOST`, `_USER`/`_PASS` and `_MANAGEMENT_USER`/`_MANAGEMENT_PASS` (its `clarinet` admin user, read off the VM). The ports are not forced — they still come from the environment or `.env.test`.
 
 Every DICOM fixture gates on `require_test_pacs()` (`tests/utils/dicom.py`): an absent Orthanc skips, but a 401/403 **fails** — a reachable PACS with wrong credentials must not hide the DICOM suite. `PACS_REST_URL` carries the REST credentials (`CLARINET_TEST_PACS_REST_USER`/`_PASS`, default stock `orthanc:orthanc`), so never print it; print `PACS_HOST`.
 
