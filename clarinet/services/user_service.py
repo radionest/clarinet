@@ -95,13 +95,16 @@ class UserService:
         user = await self.user_repo.get(user_id)
 
         update_fields = data.model_dump(exclude_unset=True, exclude={"password"})
+        # Hash before any write: a password bcrypt rejects must not leave the
+        # other fields committed behind an error response.
+        new_hash = get_password_hash(data.password) if data.password is not None else None
         await self.user_repo.update(user, update_fields)
         # Evict after the revoke, not before, to narrow the window in which a
         # concurrent request re-caches a revoked token; one that still slips
         # through lives at most session_cache_ttl_seconds.
         try:
-            if data.password is not None:
-                await self.user_repo.update_password(user, get_password_hash(data.password))
+            if new_hash is not None:
+                await self.user_repo.update_password(user, new_hash)
         finally:
             DatabaseStrategy.invalidate_user_cache(user_id)
         return await self.user_repo.get_with_roles(user_id)

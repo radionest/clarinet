@@ -136,6 +136,19 @@ class TestUserService:
         assert await get_user_sessions(env["session"], user.id) == []
 
     @pytest.mark.asyncio
+    async def test_update_user_rejected_password_writes_nothing(self, env):
+        """A password bcrypt rejects (>72 bytes) must not commit the other fields."""
+        user = await env["service"].create_user(
+            UserCreate(email="longpw@test.com", password="oldpassw")
+        )
+        with pytest.raises(ValueError):
+            await env["service"].update_user(
+                user.id, UserUpdate(is_verified=True, password="x" * 80)
+            )
+        await env["session"].refresh(user)
+        assert user.is_verified is False
+
+    @pytest.mark.asyncio
     async def test_assign_role(self, env):
         user = await env["service"].create_user(
             UserCreate(email="role@test.com", password="pass1234")
