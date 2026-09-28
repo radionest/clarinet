@@ -24,7 +24,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
-from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
+from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordCommandName, RecordData
 from clarinet.utils.pagination import SortOrder
 
 from ..exceptions import DirectRecordWriteError, ValidationError
@@ -366,6 +366,9 @@ class RecordRead(RecordBase):
     series: SeriesBase | None = None
     record_type: RecordTypeRead
     display_anon_id: str | None = None
+    # Commands the requesting user may run on this record now — filled per viewer
+    # by ``api/masking.py`` from the lifecycle policy (``record_lifecycle``).
+    allowed_commands: list[RecordCommandName] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -374,7 +377,7 @@ class RecordRead(RecordBase):
         if isinstance(data, Record):
             result: dict[str, Any] = {}
             for field_name in cls.model_fields:
-                if field_name in ("files", "file_checksums", "file_links"):
+                if field_name in ("files", "file_checksums", "file_links", "allowed_commands"):
                     continue
                 result[field_name] = getattr(data, field_name, None)
             try:

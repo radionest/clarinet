@@ -16,7 +16,8 @@ from clarinet.api.dependencies import (
     RecordServiceDep,
     SessionDep,
 )
-from clarinet.models import Record, RecordEventFind, RecordEventRead, RecordRead
+from clarinet.api.masking import record_read_for
+from clarinet.models import RecordEventFind, RecordEventRead, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
@@ -70,23 +71,23 @@ async def get_admin_stats(
 async def admin_assign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     user_id: UUID,
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     service: RecordServiceDep,
     actor: ActorDep,
-) -> Record:
+) -> RecordRead:
     """Make ``user_id`` the owner (admin only). Only a pending record moves to inwork.
 
     Args:
         record_id: The record to assign.
         user_id: The user UUID to assign.
-        _current_user: Authenticated admin user (superuser or admin role).
+        current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
     record, _ = await service.assign_user(record_id, user_id, actor=actor)
-    return record
+    return record_read_for(record, current_user)
 
 
 @router.patch(
@@ -102,23 +103,23 @@ async def admin_assign_record_user(
 async def admin_update_record_status(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     record_status: RecordStatus,
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     service: RecordServiceDep,
     actor: ActorDep,
-) -> Record:
+) -> RecordRead:
     """Set any status on a record (admin only).
 
     Args:
         record_id: The record to update.
         record_status: New status to set.
-        _current_user: Authenticated admin user (superuser or admin role).
+        current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
     record, _ = await service.update_status(record_id, record_status, actor=actor)
-    return record
+    return record_read_for(record, current_user)
 
 
 @router.delete(
@@ -128,24 +129,24 @@ async def admin_update_record_status(
 )
 async def admin_unassign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     service: RecordServiceDep,
     actor: ActorDep,
-) -> Record:
+) -> RecordRead:
     """Remove user assignment from a record (admin only).
 
     If the record is inwork, status is reset to pending.
 
     Args:
         record_id: The record to unassign.
-        _current_user: Authenticated admin user (superuser or admin role).
+        current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
     record, _ = await service.unassign_user(record_id, actor=actor)
-    return record
+    return record_read_for(record, current_user)
 
 
 @router.delete(

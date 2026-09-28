@@ -132,6 +132,34 @@ async def test_record_read_timestamps_none_for_pending(
     assert data["finished_at"] is None
 
 
+@pytest.mark.asyncio
+async def test_record_read_model_validate_defaults_allowed_commands(
+    test_session, test_user, test_patient, test_study
+):
+    """model_validate(record) — not via record_read_for — still works: allowed_commands defaults to []."""
+    record_type = RecordType(
+        name="timestamps-allowed-commands",
+        description="test",
+        level=DicomQueryLevel.STUDY,
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        user_id=test_user.id,
+        record_type_name=record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record, ["patient", "study", "record_type"])
+
+    read = RecordRead.model_validate(record, from_attributes=True)
+    assert read.allowed_commands == []
+
+
 # ---------------------------------------------------------------------------
 # Group 1b: the direct-write guard on Record.status / Record.user_id
 # ---------------------------------------------------------------------------
