@@ -435,7 +435,11 @@ fn ablation() -> models.Record {
 }
 
 fn parent_candidates() -> List(models.Record) {
-  let study_xa = make_study("1.2", "2026-02-20", None)
+  let study_xa =
+    models.Study(
+      ..make_study("1.2", "2026-02-20", None),
+      modalities_in_study: Some("XA"),
+    )
   let study_control = make_study("1.3", "2026-05-12", Some("MRI control"))
   let series_arterial =
     models.Series(
@@ -467,15 +471,21 @@ fn parent_candidates() -> List(models.Record) {
 
 pub fn parent_groups_with_study_test() {
   // A STUDY/SERIES-level child: its own study first, then patient-level
-  // records, then the other studies newest first.
-  record_form.parent_record_groups(parent_candidates(), [], "1.3")
+  // records, then the other studies newest first; rows newest first too.
+  record_form.parent_record_groups(
+    candidates: parent_candidates(),
+    studies: [],
+    study_uid: "1.3",
+  )
   |> should.equal([
     #("This study", [
-      #("70", "#70 · first-check · Completed"),
       #("71", "#71 · compare · Arterial [CT] (#3) · Completed"),
+      #("70", "#70 · first-check · Completed"),
     ]),
     #("Patient level", [#("52", "#52 · ablation · Completed")]),
-    #("Study 2026-02-20", [#("60", "#60 · xa-ablation-control · Completed")]),
+    #("Study 2026-02-20 · XA", [
+      #("60", "#60 · xa-ablation-control · Completed"),
+    ]),
     #("Study 2026-02-03 · MRI liver", [
       #("41", "#41 · mri-pre-ablation · Completed"),
     ]),
@@ -485,14 +495,20 @@ pub fn parent_groups_with_study_test() {
 pub fn parent_groups_without_study_test() {
   // A PATIENT-level child (no study picked): patient-level records first,
   // then every study newest first — no "This study" group.
-  record_form.parent_record_groups(parent_candidates(), [], "")
+  record_form.parent_record_groups(
+    candidates: parent_candidates(),
+    studies: [],
+    study_uid: "",
+  )
   |> should.equal([
     #("Patient level", [#("52", "#52 · ablation · Completed")]),
     #("Study 2026-05-12 · MRI control", [
-      #("70", "#70 · first-check · Completed"),
       #("71", "#71 · compare · Arterial [CT] (#3) · Completed"),
+      #("70", "#70 · first-check · Completed"),
     ]),
-    #("Study 2026-02-20", [#("60", "#60 · xa-ablation-control · Completed")]),
+    #("Study 2026-02-20 · XA", [
+      #("60", "#60 · xa-ablation-control · Completed"),
+    ]),
     #("Study 2026-02-03 · MRI liver", [
       #("41", "#41 · mri-pre-ablation · Completed"),
     ]),
@@ -508,7 +524,11 @@ pub fn parent_option_uses_record_type_label_test() {
         Some("MRI before ablation"),
       )),
     )
-  record_form.parent_record_groups([labeled], [], "")
+  record_form.parent_record_groups(
+    candidates: [labeled],
+    studies: [],
+    study_uid: "",
+  )
   |> should.equal([
     #("Study 2026-02-03 · MRI liver", [
       #("41", "#41 · MRI before ablation · Completed"),
@@ -523,20 +543,64 @@ pub fn parent_groups_unmask_study_test() {
   let masked =
     make_record(42, "masked-type", Some(make_study("2.1", "1976-01-01", None)))
   let studies = [models.Study(..study_pre(), anon_uid: Some("2.1"))]
-  record_form.parent_record_groups([masked, pre_ablation()], studies, "1.1")
+  let candidates = [masked, pre_ablation()]
+  record_form.parent_record_groups(
+    candidates: candidates,
+    studies: studies,
+    study_uid: "1.1",
+  )
   |> should.equal([
     #("This study", [
-      #("41", "#41 · mri-pre-ablation · Completed"),
       #("42", "#42 · masked-type · Completed"),
+      #("41", "#41 · mri-pre-ablation · Completed"),
     ]),
   ])
-  record_form.parent_record_groups([masked, pre_ablation()], studies, "")
+  record_form.parent_record_groups(
+    candidates: candidates,
+    studies: studies,
+    study_uid: "",
+  )
   |> should.equal([
     #("Study 2026-02-03 · MRI liver", [
-      #("41", "#41 · mri-pre-ablation · Completed"),
       #("42", "#42 · masked-type · Completed"),
+      #("41", "#41 · mri-pre-ablation · Completed"),
     ]),
   ])
+}
+
+pub fn modal_fetches_parent_candidates_only_when_picker_shows_test() {
+  // The modal hides the parent picker unless the type is parent_required, so
+  // it fetches the patient's records only once such a type is picked.
+  let child =
+    models.RecordType(
+      ..make_record_type("child", None),
+      level: types.Patient,
+      parent_required: True,
+    )
+  let plain =
+    models.RecordType(..make_record_type("plain", None), level: types.Patient)
+  let s =
+    shared.Shared(
+      ..make_shared(),
+      cache: cache.init()
+        |> cache.put_record_type(child)
+        |> cache.put_record_type(plain),
+    )
+  let pick = fn(m, name) {
+    let #(m, _, _) =
+      record_new.update(
+        m,
+        record_new.UpdateForm(record_form.UpdateRecordType(name)),
+        s,
+      )
+    m
+  }
+  let #(m, _, _) = record_new.init_modal(shared.PatientArgs("P001"), s)
+  m.parent_candidates_for |> should.equal("")
+  let m = pick(m, "plain")
+  m.parent_candidates_for |> should.equal("")
+  let m = pick(m, "child")
+  m.parent_candidates_for |> should.equal("P001")
 }
 
 pub fn update_patient_clears_parent_record_test() {

@@ -90,13 +90,12 @@ pub fn update(data: RecordFormData, msg: RecordFormMsg) -> RecordFormData {
 // Used by the modal embedding to drop optional `user_id` and `parent_record_id`
 // for the minimal create flow.
 //
-// `parent_candidates` — every record of the selected patient; the parent
-// picker offers them all, grouped by level and study.
+// `parent_groups` — the parent picker's options, from `parent_record_groups`.
 pub fn view(
   data data: RecordFormData,
   studies studies: List(Study),
   series_list series_list: List(Series),
-  parent_candidates parent_candidates: List(Record),
+  parent_groups parent_groups: List(#(String, List(#(String, String)))),
   errors errors: Dict(String, String),
   loading loading: Bool,
   locked_fields locked_fields: List(String),
@@ -230,11 +229,7 @@ pub fn view(
             name: "parent_record_id",
             value: data.parent_record_id,
             placeholder: #("", "No parent record"),
-            groups: parent_record_groups(
-              parent_candidates,
-              studies,
-              data.study_uid,
-            ),
+            groups: parent_groups,
             on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
           ),
           errors: errors,
@@ -506,14 +501,14 @@ fn build_series_options(series_list: List(Series)) -> List(#(String, String)) {
 /// study first (`study_uid` may be `""`), then patient-level records, then
 /// every other study newest first. A parent can sit at any level and on any
 /// study of the patient (e.g. a control-MRI form whose parent is the
-/// pre-ablation MRI on an earlier study). Empty groups are dropped.
+/// pre-ablation MRI on an earlier study). Empty groups are dropped; rows run
+/// newest first, like the studies.
 /// `studies` (the patient's, unmasked) restores the real study of a record
 /// that masking handed back under its anon UID and a sentinel date.
-/// Public for unit testing.
 pub fn parent_record_groups(
-  candidates: List(Record),
-  studies: List(Study),
-  study_uid: String,
+  candidates candidates: List(Record),
+  studies studies: List(Study),
+  study_uid study_uid: String,
 ) -> List(#(String, List(#(String, String)))) {
   let candidates = list.map(candidates, unmask_study(_, studies))
   let #(this_study, rest) =
@@ -542,7 +537,7 @@ pub fn parent_record_groups(
   |> list.map(fn(group) {
     let records =
       list.sort(group.1, fn(a, b) {
-        int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
+        int.compare(option.unwrap(b.id, 0), option.unwrap(a.id, 0))
       })
     #(group.0, list.map(records, parent_option))
   })
@@ -569,11 +564,13 @@ fn study_date(r: Record) -> String {
 
 fn study_group_label(group: List(Record)) -> String {
   case group {
+    // Modalities tell apart same-day studies without a description.
     [models.Record(study: Some(s), ..), ..] ->
-      case s.study_description {
-        Some(desc) -> "Study " <> s.date <> " · " <> desc
-        None -> "Study " <> s.date
-      }
+      [
+        "Study " <> s.date,
+        ..option.values([s.modalities_in_study, s.study_description])
+      ]
+      |> string.join(" · ")
     [models.Record(study_uid: Some(uid), ..), ..] -> "Study " <> uid
     _ -> "Study"
   }
