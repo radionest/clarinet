@@ -106,8 +106,9 @@ def scaffold_agent_docs(
         seed = project_dir / ".claude" / seed_name
         if seed.exists() or seed.is_symlink():  # a dangling link is kept, not written through
             continue
-        text = (src / name).read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root)
-        seed.write_text(text, encoding="utf-8")
+        # Copied verbatim: a seed is committed and never refreshed, so it must not
+        # carry this machine's package path (its links point into the managed dir).
+        seed.write_text((src / name).read_text(encoding="utf-8"), encoding="utf-8")
         logger.info(f"Wrote {seed}")
     return dest
 

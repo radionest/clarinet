@@ -118,12 +118,6 @@ This project's rules (auto-loaded via the `paths` frontmatter):
 - `.claude/rules/clarinet/utils.md` — helper modules, the `.seg.nrrd` format
 - `.claude/rules/clarinet/scripting.md` — the `clarinet.scripting` frame for operational scripts in root `scripts/`
 
-Framework rules (full reference docs, installed alongside the clarinet package — the paths below point at the installed package):
-
-- `{{CLARINET_DOCS}}/recordflow-dsl.md` — full DSL API with pattern matching
-- `{{CLARINET_DOCS}}/slicer-helper-api.md` — all `SlicerHelper` methods + VTK pitfalls
-- `{{CLARINET_DOCS}}/pipeline-ops.md` — pipeline settings, testing, queues
-- `{{CLARINET_DOCS}}/file-registry.md` — file pattern-resolution details
-- `{{CLARINET_DOCS}}/project-setup.md` — project layout, `clarinet init`, key settings
+Framework reference docs (RecordFlow DSL, `SlicerHelper` API, pipeline ops, file registry, project setup): the links are in `.claude/rules/clarinet/reference.md`, which points at the installed clarinet package.
 
 Production example: the `clarinet_nir_liver` repository (if available) — the most complete real-world use of this framework.

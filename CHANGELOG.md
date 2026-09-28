@@ -770,7 +770,10 @@
   written once and never rewritten. Run `clarinet agent update` once after
   upgrading: a managed `overview.md` from an earlier version moves to
   `.claude/CLAUDE.md` (header stripped) when that path is free; otherwise it
-  stays and a warning names both files.
+  stays and a warning names both files. The seed holds no machine-specific
+  path: its links to the framework reference docs moved into the managed
+  `.claude/rules/clarinet/reference.md`, which `clarinet agent update`
+  re-resolves. A migrated `overview.md` keeps whatever paths it already had.
 - **`clarinet agent update` removes managed docs the installed version no
   longer ships.** Only files carrying the managed header are removed; files you
   add to `.claude/rules/clarinet/` are left alone. `agent init` now refuses only

@@ -32,6 +32,7 @@ SECTION_RULES = [
     "schemas",
     "utils",
     "scripting",
+    "reference",
 ]
 DEEP_DOCS = [
     "recordflow-dsl",
@@ -76,11 +77,16 @@ def test_agent_source_dir_unknown_agent() -> None:
 def test_init_writes_files_header_and_resolved_links(tmp_path: Path) -> None:
     dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
     assert dest == tmp_path / MANAGED
-    # the seed carries the token substitution but no managed header
+    # the seed is machine-independent: no header, no token, no package path
     overview = (tmp_path / SEED).read_text(encoding="utf-8")
     assert not overview.startswith("<!-- managed by clarinet v")
     assert "{{CLARINET_DOCS}}" not in overview
-    assert DOCS.as_posix() in overview
+    assert DOCS.as_posix() not in overview
+    assert ".claude/rules/clarinet/reference.md" in overview
+    # the package path lives in the managed reference doc, which update re-resolves
+    reference = (dest / "reference.md").read_text(encoding="utf-8")
+    assert "{{CLARINET_DOCS}}" not in reference
+    assert DOCS.as_posix() in reference
     assert (DOCS / "recordflow-dsl.md").is_file()
 
 
@@ -171,11 +177,11 @@ def test_deep_docs_identical_to_rules_seeds() -> None:
 
 def test_written_deep_doc_links_resolve(tmp_path: Path) -> None:
     scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
-    overview = (tmp_path / SEED).read_text(encoding="utf-8")
+    overview = (tmp_path / MANAGED / "reference.md").read_text(encoding="utf-8")
     deep_link_re = re.compile(r"((?:[A-Za-z]:)?/[^\s`'\"]+/docs/[\w.-]+\.md)")
     matches = deep_link_re.findall(overview)
     deep_matches = [m for m in matches if any(m.endswith(f"{n}.md") for n in DEEP_DOCS)]
-    assert deep_matches, "no substituted deep-doc link found in written overview.md"
+    assert deep_matches, "no substituted deep-doc link found in written reference.md"
     for link in deep_matches:
         assert Path(link).is_file(), f"written link does not resolve to a file: {link}"
 
@@ -360,6 +366,6 @@ def test_written_links_use_forward_slashes_for_windows_paths(
     monkeypatch.setattr(agent_scaffold, "_package_docs_dir", lambda: win_docs)
 
     scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
-    overview = (tmp_path / SEED).read_text(encoding="utf-8")
-    assert win_docs.as_posix() in overview  # "C:/pkg/clarinet/docs"
-    assert str(win_docs) not in overview  # not the "C:\\pkg\\..." backslash form
+    reference = (tmp_path / MANAGED / "reference.md").read_text(encoding="utf-8")
+    assert win_docs.as_posix() in reference  # "C:/pkg/clarinet/docs"
+    assert str(win_docs) not in reference  # not the "C:\\pkg\\..." backslash form
