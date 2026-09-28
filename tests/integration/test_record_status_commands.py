@@ -12,6 +12,7 @@ from clarinet.exceptions.domain import (
 )
 from clarinet.models import RecordStatus as S
 from clarinet.models.record_event import RecordEvent
+from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.file_validation import FileValidationResult
 from tests.utils.lifecycle import client_as, human
 from tests.utils.urls import ADMIN_RECORDS, RECORDS_BASE, RECORDS_BULK_STATUS
@@ -77,6 +78,21 @@ async def test_preparing_jump_over_http_carries_code_and_status(lc, test_setting
     body = resp.json()
     assert (body["code"], body["metadata"]) == ("TRANSITION_NOT_ALLOWED", {"status": "preparing"})
     assert "still preparing" in body["detail"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_transition_over_http_carries_full_body(lc, test_settings, monkeypatch):
+    """A single-record command that keeps missing surfaces the full 409 body,
+    not just the code — ``detail``, ``code``, and ``metadata.status``."""
+    rec = await lc.seed(await lc.record_type("lc-concurrent-http"), status=S.pending)
+    monkeypatch.setattr(RecordRepository, "write_transition", AsyncMock(return_value=False))
+    async with client_as(lc.admin, lc.session, test_settings) as client:
+        resp = await client.patch(f"{ADMIN_RECORDS}/{rec.id}/status?record_status=pause")
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["code"] == "CONCURRENT_TRANSITION"
+    assert body["metadata"] == {"status": "pending"}
+    assert isinstance(body["detail"], str) and body["detail"]
 
 
 @pytest.mark.asyncio
