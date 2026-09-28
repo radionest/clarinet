@@ -171,7 +171,7 @@ def test_init_force_overwrites_unmanaged_foreign_file(tmp_path: Path) -> None:
 
 
 def test_init_treats_undecodable_destination_as_unmanaged(tmp_path: Path) -> None:
-    """A destination file that ``_is_managed`` can't even decode must not crash.
+    """A destination file that ``is_managed`` can't even decode must not crash.
 
     A hand-written file in a legacy encoding (e.g. cp1251 Russian text, not
     exotic) isn't clarinet's -- treated as unmanaged, not left to raise

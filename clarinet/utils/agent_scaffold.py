@@ -7,25 +7,18 @@ substituting the ``{{CLARINET_DOCS}}`` token with the resolved on-disk path of
 environment. Pure file/CLI logic — no DB, no app state (mirror of quarto_scaffold).
 """
 
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 
 import clarinet
 from clarinet.exceptions.domain import AgentScaffoldError
 from clarinet.utils.logger import logger
+from clarinet.utils.managed_files import managed_header, with_header
 
 # agent name → namespace subdir under <project>/.claude/rules/
 KNOWN_AGENTS: dict[str, str] = {"claude": "clarinet"}
 
 _DOCS_TOKEN = "{{CLARINET_DOCS}}"
-
-
-def _clarinet_version() -> str:
-    try:
-        return version("clarinet")
-    except PackageNotFoundError:  # pragma: no cover - source-tree fallback
-        return "unknown"
 
 
 def _package_docs_dir() -> Path:
@@ -46,21 +39,6 @@ def agent_source_dir(agent: str) -> Path:
     if not src.is_dir():
         raise AgentScaffoldError(f"agent docs payload not found at {src}")
     return src
-
-
-def _with_header(text: str, header: str) -> str:
-    """Insert ``header`` after the YAML frontmatter, or at the top if there is none.
-
-    A leading HTML comment before ``---`` would stop the rules loader recognising
-    ``paths:`` frontmatter, so for frontmatter files the header goes right after the
-    closing delimiter.
-    """
-    if text.startswith("---\n"):
-        end = text.find("\n---\n", 4)
-        if end != -1:
-            insert = end + len("\n---\n")
-            return text[:insert] + header + text[insert:]
-    return header + text
 
 
 def scaffold_agent_docs(
@@ -94,11 +72,11 @@ def scaffold_agent_docs(
         raise AgentScaffoldError(f"{dest} has no managed docs; run 'clarinet agent init' first")
 
     docs_root = _package_docs_dir()
-    header = f"<!-- managed by clarinet v{_clarinet_version()} — do not edit; run 'clarinet agent update' -->\n"
+    header = managed_header("<!--", "clarinet agent update")
 
     dest.mkdir(parents=True, exist_ok=True)
     for md in sorted(src.glob("*.md")):
         text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root.as_posix())
-        (dest / md.name).write_text(_with_header(text, header), encoding="utf-8")
+        (dest / md.name).write_text(with_header(text, header), encoding="utf-8")
         logger.info(f"Wrote {dest / md.name}")
     return dest
