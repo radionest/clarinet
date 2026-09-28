@@ -1,6 +1,9 @@
 """Global configuration for integration tests."""
 
 import os
+import shutil
+import subprocess
+import warnings
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
@@ -836,3 +839,32 @@ def clear_recordflow_registries():
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture(scope="session")
+def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The clarinet wheel built from this checkout, for ``packaging`` tests.
+
+    Skips with a warning rather than failing when uv is missing or the build
+    fails, so a real regression behind the skip stays visible in the summary.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv not on PATH -- cannot build a wheel")
+    out_dir = tmp_path_factory.mktemp("dist")
+    repo_root = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(out_dir), str(repo_root)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        warnings.warn(
+            f"uv build failed (exit {result.returncode}); skipping -- if this is not an "
+            f"environment issue it may mask a packaging regression.\nstderr:\n{result.stderr[-2000:]}",
+            stacklevel=2,
+        )
+        pytest.skip("uv build failed -- see the warnings summary for stderr")
+    wheels = sorted(out_dir.glob("*.whl"))
+    assert wheels, "uv build reported success but produced no wheel"
+    return wheels[-1]

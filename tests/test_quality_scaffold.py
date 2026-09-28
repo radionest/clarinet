@@ -548,7 +548,7 @@ def test_cli_init_existing_exits(tmp_path: Path) -> None:
 
 @pytest.mark.packaging
 @pytest.mark.timeout(300)
-def test_wheel_contains_exactly_the_quality_payload(tmp_path: Path) -> None:
+def test_wheel_contains_exactly_the_quality_payload(built_wheel: Path) -> None:
     """Wheel-side twin of ``test_payload_files_present`` above.
 
     That test can only ever see the source tree -- it cannot catch a payload
@@ -571,34 +571,7 @@ def test_wheel_contains_exactly_the_quality_payload(tmp_path: Path) -> None:
     ``make test-all-stages``, which already builds a wheel for the VM deploy
     step (negligible marginal cost there).
     """
-    if shutil.which("uv") is None:
-        pytest.skip("uv not on PATH -- cannot build a wheel")
-
-    repo_root = Path(__file__).resolve().parent.parent
-    out_dir = tmp_path / "dist"
-    result = subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(out_dir), str(repo_root)],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if result.returncode != 0:
-        # Any non-zero exit lands here, including a genuine packaging
-        # regression, not just a truly unavailable/broken backend -- warn
-        # loudly rather than skip in silence, so a real regression hiding
-        # behind this skip stays visible in the run's warnings summary.
-        warnings.warn(
-            f"uv build failed (exit {result.returncode}); skipping rather than "
-            "failing on the assumption this is an environment issue -- if it "
-            f"isn't, this may be masking a real packaging regression.\n"
-            f"stderr:\n{result.stderr[-2000:]}",
-            stacklevel=2,
-        )
-        pytest.skip("uv build failed -- see the warnings summary for stderr")
-
-    wheels = sorted(out_dir.glob("*.whl"))
-    assert wheels, "uv build reported success but produced no wheel"
-    wheel = wheels[-1]
+    wheel = built_wheel
 
     prefix = "clarinet/quality/"
     with zipfile.ZipFile(wheel) as zf:
