@@ -450,14 +450,17 @@ class ConfigurationError(ClarinetError):
 
 
 class ConfigLoadError(ConfigurationError):
-    """Raised when project custom code (a ``plan/`` ``.py`` file) fails to import.
+    """Raised when project custom code (a ``plan/`` ``.py`` file) fails to import,
+    or when the config root itself is missing or not a directory
+    (:class:`ConfigRootError`).
 
     Loaders raise this instead of silently returning an empty result, so a
     broken config file crashes startup (where the operator can fix it)
     rather than degrading into missing hydrators/validators/flows at runtime.
 
     Attributes:
-        path: The file that failed to load, when known.
+        path: The file that failed to load, or the rejected config root,
+            when known.
         kind: Human-readable label of what was being loaded
             (e.g. ``"flow file"``), used by :meth:`aggregate`.
         failures: Individual per-file errors when this instance was built by

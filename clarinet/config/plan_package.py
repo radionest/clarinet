@@ -87,9 +87,7 @@ def activate_plan_package(root: str | Path) -> None:
 
     if not resolved.is_dir():
         problem = "is not a directory" if resolved.exists() else "does not exist"
-        message = f"config root {resolved} {problem}"
-        logger.error(message)
-        raise ConfigRootError(message, path=resolved)
+        raise ConfigRootError(f"config root {resolved} {problem}", path=resolved)
 
     real = PathFinder.find_spec(PLAN_PACKAGE, None)
     if real is not None:

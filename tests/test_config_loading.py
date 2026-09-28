@@ -58,7 +58,9 @@ class TestPlanPackage:
         assert exc_info.value.path == resolved
         assert isinstance(exc_info.value, ConfigLoadError)
         assert pp.plan_root() is None  # nothing installed
-        assert any(r.levelname == "ERROR" and resolved in r.getMessage() for r in caplog.records)
+        # Callers surface the message (API StartupError banner, worker log) —
+        # the raise site must not log it a second time.
+        assert not any(r.levelname == "ERROR" for r in caplog.records)
 
     def test_reactivation_replaces_stale_anchor(self, tmp_path):
         from clarinet.config import plan_package as pp
