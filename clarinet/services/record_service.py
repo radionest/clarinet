@@ -32,6 +32,7 @@ from clarinet.services.record_lifecycle import (
     Assign,
     Claim,
     Command,
+    Create,
     Edit,
     Effect,
     Fail,
@@ -40,9 +41,11 @@ from clarinet.services.record_lifecycle import (
     Restart,
     SetStatus,
     Submit,
+    TypeRules,
     Unassign,
     Unblock,
     decide,
+    decide_create,
     needs_inputs,
 )
 from clarinet.utils.logger import logger
@@ -563,69 +566,87 @@ class RecordService:
         """
         decide(cmd, RecordSnapshot.of(record), actor)
 
-    async def create_record(self, record: Record, *, actor_id: UUID | None = None) -> Record:
+    async def create_record(self, record: Record, *, actor: Actor) -> Record:
         """Create a record with file validation, blocking, and RecordFlow trigger.
 
-        When ``parent_record_id`` is set, the parent is validated to exist
-        (raises ``RecordNotFoundError`` otherwise). ``user_id`` is inherited
-        from the parent only when the record's type has
+        The requested status must be pending (or preparing for admins and
+        system actors), a non-admin person may name only themselves or
+        nobody as the owner — refused before the INSERT (``decide_create``)
+        — and an owner, given or inherited from the parent, must hold the
+        type's role or be a superuser (409 ``OWNER_LACKS_ROLE``, every
+        actor). When ``parent_record_id`` is set, the parent is validated to
+        exist (raises ``RecordNotFoundError`` otherwise). ``user_id`` is
+        inherited from the parent only when the record's type has
         ``inherit_user_from_parent`` enabled and no explicit ``user_id`` was
         provided.
 
         Args:
             record: Record ORM instance to persist.
+            actor: Who is creating the record.
 
         Returns:
             Created record with relations loaded.
         """
+        record_type = await self.repo.get_record_type(record.record_type_name, with_files=False)
+        decide_create(
+            Create(status=record.status, owner_id=record.user_id), TypeRules.of(record_type), actor
+        )
         # Fetch parent up front: validates existence, drives opt-in user_id
         # inheritance, and feeds fallback file-pattern resolution below.
         parent_read = None
         if record.parent_record_id is not None:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
-            if record.user_id is None:
-                record_type = await self.repo.get_record_type(
-                    record.record_type_name, with_files=False
+            if (
+                record.user_id is None
+                and record_type.inherit_user_from_parent
+                and parent.user_id is not None
+            ):
+                # The route-level constraint check ran with user_id=None
+                # and could not see the inherited user — re-check here.
+                await self.repo.ensure_unique_by(
+                    record_type,
+                    user_id=parent.user_id,
+                    parent_record_id=record.parent_record_id,
+                    patient_id=record.patient_id,
+                    study_uid=record.study_uid,
+                    series_uid=record.series_uid,
                 )
-                if record_type.inherit_user_from_parent and parent.user_id is not None:
-                    # The route-level constraint check ran with user_id=None
-                    # and could not see the inherited user — re-check here.
-                    await self.repo.ensure_unique_by(
-                        record_type,
-                        user_id=parent.user_id,
-                        parent_record_id=record.parent_record_id,
-                        patient_id=record.patient_id,
-                        study_uid=record.study_uid,
-                        series_uid=record.series_uid,
-                    )
-                    record.user_id = parent.user_id
+                record.user_id = parent.user_id
+        if record.user_id is not None:
+            await self._ensure_can_own(record.user_id, record_type, status=None)
 
         record = await self.repo.create_with_relations(record)
+        assert record.id is not None  # persisted
 
-        # Validate input files
-        record_read = RecordRead.model_validate(record)
-        file_result = await validate_record_files(record_read, parent=parent_read)
-
+        file_result = await validate_record_files(
+            RecordRead.model_validate(record), parent=parent_read
+        )
+        auto_blocked = False
         if file_result is not None:
             if file_result.valid and file_result.matched_files:
-                await self.repo.set_files(record, file_result.matched_files)
-                record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
+                await self.repo.set_files(record, file_result.matched_files, commit=False)
             elif not file_result.valid and record.status != RecordStatus.preparing:
-                self._mark_audit(record.id, actor_id)
-                record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
-
+                # A miss means someone moved the new record first; the re-read shows it.
+                auto_blocked = await self.repo.write_transition(
+                    record.id,
+                    expected_status=record.status,
+                    expected_user_id=record.user_id,
+                    to=RecordStatus.blocked,
+                    owner=record.user_id,
+                )
+        record = await self.repo.get_with_relations(record.id, populate_existing=True)
         await self._record_event(
             record_id=record.id,
             kind="created",
-            actor_id=actor_id,
+            actor_id=audit_actor_id(actor),
             to_status=record.status,
             new_value={"record_type_name": record.record_type_name},
         )
-
-        # Fire status-change trigger for the initial status
+        await self.repo.session.commit()
+        if auto_blocked:
+            self._emit_record_updated(record, actor)
         await self._fire_status_change(record, old_status=None)
-
         return record
 
     async def update_status(

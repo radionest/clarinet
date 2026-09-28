@@ -187,7 +187,9 @@ async def test_mismatched_input_blocks_record_on_creation(
     _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
 
     service = RecordService(RecordRepository(test_session), engine=None)
-    record = await service.create_record(_record(seg_record_type.name, series))
+    record = await service.create_record(
+        _record(seg_record_type.name, series), actor=SystemActor(service_user_id=uuid4())
+    )
     assert record.status == RecordStatus.blocked
 
 
@@ -196,7 +198,9 @@ async def test_conforming_inputs_do_not_block(test_session, seg_record_type, ser
     _write(series_dir / "seg.nii")
 
     service = RecordService(RecordRepository(test_session), engine=None)
-    record = await service.create_record(_record(seg_record_type.name, series))
+    record = await service.create_record(
+        _record(seg_record_type.name, series), actor=SystemActor(service_user_id=uuid4())
+    )
     assert record.status != RecordStatus.blocked
 
 
@@ -210,7 +214,9 @@ async def test_check_files_unblocks_after_repair(test_session, seg_record_type, 
     _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
 
     service = RecordService(RecordRepository(test_session), engine=None)
-    record = await service.create_record(_record(seg_record_type.name, series))
+    record = await service.create_record(
+        _record(seg_record_type.name, series), actor=SystemActor(service_user_id=uuid4())
+    )
     assert record.status == RecordStatus.blocked
 
     _write(series_dir / "seg.nii")  # repaired onto the volume's grid
@@ -227,7 +233,9 @@ async def test_check_files_leaves_record_blocked_while_mismatched(
     _write(series_dir / "seg.nii", direction=_Z_FLIP, origin=(0.0, 0.0, 5.0))
 
     service = RecordService(RecordRepository(test_session), engine=None)
-    record = await service.create_record(_record(seg_record_type.name, series))
+    record = await service.create_record(
+        _record(seg_record_type.name, series), actor=SystemActor(service_user_id=uuid4())
+    )
 
     assert await service.check_files(record.id, actor=SystemActor(service_user_id=uuid4())) == (
         [],
@@ -250,7 +258,9 @@ async def test_validate_files_reports_mismatch_without_mutating(
     before_bytes = seg_path.read_bytes()
 
     service = RecordService(RecordRepository(test_session), engine=None)
-    record = await service.create_record(_record(seg_record_type.name, series))
+    record = await service.create_record(
+        _record(seg_record_type.name, series), actor=SystemActor(service_user_id=uuid4())
+    )
 
     response = await client.post(record_validate_files_url(record.id))
     assert response.status_code == 200
@@ -274,7 +284,9 @@ async def test_conform_action_never_repairs_an_input(
     before = seg_path.read_bytes()
 
     service = RecordService(RecordRepository(test_session), engine=None)
-    record = await service.create_record(_record(seg_record_type_conform.name, series))
+    record = await service.create_record(
+        _record(seg_record_type_conform.name, series), actor=SystemActor(service_user_id=uuid4())
+    )
 
     assert record.status == RecordStatus.blocked
     assert seg_path.read_bytes() == before  # untouched
@@ -300,7 +312,8 @@ async def test_preparing_to_pending_blocks_on_grid_mismatch(
 
     service = RecordService(RecordRepository(test_session), engine=None)
     record = await service.create_record(
-        _record(seg_record_type.name, series, status=RecordStatus.preparing)
+        _record(seg_record_type.name, series, status=RecordStatus.preparing),
+        actor=SystemActor(service_user_id=uuid4()),
     )
     assert record.status == RecordStatus.preparing  # creation-time blocking is skipped
 

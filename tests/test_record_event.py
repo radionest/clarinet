@@ -50,15 +50,18 @@ class TestRecordServiceAuditEvents:
 
     @pytest.mark.asyncio
     async def test_create_record_writes_created(self) -> None:
-        actor = uuid4()
+        actor = SystemActor(service_user_id=uuid4())
         record_mock = MagicMock()
         record_mock.id = 5
         record_mock.status = RecordStatus.pending
         record_mock.record_type_name = "test-rt"
         record_mock.parent_record_id = None
+        record_mock.user_id = None
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
         service, event_repo = _service(repo_mock)
 
         with (
@@ -68,7 +71,7 @@ class TestRecordServiceAuditEvents:
                 new=AsyncMock(return_value=None),
             ),
         ):
-            await service.create_record(record_mock, actor_id=actor)
+            await service.create_record(record_mock, actor=actor)
 
         event = _added_event(event_repo)
         assert event.kind == "created"

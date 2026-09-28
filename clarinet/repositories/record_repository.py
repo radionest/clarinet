@@ -739,27 +739,6 @@ class RecordRepository(BaseRepository[Record]):
             raise UserNotFoundError(user_id)
         return user
 
-    async def update_status(
-        self, record_id: int, new_status: RecordStatus
-    ) -> tuple[Record, RecordStatus]:
-        """Update record status.
-
-        Args:
-            record_id: Record ID
-            new_status: New status to set
-
-        Returns:
-            Tuple of (record with relations loaded, old status)
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
-        """
-        record = await self.get(record_id)
-        old_status = record.status
-        record.status = new_status
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
-
     async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Replace a record's data without touching its status or owner (prefill).
 

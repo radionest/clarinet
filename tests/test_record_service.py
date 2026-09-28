@@ -352,13 +352,18 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
         record_read_mock = MagicMock()
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -367,7 +372,7 @@ class TestCreateRecord:
             patched_read.model_validate.return_value = record_read_mock
             patched_vrf.return_value = None  # no input files defined
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
             repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
             patched_vrf.assert_awaited_once_with(record_read_mock, parent=None)
@@ -380,6 +385,8 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
         refreshed_mock = MagicMock()
         record_read_mock = MagicMock()
         refreshed_read_mock = MagicMock()
@@ -391,9 +398,11 @@ class TestCreateRecord:
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
         repo_mock.get_with_relations.return_value = refreshed_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -402,9 +411,11 @@ class TestCreateRecord:
             patched_read.model_validate.side_effect = [record_read_mock, refreshed_read_mock]
             patched_vrf.return_value = file_result_mock
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
-            repo_mock.set_files.assert_awaited_once_with(record_mock, {"input": "file.nii.gz"})
+            repo_mock.set_files.assert_awaited_once_with(
+                record_mock, {"input": "file.nii.gz"}, commit=False
+            )
             repo_mock.get_with_relations.assert_awaited_once()
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 refreshed_read_mock, None
@@ -417,8 +428,11 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
         blocked_mock = MagicMock()
         blocked_mock.status = RecordStatus.blocked
+        blocked_mock.record_type_name = "test-rt"
         record_read_mock = MagicMock()
         blocked_read_mock = MagicMock()
 
@@ -428,10 +442,13 @@ class TestCreateRecord:
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
-        repo_mock.update_status.return_value = (blocked_mock, RecordStatus.pending)
+        repo_mock.write_transition.return_value = True
+        repo_mock.get_with_relations.return_value = blocked_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -440,9 +457,15 @@ class TestCreateRecord:
             patched_read.model_validate.side_effect = [record_read_mock, blocked_read_mock]
             patched_vrf.return_value = file_result_mock
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
-            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.blocked)
+            repo_mock.write_transition.assert_awaited_once_with(
+                1,
+                expected_status=RecordStatus.pending,
+                expected_user_id=None,
+                to=RecordStatus.blocked,
+                owner=None,
+            )
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 blocked_read_mock, None
             )
@@ -455,6 +478,7 @@ class TestCreateRecord:
         record_mock.id = 1
         record_mock.parent_record_id = None
         record_mock.status = RecordStatus.preparing
+        record_mock.user_id = None
         record_read_mock = MagicMock()
 
         file_result_mock = MagicMock()
@@ -463,9 +487,12 @@ class TestCreateRecord:
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -474,9 +501,9 @@ class TestCreateRecord:
             patched_read.model_validate.return_value = record_read_mock
             patched_vrf.return_value = file_result_mock
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
-            repo_mock.update_status.assert_not_awaited()
+            repo_mock.write_transition.assert_not_awaited()
             engine_mock.handle_record_status_change.assert_awaited_once_with(record_read_mock, None)
             assert result == record_mock
 
@@ -486,11 +513,16 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
 
         service = RecordService(repo_mock, engine=None)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -499,7 +531,7 @@ class TestCreateRecord:
             patched_read.model_validate.return_value = MagicMock()
             patched_vrf.return_value = None
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
             repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
             assert result == record_mock

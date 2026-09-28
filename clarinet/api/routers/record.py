@@ -440,14 +440,28 @@ async def check_record_type_role(
         Depends(check_record_constraints),
         Depends(check_storage_path_admin_only),
     ],
+    responses={
+        404: {"description": "Unknown owner user_id"},
+        409: {
+            "description": "Initial status other than pending (or preparing for admins and "
+            "the service token); the owner, given or inherited, lacks the type's role "
+            "(code=OWNER_LACKS_ROLE); or a max_records/unique_by constraint"
+        },
+    },
 )
 async def add_record(
     new_record: RecordCreate,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     user: CurrentUserDep,
 ) -> RecordRead:
     """Create a new record.
+
+    Only ``status: pending`` may be requested (``preparing`` too for admins
+    and the service token) — 409 otherwise; a non-admin may name only
+    themselves or nobody as ``user_id`` — 403 otherwise; the owner, given or
+    inherited, must hold the type's role or be a superuser — 409
+    ``OWNER_LACKS_ROLE`` otherwise.
 
     If the RecordType defines required input files and they are not yet
     present, the record is created with ``blocked`` status instead of
@@ -457,7 +471,7 @@ async def add_record(
     parent record only if the RecordType has ``inherit_user_from_parent``
     enabled and no explicit ``user_id`` is provided.
     """
-    record = await service.create_record(Record(**new_record.model_dump()), actor_id=actor)
+    record = await service.create_record(Record(**new_record.model_dump()), actor=actor)
     return await mask_record(record, user, service.repo)
 
 

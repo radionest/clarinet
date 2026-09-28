@@ -431,12 +431,6 @@ class TestRecordRepository:
         assert len(records) >= 1
 
     @pytest.mark.asyncio
-    async def test_update_status(self, env):
-        rec, old_status = await env["repo"].update_status(env["record"].id, RecordStatus.inwork)
-        assert old_status == RecordStatus.pending
-        assert rec.status == RecordStatus.inwork
-
-    @pytest.mark.asyncio
     async def test_update_data(self, env):
         """update_data is data-only: status and owner are untouched (prefill)."""
         data = {"label": "positive"}

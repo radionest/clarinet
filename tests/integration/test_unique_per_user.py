@@ -585,6 +585,8 @@ class TestCreateRecordApiConstraint:
             status=RecordStatus.pending,
         )
         test_session.add(existing)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
         await test_session.commit()
 
         resp = await client.post(
