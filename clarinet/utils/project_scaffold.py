@@ -48,7 +48,7 @@ def scaffold_project(project_dir: Path) -> list[Path]:
         rel = item.relative_to(src).as_posix()
         target_rel = Path(SCAFFOLD_DOTFILES.get(rel, rel))
         target = project_dir / target_rel
-        if target.exists():
+        if target.exists() or target.is_symlink():  # a dangling link is kept, not written through
             kept.append(target_rel)
             continue
         target.parent.mkdir(parents=True, exist_ok=True)

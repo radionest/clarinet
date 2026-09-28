@@ -11,7 +11,7 @@ import pytest
 import clarinet
 from clarinet.exceptions.domain import ProjectScaffoldError
 from clarinet.utils import project_scaffold
-from clarinet.utils.project_scaffold import SCAFFOLD_DOTFILES, scaffold_project, scaffold_source_dir
+from clarinet.utils.project_scaffold import scaffold_project, scaffold_source_dir
 
 PACKAGE_ROOT = Path(clarinet.__file__).resolve().parent
 
@@ -40,7 +40,31 @@ def test_payload_lives_in_the_package_and_is_complete() -> None:
         "no dotfiles in the payload — a .gitignore there governs the wheel"
     )
     assert not (src / ".claude").exists()
-    assert SCAFFOLD_DOTFILES == {"gitignore": ".gitignore", "env.example": ".env.example"}
+
+
+def test_real_payload_scaffolds_with_dotted_names(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    assert scaffold_project(project) == []
+    dotted = {"gitignore": ".gitignore", "env.example": ".env.example"}
+    expected = {dotted.get(rel, rel) for rel in EXPECTED_PAYLOAD}
+    written = {p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file()}
+    assert expected <= written, f"missing: {expected - written}"
+    assert not (project / "gitignore").exists() and not (project / "env.example").exists()
+
+
+def test_dangling_symlink_target_is_kept_not_written_through(
+    fake_payload: Path, tmp_path: Path
+) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    outside = tmp_path / "outside.txt"
+    try:
+        (project / ".gitignore").symlink_to(outside)
+    except OSError as e:
+        pytest.skip(f"cannot create symlinks on this host: {e}")
+
+    assert Path(".gitignore") in scaffold_project(project)
+    assert not outside.exists()
 
 
 def test_settings_toml_is_production_shaped_without_api_base_url() -> None:
