@@ -62,6 +62,42 @@ pub fn record_page_title_falls_back_to_type_name_test() {
   make_record(42) |> render_record |> h1_text |> should.equal("liver_seg")
 }
 
+// A non-admin owner viewing their own "Assigned to" row must see their own
+// email, not cache.user_email's "…" loading placeholder — shared.cache.users
+// is only ever populated for admins (see execute.gleam init_effects).
+pub fn record_page_owner_sees_own_email_not_loading_placeholder_test() {
+  let owner =
+    models.User(
+      id: "owner-1",
+      email: "owner@example.com",
+      is_active: True,
+      is_superuser: False,
+      is_verified: True,
+      role_names: [],
+      capabilities: [],
+    )
+  let record =
+    models.Record(
+      ..make_record(42),
+      user_id: Some("owner-1"),
+      allowed_commands: ["unassign"],
+    )
+  let ctx =
+    shared.Shared(
+      ..make_shared(cache.put_record(cache.init(), record)),
+      user: Some(owner),
+    )
+  let #(model, _eff, _out) = execute.init("42", ctx)
+  let html =
+    execute.view(
+      execute.Model(..model, record_load_status: load_status.Loaded),
+      ctx,
+    )
+    |> element.to_string
+  html |> string.contains("owner@example.com") |> should.be_true
+  html |> string.contains("…") |> should.be_false
+}
+
 // --- Patient page ---
 
 pub fn patient_page_ends_with_delete_then_collapsed_activity_test() {

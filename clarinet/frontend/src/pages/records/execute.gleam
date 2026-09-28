@@ -326,6 +326,18 @@ fn is_admin_user(shared: Shared) -> Bool {
   }
 }
 
+// `shared.cache.users` is populated only for admins (ReloadUsers is fired
+// admin-only on load, see init_effects). A non-admin owner viewing their own
+// "Assigned to" row would otherwise see cache.user_email's "…" loading
+// placeholder forever, since that cache never gets filled for them — use the
+// viewer's own email from `shared.user` when the record's owner is the viewer.
+fn assignee_email(shared: Shared, uid: String) -> String {
+  case shared.user {
+    Some(u) if u.id == uid -> u.email
+    _ -> cache.user_email(shared.cache, uid)
+  }
+}
+
 fn load_record_probe_effect(record_id: String) -> Effect(Msg) {
   use dispatch <- effect.from
   records.get_record(record_id)
@@ -1982,7 +1994,7 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             html.dt([], [html.text("Assigned to:")]),
             html.dd([], case record.user_id {
               Some(uid) -> [
-                html.text(cache.user_email(shared.cache, uid)),
+                html.text(assignee_email(shared, uid)),
                 html.text(" "),
                 case permissions.can_release_record(record) {
                   True ->
