@@ -20,7 +20,7 @@ def test_explicit_api_base_url_wins() -> None:
 
 @pytest.mark.parametrize(
     ("host", "expected"),
-    [("0.0.0.0", "127.0.0.1"), ("::", "127.0.0.1"), ("10.0.0.5", "10.0.0.5"), ("::1", "[::1]")],
+    [("0.0.0.0", "127.0.0.1"), ("::", "[::1]"), ("10.0.0.5", "10.0.0.5"), ("::1", "[::1]")],
 )
 def test_derived_host(host: str, expected: str) -> None:
     assert _url(host=host) == f"http://{expected}:8111/api"

@@ -602,12 +602,13 @@ class Settings(BaseSettings):
         An explicit ``api_base_url`` wins. Set it behind a TLS-terminating
         proxy (so the client receives valid Secure cookies) or when workers run
         on another host. Otherwise it is derived from the bind: a wildcard host
-        is reached via loopback, and ``root_url`` is included because the app
+        is reached via the loopback of its family (``0.0.0.0`` → ``127.0.0.1``,
+        ``::`` → ``[::1]``), and ``root_url`` is included because the app
         is mounted under it (``create_app(root_path=...)``).
         """
         if self.api_base_url:
             return self.api_base_url
-        host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
+        host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(self.host, self.host)
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
         root = self.root_url.strip("/")
