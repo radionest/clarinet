@@ -35,7 +35,8 @@
 
 - **`clarinet init` has one path; `--template` / `--list-templates` are gone.**
   It copies the payload shipped inside the package (`clarinet/scaffold/`):
-  production-shaped `settings.toml`, a fully commented `settings.custom.toml`,
+  production-shaped `settings.toml` (bound to `127.0.0.1` while `debug = true`
+  and the default admin password apply), a fully commented `settings.custom.toml`,
   `.env.example`, `.gitignore`, the example `plan/`, the managed agent docs and
   the `.claude/CLAUDE.md` seed. `--template` read `examples/`, which is not in
   the wheel, so it failed from every pip install (#472). Existing files are
@@ -758,8 +759,9 @@
 ### Changed
 
 - **`effective_api_base_url` is derived from the bind.** Without an explicit
-  `api_base_url`, internal clients now call `http://127.0.0.1:<port><root_url>/api`
-  for a wildcard host (`0.0.0.0`, `::`), or `host` otherwise (IPv6 bracketed),
+  `api_base_url`, internal clients now call `http://<host>:<port><root_url>/api`,
+  with a wildcard host replaced by its loopback (`0.0.0.0` → `127.0.0.1`,
+  `::` → `[::1]`; IPv6 bracketed),
   and include `root_url`. The app answers both prefixed and unprefixed paths.
   Set `api_base_url` behind a TLS proxy or when workers run on another host.
 - **`overview.md` is a project-owned `.claude/CLAUDE.md` seed**, no longer a

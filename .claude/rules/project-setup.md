@@ -78,7 +78,7 @@ pipeline_enabled = true                         # Requires RabbitMQ
 frontend_enabled = true
 ```
 
-Internal clients call `http://<host>:<port><root_url>/api` (a wildcard host becomes `127.0.0.1`); set `api_base_url` only behind a TLS proxy or when workers run on another host.
+Internal clients call `http://<host>:<port><root_url>/api` (a wildcard host becomes its loopback: `0.0.0.0` → `127.0.0.1`, `::` → `[::1]`); set `api_base_url` only behind a TLS proxy or when workers run on another host.
 
 `config_tasks_path` defaults to `./plan/` (it was `./tasks/` in earlier
 releases). A project that kept the old layout and never set the option must add

@@ -72,7 +72,7 @@ def test_settings_toml_is_production_shaped_without_api_base_url() -> None:
     expected = {
         "root_url": "/my_project",
         "port": 8111,
-        "host": "0.0.0.0",
+        "host": "127.0.0.1",
         "debug": True,
         "database_driver": "postgresql+asyncpg",
         "recordflow_enabled": True,
