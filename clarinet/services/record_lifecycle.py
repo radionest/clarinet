@@ -162,11 +162,20 @@ class RecordSnapshot:
 
     @classmethod
     def of(cls, record: Record) -> RecordSnapshot:
-        """Snapshot a record loaded with its ``record_type``."""
+        """Snapshot a record loaded with its ``record_type``.
+
+        ``RecordStatus(record.status)`` normalises: SQLModel ``table=True`` classes
+        skip pydantic coercion on direct construction (``Record(status="pending", ...)``,
+        common in test fixtures), so an identity-mapped ``Record`` can carry a plain
+        ``str`` in ``status`` instead of the ``RecordStatus`` enum member — invisible
+        everywhere else because ``RecordStatus`` is itself a ``str`` subclass, until
+        something calls ``.value`` on it (every 409 message in this module does).
+        ``RecordStatus(x)`` is idempotent for an already-correct enum member.
+        """
         assert record.id is not None  # persisted record
         return cls(
             record_id=record.id,
-            status=record.status,
+            status=RecordStatus(record.status),
             user_id=record.user_id,
             finished_at=record.finished_at,
             rules=TypeRules.of(record.record_type),
