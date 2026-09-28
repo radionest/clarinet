@@ -49,6 +49,7 @@
   | omits `config_tasks_path` and keeps `tasks/` | add `config_tasks_path = "./tasks/"` or rename the directory to `plan/` |
   | is in TOML mode and never created its folder | create it before starting |
   | used `clarinet init --template research` | use `clarinet init` |
+  | was scaffolded with `--template research` (header-less `.claude/rules/{anonymization,definitions,schemas,scripting,slicer,utils,workflows}.md`) | delete those copies, then run `clarinet agent init` |
   | was scaffolded from the old template | `database_login` → `database_username`, `CLARINET_DATABASE_LOGIN` → `CLARINET_DATABASE_USERNAME`; replace `${VAR}` strings with real values or env vars |
   | sets `CLARINET_JWT_SECRET_KEY` | rename it to `CLARINET_SECRET_KEY` |
   | uses `clarinet agent init` docs | run `clarinet agent update` once (moves `overview.md` to `.claude/CLAUDE.md`, prunes stale managed docs) |
@@ -745,7 +746,7 @@
   `anon scrub-db` operator commands. `workflows.md` § Built-in tasks gains
   `anonymize_study_pipeline` and `prefetch_dicom_web`, and now spells out that task-name
   collisions are on the **bare function name** (`{namespace}:{function_name}`, not
-  module-qualified). The `research` project template ships the same doc.
+  module-qualified). `clarinet init` installs the same doc.
 
 ### Improved
 
