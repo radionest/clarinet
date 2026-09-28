@@ -15,6 +15,7 @@ from tests.conftest import (
     create_authenticated_client,
     create_mock_user_with_role,
 )
+from tests.utils.lifecycle import force_status
 from tests.utils.urls import RECORD_TYPES, RECORDS_BASE
 
 
@@ -111,11 +112,7 @@ async def test_update_record_status(test_session, test_user, test_patient, test_
     await test_session.commit()
 
     # Update status
-    record.status = RecordStatus.finished
-    record.finished_at = datetime.now(UTC)
-    test_session.add(record)
-    await test_session.commit()
-    await test_session.refresh(record)
+    await force_status(test_session, record, RecordStatus.finished, finished_at=datetime.now(UTC))
 
     # Check changes
     updated_record = await test_session.get(Record, record.id)
@@ -566,9 +563,7 @@ async def test_prefill_patch_merges_data(client, test_session, _pending_record):
 @pytest.mark.asyncio
 async def test_prefill_rejects_finished_record(client, test_session, _pending_record):
     """Prefill returns 409 for a finished record."""
-    _pending_record.status = RecordStatus.finished
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.finished)
 
     response = await client.post(
         f"/api/records/{_pending_record.id}/data/prefill",
@@ -580,9 +575,7 @@ async def test_prefill_rejects_finished_record(client, test_session, _pending_re
 @pytest.mark.asyncio
 async def test_prefill_rejects_inwork_record(client, test_session, _pending_record):
     """Prefill returns 409 for an inwork record."""
-    _pending_record.status = RecordStatus.inwork
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.inwork)
 
     response = await client.post(
         f"/api/records/{_pending_record.id}/data/prefill",
@@ -594,9 +587,7 @@ async def test_prefill_rejects_inwork_record(client, test_session, _pending_reco
 @pytest.mark.asyncio
 async def test_prefill_allows_blocked_record(client, test_session, _pending_record):
     """Prefill works on blocked records."""
-    _pending_record.status = RecordStatus.blocked
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.blocked)
 
     response = await client.post(
         f"/api/records/{_pending_record.id}/data/prefill",
@@ -634,9 +625,7 @@ async def test_prefill_partial_validation_rejects_type_errors(client, _pending_r
 @pytest.mark.asyncio
 async def test_prefill_allows_preparing_record(client, test_session, _pending_record):
     """Prefill works on preparing records without changing status."""
-    _pending_record.status = RecordStatus.preparing
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.preparing)
 
     response = await client.post(
         f"{RECORDS_BASE}/{_pending_record.id}/data/prefill",
@@ -649,9 +638,7 @@ async def test_prefill_allows_preparing_record(client, test_session, _pending_re
 @pytest.mark.asyncio
 async def test_submit_rejects_preparing_record(client, test_session, _pending_record):
     """Submit returns 409 for a preparing record."""
-    _pending_record.status = RecordStatus.preparing
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.preparing)
 
     response = await client.post(
         f"{RECORDS_BASE}/{_pending_record.id}/data",
@@ -682,9 +669,7 @@ async def test_create_record_with_preparing_status(
 @pytest.mark.asyncio
 async def test_status_update_preparing_to_pending(client, test_session, _pending_record):
     """PATCH /status preparing → pending succeeds when the type has no file registry."""
-    _pending_record.status = RecordStatus.preparing
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.preparing)
 
     response = await client.patch(
         f"{RECORDS_BASE}/{_pending_record.id}/status",
@@ -702,9 +687,7 @@ async def test_check_files_does_not_touch_preparing_record(client, test_session,
     if check-files ever resolved working dirs before the preparing early-return,
     this would 500 (KeyError on the level lookup).
     """
-    _pending_record.status = RecordStatus.preparing
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.preparing)
 
     response = await client.post(f"{RECORDS_BASE}/{_pending_record.id}/check-files")
     assert response.status_code == 200
@@ -717,9 +700,7 @@ async def test_check_files_does_not_touch_preparing_record(client, test_session,
 @pytest.mark.asyncio
 async def test_status_update_preparing_to_inwork_conflict(client, test_session, _pending_record):
     """PATCH /status preparing → inwork returns 409 — must exit via pending."""
-    _pending_record.status = RecordStatus.preparing
-    test_session.add(_pending_record)
-    await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.preparing)
 
     response = await client.patch(
         f"{RECORDS_BASE}/{_pending_record.id}/status",
@@ -734,11 +715,10 @@ async def test_status_update_preparing_to_inwork_conflict(client, test_session, 
 @pytest.mark.asyncio
 async def test_assign_user_keeps_preparing_status(client, test_session, test_user, _pending_record):
     """Assigning a user to a preparing record sets the owner but does not move it."""
-    _pending_record.status = RecordStatus.preparing
-    test_session.add(_pending_record)
     test_user.is_superuser = True  # pass the new-owner role check (type has role_name=None)
     test_session.add(test_user)
     await test_session.commit()
+    await force_status(test_session, _pending_record, RecordStatus.preparing)
 
     response = await client.patch(
         f"{RECORDS_BASE}/{_pending_record.id}/user",

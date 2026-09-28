@@ -32,7 +32,6 @@ from starlette.responses import Response
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
     ActorDep,
-    AuditActorDep,
     AuthorizedRecordDep,
     ClientStoragePathDep,
     CurrentUserDep,
@@ -570,7 +569,7 @@ async def update_record_context_info(
     service: RecordServiceDep,
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
     """Replace ``context_info`` (markdown source) on a record.
 
@@ -579,7 +578,7 @@ async def update_record_context_info(
     unassigned. Pass ``null`` to clear the field. The rendered HTML is
     available on the response as ``context_info_html``.
     """
-    record = await service.update_context_info(record_id, body.context_info, actor_id=actor)
+    record = await service.update_context_info(record_id, body.context_info, actor=actor)
     return await mask_record(record, user, service.repo)
 
 

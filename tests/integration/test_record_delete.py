@@ -15,6 +15,7 @@ from tests.utils.factories import (
     make_study,
     seed_record,
 )
+from tests.utils.lifecycle import force_status
 from tests.utils.urls import ADMIN_RECORDS
 
 
@@ -189,8 +190,7 @@ class TestDeleteRecordCascade:
 
         # Put one child into inwork state
         child_a_db = await test_session.get(Record, child_a.id)
-        child_a_db.status = RecordStatus.inwork
-        await test_session.commit()
+        await force_status(test_session, child_a_db, RecordStatus.inwork)
 
         resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 409
@@ -207,8 +207,7 @@ class TestDeleteRecordCascade:
         root = cascade_env["root"]
 
         root_db = await test_session.get(Record, root.id)
-        root_db.status = RecordStatus.inwork
-        await test_session.commit()
+        await force_status(test_session, root_db, RecordStatus.inwork)
 
         resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 409

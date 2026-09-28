@@ -81,8 +81,7 @@ async def _seed_finished_record(
 ) -> Record:
     """Create a finished record and pin ``finished_at`` deterministically.
 
-    The status event listener sets ``finished_at`` to "now" during
-    construction; the explicit assignment below overrides it.
+    ``Record(...)`` does not stamp ``finished_at``; set it explicitly.
     """
     record = Record(
         patient_id=patient.id,

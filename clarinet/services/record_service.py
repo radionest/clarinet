@@ -12,7 +12,6 @@ from clarinet.exceptions.domain import (
     AuthorizationError,
     BusinessRuleViolationError,
     ConcurrentTransitionError,
-    RecordEditLockedError,
     RecordOwnerLacksRoleError,
     TransitionNotAllowedError,
     UnsafePathError,
@@ -20,7 +19,7 @@ from clarinet.exceptions.domain import (
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.exceptions.http import UNPROCESSABLE_ENTITY
 from clarinet.files import Files, join_within
-from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
+from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.actor import Actor, audit_actor_id, can_access
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -51,40 +50,12 @@ from clarinet.services.record_lifecycle import (
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
-    from clarinet.models import User
     from clarinet.models.record import RecordType
     from clarinet.models.record_event import RecordEventKind
     from clarinet.repositories.record_event_repository import RecordEventRepository
     from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
-
-
-def ensure_record_editable(record: Record, acting_user: User | None) -> None:
-    """Raise when *acting_user* may not change a submitted (finished) record.
-
-    Enforces ``RecordType.editable`` / ``RecordType.edit_window_days``.
-    ``acting_user=None`` marks a trusted caller — in-process service calls
-    (RecordFlow triggers, check-files auto-unblock) and admin endpoints that
-    deliberately bypass the lock. Superusers (including pipeline service
-    tokens) also bypass. Requires ``record.record_type`` to be loaded.
-
-    Raises:
-        RecordEditLockedError: 409 via the BusinessRuleViolationError handler.
-    """
-    if acting_user is None or acting_user.is_superuser:
-        return
-    if is_record_editable(record.status, record.finished_at, record.record_type):
-        return
-    if not record.record_type.editable:
-        raise RecordEditLockedError(
-            f"Record {record.id}: record type '{record.record_type_name}' "
-            f"does not allow changing submitted records."
-        )
-    raise RecordEditLockedError(
-        f"Record {record.id}: editing window of "
-        f"{record.record_type.edit_window_days} days after submission has passed."
-    )
 
 
 def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
@@ -232,8 +203,8 @@ class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
     When *event_repo* is provided, every mutation also appends a
-    :class:`RecordEvent` audit row (``actor_id=None`` marks system /
-    worker / RecordFlow calls — see ``get_audit_actor``).
+    :class:`RecordEvent` audit row (``actor_id=None`` marks a system actor —
+    see ``models/actor.py``).
 
     Args:
         record_repo: Record repository instance.
@@ -1001,9 +972,7 @@ class RecordService:
 
         return list(changed), new_checksums
 
-    async def delete_record_cascade(
-        self, record_id: int, *, actor_id: UUID | None = None
-    ) -> tuple[list[int], int]:
+    async def delete_record_cascade(self, record_id: int, *, actor: Actor) -> tuple[list[int], int]:
         """Delete a record, all its descendants, and their OUTPUT files.
 
         Check-and-delete runs inside a single DB transaction with row locks
@@ -1068,7 +1037,7 @@ class RecordService:
             await self._record_event(
                 record_id=rid,
                 kind="deleted",
-                actor_id=actor_id,
+                actor_id=audit_actor_id(actor),
                 from_status=snapshot.status,
                 old_value={
                     "record_id": rid,
@@ -1225,9 +1194,7 @@ class RecordService:
             )
         return paths
 
-    async def clear_output_files(
-        self, record_id: int, *, actor_id: UUID | None = None
-    ) -> tuple[list[str], int]:
+    async def clear_output_files(self, record_id: int, *, actor: Actor) -> tuple[list[str], int]:
         """Delete OUTPUT files from disk and their RecordFileLink rows.
 
         Only allowed for records NOT in ``finished`` status. Intended for
@@ -1271,7 +1238,7 @@ class RecordService:
         await self._record_event(
             record_id=record_id,
             kind="files_cleared",
-            actor_id=actor_id,
+            actor_id=audit_actor_id(actor),
             new_value={"files": deleted_files, "links": deleted_links},
         )
 
@@ -1282,20 +1249,21 @@ class RecordService:
         return deleted_files, deleted_links
 
     async def update_context_info(
-        self, record_id: int, context_info: str | None, *, actor_id: UUID | None = None
+        self, record_id: int, context_info: str | None, *, actor: Actor
     ) -> Record:
         """Replace ``context_info`` on a record with an audit event.
 
         Args:
             record_id: Record ID.
             context_info: New markdown source (``None`` clears the field).
-            actor_id: Audit actor; ``None`` marks a system/worker call.
+            actor: Who is making the change.
 
         Returns:
             Updated record with relations loaded.
         """
         record = await self.repo.get(record_id)
         old_value = record.context_info
+        actor_id = audit_actor_id(actor)
         self._mark_audit(record_id, actor_id)
         updated = await self.repo.update_fields(record_id, {"context_info": context_info})
         await self._record_event(

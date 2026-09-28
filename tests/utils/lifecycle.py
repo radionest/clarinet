@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from clarinet.models import Record, RecordRead, RecordStatus, User
 from clarinet.models.actor import HumanActor, SystemActor
@@ -19,6 +21,21 @@ from tests.utils.factories import make_record_type, seed_record
 
 ROLE = "lc-role"
 OTHER_ROLE = "lc-other-role"
+
+
+async def force_status(
+    session: AsyncSession, record: Record, status: RecordStatus, **columns: object
+) -> None:
+    """Test setup only: put a saved record in ``status`` without the lifecycle.
+
+    The ORM guard refuses ``record.status = …`` on a saved record; this goes
+    around it with a Core UPDATE, commits and refreshes ``record``.
+    """
+    await session.execute(
+        update(Record).where(col(Record.id) == record.id).values(status=status, **columns)
+    )
+    await session.commit()
+    await session.refresh(record)
 
 
 def human(user: User) -> HumanActor:

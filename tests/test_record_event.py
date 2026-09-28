@@ -1,13 +1,12 @@
-"""Unit tests for RecordService audit event writes and the audit actor dependency."""
+"""Unit tests for RecordService audit event writes."""
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from clarinet.models import RecordStatus
-from clarinet.models.actor import SystemActor
+from clarinet.models.actor import HumanActor, SystemActor
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.record_service import RecordService
 
@@ -81,7 +80,7 @@ class TestRecordServiceAuditEvents:
 
     @pytest.mark.asyncio
     async def test_clear_output_files_writes_files_cleared(self) -> None:
-        actor = uuid4()
+        actor = HumanActor(user_id=uuid4(), is_superuser=True, role_names=frozenset())
         record_mock = MagicMock()
         record_mock.status = RecordStatus.failed
         record_mock.parent_record_id = None
@@ -95,7 +94,7 @@ class TestRecordServiceAuditEvents:
             patch("clarinet.services.record_service.RecordRead"),
             patch.object(service, "_collect_output_file_paths", new=AsyncMock(return_value=[])),
         ):
-            await service.clear_output_files(1, actor_id=actor)
+            await service.clear_output_files(1, actor=actor)
 
         event = _added_event(event_repo)
         assert event.kind == "files_cleared"
@@ -103,7 +102,7 @@ class TestRecordServiceAuditEvents:
 
     @pytest.mark.asyncio
     async def test_update_context_info_keeps_old_and_new(self) -> None:
-        actor = uuid4()
+        actor = HumanActor(user_id=uuid4(), is_superuser=True, role_names=frozenset())
         record_mock = MagicMock()
         record_mock.context_info = "old text"
 
@@ -112,57 +111,10 @@ class TestRecordServiceAuditEvents:
         repo_mock.update_fields.return_value = record_mock
         service, event_repo = _service(repo_mock)
 
-        await service.update_context_info(1, "new text", actor_id=actor)
+        await service.update_context_info(1, "new text", actor=actor)
 
         repo_mock.update_fields.assert_awaited_once_with(1, {"context_info": "new text"})
         event = _added_event(event_repo)
         assert event.kind == "context_info_updated"
         assert event.old_value == {"context_info": "old text"}
         assert event.new_value == {"context_info": "new text"}
-
-
-class TestGetAuditActor:
-    def _request(self, headers: dict[str, str]) -> SimpleNamespace:
-        return SimpleNamespace(headers=headers, client=SimpleNamespace(host="10.0.0.1"))
-
-    @pytest.mark.asyncio
-    async def test_browser_user_is_actor(self) -> None:
-        from clarinet.api.dependencies import get_audit_actor
-
-        user = MagicMock()
-        user.id = uuid4()
-        with patch("clarinet.api.auth_config.settings") as settings_mock:
-            settings_mock.effective_service_token = "secret-token"
-            assert await get_audit_actor(self._request({}), user) == user.id
-
-    @pytest.mark.asyncio
-    async def test_service_token_maps_to_none(self) -> None:
-        from clarinet.api.dependencies import get_audit_actor
-
-        user = MagicMock()
-        user.id = uuid4()
-        with patch("clarinet.api.auth_config.settings") as settings_mock:
-            settings_mock.effective_service_token = "secret-token"
-            settings_mock.login_lockout_minutes = 0
-            request = self._request({"X-Internal-Token": "secret-token"})
-            assert await get_audit_actor(request, user) is None
-
-    @pytest.mark.asyncio
-    async def test_wrong_token_falls_back_to_user(self) -> None:
-        from clarinet.api.dependencies import get_audit_actor
-
-        user = MagicMock()
-        user.id = uuid4()
-        with patch("clarinet.api.auth_config.settings") as settings_mock:
-            settings_mock.effective_service_token = "secret-token"
-            settings_mock.login_lockout_minutes = 0
-            request = self._request({"X-Internal-Token": "wrong"})
-            assert await get_audit_actor(request, user) == user.id
-
-    def test_empty_effective_token_never_matches(self) -> None:
-        from clarinet.api.auth_config import is_service_request
-
-        with patch("clarinet.api.auth_config.settings") as settings_mock:
-            settings_mock.effective_service_token = ""
-            assert is_service_request(self._request({"X-Internal-Token": ""})) is False
-            assert is_service_request(self._request({"X-Internal-Token": "x"})) is False

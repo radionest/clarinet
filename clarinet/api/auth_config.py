@@ -547,7 +547,7 @@ def is_service_request(request: Request) -> bool:
     that is not locked out for guessing it (see the throttle note below).
 
     Single source of truth for service-token detection — used by auth
-    (``_get_service_user``) and audit actor resolution (``get_audit_actor``)
+    (``_get_service_user``) and the record actor (``get_actor``)
     so the two cannot drift apart.
     """
     effective_token = settings.effective_service_token

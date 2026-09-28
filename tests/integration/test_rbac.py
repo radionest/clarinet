@@ -30,6 +30,7 @@ from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.database import get_async_session
 from tests.utils.factories import make_patient, make_record_type
+from tests.utils.lifecycle import force_status
 from tests.utils.test_helpers import PatientFactory, RecordFactory
 from tests.utils.urls import (
     ADMIN_RECORD_EVENTS,
@@ -503,9 +504,7 @@ async def test_patch_record_assigned_to_other_user_forbidden(
     test_session, role_a_client, record_role_a, superuser
 ):
     """Same-role caller cannot PATCH a record assigned to someone else (MutableRecordDep)."""
-    record_role_a.user_id = superuser.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=superuser.id)
 
     response = await role_a_client.patch(f"/api/records/{record_role_a.id}", json={})
     assert response.status_code == 403
@@ -516,9 +515,7 @@ async def test_assign_user_cannot_take_over_other_users_record(
     test_session, role_a_client, record_role_a, superuser, user_with_role_a
 ):
     """A same-role caller cannot re-target a colleague's record to themselves (#620)."""
-    record_role_a.user_id = superuser.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=superuser.id)
 
     response = await role_a_client.patch(
         f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
@@ -554,9 +551,7 @@ async def test_assign_user_cannot_claim_finished_record(
     test_session, role_a_client, record_role_a, user_with_role_a
 ):
     """A non-admin cannot claim a finished record: claim allows pending/inwork only (#629)."""
-    record_role_a.status = RecordStatus.finished
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, RecordStatus.finished)
 
     response = await role_a_client.patch(
         f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
@@ -575,9 +570,7 @@ async def test_admin_role_may_reassign_other_users_record(
     user_with_role_a,
 ):
     test_session.add(UserRolesLink(user_id=admin_role_user.id, role_name=role_a.name))
-    record_role_a.user_id = superuser.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=superuser.id)
     await test_session.refresh(admin_role_user, ["roles"])
 
     response = await admin_role_client.patch(
@@ -591,9 +584,7 @@ async def test_admin_role_may_reassign_other_users_record(
 async def test_bulk_status_on_other_users_record_forbidden(
     test_session, role_a_client, record_role_a, superuser
 ):
-    record_role_a.user_id = superuser.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=superuser.id)
 
     response = await role_a_client.patch(
         f"{RECORDS_BULK_STATUS}?new_status=failed", json=[record_role_a.id]
@@ -605,9 +596,9 @@ async def test_bulk_status_on_other_users_record_forbidden(
 async def test_role_holder_may_fail_own_record(
     test_session, role_a_client, record_role_a, user_with_role_a
 ):
-    record_role_a.user_id = user_with_role_a.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(
+        test_session, record_role_a, record_role_a.status, user_id=user_with_role_a.id
+    )
 
     response = await role_a_client.post(
         f"{RECORDS_BASE}/{record_role_a.id}/fail", json={"reason": "test"}
@@ -628,9 +619,7 @@ async def test_role_holder_may_fail_own_record(
 async def test_mutations_on_other_users_record_forbidden(
     test_session, role_a_client, record_role_a, superuser, action, body
 ):
-    record_role_a.user_id = superuser.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=superuser.id)
 
     response = await role_a_client.post(f"{RECORDS_BASE}/{record_role_a.id}/{action}", json=body)
     assert response.status_code == 403
@@ -650,9 +639,7 @@ async def test_admin_role_may_mutate_other_users_record(
 ):
     """A non-superuser admin holding the type's role keeps the frontend's Fail/Restart."""
     test_session.add(UserRolesLink(user_id=admin_role_user.id, role_name=role_a.name))
-    record_role_a.user_id = superuser.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=superuser.id)
     await test_session.refresh(admin_role_user, ["roles"])
 
     response = await admin_role_client.post(
@@ -913,9 +900,9 @@ async def test_my_records_endpoint_filtered_by_role(
     Records assigned to other roles should not appear.
     """
     # Assign record_role_a to user_with_role_a
-    record_role_a.user_id = user_with_role_a.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(
+        test_session, record_role_a, record_role_a.status, user_id=user_with_role_a.id
+    )
 
     response = await role_a_client.post(
         "/api/records/find",
@@ -994,9 +981,9 @@ async def test_my_records_includes_unassigned_matching_role(
 ):
     """POST /api/records/find includes both assigned and unassigned records matching the user's role."""
     # Assign record_role_a to user
-    record_role_a.user_id = user_with_role_a.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(
+        test_session, record_role_a, record_role_a.status, user_id=user_with_role_a.id
+    )
 
     # Create a second unassigned record with same role
     unassigned_record = Record(
@@ -1048,9 +1035,7 @@ async def test_my_records_excludes_other_user_assigned_records(
     await test_session.commit()
 
     # Assign record_role_a to the other user
-    record_role_a.user_id = other_user_id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=other_user_id)
 
     response = await role_a_client.post("/api/records/find", json={"wo_user": True})
     assert response.status_code == 200
@@ -1475,9 +1460,7 @@ async def test_slicer_record_own_role_passes_authorization(
     )
     test_session.add(owner)
     await test_session.commit()
-    record_role_a.user_id = owner.id
-    test_session.add(record_role_a)
-    await test_session.commit()
+    await force_status(test_session, record_role_a, record_role_a.status, user_id=owner.id)
 
     # The type has no slicer_script, so the endpoint fails later — but not on authorization.
     response = await role_a_client.post(SLICER_RECORD_OPEN.format(record_id=record_role_a.id))

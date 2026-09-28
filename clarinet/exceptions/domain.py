@@ -347,6 +347,14 @@ class RecordParentRequiredError(RecordConstraintViolationError):
     error_code: ClassVar[str] = "PARENT_REQUIRED"
 
 
+class DirectRecordWriteError(ClarinetError):
+    """A saved record's ``status`` or ``user_id`` was assigned outside the lifecycle gateway.
+
+    A programming error: after the INSERT only ``RecordService`` changes them,
+    through ``RecordRepository.write_transition``.
+    """
+
+
 class RecordLifecycleError(BusinessRuleViolationError):
     """A record command refused by its state, the edit lock, a race or the new owner (409).
 

@@ -8,6 +8,7 @@ and clears it on teardown.
 import pytest
 import pytest_asyncio
 
+from clarinet.models.actor import HumanActor
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.record_event_repository import RecordEventRepository
@@ -203,7 +204,9 @@ async def test_delete_record_cascade_emits_enriched(test_session, sse_bus, hiera
         engine=None,
         event_repo=RecordEventRepository(test_session),
     )
-    await service.delete_record_cascade(rec.id)
+    await service.delete_record_cascade(
+        rec.id, actor=HumanActor(user_id=owner.id, is_superuser=True, role_names=frozenset())
+    )
 
     deleted = _entity_events(sse_bus, "record", "deleted")
     assert len(deleted) == 1

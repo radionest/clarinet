@@ -26,6 +26,7 @@ from tests.utils.factories import (
     make_study,
     seed_record,
 )
+from tests.utils.lifecycle import force_status
 from tests.utils.urls import RECORDS_BASE
 
 
@@ -221,9 +222,7 @@ async def test_owner_can_update(test_session, test_settings, env):
     """Non-superuser whose id matches record.user_id is allowed."""
     user = await _make_user(test_session, role="ctx-tester")
     record = env["record"]
-    record.user_id = user.id
-    test_session.add(record)
-    await test_session.commit()
+    await force_status(test_session, record, record.status, user_id=user.id)
 
     setup_auth_overrides(user, test_session, test_settings)
     transport = ASGITransport(app=app)
@@ -269,9 +268,7 @@ async def test_non_owner_with_role_match_forbidden(test_session, test_settings, 
     other = await _make_user(test_session, role="ctx-tester")
 
     record = env["record"]
-    record.user_id = owner.id
-    test_session.add(record)
-    await test_session.commit()
+    await force_status(test_session, record, record.status, user_id=owner.id)
 
     setup_auth_overrides(other, test_session, test_settings)
     transport = ASGITransport(app=app)

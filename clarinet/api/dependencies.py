@@ -5,7 +5,6 @@ Dependencies for FastAPI application with enhanced dependency injection.
 from collections.abc import Awaitable, Callable
 from typing import Annotated, cast
 from urllib.parse import unquote
-from uuid import UUID
 
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Path, Query, Request
@@ -234,25 +233,6 @@ PipelineTaskRunRepositoryDep = Annotated[
     PipelineTaskRunRepository, Depends(get_pipeline_task_run_repository)
 ]
 RecordEventRepositoryDep = Annotated[RecordEventRepository, Depends(get_record_event_repository)]
-
-
-async def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
-    """Resolve the audit actor for the current request.
-
-    ``None`` marks a system call: requests authenticated with a valid
-    ``X-Internal-Token`` (pipeline workers, RecordFlow engine) act as the
-    admin user but must not be attributed to a human in the audit trail.
-
-    ``async`` although it never awaits: a plain ``def`` dependency runs in the
-    threadpool, and ``is_service_request`` touches the failed-auth ``TTLCache``,
-    which is not thread-safe and is otherwise used from the event loop only.
-    """
-    if is_service_request(request):
-        return None
-    return user.id
-
-
-AuditActorDep = Annotated[UUID | None, Depends(get_audit_actor)]
 
 
 async def get_actor(request: Request, user: CurrentUserDep) -> Actor:

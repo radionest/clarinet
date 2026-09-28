@@ -20,13 +20,14 @@ from pydantic import (
     model_validator,
 )
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, event, func
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
 from clarinet.utils.pagination import SortOrder
 
-from ..exceptions import ValidationError
+from ..exceptions import DirectRecordWriteError, ValidationError
 from .base import BaseModel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientInfo
@@ -266,19 +267,25 @@ class Record(RecordBase, table=True):
                 )
 
 
-# Add event listener to update timestamps based on status changes
 @event.listens_for(Record.status, "set")
-def set_record_timestamps(target: Record, value: Any, oldvalue: Any, _initiator: Any) -> None:
-    """Update record timestamps when status changes."""
-    if value == oldvalue:
-        return
-    match value:
-        case RecordStatus.inwork:
-            target.started_at = datetime.now(UTC)
-        case RecordStatus.finished:
-            target.finished_at = datetime.now(UTC)
-        case _:
-            return
+@event.listens_for(Record.user_id, "set")
+def refuse_direct_lifecycle_writes(
+    target: Record, _value: Any, _oldvalue: Any, initiator: Any
+) -> None:
+    """Refuse assigning ``status`` / ``user_id`` on a record that is already saved.
+
+    After the INSERT only ``RecordRepository.write_transition`` changes them — a
+    Core UPDATE this listener never sees — behind ``RecordService``'s lifecycle
+    policy. A new, unsaved record may set both (create); loads and refreshes
+    fire no ``set`` event. The ORM counterpart of django-fsm's ``protected=True``.
+    """
+    state = sa_inspect(target)
+    assert state is not None  # an ORM-mapped instance always has inspection state
+    if state.has_identity:
+        raise DirectRecordWriteError(
+            f"Record.{initiator.key} of a saved record is written only by "
+            "RecordService (RecordRepository.write_transition)"
+        )
 
 
 class RecordCreate(RecordBase):

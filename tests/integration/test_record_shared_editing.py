@@ -15,6 +15,7 @@ from sqlmodel import select
 from clarinet.models import Record, RecordStatus, RecordType, User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from tests.conftest import create_authenticated_client
+from tests.utils.lifecycle import force_status
 from tests.utils.urls import RECORDS_BASE
 
 ROLE_NAME = "shared-edit-role"
@@ -131,8 +132,7 @@ class TestSharedEditingAuthz:
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, owner_user
         )
-        rec.status = RecordStatus.inwork
-        await test_session.commit()
+        await force_status(test_session, rec, RecordStatus.inwork)
         resp = await editor_client.patch(
             f"{RECORDS_BASE}/{rec.id}/user", params={"user_id": str(editor_user.id)}
         )

@@ -126,3 +126,11 @@ class TestGetActor:
             settings_mock.login_lockout_minutes = 0
             actor = await get_actor(_request({"X-Internal-Token": "wrong"}), user)
         assert isinstance(actor, HumanActor)
+
+    def test_empty_effective_token_never_matches(self) -> None:
+        from clarinet.api.auth_config import is_service_request
+
+        with patch("clarinet.api.auth_config.settings") as settings_mock:
+            settings_mock.effective_service_token = ""
+            assert is_service_request(_request({"X-Internal-Token": ""})) is False
+            assert is_service_request(_request({"X-Internal-Token": "x"})) is False

@@ -1,5 +1,6 @@
 """Unit tests for RecordService and StudyService RecordFlow triggers."""
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,6 +22,33 @@ from clarinet.services.record_service import (
 )
 from clarinet.services.study_service import StudyService
 from clarinet.utils.logger import logger
+
+_MUTATORS = (
+    "create_record",
+    "update_status",
+    "assign_user",
+    "claim_record",
+    "claim_random_from_pool",
+    "unassign_user",
+    "submit_data",
+    "update_data",
+    "bulk_update_status",
+    "invalidate_record",
+    "fail_record",
+    "check_files",
+    "update_context_info",
+    "clear_output_files",
+    "delete_record_cascade",
+)
+
+
+@pytest.mark.parametrize("name", _MUTATORS)
+def test_mutators_require_a_keyword_only_actor(name):
+    params = inspect.signature(getattr(RecordService, name)).parameters
+    actor = params["actor"]
+    assert actor.kind is inspect.Parameter.KEYWORD_ONLY
+    assert actor.default is inspect.Parameter.empty
+    assert not {"acting_user", "actor_id"} & params.keys()
 
 
 class TestRecordServiceTriggers:

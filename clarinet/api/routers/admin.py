@@ -11,7 +11,6 @@ from clarinet.api.dependencies import (
     ActorDep,
     AdminServiceDep,
     AdminUserDep,
-    AuditActorDep,
     PaginationDep,
     RecordEventRepositoryDep,
     RecordServiceDep,
@@ -158,13 +157,13 @@ async def delete_record_cascade(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> DeleteRecordResult:
     """Delete a record with all descendants and their OUTPUT files (admin only).
 
     Aborts with 409 Conflict if any record in the subtree is in ``inwork`` status.
     """
-    deleted_ids, files_removed = await service.delete_record_cascade(record_id, actor_id=actor)
+    deleted_ids, files_removed = await service.delete_record_cascade(record_id, actor=actor)
     return DeleteRecordResult(deleted_ids=deleted_ids, files_removed=files_removed)
 
 
@@ -173,13 +172,13 @@ async def clear_record_output_files(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> ClearOutputFilesResult:
     """Delete OUTPUT files from disk for a non-finished record (admin only).
 
     Intended for clearing stale output files before retrying a failed pipeline task.
     """
-    deleted_files, deleted_links = await service.clear_output_files(record_id, actor_id=actor)
+    deleted_files, deleted_links = await service.clear_output_files(record_id, actor=actor)
     return ClearOutputFilesResult(deleted_files=deleted_files, deleted_links=deleted_links)
 
 
