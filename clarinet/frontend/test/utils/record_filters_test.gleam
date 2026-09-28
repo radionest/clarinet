@@ -52,6 +52,7 @@ fn make_record(
     display_anon_id: None,
     is_editable: True,
     shared_editing: False,
+    allowed_commands: [],
   )
 }
 

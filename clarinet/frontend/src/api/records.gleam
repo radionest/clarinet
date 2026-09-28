@@ -403,6 +403,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(decode.string),
   )
+  use allowed_commands <- decode.optional_field(
+    "allowed_commands",
+    [],
+    decode.list(decode.string),
+  )
 
   let status = status.from_backend_string(status_str)
   let data = case data_dyn {
@@ -442,6 +447,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     display_anon_id: display_anon_id,
     is_editable: is_editable,
     shared_editing: shared_editing,
+    allowed_commands: allowed_commands,
   ))
 }
 
@@ -666,7 +672,8 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
   ))
 }
 
-/// Assign a user to a record (sets status to inwork)
+/// Assign a user to a record. Only a pending record moves to inwork; other
+/// statuses stay.
 pub fn assign_record_user(
   record_id: Int,
   user_id: String,
@@ -674,6 +681,20 @@ pub fn assign_record_user(
   let path =
     "/records/" <> int.to_string(record_id) <> "/user?user_id=" <> user_id
   http_client.patch(path, json.to_string(json.object([])))
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
+/// Give a record back: clears the owner; inwork falls back to pending
+/// (DELETE /records/{id}/user). Its owner may do it on a `releasable` record
+/// type; admins always.
+pub fn release_record(record_id: Int) -> Promise(Result(Record, ApiError)) {
+  http_client.delete("/records/" <> int.to_string(record_id) <> "/user")
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,

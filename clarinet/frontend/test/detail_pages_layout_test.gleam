@@ -404,6 +404,7 @@ fn make_record(id: Int) -> models.Record {
     display_anon_id: None,
     is_editable: True,
     shared_editing: False,
+    allowed_commands: [],
   )
 }
 

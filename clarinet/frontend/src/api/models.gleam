@@ -140,6 +140,10 @@ pub type Record {
     // non-superusers (RecordType.editable + edit_window_days)
     is_editable: Bool,
     shared_editing: Bool,
+    // Commands the current viewer may run on this record, computed per request
+    // by the backend lifecycle policy ("claim", "assign", "unassign", "submit",
+    // "edit", "fail", "restart", "set_status", "unblock")
+    allowed_commands: List(String),
   )
 }
 
