@@ -55,7 +55,9 @@
   one transaction with its audit event, so a concurrent change is re-evaluated
   instead of overwritten and no transition is left without its event.
   Service-token callers (RecordFlow, workers, cron, operator scripts) keep every
-  transition they use, the 409 texts and the hard-invalidation semantics.
+  transition they use, the 409 texts and the hard-invalidation semantics,
+  except that a new owner must hold the record type's role or be a superuser
+  (items 8/10 below) — the service token is not exempt from that check.
   Behaviour changes:
   1. `PATCH /api/records/{id}/status` and `PATCH /api/records/bulk/status` are
      admin and service-token only — other people get 403 (the owner could set

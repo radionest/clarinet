@@ -59,7 +59,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}` | GET | 200 | Get record |
 | `/api/records/{id}` | PATCH | 200 | Partial update (`viewer_study_uids`, `viewer_series_uids`, ≤1000 entries each); empty body is a no-op read. Auth: `MutableRecordDep` (admin/owner/unassigned/`shared_editing`); a non-empty body additionally needs an admin (**403** otherwise — pipelines write the lists with the service token); response masked per record masking policy |
 | `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |
-| `/api/records/{id}/status` | PATCH | 200 | Update status — admins and the service token only (**403** otherwise). **409** on `preparing` → `inwork`/`finished` (must exit via `pending`). Preparing → pending re-validates files (may land in `blocked`). The current status again is a no-op (200, no audit, no flows) |
+| `/api/records/{id}/status` | PATCH | 200 | Update status — admins and the service token only (**403** otherwise; a non-superuser admin needs the type's role). **409** on `preparing` → `inwork`/`finished` (must exit via `pending`). Preparing → pending re-validates files (may land in `blocked`). The current status again is a no-op (200, no audit, no flows) |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user. Auth: `AuthorizedRecordDep`. A non-admin naming themselves claims the record — unassigned or already theirs, `pending`/`inwork` (frontend auto-assign) — **403** if it belongs to someone else, **409** in any other status. Anything else is an assign — admins and the service token only (**403** otherwise; a non-superuser admin needs the type's role). Assign sets the owner only; a `pending` record moves to `inwork`. **404** unknown user; **409** `OWNER_LACKS_ROLE` or `unique_by` |
 | `/api/records/{id}/user` | DELETE | 200 | Release: clears the owner; `inwork` → `pending`. The owner of a `pending`/`inwork` record whose type is `releasable`; admins and the service token on any status. **403** otherwise; **409** the owner releasing another status |
 | `/api/records/{id}/context-info` | PATCH | 200 | Replace context_info (markdown). Body: `{"context_info": str \| null}`. Auth: `MutableRecordDep` |
@@ -82,10 +82,14 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 Every lifecycle 409 body is `{detail, code, metadata}`: `code` ∈
 `TRANSITION_NOT_ALLOWED`, `RECORD_EDIT_LOCKED`, `CONCURRENT_TRANSITION`,
-`OWNER_LACKS_ROLE`; `metadata.status` is the record's current status (`POST
-/api/records` 409s carry no `metadata`, since there is no record yet). Record
-responses carry `allowed_commands` — the lifecycle commands the caller may run
-on the record right now.
+`OWNER_LACKS_ROLE`; `metadata.status` is the record's current status. Two
+409s carry no `metadata`: `POST /api/records` (`TRANSITION_NOT_ALLOWED` or
+`OWNER_LACKS_ROLE` — no record exists yet) and `POST
+/api/records/claim-next`'s "every record picked from the pool was taken
+first" (`CONCURRENT_TRANSITION` raised without a status —
+`RecordService.claim_random_from_pool`). Record responses carry
+`allowed_commands` — the lifecycle commands the caller may run on the record
+right now.
 
 ### Record Types (`/api/records/types`)
 
@@ -129,8 +133,8 @@ on the record right now.
 | `/api/admin/online-users` | GET | 200 | Ids of users online now (≥1 session valid within `session_idle_timeout_minutes`); feeds role-matrix presence dots. SSE `presence` events deliver live deltas |
 | `/api/admin/records/{id}` | DELETE | 200 | Cascade-delete record + descendants + output files (admin; 409 if any inwork) |
 | `/api/admin/records/{id}/assign` | PATCH | 200 | Admin assign — sets the owner only (a `pending` record moves to `inwork`); **403** for a non-superuser admin without the type's role; **404** unknown user; **409** `OWNER_LACKS_ROLE` or `unique_by` |
-| `/api/admin/records/{id}/status` | PATCH | 200 | Admin set status — same rules as `PATCH /records/{id}/status` |
-| `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign; `inwork` falls back to `pending`; **403** for a non-superuser admin without the type's role |
+| `/api/admin/records/{id}/status` | PATCH | 200 | Admin set status — same rules as `PATCH /records/{id}/status`, including the non-superuser-admin type-role check |
+| `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign; `inwork` falls back to `pending`; **403** for a non-superuser admin without the type's role; **409** the record changed concurrently |
 | `/api/admin/records/{id}/output-files` | DELETE | 200 | Clear output files (admin) |
 | `/api/admin/records/events` | GET | 200 | Global record audit feed, newest first (admin). Filters: `kind`, `actor_id`, `patient_id` (events of the patient's current records), `record_type_name` (events of records of that type), `since` + pagination. `actor_name` (email) resolved server-side |
 | `/api/admin/records/events/deleted` | GET | 200 | Audit events of deleted records (snapshot in `old_value`), newest first |

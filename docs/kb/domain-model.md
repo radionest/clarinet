@@ -71,21 +71,23 @@ The behavioural flags (`unique_by`, `shared_editing`, `editable`,
 ```mermaid
 stateDiagram-v2
     [*] --> pending : create
-    [*] --> preparing : "create (admin or system)"
-    pending --> blocked : "create, inputs missing or grid mismatch"
-    preparing --> pending : "set-status, inputs valid"
-    preparing --> blocked : "set-status to pending, inputs invalid"
-    blocked --> pending : "unblock (check-files) or restart"
+    [*] --> preparing : create (admin or system)
+    [*] --> blocked : create, inputs missing or grid mismatch
+    preparing --> pending : set-status, inputs valid
+    preparing --> blocked : set-status to pending, inputs invalid
+    blocked --> pending : unblock (check-files) or restart
     pending --> inwork : claim or assign
-    inwork --> pending : unassign or owner release
-    inwork --> finished : submit
+    inwork --> pending : unassign or owner release or restart
     pending --> finished : submit
+    inwork --> finished : submit
     pause --> finished : submit
     failed --> finished : submit
-    inwork --> failed : "fail or submit ?status=failed"
-    pending --> failed : "fail or submit ?status=failed"
-    finished --> pending : "restart (hard invalidation)"
+    pending --> failed : fail or submit ?status=failed
+    inwork --> failed : fail or submit ?status=failed
+    pause --> failed : submit ?status=failed
+    finished --> pending : restart
     failed --> pending : restart
+    pause --> pending : restart
 ```
 
 Admins and system actors may also set any status directly (set-status) except
@@ -157,7 +159,8 @@ the command's contract refuses the record's current status; a 409 body carries
 
 `RecordService._transition` owns the pipeline: `record_lifecycle.decide` →
 `RecordRepository.write_transition` (one conditional UPDATE on status and
-owner, re-decided against fresh state up to 3 times on a concurrent miss) →
+owner, re-decided against fresh state for at most 3 attempts on a concurrent
+miss) →
 the audit row and matched input-file links join the same transaction → one
 commit → SSE and RecordFlow fire only after that commit lands. Status flows
 fire `on_status(to)` only when the command actually changes the status; hard
@@ -216,9 +219,11 @@ writes are deliberately not audited.
 `AuthorizedRecordDep` grants read access to superusers and to holders of the
 record type's role; `MutableRecordDep` adds mutation for admins (`is_admin`),
 the assigned user or an unassigned record (and bypasses the owner check when
-`shared_editing` is set). Every record mutation goes through it — including
-`/fail`, `/invalidate`, `/check-files` (it can unblock a record and fire
-file-change flows) and, per target record, `PATCH /bulk/status`.
+`shared_editing` is set). Every single-record mutation goes through it —
+including `/fail`, `/invalidate`, `/check-files` (it can unblock a record and
+fire file-change flows). `PATCH /bulk/status` carries no per-target router
+dependency of its own; the service-level policy alone makes it admin- and
+service-token-only.
 The record service re-checks the same rights itself (lifecycle policy), so no
 endpoint can change status or ownership past a weaker router dependency. Raw
 status changes and assigning another user are admin-only; unassigning is too,

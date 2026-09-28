@@ -449,11 +449,13 @@ points for OUTPUT grids — a record can still reach `finished` carrying a
 mismatched OUTPUT through a status-only route that never passes through
 `_process_submission`. `PATCH /records/{id}/status` and
 `PATCH /admin/records/{id}/status` call `RecordService.update_status`
-directly; RecordFlow's `update_record(status='finished')` reaches the same
-endpoint over HTTP; `PATCH /records/bulk/status` calls
-`RecordService.bulk_update_status`, which reuses `update_status` only for
-records still `preparing` and otherwise updates status through the
-repository directly. None of these call `enforce_output_grids`.
+(the raw `SetStatus` command through `_transition`); RecordFlow's
+`update_record(status='finished')` reaches the same endpoint over HTTP;
+`PATCH /records/bulk/status` calls `RecordService.bulk_update_status`, which
+decides every target with the same `SetStatus` command (`_decide_one`,
+re-validating files per record on a `preparing` → `pending` exit) before
+writing any of them (`_write_one`). None of these call
+`enforce_output_grids`.
 
 `enforce_output_grids` itself takes no acting user, so this is not a
 human-vs-machine split. A pipeline task's auto-submit
