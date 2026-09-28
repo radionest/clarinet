@@ -610,7 +610,9 @@ class Settings(BaseSettings):
         host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
-        return f"http://{host}:{self.port}{self.root_url.rstrip('/')}/api"
+        root = self.root_url.strip("/")
+        prefix = f"/{root}" if root else ""
+        return f"http://{host}:{self.port}{prefix}/api"
 
     @property
     def session_expire_seconds(self) -> int:

@@ -28,7 +28,13 @@ def test_derived_host(host: str, expected: str) -> None:
 
 @pytest.mark.parametrize(
     ("root_url", "expected"),
-    [("/my_project", "/my_project"), ("/my_project/", "/my_project"), ("/", ""), ("", "")],
+    [
+        ("/my_project", "/my_project"),
+        ("/my_project/", "/my_project"),
+        ("/", ""),
+        ("", ""),
+        ("my_project", "/my_project"),
+    ],
 )
 def test_derived_url_includes_root_url(root_url: str, expected: str) -> None:
     assert _url(root_url=root_url) == f"http://127.0.0.1:8111{expected}/api"
