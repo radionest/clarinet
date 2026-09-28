@@ -12,6 +12,7 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import Script, ScriptDirectory
 from sqlalchemy import DefaultClause, create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.sql import functions as sql_functions
 from sqlalchemy.sql.expression import False_, True_
 
 from clarinet.exceptions import MigrationError
@@ -162,12 +163,13 @@ def render_item(
     obj: object,
     autogen_context: AutogenContext,
 ) -> str | Literal[False]:
-    """Alembic ``render_item`` hook that keeps boolean ``server_default`` portable.
+    """Alembic ``render_item`` hook that keeps ``server_default`` dialect-neutral.
 
     Autogenerate compiles a ``server_default`` with the dialect it is connected
-    to, so ``sql_expression.false()`` generated on SQLite lands in the migration
-    as ``sa.text('0')`` — and PostgreSQL rejects ``BOOLEAN DEFAULT 0`` (#450).
-    ``sa.false()`` is compiled by whichever database applies the migration.
+    to: ``sql_expression.false()`` generated on SQLite lands as ``sa.text('0')``,
+    which PostgreSQL rejects (#450), and ``func.now()`` generated on PostgreSQL
+    lands as ``sa.text('now()')``, which SQLite rejects. ``sa.false()`` /
+    ``sa.func.now()`` are compiled by whichever database applies the migration.
 
     Everything else returns ``False`` (Alembic's own rendering); returning
     ``None`` would silently drop the default.
@@ -178,6 +180,8 @@ def render_item(
             return f"{prefix}true()"
         if isinstance(obj.arg, False_):
             return f"{prefix}false()"
+        if isinstance(obj.arg, sql_functions.now):
+            return f"{prefix}func.now()"
     return False
 
 
