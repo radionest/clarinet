@@ -13,10 +13,12 @@ from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.record_event_repository import RecordEventRepository
 from clarinet.repositories.record_repository import RecordRepository
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.services.events.bus import set_event_bus
 from clarinet.services.events.capture import register_capture_listeners
 from clarinet.services.events.models import EntityEvent
 from clarinet.services.record_service import RecordService
+from clarinet.services.user_service import UserService
 from tests.utils.factories import (
     make_patient,
     make_record_type,
@@ -213,6 +215,25 @@ async def test_delete_record_cascade_emits_enriched(test_session, sse_bus, hiera
     assert deleted[0].id == str(rec.id)
     assert deleted[0].record_type_name == "sse-rt"
     assert deleted[0].user_id == owner.id
+
+
+@pytest.mark.asyncio
+async def test_delete_user_emits_updated_for_owned_records(test_session, sse_bus, hierarchy):
+    """Deleting an owner nulls ``user_id`` by Core UPDATE (UoW-invisible), so
+    the service emits record/updated with ``record_type_name`` itself — role
+    holders viewing the record must see the owner go."""
+    owner = make_user()
+    test_session.add(owner)
+    await test_session.commit()
+    rec = await _seed(test_session, hierarchy, user_id=owner.id, status=RecordStatus.inwork)
+    sse_bus.events.clear()
+
+    await UserService(UserRepository(test_session)).delete_user(owner.id)
+
+    updated = _entity_events(sse_bus, "record", "updated")
+    assert [(ev.id, ev.record_type_name, ev.user_id) for ev in updated] == [
+        (str(rec.id), "sse-rt", None)
+    ]
 
 
 @pytest.mark.asyncio

@@ -103,8 +103,8 @@
   untouched, outside the transition gateway) — the base nulled `record.user_id`
   via the ORM's FK-nullify-on-delete cascade when `session.delete(user)`
   flushed, which the new direct-write guard on `Record.user_id` would now
-  trip; the raw UPDATE sidesteps the guard and keeps the same no-audit,
-  no-SSE-event effect.
+  trip; the raw UPDATE sidesteps the guard, still writes no audit row, and
+  publishes the record `updated` SSE events the ORM nullify used to.
   Python API: every mutating `RecordService` method takes a required keyword-only
   `actor` (`clarinet.models.actor.SystemActor | HumanActor`); `acting_user=`,
   `actor_id=`, `claim_record(..., user_id)`, `claim_random_from_pool(..., user_id)`,

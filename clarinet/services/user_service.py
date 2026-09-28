@@ -10,6 +10,7 @@ from clarinet.exceptions.domain import (
 )
 from clarinet.models import User, UserCreate, UserRole, UserUpdate
 from clarinet.repositories.user_repository import UserRepository
+from clarinet.services.events.capture import emit_record_events
 from clarinet.utils.auth import get_password_hash, verify_password
 
 
@@ -118,8 +119,10 @@ class UserService:
             EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
-        await self.user_repo.clear_owned_records(user_id)
+        cleared = await self.user_repo.clear_owned_records(user_id)
         await self.user_repo.delete(user)
+        # sse-capture: explicit emit, UoW-invisible (Core UPDATE in clear_owned_records).
+        emit_record_events(cleared)
 
     async def authenticate(self, username: str, password: str) -> User:
         """Authenticate user with username and password.
