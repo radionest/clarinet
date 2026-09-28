@@ -300,7 +300,7 @@ async def test_conform_action_never_repairs_an_input(
 async def test_preparing_to_pending_blocks_on_grid_mismatch(
     test_session, seg_record_type, series_dir, series
 ):
-    """RecordService._resolve_preparing_exit also inherits the grid check.
+    """The preparing exit (``RecordService._inputs_verdict``) also inherits the grid check.
 
     Not named in the plan, but it is a third live seam through
     ``validate_record_files``: creation-time blocking is skipped for

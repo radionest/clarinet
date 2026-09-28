@@ -472,8 +472,8 @@ class RecordRead(RecordBase):
         """Whether non-admin people (not a superuser, not the `admin` role)
         may edit or hard-invalidate this finished record.
 
-        Server-side verdict for the frontend (form/Re-submit gating) — see
-        :func:`is_record_editable`. Superuser bypass is the client's concern.
+        See :func:`is_record_editable`. The frontend gates actions on
+        ``allowed_commands`` instead, where the server applies the admin bypass.
         """
         return is_record_editable(self.status, self.finished_at, self.record_type)
 

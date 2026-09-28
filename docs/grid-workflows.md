@@ -322,8 +322,8 @@ seam inherits the check automatically:
   response; nothing is mutated. The same endpoint previews the OUTPUT
   pairs too — see the OUTPUT seam below.
 - The `preparing → pending` status transition
-  (`RecordService._resolve_preparing_exit`) — redirected to `blocked` instead
-  of `pending`.
+  (`RecordService._inputs_verdict` feeding `record_lifecycle._set_status`) —
+  redirected to `blocked` instead of `pending`.
 - `POST /records/{id}/data` and `POST /records/{id}/submit`
   (`_process_submission`, `clarinet/api/routers/record.py:603-608`) re-validate
   with `raise_on_invalid=True` immediately before the submission is persisted —

@@ -25,7 +25,7 @@ Status, owner and data changes go through ``RecordService._transition``
 instead: its Core UPDATE is invisible to this capture, so it publishes the
 enriched record event itself (``emit_record_events``) after its one commit,
 in which the audit row commits too. The breadcrumb serves the service's other
-audited mutations (context info, output-file clearing, soft invalidation).
+audited mutations (context info, soft invalidation).
 
 A record ``updated`` event that changes an audited column with **no** such
 breadcrumb is a drift signal (some path mutated state outside the audited

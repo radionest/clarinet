@@ -489,12 +489,13 @@ def get_user_role_names(user: User) -> set[str]:
 def is_admin(user: User) -> bool:
     """True for a superuser OR a member of the built-in 'admin' role.
 
-    The single definition of "admin" for every caller that can reach it.
+    Delegates to ``User.is_admin`` — the one definition is
+    ``clarinet.models.actor.is_admin_by``, shared with ``HumanActor.is_admin``.
     ``current_admin_user`` turns it into a 403; the sites that must branch on it
     inline rather than gate a whole route read it directly — the
     ``clarinet_storage_path`` guard and the create-time
     ``check_record_type_role``, the owner bypass in
-    ``authorize_mutable_record_access`` and on record assign, the viewer-list
+    ``authorize_mutable_record_access``, the viewer-list
     write guard on record PATCH, the actor-email
     masking in the record audit feed, and ``SseConnection.is_admin``, which
     decides whether a live event stream may carry admin-only frames.

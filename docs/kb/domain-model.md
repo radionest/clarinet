@@ -221,7 +221,9 @@ record type's role; `MutableRecordDep` adds mutation for admins (`is_admin`),
 the assigned user or an unassigned record (and bypasses the owner check when
 `shared_editing` is set). Every single-record mutation goes through it —
 including `/fail`, `/invalidate`, `/check-files` (it can unblock a record and
-fire file-change flows). `PATCH /bulk/status` carries no per-target router
+fire file-change flows) — except the owner changes: `PATCH` and `DELETE
+/records/{id}/user` take only `AuthorizedRecordDep`, because claim, assign
+and release rights are the lifecycle policy's call. `PATCH /bulk/status` carries no per-target router
 dependency of its own; the service-level policy alone makes it admin- and
 service-token-only.
 The record service re-checks the same rights itself (lifecycle policy), so no

@@ -937,7 +937,7 @@ async def test_role_filtering_prevents_access_to_other_records(
     # Verify role_a user can mutate their own record (fail is a lifecycle
     # command, not an admin-only raw status change)
     response = await role_a_client.post(
-        f"/api/records/{record_role_a.id}/fail",
+        f"{RECORDS_BASE}/{record_role_a.id}/fail",
         json={"reason": "rbac check"},
     )
     assert response.status_code == 200

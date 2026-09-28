@@ -11,7 +11,7 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 
 | Router | Auth Level | Notes |
 |--------|-----------|-------|
-| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record reads, `MutableRecordDep` on single-record writes; `PATCH /{id}/user` keeps `AuthorizedRecordDep` — the service decides claim vs assign; `DELETE /{id}/user` is the owner's release; `POST /` requires an admin or the record type's role (`check_record_type_role`) |
+| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record reads, `MutableRecordDep` on single-record writes; `PATCH /{id}/user` keeps `AuthorizedRecordDep` — the router picks claim (a non-admin naming themselves) vs assign, the service's policy decides whether either is allowed; `DELETE /{id}/user` is the owner's release; `POST /` requires an admin or the record type's role (`check_record_type_role`) |
 | `slicer.py` | mixed | `/records/{id}/open` and `/validate` use `AuthorizedRecordDep` (they ship the record's context to the caller's Slicer); `exec`, `ping`, `clear` act only on the caller's own Slicer and stay `CurrentUserDep` |
 | `study.py` | `current_admin_user` | Admin-only (patients, studies, series): is_superuser OR `admin` role |
 | `record_type.py` | `current_superuser` | Admin-only for mutations; read is open to authenticated |
@@ -77,8 +77,9 @@ The actor comes from `ActorDep` (`dependencies.py::get_actor`, backed by
 `auth_config.is_service_request`): a `HumanActor`, or a `SystemActor` when the
 request carries a valid `X-Internal-Token` (audit `actor_id=None`) — every
 mutating endpoint passes `actor=actor` into the service. Status, owner and
-data changes commit their event in the same transaction; other audited
-mutations still commit it at request teardown. `record_event.record_key` is a
+data changes and cascade delete commit their event in the same transaction,
+creation right after the INSERT; context-info updates, soft invalidation and
+output-file clearing leave it to the request-teardown commit. `record_event.record_key` is a
 denormalized record id without FK — it keeps a deleted record's history
 correlatable after `record_id` goes NULL. Prefill writes are deliberately not
 audited (high-volume system noise).
