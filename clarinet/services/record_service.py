@@ -237,12 +237,15 @@ class RecordService:
         """Append an audit event right after a record mutation.
 
         The event is flushed immediately — before any RecordFlow dispatch,
-        so an engine failure cannot lose it — and committed by the next
-        commit on the shared session (request teardown). A process crash
-        between the mutation's own commit and teardown loses the event but
-        never the mutation (accepted trade-off; cascade delete is the one
-        path where events share the mutation's transaction). No-op when
-        auditing is disabled (``event_repo is None``).
+        so an engine failure cannot lose it. Lifecycle commands (via
+        ``_transition``), record creation, and cascade delete commit the
+        event together with the mutation, in the same transaction.
+        Non-transition mutations that don't explicitly commit — context
+        info updates, soft invalidation, clearing output files — leave the
+        event for the next commit on the shared session (request
+        teardown); a crash before that loses the event but never the
+        mutation for those paths. No-op when auditing is disabled
+        (``event_repo is None``).
         """
         if self.event_repo is None:
             return
@@ -263,11 +266,16 @@ class RecordService:
     def _mark_audit(self, record_id: int | None, actor_id: UUID | None) -> None:
         """Announce the *next* committing record mutation to the SSE capture.
 
-        The repo write commits internally and the matching ``RecordEvent``
-        commits later, so the SSE capture cannot pair them per-commit. Setting
+        Only needed for non-transition mutations that commit on their own
+        (soft invalidation, context info updates) — the repo write commits
+        internally and the matching ``RecordEvent`` commits later at request
+        teardown, so the SSE capture cannot pair them per-commit. Setting
         this breadcrumb right before the committing write lets the capture emit
         one enriched record event (``user_id`` = the acting user) and skip the
-        drift warning. No-op when SSE is off (see ``mark_pending_audit``).
+        drift warning. Lifecycle commands never call this — ``_transition``
+        commits the audit row together with the change, so the capture pairs
+        them per-commit already. No-op when SSE is off (see
+        ``mark_pending_audit``).
         """
         mark_pending_audit(self.repo.session, record_id, actor_id)
 
@@ -328,10 +336,11 @@ class RecordService:
     ) -> tuple[Record, RecordSnapshot, Effect | None, dict[str, str]]:
         """Snapshot ``record_id`` and decide ``cmd`` against it. Never writes, never commits.
 
-        Snapshot (``populate_existing``) → input-file verdict only when
-        ``needs_inputs`` says so → ``decide``. Never touches the DB beyond the
-        read, so a bulk caller can run this for every record in a batch
-        before writing any of them (decide-all-then-write-all).
+        Snapshot (``populate_existing``) → reads the parent (and may do file
+        I/O for the inputs verdict) only when ``needs_inputs`` says so →
+        ``decide``. Never writes to the DB, so a bulk caller can run this for
+        every record in a batch before writing any of them
+        (decide-all-then-write-all).
 
         Returns:
             (record as read, snapshot, effect, matched). ``effect`` is

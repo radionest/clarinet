@@ -32,6 +32,12 @@ class UserRepository(BaseRepository[User]):
         ``synchronize_session=False`` bypasses that attribute entirely — the
         same technique ``write_transition`` itself uses.
         """
+        # ponytail: this only pre-empts SQLAlchemy's FK-nullify cascade while
+        # ``User.records`` stays unloaded on the deleted user — any other
+        # delete path (e.g. ``clarinet/utils/fastapi_users_db.py``'s delete)
+        # would still load/touch the relationship and hit the direct-write
+        # guard. Durable fix: ``ForeignKey("user.id", ondelete="SET NULL")`` +
+        # ``passive_deletes=True`` on the relationship (needs a migration).
         await self.session.execute(
             update(Record)
             .where(col(Record.user_id) == user_id)

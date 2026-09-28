@@ -182,7 +182,9 @@ class RecordDef(BaseModel):
             explicit unique_by wins over it.
         parent_required: Require a parent record at creation.
         inherit_user_from_parent: Child inherits user_id from its parent record.
-        editable: Whether non-superusers may change a submitted (finished) record.
+        editable: False: non-admin people (not a superuser, not the `admin`
+            role) may not edit or hard-invalidate a finished record once the
+            type locks it.
         edit_window_days: Days a finished record stays editable; None = no limit.
         shared_editing: Any role-holder may edit any record of this type;
             each edit reassigns ownership to the editor. Requires

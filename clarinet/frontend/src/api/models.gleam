@@ -136,8 +136,9 @@ pub type Record {
     // anon_per_study_patient_id is enabled and the study is anonymized;
     // display falls back to patient.anon_id otherwise
     display_anon_id: Option(String),
-    // Server-side verdict: may the submitted data still be changed by
-    // non-superusers (RecordType.editable + edit_window_days)
+    // Server-side verdict: may a non-admin person (not a superuser, not the
+    // `admin` role) still edit or hard-invalidate this finished record
+    // (RecordType.editable + edit_window_days)
     is_editable: Bool,
     shared_editing: Bool,
     // Commands the current viewer may run on this record, computed per request

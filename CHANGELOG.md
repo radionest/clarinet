@@ -72,8 +72,8 @@
   4. The edit lock (`editable=False`, `edit_window_days`) yields to admins —
      superuser **or** `admin` role — instead of superusers only, in the API and
      the frontend.
-  5. A non-admin claiming an unassigned finished / failed / paused record gets
-     409 (was 403).
+  5. A non-admin claiming an unassigned record outside `pending`/`inwork` —
+     finished, failed, paused, blocked, or preparing — gets 409 (was 403).
   6. An `admin`-role user who lacks a record type's role gets 403 on
      `/api/admin/records/{id}/status|assign|user` for records of that type.
   7. Kept: a system submit of an unassigned record makes the service account
@@ -100,8 +100,11 @@
   `new_value.user_id`/`via`) instead of a separate `assigned` event — the
   activity feed's "assigned" filter no longer shows them. Deleting a user now
   clears the records it owned with one SQL `UPDATE` (`user_id = NULL`, status
-  untouched, outside the transition gateway) instead of unassigning each one
-  through it, so it no longer emits SSE "record updated" events for them.
+  untouched, outside the transition gateway) — the base nulled `record.user_id`
+  via the ORM's FK-nullify-on-delete cascade when `session.delete(user)`
+  flushed, which the new direct-write guard on `Record.user_id` would now
+  trip; the raw UPDATE sidesteps the guard and keeps the same no-audit,
+  no-SSE-event effect.
   Python API: every mutating `RecordService` method takes a required keyword-only
   `actor` (`clarinet.models.actor.SystemActor | HumanActor`); `acting_user=`,
   `actor_id=`, `claim_record(..., user_id)`, `claim_random_from_pool(..., user_id)`,

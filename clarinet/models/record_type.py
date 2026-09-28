@@ -134,9 +134,9 @@ class RecordTypeBase(SQLModel):
         default=True,
         sa_column_kwargs={"server_default": sql_expression.true()},
         description=(
-            "Whether non-superusers may change a submitted (finished) record: "
-            "re-submit data, re-open via status change, or hard-invalidate. "
-            "False locks the answer at submit."
+            "False: non-admin people (not a superuser, not the `admin` role) "
+            "may not edit or hard-invalidate a finished record once the type "
+            "locks it."
         ),
     )
     # Nullable by design (None = no time limit), so the additive migration
