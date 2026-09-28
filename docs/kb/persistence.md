@@ -125,8 +125,11 @@ which PostgreSQL rejects (#450); on PostgreSQL `func.now()` would land as
 `clarinet/utils/migrations.py` renders them as `sa.true()` / `sa.false()` /
 `sa.func.now()`, compiled by the database applying the migration. The
 generated `alembic/env.py` is a three-line shim over `run_env()` in the same
-module, which passes `render_item`, `compare_type=True` and — on SQLite, which
-has no `ALTER COLUMN` — `render_as_batch=True`. `env.py` is written only when
+module, which passes `render_item`, `compare_type=True` and
+`render_as_batch=True`: type, nullability and constraint changes render as batch
+operations — plain `ALTER`s on PostgreSQL, table rebuilds on SQLite (which has
+no `ALTER COLUMN`) — so a revision applies on both, whichever database generated
+it. `env.py` is written only when
 missing, so an `env.py` from before #655 is replaced by hand (CHANGELOG), and
 `clarinet init-migrations` / `clarinet db migrate create` warn until it is. The
 hook sees model defaults only — a downgrade that re-adds a dropped boolean

@@ -822,9 +822,11 @@
   writes a three-line `env.py` that calls `clarinet.utils.migrations.run_env()`,
   so env-level fixes ship with the package instead of as hand edits. `run_env()`
   sets `compare_type=True` explicitly (Alembic < 1.12 defaulted to off; the
-  floor is now `alembic>=1.12`) and, on SQLite, `render_as_batch=True` — SQLite
-  has no `ALTER COLUMN`, so type, nullability and constraint changes are
-  rendered as table rebuilds that apply (#655). **Downstream migration:**
+  floor is now `alembic>=1.12`) and `render_as_batch=True` — type, nullability
+  and constraint changes render as batch operations: plain `ALTER`s on
+  PostgreSQL, table rebuilds on SQLite (which has no `ALTER COLUMN`) — so a
+  revision applies on both, whichever database generated it (#655).
+  **Downstream migration:**
   replace `alembic/env.py` with the shim below, keeping any project model
   imports above the `run_env()` call; `clarinet init-migrations` and
   `clarinet db migrate create` warn until you do. Already-generated revisions

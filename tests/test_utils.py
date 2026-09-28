@@ -322,6 +322,12 @@ class TestMigrationTemplate:
         assert "from clarinet.utils.migrations import run_env" in content
         assert content.rstrip().endswith("run_env()")
 
+    def test_env_py_is_ascii(self):
+        # init_alembic_in_project writes it with the platform default encoding.
+        from clarinet.utils.migrations import generate_alembic_env
+
+        assert generate_alembic_env().isascii()
+
 
 # ===================================================================
 # Markdown rendering

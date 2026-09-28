@@ -211,10 +211,12 @@ def run_env() -> None:
         render_item=render_item,
         # Explicit: Alembic < 1.12 defaulted to False.
         compare_type=True,
-        # SQLite has no ALTER COLUMN / ALTER CONSTRAINT. Batch ops rebuild the
-        # table and copy rows through CAST(col AS <new type>) — safe because the
-        # model types are portable (Uuid → CHAR(32), TEXT affinity).
-        render_as_batch=url.startswith("sqlite"),
+        # Batch on every dialect: a revision must apply on both SQLite and
+        # PostgreSQL whichever one generated it. PostgreSQL runs plain ALTERs
+        # (recreate="auto"); SQLite has no ALTER COLUMN, so it rebuilds the
+        # table and copies rows through CAST(col AS <new type>) - safe because
+        # the model types are portable (Uuid -> CHAR(32), TEXT affinity).
+        render_as_batch=True,
     )
 
     if context.is_offline_mode():
@@ -248,7 +250,7 @@ def generate_alembic_env(
         Content for env.py file
     """
     content = dedent('''
-    """Alembic environment — the body is clarinet.utils.migrations.run_env().
+    """Alembic environment - the body is clarinet.utils.migrations.run_env().
 
     It ships with the clarinet package, so env-level fixes arrive on upgrade.
     Import project model modules above the run_env() call to include their
