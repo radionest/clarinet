@@ -1042,21 +1042,6 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.refresh(record)
         return record
 
-    async def bulk_update_status(self, record_ids: list[int], new_status: RecordStatus) -> None:
-        """Update status for multiple records.
-
-        Records that don't exist are silently skipped.
-
-        Args:
-            record_ids: List of record IDs
-            new_status: New status to set
-        """
-        for record_id in record_ids:
-            record = await self.get_optional(record_id)
-            if record:
-                record.status = new_status
-        await self.session.commit()
-
     async def invalidate_record(
         self,
         record_id: int,

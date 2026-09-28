@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from fastapi import Path as PathParam
 
 from clarinet.api.dependencies import (
+    ActorDep,
     AdminServiceDep,
     AdminUserDep,
     AuditActorDep,
@@ -80,13 +81,22 @@ async def admin_assign_record_user(
     return record
 
 
-@router.patch("/records/{record_id}/status", response_model=RecordRead)
+@router.patch(
+    "/records/{record_id}/status",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "A preparing record may not jump to inwork/finished, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def admin_update_record_status(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     record_status: RecordStatus,
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> Record:
     """Set any status on a record (admin only).
 
@@ -99,7 +109,7 @@ async def admin_update_record_status(
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.update_status(record_id, record_status, actor_id=actor)
+    record, _ = await service.update_status(record_id, record_status, actor=actor)
     return record
 
 

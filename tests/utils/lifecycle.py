@@ -1,8 +1,11 @@
 """Record-lifecycle test helpers: persisted people, typed records, a recording engine."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.models import Record, RecordRead, RecordStatus, User
@@ -10,6 +13,8 @@ from clarinet.models.actor import HumanActor, SystemActor
 from clarinet.repositories.record_event_repository import RecordEventRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.record_service import RecordService
+from clarinet.settings import Settings
+from tests.conftest import create_authenticated_client
 from tests.utils.factories import make_record_type, seed_record
 
 ROLE = "lc-role"
@@ -19,6 +24,26 @@ OTHER_ROLE = "lc-other-role"
 def human(user: User) -> HumanActor:
     """HumanActor for a user whose roles are loaded (``create_mock_user_with_role``)."""
     return user.as_actor()
+
+
+@asynccontextmanager
+async def client_as(
+    user: User, session: AsyncSession, settings: Settings, *, service_token: str | None = None
+) -> AsyncIterator[AsyncClient]:
+    """Authenticated client for ``user`` — one at a time (dependency overrides are app-global).
+
+    With ``service_token`` every request also carries ``X-Internal-Token``, so the
+    record service sees a ``SystemActor`` (``get_actor`` reads only the header).
+    """
+    clients = create_authenticated_client(user, session, settings)
+    client = await anext(clients)
+    if service_token is not None:
+        client.headers["X-Internal-Token"] = service_token
+    try:
+        yield client
+    finally:
+        with suppress(StopAsyncIteration):
+            await anext(clients)  # runs the generator's override cleanup
 
 
 @dataclass

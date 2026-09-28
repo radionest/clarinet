@@ -524,12 +524,6 @@ class TestRecordRepository:
         assert old_status == RecordStatus.finished
 
     @pytest.mark.asyncio
-    async def test_bulk_update_status(self, env):
-        await env["repo"].bulk_update_status([env["record"].id], RecordStatus.pause)
-        rec = await env["repo"].get(env["record"].id)
-        assert rec.status == RecordStatus.pause
-
-    @pytest.mark.asyncio
     async def test_invalidate_record_hard(self, env):
         # Set to inwork first
         env["record"].status = RecordStatus.inwork

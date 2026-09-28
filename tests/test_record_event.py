@@ -24,48 +24,6 @@ def _added_event(event_repo: AsyncMock) -> RecordEvent:
 
 class TestRecordServiceAuditEvents:
     @pytest.mark.asyncio
-    async def test_update_status_writes_status_changed(self) -> None:
-        actor = uuid4()
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.inwork
-
-        repo_mock = AsyncMock()
-        repo_mock.update_status.return_value = (record_mock, RecordStatus.pending)
-        service, event_repo = _service(repo_mock)
-
-        await service.update_status(1, RecordStatus.inwork, actor_id=actor)
-
-        event = _added_event(event_repo)
-        assert event.kind == "status_changed"
-        assert event.record_id == 1
-        assert event.actor_id == actor
-        assert event.from_status == "pending"
-        assert event.to_status == "inwork"
-
-    @pytest.mark.asyncio
-    async def test_update_status_unchanged_writes_nothing(self) -> None:
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.update_status.return_value = (record_mock, RecordStatus.pending)
-        service, event_repo = _service(repo_mock)
-
-        await service.update_status(1, RecordStatus.pending)
-
-        event_repo.add.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_update_status_without_event_repo_is_noop(self) -> None:
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.inwork
-        repo_mock = AsyncMock()
-        repo_mock.update_status.return_value = (record_mock, RecordStatus.pending)
-
-        service = RecordService(repo_mock, engine=None)
-        await service.update_status(1, RecordStatus.inwork)  # must not raise
-
-    @pytest.mark.asyncio
     async def test_assign_user_writes_assigned(self) -> None:
         actor = uuid4()
         target_user = uuid4()
@@ -213,27 +171,6 @@ class TestRecordServiceAuditEvents:
         assert kinds == ["assigned", "data_submitted"]
         assigned = event_repo.add.await_args_list[0].args[0]
         assert assigned.new_value == {"user_id": str(user_id), "via": "submit"}
-
-    @pytest.mark.asyncio
-    async def test_bulk_update_marks_via_bulk(self) -> None:
-        actor = uuid4()
-        old_record = MagicMock()
-        old_record.status = RecordStatus.pending
-        updated = MagicMock()
-        updated.status = RecordStatus.failed
-
-        repo_mock = AsyncMock()
-        repo_mock.get_optional.return_value = old_record
-        repo_mock.get_with_relations.return_value = updated
-        service, event_repo = _service(repo_mock)
-
-        await service.bulk_update_status([1], RecordStatus.failed, actor_id=actor)
-
-        event = _added_event(event_repo)
-        assert event.kind == "status_changed"
-        assert event.new_value == {"via": "bulk"}
-        assert event.from_status == "pending"
-        assert event.to_status == "failed"
 
     @pytest.mark.asyncio
     async def test_create_record_writes_created(self) -> None:

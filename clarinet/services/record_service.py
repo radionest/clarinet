@@ -388,6 +388,7 @@ class RecordService:
         actor: Actor,
         *,
         data: RecordData | None = None,
+        via: str | None = None,
     ) -> bool:
         """Conditionally write one decided (non-no-op) command. Never commits.
 
@@ -396,7 +397,8 @@ class RecordService:
         join this same transaction before returning. Never commits — a bulk
         caller runs this once per record inside one shared transaction and
         rolls the whole batch back on the first miss (``False``); ``_transition``
-        commits itself on a miss and retries.
+        commits itself on a miss and retries. ``via`` is stamped on the audit
+        event's ``new_value`` (e.g. ``"bulk"``) — see ``_audit_transition``.
 
         Returns:
             Whether the write landed. ``False`` means the record changed
@@ -419,7 +421,7 @@ class RecordService:
         )
         if not written:
             return False
-        await self._audit_transition(cmd, snap, effect, actor, data=data)
+        await self._audit_transition(cmd, snap, effect, actor, data=data, via=via)
         if matched and effect.to_status == RecordStatus.pending:
             await self.repo.set_files(record, matched, commit=False)
         return True
@@ -624,63 +626,20 @@ class RecordService:
         return record
 
     async def update_status(
-        self,
-        record_id: int,
-        new_status: RecordStatus,
-        *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        self, record_id: int, new_status: RecordStatus, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Update record status and fire RecordFlow trigger if status changed.
+        """Raw status change (``SetStatus``) — admins and system actors only.
 
-        When a record leaves ``preparing`` for ``pending``, input files are
-        re-validated *before* any status is written: an invalid file set sends
-        the record to ``blocked`` instead (check-files unblocks it later once
-        files appear), so the record is never observable as
-        pending-with-invalid-files. Direct ``preparing`` → ``inwork``/
-        ``finished`` transitions are rejected — a preparing record must exit
-        via ``pending``.
-
-        Args:
-            record_id: Record ID.
-            new_status: New status to set.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
+        A preparing record may not jump to inwork/finished; ``preparing → pending``
+        re-validates input files first and lands in ``blocked`` when they are
+        invalid (never observable as pending-with-invalid-files); writing the
+        current status again is a no-op — no audit, no flows.
 
         Returns:
-            Tuple of (updated record, old status). The record's final status
-            may differ from ``new_status`` (see above).
-
-        Raises:
-            RecordEditLockedError: If the record is finished and its type
-                locks submitted records for *acting_user*.
-            BusinessRuleViolationError: On a direct preparing → inwork/finished
-                transition.
+            (fresh record, status before) — the final status may differ from
+            ``new_status`` (see above).
         """
-        if acting_user is not None and not acting_user.is_superuser:
-            record = await self.repo.get_with_relations(record_id)
-            ensure_record_editable(record, acting_user)
-        target_status = new_status
-        matched_files: dict[str, str] = {}
-        current = await self.repo.get(record_id)
-        if current.status == RecordStatus.preparing:
-            target_status, matched_files = await self._resolve_preparing_exit(record_id, new_status)
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_status(record_id, target_status)
-        if matched_files:
-            await self.repo.set_files(record, matched_files)
-            record = await self.repo.get_with_relations(record_id)
-        if old_status != record.status:
-            await self._record_event(
-                record_id=record_id,
-                kind="status_changed",
-                actor_id=actor_id,
-                from_status=old_status,
-                to_status=record.status,
-            )
-            await self._fire_status_change(record, old_status)
-        return record, old_status
+        return await self._transition(record_id, SetStatus(new_status), actor)
 
     async def assign_user(
         self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
@@ -1016,76 +975,47 @@ class RecordService:
         await self._fire_file_change(record)
 
     async def bulk_update_status(
-        self,
-        record_ids: list[int],
-        new_status: RecordStatus,
-        *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        self, record_ids: list[int], new_status: RecordStatus, *, actor: Actor
     ) -> None:
-        """Update status for multiple records and fire triggers for each changed record.
+        """Set one status on many records — all of them or none.
 
-        ``preparing`` records are routed through :meth:`update_status` one by
-        one so the exit re-validation applies (preparing → pending may land in
-        ``blocked``) — the bulk repo path would bypass it.
-
-        Args:
-            record_ids: List of record IDs.
-            new_status: New status to set.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Raises:
-            RecordEditLockedError: If any target record is finished and its
-                type locks submitted records for *acting_user*. Raised before
-                any status is mutated.
-            BusinessRuleViolationError: If any target record is preparing and
-                ``new_status`` is inwork/finished. Raised before any status
-                is mutated.
+        Ids are deduplicated and sorted, so every bulk request locks rows in the
+        same order and two of them cannot deadlock. Every record is decided
+        (``_decide_one``, read-only) before anything is written, so one refusal
+        (403/409) leaves every record untouched; the writes (``_write_one``)
+        then share this one transaction — the first miss rolls the whole batch
+        back and raises ``ConcurrentTransitionError`` (unlike ``_transition``,
+        bulk never retries). SSE and RecordFlow fire per written record only
+        after the commit. Unknown ids are skipped.
         """
-        # Capture old statuses (and enforce the edit lock) before bulk update
-        old_statuses: dict[int, RecordStatus] = {}
-        preparing_ids: list[int] = []
-        for record_id in record_ids:
-            record = await self.repo.get_optional(record_id)
-            if record:
-                if acting_user is not None and not acting_user.is_superuser:
-                    with_type = await self.repo.get_with_relations(record_id)
-                    ensure_record_editable(with_type, acting_user)
-                if record.status == RecordStatus.preparing:
-                    if new_status in (RecordStatus.inwork, RecordStatus.finished):
-                        raise BusinessRuleViolationError(
-                            f"Record {record_id} is still preparing — it must leave "
-                            f"via 'pending' (with file re-validation) before "
-                            f"'{new_status.value}'."
-                        )
-                    preparing_ids.append(record_id)
-                    continue
-                old_statuses[record_id] = record.status
+        cmd = SetStatus(new_status)
+        decided: list[tuple[Record, RecordSnapshot, Effect, dict[str, str]]] = []
+        for record_id in sorted(set(record_ids)):
+            if await self.repo.get_optional(record_id) is None:
+                continue
+            record, snap, effect, matched = await self._decide_one(record_id, cmd, actor)
+            if effect is not None:
+                decided.append((record, snap, effect, matched))
 
-        for marked_id in old_statuses:
-            self._mark_audit(marked_id, actor_id)
-        await self.repo.bulk_update_status(list(old_statuses), new_status)
-
-        # Preparing records take the single-record path: exit re-validation
-        # applies and each fires its own trigger.
-        for record_id in preparing_ids:
-            await self.update_status(record_id, new_status, acting_user=acting_user)
-
-        # Fire triggers for each record whose status actually changed
-        for record_id, old_status in old_statuses.items():
-            if old_status != new_status:
-                updated = await self.repo.get_with_relations(record_id)
-                await self._record_event(
-                    record_id=record_id,
-                    kind="status_changed",
-                    actor_id=actor_id,
-                    from_status=old_status,
-                    to_status=new_status,
-                    new_value={"via": "bulk"},
+        written: list[tuple[RecordSnapshot, Effect]] = []
+        for record, snap, effect, matched in decided:
+            if not await self._write_one(record, snap, effect, matched, cmd, actor, via="bulk"):
+                await self.repo.session.rollback()
+                raise ConcurrentTransitionError(
+                    f"Record {snap.record_id} changed during the bulk status update; "
+                    f"no record was changed.",
+                    status=snap.status.value,
                 )
-                await self._fire_status_change(updated, old_status)
+            written.append((snap, effect))
+
+        updated = [
+            await self.repo.get_with_relations(snap.record_id, populate_existing=True)
+            for snap, _ in written
+        ]
+        await self.repo.session.commit()
+        for (snap, effect), record in zip(written, updated, strict=True):
+            self._emit_record_updated(record, actor)
+            await self._fire(effect, record, snap.status)
 
     async def invalidate_record(
         self,
@@ -1185,10 +1115,11 @@ class RecordService:
         return record
 
     async def check_files(
-        self, record_id: int, *, actor_id: UUID | None = None
+        self, record_id: int, *, actor: Actor
     ) -> tuple[list[str], dict[str, str]]:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
+        A person needs the lifecycle policy's mutation rights (``Unblock``).
         For preparing records: no-op — prefill / file generation is in flight,
         so neither auto-unblock nor checksum bookkeeping may run.
         For blocked records: validates input files, transitions to pending if valid.
@@ -1200,30 +1131,15 @@ class RecordService:
             Empty tuple ([], {}) if record stays blocked or is preparing.
         """
         record = await self.repo.get_with_relations(record_id)
-        record_read = RecordRead.model_validate(record)
-
+        self.precheck(record, Unblock(), actor)
         if record.status == RecordStatus.preparing:
             return [], {}
-
-        # Fetch parent once — feeds fallback pattern resolution for both
-        # input validation (blocked records) and the OUTPUT checksum scan.
-        parent_read = None
-        if record.parent_record_id is not None:
-            parent = await self.repo.get_with_relations(record.parent_record_id)
-            parent_read = RecordRead.model_validate(parent)
-
-        # Auto-unblock: if record is blocked, check whether input files are now present
         if record.status == RecordStatus.blocked:
-            file_result = await validate_record_files(record_read, parent=parent_read)
-            if file_result is not None and file_result.valid:
-                if file_result.matched_files:
-                    await self.repo.set_files(record, file_result.matched_files)
-                record, _ = await self.update_status(
-                    record_id, RecordStatus.pending, actor_id=actor_id
-                )
-                record_read = RecordRead.model_validate(record)
-            else:
+            record, _ = await self._transition(record_id, Unblock(), actor)
+            if record.status == RecordStatus.blocked:
                 return [], {}
+        record_read = RecordRead.model_validate(record)
+        parent_read = await self._parent_read(record)
 
         new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
             record_read.record_type.file_registry or []
@@ -1600,46 +1516,6 @@ class RecordService:
             series_uid=record.series_uid,
             exclude_record_id=record.id,
         )
-
-    async def _resolve_preparing_exit(
-        self, record_id: int, new_status: RecordStatus
-    ) -> tuple[RecordStatus, dict[str, str]]:
-        """Resolve the target status for a record leaving ``preparing``.
-
-        Records created as ``preparing`` skip creation-time auto-blocking, so
-        missing input files are caught on exit instead. For the ``pending``
-        target the files are validated before any status is written; an
-        invalid set redirects the transition to ``blocked`` (check-files
-        unblocks it later). No file registry → pending. ``inwork`` and
-        ``finished`` are rejected — a preparing record must pass through
-        ``pending`` and its file re-validation first.
-
-        Returns:
-            Tuple of (resolved status, matched files for ``set_files``).
-
-        Raises:
-            BusinessRuleViolationError: On a direct preparing → inwork/finished
-                transition (→ 409).
-        """
-        if new_status in (RecordStatus.inwork, RecordStatus.finished):
-            raise BusinessRuleViolationError(
-                f"Record {record_id} is still preparing — it must leave via "
-                f"'pending' (with file re-validation) before '{new_status.value}'."
-            )
-        if new_status != RecordStatus.pending:
-            return new_status, {}
-        record = await self.repo.get_with_relations(record_id)
-        record_read = RecordRead.model_validate(record)
-        parent_read = None
-        if record.parent_record_id is not None:
-            parent = await self.repo.get_with_relations(record.parent_record_id)
-            parent_read = RecordRead.model_validate(parent)
-        file_result = await validate_record_files(record_read, parent=parent_read)
-        if file_result is None:
-            return RecordStatus.pending, {}
-        if not file_result.valid:
-            return RecordStatus.blocked, {}
-        return RecordStatus.pending, file_result.matched_files or {}
 
     async def _register_output_links(
         self,

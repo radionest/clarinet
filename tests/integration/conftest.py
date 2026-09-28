@@ -365,6 +365,16 @@ def test_images_path() -> Path:
     return Path(__file__).parent / "test_data" / "slicer"
 
 
+@pytest.fixture
+def service_token(test_settings, monkeypatch) -> str:
+    """A known ``X-Internal-Token`` for ``client_as(..., service_token=...)``."""
+    from pydantic import SecretStr
+
+    token = "lc-service-token"
+    monkeypatch.setattr(test_settings, "internal_service_token", SecretStr(token))
+    return token
+
+
 @pytest_asyncio.fixture
 async def lc(test_session, test_patient, test_study, test_series):
     """Lifecycle scaffold — see tests/utils/lifecycle.py."""

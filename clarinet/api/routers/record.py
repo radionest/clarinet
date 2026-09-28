@@ -31,6 +31,7 @@ from starlette.responses import Response
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
+    ActorDep,
     AuditActorDep,
     AuthorizedRecordDep,
     ClientStoragePathDep,
@@ -46,7 +47,6 @@ from clarinet.api.dependencies import (
     SeriesRepositoryDep,
     SessionDep,
     SlicerServiceDep,
-    authorize_mutable_record_access,
     get_client_ip,
     get_user_role_names,
     is_admin,
@@ -465,26 +465,15 @@ async def bulk_update_record_status(
     record_ids: list[Annotated[int, Body(ge=1, le=2147483647)]],
     new_status: RecordStatus,
     service: RecordServiceDep,
-    user: CurrentUserDep,
-    repo: RecordRepositoryDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> None:
-    """Update status for multiple records at once.
+    """Set one status on many records — admins and the service token only (403 otherwise).
 
-    Non-superusers need the type's role and ``MutableRecordDep`` rights on
-    every target record. 409 when any target record is finished and its type
-    locks submitted records (``editable`` / ``edit_window_days``) —
-    non-superusers only.
+    All or nothing: 409 when any target's status refuses it (preparing →
+    inwork/finished) or it changed concurrently. Preparing → pending re-validates
+    files per record (may land in blocked).
     """
-    if not user.is_superuser:
-        user_roles = get_user_role_names(user)
-        for rid in record_ids:
-            record = await repo.get_with_relations(rid)
-            role_name = record.record_type.role_name
-            if role_name is None or role_name not in user_roles:
-                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
-            await authorize_mutable_record_access(record, user)
-    await service.bulk_update_status(record_ids, new_status, acting_user=user, actor_id=actor)
+    await service.bulk_update_status(record_ids, new_status, actor=actor)
 
 
 @router.patch("/{record_id}/status", response_model=RecordRead)
@@ -494,17 +483,14 @@ async def update_record_status(
     service: RecordServiceDep,
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
-    """Update a record's status.
+    """Set a record's status — admins and the service token only (403 otherwise).
 
-    409 for non-superusers on any status change of a finished record whose
-    type locks submitted records (``editable`` / ``edit_window_days``) —
-    re-opening would let the user change the answer via a fresh POST.
+    409 on preparing → inwork/finished; preparing → pending re-validates
+    files (may land in blocked); the current status again is a no-op.
     """
-    record, _ = await service.update_status(
-        record_id, record_status, acting_user=user, actor_id=actor
-    )
+    record, _ = await service.update_status(record_id, record_status, actor=actor)
     return await mask_record(record, user, service.repo)
 
 
@@ -1041,14 +1027,14 @@ async def check_record_files(
     record_id: int,
     _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> FileCheckResult:
     """Compute current file checksums, compare with stored, trigger invalidation if changed.
 
     For ``blocked`` records, this endpoint also checks whether the required
     input files have appeared and auto-transitions to ``pending`` if so.
     """
-    changed_files, checksums = await service.check_files(record_id, actor_id=actor)
+    changed_files, checksums = await service.check_files(record_id, actor=actor)
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
 
 

@@ -947,17 +947,18 @@ async def test_role_filtering_prevents_access_to_other_records(
     response = await role_a_client.get(f"/api/records/{record_role_b.id}")
     assert response.status_code == 403
 
-    # Verify role_a user can update their own record
-    response = await role_a_client.patch(
-        f"/api/records/{record_role_a.id}/status",
-        params={"record_status": "inwork"},
+    # Verify role_a user can mutate their own record (fail is a lifecycle
+    # command, not an admin-only raw status change)
+    response = await role_a_client.post(
+        f"/api/records/{record_role_a.id}/fail",
+        json={"reason": "rbac check"},
     )
     assert response.status_code == 200
 
     # Verify update succeeded
     get_response = await role_a_client.get(f"/api/records/{record_role_a.id}")
     assert get_response.status_code == 200
-    assert get_response.json()["status"] == "inwork"
+    assert get_response.json()["status"] == "failed"
 
 
 @pytest.mark.asyncio
