@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, assert_never, cast
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
     AnonPathError,
+    AuthorizationError,
     BusinessRuleViolationError,
     ConcurrentTransitionError,
     RecordEditLockedError,
     RecordOwnerLacksRoleError,
+    TransitionNotAllowedError,
     UnsafePathError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
@@ -642,124 +645,81 @@ class RecordService:
         return await self._transition(record_id, SetStatus(new_status), actor)
 
     async def assign_user(
-        self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
+        self, record_id: int, user_id: UUID, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Assign user to a record and fire RecordFlow trigger if status changed.
+        """Make ``user_id`` the owner — admins and system actors only.
 
-        Args:
-            record_id: Record ID.
-            user_id: User UUID.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
+        Only a pending record moves (to inwork, firing ``on_status("inwork")``);
+        every other status — finished, blocked and preparing included — stays.
 
         Raises:
-            RecordConstraintViolationError: If unique_by is violated.
+            AuthorizationError: 403 for a non-admin person.
+            UserNotFoundError: 404 — no such user.
+            RecordOwnerLacksRoleError: 409 — the user cannot access the type.
+            RecordUniquePerUserError: ``unique_by`` violated for the new owner.
         """
-        record = await self.repo.get_with_record_type(record_id)
-        await self._check_unique_by(user_id, record)
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.assign_user(record_id, user_id)
-        await self._record_event(
-            record_id=record_id,
-            kind="assigned",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-            new_value={"user_id": str(user_id)},
-        )
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
-        return record, old_status
+        return await self._transition(record_id, Assign(user_id), actor)
 
-    async def claim_record(
-        self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
-    ) -> Record:
-        """Claim a record for a user with uniqueness constraint check.
+    async def claim_record(self, record_id: int, *, actor: Actor) -> Record:
+        """Take an unassigned (or already own) pending/inwork record for the actor.
 
-        Mirrors ``assign_user``: assigns the user, moves the record to
-        ``inwork`` and fires the RecordFlow status-change trigger, so taking a
-        task from the pool runs the same automation as an admin assignment.
-
-        Args:
-            record_id: Record ID.
-            user_id: User UUID claiming the record.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Updated record (relations loaded) with inwork status.
+        The claimant is the person, or the service account for a system actor.
+        pending → inwork fires ``on_status("inwork")``; re-claiming one's own
+        inwork record changes nothing.
 
         Raises:
-            RecordConstraintViolationError: If unique_by is violated.
+            AuthorizationError: 403 — someone else's record, or no type role.
+            TransitionNotAllowedError: 409 — the record is not pending/inwork.
+            RecordUniquePerUserError: ``unique_by`` violated.
         """
-        record = await self.repo.get_with_record_type(record_id)
-        old_status = record.status
-        await self._check_unique_by(user_id, record)
-        self._mark_audit(record_id, actor_id)
-        await self.repo.claim_record(record_id, user_id)
-        updated = await self.repo.get_with_relations(record_id)
-        await self._record_event(
-            record_id=record_id,
-            kind="assigned",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=updated.status,
-            new_value={"user_id": str(user_id), "via": "claim"},
-        )
-        if old_status != updated.status:
-            await self._fire_status_change(updated, old_status)
-        return updated
+        record, _ = await self._transition(record_id, Claim(), actor)
+        return record
 
     async def claim_random_from_pool(
-        self,
-        criteria: RecordSearchCriteria,
-        user_id: UUID,
-        *,
-        actor_id: UUID | None = None,
+        self, criteria: RecordSearchCriteria, *, actor: Actor
     ) -> Record | None:
-        """Claim a random record matching ``criteria`` for ``user_id``.
+        """Claim a random record matching ``criteria`` for the actor; ``None`` for an empty pool.
 
-        Picks one random record from the pool (typically an unassigned
-        ``pending`` record of a given type) and claims it via ``claim_record``.
-        Returns ``None`` when nothing matches, so the router can answer 404
-        without reaching into the repository itself.
+        ``find_random(for_update=True)`` locks the pick (``FOR UPDATE SKIP LOCKED``
+        on PostgreSQL), so concurrent claimers get different records. Without row
+        locks (SQLite) two claimers can pick the same one: the loser's claim is
+        refused on the fresh state, and the next pick skips that record — at most
+        ``_MAX_TRANSITION_ATTEMPTS`` picks.
 
-        ``find_random`` runs with ``for_update=True`` (``FOR UPDATE SKIP
-        LOCKED``): the chosen row is locked for this transaction until
-        ``claim_record`` commits, so a concurrent claimer skips it and two
-        users can never win the same pool record.
+        Raises:
+            ConcurrentTransitionError: 409 — every pick was taken first.
+            RecordUniquePerUserError: ``unique_by`` violated.
         """
-        record = await self.repo.find_random(criteria, for_update=True)
-        if record is None:
-            return None
-        assert record.id is not None  # find_random returns a persisted record
-        return await self.claim_record(record.id, user_id, actor_id=actor_id)
-
-    async def unassign_user(
-        self, record_id: int, *, actor_id: UUID | None = None
-    ) -> tuple[Record, RecordStatus]:
-        """Remove user from a record and fire RecordFlow trigger if status changed.
-
-        Args:
-            record_id: Record ID.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
-        """
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.unassign_user(record_id)
-        await self._record_event(
-            record_id=record_id,
-            kind="unassigned",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
+        taken: set[int] = set()
+        for _ in range(_MAX_TRANSITION_ATTEMPTS):
+            pick = await self.repo.find_random(
+                replace(criteria, exclude_ids=taken), for_update=True
+            )
+            if pick is None:
+                return None
+            assert pick.id is not None  # find_random returns a persisted record
+            try:
+                return await self.claim_record(pick.id, actor=actor)
+            except (AuthorizationError, TransitionNotAllowedError) as exc:
+                logger.info(
+                    f"claim-next: record {pick.id} was taken first ({exc}); picking another"
+                )
+                taken = taken | {pick.id}
+        raise ConcurrentTransitionError(
+            "Every record picked from the pool was taken first; try again."
         )
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
-        return record, old_status
+
+    async def unassign_user(self, record_id: int, *, actor: Actor) -> tuple[Record, RecordStatus]:
+        """Clear the owner; inwork falls back to pending (``on_status("pending")``).
+
+        Admins and system actors on any status; the owner of a pending/inwork
+        record whose type is ``releasable``.
+
+        Raises:
+            AuthorizationError: 403 — anyone else.
+            TransitionNotAllowedError: 409 — the owner releasing another status.
+        """
+        return await self._transition(record_id, Unassign(), actor)
 
     async def submit_data(
         self,

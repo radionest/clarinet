@@ -78,6 +78,8 @@ class RecordSearchCriteria:
     # selected, the same parent). Requires ``user_id`` to be set;
     # ``_build_criteria_query`` joins ``RecordType`` automatically.
     exclude_unique_violations: bool = False
+    # Record ids a pool pick must skip (claim-next after a lost race).
+    exclude_ids: set[int] = field(default_factory=set)
     data_queries: list[RecordFindResult] = field(default_factory=list)
 
 
@@ -958,55 +960,6 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
-    async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
-        """Assign a user to a record and set status to inwork.
-
-        Args:
-            record_id: Record ID
-            user_id: User UUID
-
-        Returns:
-            Tuple of (record with relations loaded, old status)
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
-            UserNotFoundError: If user doesn't exist
-            ValidationError: If record is blocked or preparing
-        """
-        record = await self.get(record_id)
-        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
-            raise ValidationError(f"Cannot assign user to a {record.status.value} record")
-        user = await self.session.get(User, user_id)
-        if not user:
-            raise UserNotFoundError(user_id)
-        old_status = record.status
-        record.user_id = user_id
-        record.status = RecordStatus.inwork
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
-
-    async def unassign_user(self, record_id: int) -> tuple[Record, RecordStatus]:
-        """Remove user assignment from a record.
-
-        If the record is currently inwork, status is reset to pending.
-
-        Args:
-            record_id: Record ID.
-
-        Returns:
-            Tuple of (record with relations loaded, old status).
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
-        """
-        record = await self.get(record_id)
-        old_status = record.status
-        record.user_id = None
-        if record.status == RecordStatus.inwork:
-            record.status = RecordStatus.pending
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
-
     async def ensure_user_assigned(self, record_id: int, user_id: UUID) -> None:
         """Assign user to a record only if it has no user yet.
 
@@ -1018,29 +971,6 @@ class RecordRepository(BaseRepository[Record]):
         if record.user_id is None:
             record.user_id = user_id
             await self.session.commit()
-
-    async def claim_record(self, record_id: int, user_id: UUID) -> Record:
-        """Assign user and set status to inwork.
-
-        Args:
-            record_id: Record ID
-            user_id: User UUID
-
-        Returns:
-            Updated record
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
-            ValidationError: If record is blocked or preparing
-        """
-        record = await self.get(record_id)
-        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
-            raise ValidationError(f"Cannot claim a {record.status.value} record")
-        record.user_id = user_id
-        record.status = RecordStatus.inwork
-        await self.session.commit()
-        await self.session.refresh(record)
-        return record
 
     async def invalidate_record(
         self,
@@ -1549,6 +1479,9 @@ class RecordRepository(BaseRepository[Record]):
         # Parent record filter
         if criteria.parent_record_id is not None:
             statement = statement.where(Record.parent_record_id == criteria.parent_record_id)
+
+        if criteria.exclude_ids:
+            statement = statement.where(col(Record.id).not_in(criteria.exclude_ids))
 
         # Role-based access filter
         if criteria.role_names is not None:

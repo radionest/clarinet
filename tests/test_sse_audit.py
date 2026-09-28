@@ -188,7 +188,7 @@ async def test_audit_dedup_single_enriched_event(test_session, sse_strict_bus, h
 @pytest.mark.asyncio
 async def test_audit_assign_enriched(test_session, sse_strict_bus, hierarchy):
     """Assigning a user through RecordService enriches user_id to the actor."""
-    assignee = make_user()
+    assignee = make_user(is_superuser=True)  # passes the new-owner role check (type has no role)
     actor = make_user()
     test_session.add_all([assignee, actor])
     await test_session.commit()
@@ -196,7 +196,11 @@ async def test_audit_assign_enriched(test_session, sse_strict_bus, hierarchy):
     drain_orphan_audit_events()
     sse_strict_bus.events.clear()
 
-    await _service(test_session).assign_user(rec.id, assignee.id, actor_id=actor.id)
+    await _service(test_session).assign_user(
+        rec.id,
+        assignee.id,
+        actor=HumanActor(user_id=actor.id, is_superuser=True, role_names=frozenset()),
+    )
     await test_session.commit()
 
     records = _entity_events(sse_strict_bus, "record", "updated")

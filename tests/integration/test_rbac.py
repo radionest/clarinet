@@ -553,7 +553,7 @@ async def test_assign_user_self_claim_of_unassigned_record_allowed(
 async def test_assign_user_cannot_claim_finished_record(
     test_session, role_a_client, record_role_a, user_with_role_a
 ):
-    """Assigning forces inwork, so a self-claim would re-open a finished record (#629)."""
+    """A non-admin cannot claim a finished record: claim allows pending/inwork only (#629)."""
     record_role_a.status = RecordStatus.finished
     test_session.add(record_role_a)
     await test_session.commit()
@@ -561,7 +561,7 @@ async def test_assign_user_cannot_claim_finished_record(
     response = await role_a_client.patch(
         f"{RECORDS_BASE}/{record_role_a.id}/user", params={"user_id": str(user_with_role_a.id)}
     )
-    assert response.status_code == 403
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

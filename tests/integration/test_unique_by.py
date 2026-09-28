@@ -463,6 +463,9 @@ async def test_claim_enforces_partitions(
         parent_record_id=q.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp_p = await client.patch(
         f"{RECORDS_BASE}/{candidate_p.id}/user", params={"user_id": str(test_user.id)}
@@ -568,6 +571,9 @@ async def test_claim_parent_only_record_succeeds(
         parent_record_id=anchor.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp = await client.patch(
         f"{RECORDS_BASE}/{child.id}/user", params={"user_id": str(test_user.id)}
@@ -650,6 +656,9 @@ async def test_assign_excludes_only_self_not_other_conflicts(
         parent_record_id=p.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp = await client.patch(
         f"{RECORDS_BASE}/{candidate.id}/user", params={"user_id": str(test_user.id)}

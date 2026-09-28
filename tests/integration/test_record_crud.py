@@ -732,19 +732,21 @@ async def test_status_update_preparing_to_inwork_conflict(client, test_session, 
 
 
 @pytest.mark.asyncio
-async def test_assign_user_rejects_preparing_record(
-    client, test_session, test_user, _pending_record
-):
-    """Assigning a user to a preparing record fails with 422 (ValidationError)."""
+async def test_assign_user_keeps_preparing_status(client, test_session, test_user, _pending_record):
+    """Assigning a user to a preparing record sets the owner but does not move it."""
     _pending_record.status = RecordStatus.preparing
     test_session.add(_pending_record)
+    test_user.is_superuser = True  # pass the new-owner role check (type has role_name=None)
+    test_session.add(test_user)
     await test_session.commit()
 
     response = await client.patch(
         f"{RECORDS_BASE}/{_pending_record.id}/user",
         params={"user_id": str(test_user.id)},
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["status"] == RecordStatus.preparing.value
+    assert response.json()["user_id"] == str(test_user.id)
 
 
 # ── clarinet_storage_path — admin-only (Task 12 Part B, half 2) ────────────

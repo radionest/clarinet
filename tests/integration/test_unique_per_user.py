@@ -27,6 +27,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.exceptions.domain import RecordConstraintViolationError
+from clarinet.models.actor import SystemActor
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
 from clarinet.models.user import User, UserRole, UserRolesLink
@@ -146,12 +147,17 @@ class TestAssignUserUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         with pytest.raises(RecordConstraintViolationError):
-            await service.assign_user(new_record.id, test_user.id)  # type: ignore[arg-type]
+            await service.assign_user(  # type: ignore[arg-type]
+                new_record.id, test_user.id, actor=SystemActor(service_user_id=test_user.id)
+            )
 
     @pytest.mark.asyncio
     async def test_assign_user_succeeds_when_unique_per_user_false(
@@ -181,12 +187,17 @@ class TestAssignUserUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         # Should not raise
-        record, _ = await service.assign_user(new_record.id, test_user.id)  # type: ignore[arg-type]
+        record, _ = await service.assign_user(  # type: ignore[arg-type]
+            new_record.id, test_user.id, actor=SystemActor(service_user_id=test_user.id)
+        )
         assert record.user_id == test_user.id
 
     @pytest.mark.asyncio
@@ -226,12 +237,17 @@ class TestAssignUserUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         # Should not raise
-        record, _ = await service.assign_user(new_record.id, test_user.id)  # type: ignore[arg-type]
+        record, _ = await service.assign_user(  # type: ignore[arg-type]
+            new_record.id, test_user.id, actor=SystemActor(service_user_id=test_user.id)
+        )
         assert record.user_id == test_user.id
 
 
@@ -269,12 +285,17 @@ class TestClaimRecordUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         with pytest.raises(RecordConstraintViolationError):
-            await service.claim_record(new_record.id, test_user.id)  # type: ignore[arg-type]
+            await service.claim_record(  # type: ignore[arg-type]
+                new_record.id, actor=SystemActor(service_user_id=test_user.id)
+            )
 
     @pytest.mark.asyncio
     async def test_claim_record_succeeds_for_different_context(
@@ -311,11 +332,16 @@ class TestClaimRecordUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
-        record = await service.claim_record(new_record.id, test_user.id)  # type: ignore[arg-type]
+        record = await service.claim_record(  # type: ignore[arg-type]
+            new_record.id, actor=SystemActor(service_user_id=test_user.id)
+        )
         assert record.user_id == test_user.id
 
 

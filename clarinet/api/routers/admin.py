@@ -58,15 +58,24 @@ async def get_admin_stats(
     return await service.get_stats()
 
 
-@router.patch("/records/{record_id}/assign", response_model=RecordRead)
+@router.patch(
+    "/records/{record_id}/assign",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "The user cannot access the record type, unique_by violated, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def admin_assign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     user_id: UUID,
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> Record:
-    """Assign a user to a record (admin only).
+    """Make ``user_id`` the owner (admin only). Only a pending record moves to inwork.
 
     Args:
         record_id: The record to assign.
@@ -77,7 +86,7 @@ async def admin_assign_record_user(
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
+    record, _ = await service.assign_user(record_id, user_id, actor=actor)
     return record
 
 
@@ -113,12 +122,16 @@ async def admin_update_record_status(
     return record
 
 
-@router.delete("/records/{record_id}/user", response_model=RecordRead)
+@router.delete(
+    "/records/{record_id}/user",
+    response_model=RecordRead,
+    responses={409: {"description": "The record changed concurrently"}},
+)
 async def admin_unassign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> Record:
     """Remove user assignment from a record (admin only).
 
@@ -132,7 +145,7 @@ async def admin_unassign_record_user(
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.unassign_user(record_id, actor_id=actor)
+    record, _ = await service.unassign_user(record_id, actor=actor)
     return record
 
 

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, sessionmaker
 from sqlmodel import select
 
+from clarinet.models.actor import SystemActor
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
 from clarinet.models.user import User, UserRole, UserRolesLink
@@ -251,7 +252,10 @@ class TestClaimRecordTrigger:
         engine = AsyncMock()
         service = RecordService(RecordRepository(test_session), engine=engine)
 
-        await service.claim_record(record.id, claim_user.id)  # type: ignore[arg-type]
+        await service.claim_record(
+            record.id,
+            actor=SystemActor(service_user_id=claim_user.id),  # type: ignore[arg-type]
+        )
 
         engine.handle_record_status_change.assert_awaited_once_with(ANY, RecordStatus.pending)
 

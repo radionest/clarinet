@@ -26,64 +26,6 @@ class TestRecordServiceTriggers:
     """Test RecordService mutation methods fire correct RecordFlow triggers."""
 
     @pytest.mark.asyncio
-    async def test_assign_user_fires_status_change_trigger(self) -> None:
-        """Test assign_user fires status-change trigger when status changes."""
-        user_id = uuid4()
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.inwork
-        old_status = RecordStatus.pending
-        record_read_mock = MagicMock()
-
-        prefetch_mock = MagicMock()
-        prefetch_mock.record_type.unique_per_user = False
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = prefetch_mock
-        repo_mock.assign_user.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-
-        service = RecordService(repo_mock, engine_mock)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = record_read_mock
-            result, result_old_status = await service.assign_user(1, user_id)
-
-            repo_mock.get_with_record_type.assert_awaited_once_with(1)
-            repo_mock.assign_user.assert_awaited_once_with(1, user_id)
-            patched.model_validate.assert_called_once_with(record_mock)
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                record_read_mock, old_status
-            )
-            assert result == record_mock
-            assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_assign_user_no_trigger_when_status_unchanged(self) -> None:
-        """Test assign_user does not fire trigger when status unchanged."""
-        user_id = uuid4()
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-        old_status = RecordStatus.pending
-
-        prefetch_mock = MagicMock()
-        prefetch_mock.record_type.unique_per_user = False
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = prefetch_mock
-        repo_mock.assign_user.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        result, result_old_status = await service.assign_user(1, user_id)
-
-        repo_mock.assign_user.assert_awaited_once_with(1, user_id)
-        engine_mock.handle_record_status_change.assert_not_awaited()
-        assert result == record_mock
-        assert result_old_status == old_status
-
-    @pytest.mark.asyncio
     async def test_submit_data_fires_status_change_trigger(self) -> None:
         """Test submit_data fires status-change trigger."""
         data = {"field": "value"}

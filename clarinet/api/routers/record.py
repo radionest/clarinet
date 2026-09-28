@@ -80,6 +80,7 @@ from clarinet.models import (
     RecordTypeRead,
     User,
 )
+from clarinet.models.actor import HumanActor
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import (
     FileValidationResult,
@@ -271,14 +272,17 @@ async def get_my_available_record_types(
     response_model=RecordRead,
     responses={
         404: {"description": "No claimable record of this type in the pool"},
-        409: {"description": "unique_by violated for this user and type"},
+        409: {
+            "description": "unique_by violated for this user and type, "
+            "or every picked record was taken first"
+        },
     },
 )
 async def claim_next_record(
     record_type_name: Annotated[str, Query(min_length=1)],
     service: RecordServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
     """Claim a random unassigned pending record of ``record_type_name`` from the pool.
 
@@ -300,7 +304,7 @@ async def claim_next_record(
         user_id=None if user.is_superuser else user.id,
     )
     criteria = _build_record_search_criteria(query, user)
-    record = await service.claim_random_from_pool(criteria, user.id, actor_id=actor)
+    record = await service.claim_random_from_pool(criteria, actor=actor)
     if record is None:
         raise NOT_FOUND.with_context(f"No available record of type '{record_type_name}' to claim")
     return await mask_record(record, user, service.repo)
@@ -499,33 +503,48 @@ async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
     service: RecordServiceDep,
-    authorized_record: AuthorizedRecordDep,
+    _authorized_record: AuthorizedRecordDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
     """Assign a record to a user.
 
-    Non-admins may only claim for themselves an unassigned ``pending`` /
-    ``inwork`` record — what the frontend's auto-assign on open does.
-    Re-targeting a colleague's record would side-step the owner check of
-    ``MutableRecordDep``, and assigning forces ``inwork``, so claiming a
-    finished record would re-open it past its edit lock. Admins may assign
-    anyone, but still only past the read gate: a non-superuser admin needs
-    the type's role.
+    A non-admin naming themselves claims the record — unassigned or already
+    theirs, pending or inwork (the frontend's auto-assign on open). Anything
+    else is an assign, which only admins and the service token may do; it sets
+    the owner, and only a pending record moves to inwork.
     """
-    # ponytail: check-then-write, not atomic — a self-claim racing another assign
-    # of the same free record: last wins. Fix with a conditional
-    # UPDATE ... WHERE user_id IS NULL (a row lock alone won't do).
-    if not is_admin(user) and (
-        user_id != user.id
-        or authorized_record.user_id is not None
-        or authorized_record.status not in (RecordStatus.pending, RecordStatus.inwork)
-    ):
-        raise AuthorizationError(
-            "Only an admin can assign another user, take an assigned record, "
-            "or claim one that is not pending or inwork"
-        )
-    record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
+    if isinstance(actor, HumanActor) and not actor.is_admin and user_id == actor.user_id:
+        record = await service.claim_record(record_id, actor=actor)
+    else:
+        record, _ = await service.assign_user(record_id, user_id, actor=actor)
+    return await mask_record(record, user, service.repo)
+
+
+@router.delete(
+    "/{record_id}/user",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "The owner may release only a pending or inwork record, "
+            "or the record changed concurrently"
+        }
+    },
+)
+async def release_record(
+    record_id: int,
+    service: RecordServiceDep,
+    _authorized_record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+    actor: ActorDep,
+) -> RecordRead:
+    """Clear the record's owner; inwork falls back to pending.
+
+    The owner may release their own pending/inwork record when its type is
+    ``releasable``; admins and the service token may unassign any record.
+    403 otherwise.
+    """
+    record, _ = await service.unassign_user(record_id, actor=actor)
     return await mask_record(record, user, service.repo)
 
 
@@ -1331,19 +1350,6 @@ async def find_records(
         limit=query.limit,
         sort=query.sort,
     )
-
-
-# Dependency functions (used by other parts of the application)
-
-
-async def assign_user_to_record(
-    record_id: int,
-    service: RecordServiceDep,
-    actor: AuditActorDep,
-    user: User = Depends(current_active_user),
-) -> Record:
-    """Assign the current user to a record with uniqueness constraint check."""
-    return await service.claim_record(record_id, user.id, actor_id=actor)
 
 
 async def add_demo_records_for_user(
