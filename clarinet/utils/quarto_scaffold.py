@@ -11,6 +11,8 @@ import re
 import subprocess
 import tempfile
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -227,18 +229,12 @@ def strip_docx_body(src: Path, dest: Path) -> None:
     except ET.ParseError as exc:
         raise QuartoScaffoldError(f"{src} has a malformed XML part: {exc}") from exc
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), prefix=".reference-", suffix=".tmp")
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
-        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
-            for info in kept_infos:
-                zout.writestr(info, parts[info.filename])
-        os.replace(tmp_path, dest)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    with (
+        _atomic_write(dest) as tmp_path,
+        zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout,
+    ):
+        for info in kept_infos:
+            zout.writestr(info, parts[info.filename])
 
 
 def _scrub_core_props(core_xml: bytes) -> bytes:
@@ -361,35 +357,74 @@ def _empty_body(document_xml: bytes) -> bytes:
     return result
 
 
+@contextmanager
+def _atomic_write(dest: Path) -> Iterator[Path]:
+    """Yield a temp path beside ``dest``, moved onto ``dest`` only if the block succeeds.
+
+    A failed or interrupted write never leaves a partial ``reference.docx``,
+    which :func:`_prepare_reference` would otherwise reuse as-is.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), prefix=".reference-", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        yield tmp_path
+        # ponytail: mkstemp's 0600 would stick to dest; fixed 0644 ignores a stricter umask
+        os.chmod(tmp_path, 0o644)
+        os.replace(tmp_path, dest)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _is_docx(path: Path) -> bool:
+    """A zip holding ``word/document.xml`` — the bar :func:`strip_docx_body` sets."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            return _DOCUMENT_PART in z.namelist()
+    except zipfile.BadZipFile:
+        return False
+
+
 def generate_default_reference(dest: Path, quarto_executable: Path) -> None:
     """Write the bundled pandoc default ``reference.docx`` to ``dest``.
 
     ``quarto pandoc`` proxies Quarto's bundled pandoc, so no separate pandoc
-    install is needed. ``--print-default-data-file reference.docx`` emits the
-    docx bytes on stdout.
+    install is needed. Pandoc writes the file itself (``-o``, which must precede
+    ``--print-default-data-file``): Quarto 1.4.557's ``quarto pandoc`` sends the
+    docx bytes to stderr, corrupted, instead of stdout. It writes to a temp file
+    that replaces ``dest`` only once it validates as a docx.
 
     Raises:
-        QuartoScaffoldError: the subprocess exits non-zero or emits no bytes.
+        QuartoScaffoldError: the subprocess times out, exits non-zero, or
+            writes no valid docx; ``dest`` is left untouched.
     """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        proc = subprocess.run(
-            [str(quarto_executable), "pandoc", "--print-default-data-file", "reference.docx"],
-            capture_output=True,
-            timeout=60,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise QuartoScaffoldError(
-            "failed to generate default reference.docx: pandoc timed out after 60 s"
-        ) from exc
-    if proc.returncode != 0:
-        detail = proc.stderr.decode(errors="replace").strip()[:500]
-        raise QuartoScaffoldError(f"failed to generate default reference.docx: {detail}")
-    if not proc.stdout:
-        raise QuartoScaffoldError(
-            "failed to generate default reference.docx: pandoc produced no output"
-        )
-    dest.write_bytes(proc.stdout)
+    with _atomic_write(dest) as tmp_path:
+        try:
+            proc = subprocess.run(
+                [
+                    str(quarto_executable),
+                    "pandoc",
+                    "-o",
+                    str(tmp_path),
+                    "--print-default-data-file",
+                    "reference.docx",
+                ],
+                capture_output=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise QuartoScaffoldError(
+                "failed to generate default reference.docx: pandoc timed out after 60 s"
+            ) from exc
+        if proc.returncode != 0:
+            detail = proc.stderr.decode(errors="replace").strip()[:500]
+            raise QuartoScaffoldError(f"failed to generate default reference.docx: {detail}")
+        if not _is_docx(tmp_path):
+            raise QuartoScaffoldError(
+                "failed to generate default reference.docx: pandoc did not write a valid .docx"
+            )
 
 
 def scaffold_quarto_report(

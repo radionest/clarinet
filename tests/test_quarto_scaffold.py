@@ -1,6 +1,9 @@
 """Unit tests for clarinet.utils.quarto_scaffold."""
 
+import io
+import stat
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -538,60 +541,107 @@ def test_strip_preserves_extra_namespaces(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_generate_default_reference_writes_stdout(
+def _zip_bytes(name: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(name, "<x/>")
+    return buf.getvalue()
+
+
+def _pandoc_out(cmd: list[str]) -> Path:
+    return Path(cmd[cmd.index("-o") + 1])
+
+
+def test_generate_default_reference_lets_pandoc_write_dest(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Pandoc writes the docx itself via ``-o`` (before the print flag): Quarto
+    1.4.557's ``quarto pandoc`` sends stdout to stderr, corrupted (#684). It
+    writes a temp file beside ``dest``, moved into place once validated."""
     captured: dict[str, list[str]] = {}
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         captured["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout=b"PKdocxbytes", stderr=b"")
+        _pandoc_out(cmd).write_bytes(_zip_bytes("word/document.xml"))
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     dest = tmp_path / "reference.docx"
     generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
 
-    assert dest.read_bytes() == b"PKdocxbytes"
-    assert captured["cmd"][1:] == ["pandoc", "--print-default-data-file", "reference.docx"]
+    assert list(tmp_path.iterdir()) == [dest]
+    assert zipfile.is_zipfile(dest)
+    cmd = captured["cmd"]
+    assert cmd[1:3] == ["pandoc", "-o"]
+    assert Path(cmd[3]).parent == dest.parent
+    assert cmd[4:] == ["--print-default-data-file", "reference.docx"]
 
 
 def test_generate_default_reference_raises_on_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """A non-zero exit must not leave pandoc's partial output behind."""
+
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        _pandoc_out(cmd).write_bytes(b"PK partial")
         return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"boom")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    with pytest.raises(QuartoScaffoldError):
+    with pytest.raises(QuartoScaffoldError, match="boom"):
         generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_generate_default_reference_raises_on_empty_stdout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    "written",
+    [None, b"", b"PK not really a zip", _zip_bytes("word/styles.xml")],
+    ids=["nothing", "empty", "not-zip", "zip-without-document"],
+)
+def test_generate_default_reference_raises_without_valid_docx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, written: bytes | None
 ) -> None:
-    """Zero exit but empty stdout must error instead of writing a 0-byte file."""
+    """Zero exit but no / empty / corrupt / non-docx file must error, leave no file."""
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if written is not None:
+            _pandoc_out(cmd).write_bytes(written)
         return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    dest = tmp_path / "reference.docx"
-    with pytest.raises(QuartoScaffoldError):
-        generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
-    assert not dest.exists()
+    with pytest.raises(QuartoScaffoldError, match=r"valid \.docx"):
+        generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_generate_default_reference_raises_on_timeout(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """subprocess.TimeoutExpired must be mapped to QuartoScaffoldError."""
+    """subprocess.TimeoutExpired maps to QuartoScaffoldError, partial output removed."""
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        _pandoc_out(cmd).write_bytes(b"PK partial")
         raise subprocess.TimeoutExpired(cmd, 60)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(QuartoScaffoldError, match="timed out"):
         generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_generate_default_reference_is_world_readable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The temp file's mkstemp 0600 must not stick to the published reference.docx."""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        _pandoc_out(cmd).write_bytes(_zip_bytes("word/document.xml"))
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    dest = tmp_path / "reference.docx"
+    generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o644
 
 
 # ---------------------------------------------------------------------------
@@ -833,14 +883,24 @@ def test_cmd_quarto_new_exits_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Optional: real Quarto round-trip — a stripped reference.docx still renders.
-# Skipped when Quarto is not installed.
+# Optional: real Quarto — default reference generation, and a stripped
+# reference.docx still renders. Skipped when Quarto is not installed.
 # ---------------------------------------------------------------------------
 
 import shutil  # noqa: E402
-import sys  # noqa: E402
 
 _QUARTO_BIN = shutil.which("quarto")
+
+
+@pytest.mark.skipif(_QUARTO_BIN is None, reason="quarto CLI not installed")
+def test_generate_default_reference_with_quarto(tmp_path: Path) -> None:
+    """Real ``quarto pandoc`` yields a valid docx (1.4.557 corrupted stdout, #684).
+    Needs no render kernel, so unlike the round-trip it also runs on Windows."""
+    assert _QUARTO_BIN is not None
+    dest = tmp_path / "reference.docx"
+    generate_default_reference(dest, Path(_QUARTO_BIN))
+    with zipfile.ZipFile(dest) as z:
+        assert "word/document.xml" in z.namelist()
 
 
 @pytest.mark.skipif(_QUARTO_BIN is None, reason="quarto CLI not installed")
