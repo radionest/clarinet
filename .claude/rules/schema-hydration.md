@@ -1,7 +1,6 @@
 ---
 paths:
   - "clarinet/services/schema_hydration.py"
-  - "tasks/**/schema_hydrators.py"
   - "plan/**/schema_hydrators.py"
 ---
 

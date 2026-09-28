@@ -86,6 +86,10 @@ install_project() {
             log "Removing previous project bundle artifacts (plan/, review/)..."
             rm -rf "${INSTALL_DIR}/plan" "${INSTALL_DIR}/review" "$PROJECT_MARKER"
         fi
+        # The API refuses to start without its config root (default ./plan/
+        # under WorkingDirectory=/opt/clarinet); a bare stand runs on an empty one.
+        mkdir -p "${INSTALL_DIR}/plan"
+        chown clarinet:clarinet "${INSTALL_DIR}/plan"
         return
     fi
     if [[ ! -d "$bundle/plan" || ! -f "$bundle/settings.toml" ]]; then
