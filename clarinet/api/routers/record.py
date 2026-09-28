@@ -43,7 +43,6 @@ from clarinet.api.dependencies import (
     RecordServiceDep,
     RecordTypeRepositoryDep,
     RecordTypeServiceDep,
-    SeriesRepositoryDep,
     SessionDep,
     SlicerServiceDep,
     get_client_ip,
@@ -1388,44 +1387,3 @@ async def find_records(
         limit=query.limit,
         sort=query.sort,
     )
-
-
-async def add_demo_records_for_user(
-    user: User,
-    repo: RecordRepositoryDep,
-    series_repo: SeriesRepositoryDep,
-    record_type_repo: RecordTypeRepositoryDep,
-) -> None:
-    """Add demo records for a new user."""
-    series = await series_repo.get_random()
-
-    record_types = await record_type_repo.find(RecordTypeFind(name="demo"))
-
-    if not record_types:
-        raise NOT_FOUND.with_context("No demo record types found")
-
-    # Create a record for each demo record type
-    records: list[Record] = []
-    for record_type in record_types:
-        if record_type.level not in ("SERIES", "STUDY"):
-            continue
-
-        new_record = RecordCreate(
-            status=RecordStatus.pending,
-            user_id=user.id,
-            study_uid=series.study_uid,
-            patient_id=series.study.patient_id,
-            record_type_name=record_type.name,
-            series_uid=series.series_uid if record_type.level == "SERIES" else None,
-        )
-        # No check_storage_path_admin_only here on purpose. `user` is the
-        # record OWNER these demo records are created for, not the
-        # authenticated caller, so passing it would authorize against the
-        # wrong subject — granting or denying by the target user's roles.
-        # The invariant is structural instead: RecordCreate is built field by
-        # field just above and never takes clarinet_storage_path from input.
-        # Anything that changes that must add the caller's own check.
-        records.append(Record(**new_record.model_dump()))
-
-    if records:
-        await repo.create_many(records)
