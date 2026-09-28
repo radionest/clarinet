@@ -197,11 +197,13 @@ pub fn select(
       attribute.class("form-select"),
       event.on_change(on_change),
     ],
-    list.map(options, fn(opt) {
-      let #(val, label) = opt
-      html.option([attribute.value(val), attribute.selected(val == value)], label)
-    }),
+    list.map(options, select_option(_, value)),
   )
+}
+
+fn select_option(opt: #(String, String), value: String) -> Element(msg) {
+  let #(val, label) = opt
+  html.option([attribute.value(val), attribute.selected(val == value)], label)
 }
 
 // Select dropdown with per-option `disabled` flag. Used by the record-type
@@ -232,6 +234,36 @@ pub fn select_with_disabled(
         label,
       )
     }),
+  )
+}
+
+// Select dropdown whose options sit in labelled `<optgroup>`s, below one
+// ungrouped `placeholder` option (e.g. "No parent record"). Used by the
+// parent-record picker to group candidates by level and study.
+pub fn select_grouped(
+  name name: String,
+  value value: String,
+  placeholder placeholder: #(String, String),
+  groups groups: List(#(String, List(#(String, String)))),
+  on_change on_change: fn(String) -> msg,
+) -> Element(msg) {
+  html.select(
+    [
+      attribute.id(name),
+      attribute.name(name),
+      attribute.class("form-select"),
+      event.on_change(on_change),
+    ],
+    [
+      select_option(placeholder, value),
+      ..list.map(groups, fn(group) {
+        let #(group_label, options) = group
+        html.optgroup(
+          [attribute.attribute("label", group_label)],
+          list.map(options, select_option(_, value)),
+        )
+      })
+    ],
   )
 }
 

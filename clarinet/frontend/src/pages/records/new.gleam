@@ -17,7 +17,10 @@ import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise
+import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -42,6 +45,13 @@ pub type Model {
     form_errors: Dict(String, String),
     form_studies: List(Study),
     form_series: List(Series),
+    // Every record of the selected patient — the parent picker offers them
+    // all, whatever their level or study. Fetched once per patient
+    // (`parent_candidates_for`, "" = not yet) and only while the picker
+    // shows; `form_parent_groups` is the picker's options derived from them.
+    form_parent_candidates: List(Record),
+    parent_candidates_for: String,
+    form_parent_groups: List(#(String, List(#(String, String)))),
     loading: Bool,
     // Race guards: each cascading load increments these counters and the
     // result handler discards stale responses whose request_id doesn't match
@@ -60,6 +70,12 @@ pub type Msg {
   SubmitResult(Result(Record, ApiError))
   StudiesLoaded(request_id: Int, result: Result(List(Study), ApiError))
   SeriesLoaded(request_id: Int, result: Result(List(Series), ApiError))
+  // Keyed by patient, not a request id: ids restart with every modal, so a
+  // closed modal's late response could pass a reopened one's guard.
+  ParentCandidatesLoaded(
+    patient_id: String,
+    result: Result(List(Record), ApiError),
+  )
   Cancel
 }
 
@@ -73,6 +89,9 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       form_errors: dict.new(),
       form_studies: [],
       form_series: [],
+      form_parent_candidates: [],
+      parent_candidates_for: "",
+      form_parent_groups: [],
       loading: False,
       studies_request_id: 0,
       series_request_id: 0,
@@ -171,6 +190,9 @@ pub fn init_modal(
       form_errors: dict.new(),
       form_studies: [],
       form_series: [],
+      form_parent_candidates: [],
+      parent_candidates_for: "",
+      form_parent_groups: [],
       loading: False,
       studies_request_id: 1,
       series_request_id: 1,
@@ -267,7 +289,51 @@ pub fn update(
         #(m, load_series_for_study(new_id, new_data.study_uid))
       }
 
-      #(updated_model, effect.batch([studies_eff, series_eff]), [])
+      // Parent candidates span the whole patient: fetched once per patient,
+      // and only while the picker shows — the modal hides it unless the type
+      // is `parent_required`. Only a patient or type change can show the
+      // picker, so only those (re)fetch: a failed load retries on the next one,
+      // not on every Context Info keystroke.
+      let updated_model = case patient_changed {
+        True ->
+          Model(
+            ..updated_model,
+            form_parent_candidates: [],
+            parent_candidates_for: "",
+          )
+        False -> updated_model
+      }
+      let picker_hidden =
+        compute_hidden_fields(
+          model.host_mode,
+          record_type_requires_parent(
+            new_data.record_type_name,
+            shared.cache.record_types,
+          ),
+        )
+        |> list.contains("parent_record_id")
+      let #(updated_model, parent_eff) = {
+        use <- bool.guard(
+          picker_hidden
+            || new_data.patient_id == ""
+            || !{ patient_changed || type_changed }
+            || updated_model.parent_candidates_for == new_data.patient_id,
+          #(updated_model, effect.none()),
+        )
+        #(
+          Model(..updated_model, parent_candidates_for: new_data.patient_id),
+          load_parent_candidates(new_data.patient_id),
+        )
+      }
+      // Patient and type changes clear candidates / studies above.
+      let updated_model = case
+        patient_changed || study_changed || type_changed
+      {
+        True -> with_parent_groups(updated_model)
+        False -> updated_model
+      }
+
+      #(updated_model, effect.batch([studies_eff, series_eff, parent_eff]), [])
     }
 
     StudiesLoaded(request_id, Ok(studies_list)) -> {
@@ -275,7 +341,11 @@ pub fn update(
         request_id != model.studies_request_id,
         #(model, effect.none(), []),
       )
-      #(Model(..model, form_studies: studies_list), effect.none(), [])
+      #(
+        with_parent_groups(Model(..model, form_studies: studies_list)),
+        effect.none(),
+        [],
+      )
     }
 
     StudiesLoaded(request_id, Error(_)) -> {
@@ -283,7 +353,7 @@ pub fn update(
         request_id != model.studies_request_id,
         #(model, effect.none(), []),
       )
-      #(Model(..model, form_studies: []), effect.none(), [])
+      #(with_parent_groups(Model(..model, form_studies: [])), effect.none(), [])
     }
 
     SeriesLoaded(request_id, Ok(series_list)) -> {
@@ -300,6 +370,32 @@ pub fn update(
         #(model, effect.none(), []),
       )
       #(Model(..model, form_series: []), effect.none(), [])
+    }
+
+    ParentCandidatesLoaded(patient_id, Ok(candidates)) -> {
+      use <- bool.guard(
+        patient_id != model.form_data.patient_id,
+        #(model, effect.none(), []),
+      )
+      #(
+        with_parent_groups(Model(..model, form_parent_candidates: candidates)),
+        effect.none(),
+        [],
+      )
+    }
+
+    ParentCandidatesLoaded(patient_id, Error(err)) -> {
+      use <- bool.guard(
+        patient_id != model.form_data.patient_id,
+        #(model, effect.none(), []),
+      )
+      #(
+        with_parent_groups(
+          Model(..model, form_parent_candidates: [], parent_candidates_for: ""),
+        ),
+        effect.none(),
+        handle_error(err, "Failed to load parent records"),
+      )
     }
 
     Submit -> {
@@ -477,6 +573,33 @@ fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
   Nil
 }
 
+// Grouped here rather than in `view`: up to 1000 candidates are regrouped
+// when an input changes, not on every render (e.g. each Context Info key).
+fn with_parent_groups(model: Model) -> Model {
+  Model(
+    ..model,
+    form_parent_groups: record_form.parent_record_groups(
+      candidates: model.form_parent_candidates,
+      studies: model.form_studies,
+      study_uid: model.form_data.study_uid,
+    ),
+  )
+}
+
+// Not the shared records bucket: it pages at 100, the picker wants the whole
+// patient at once.
+// ponytail: one page of at most 1000 records (the /records/find cap) per
+// patient; follow next_cursor if a patient ever outgrows it.
+fn load_parent_candidates(patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  records.find_records([#("patient_id", json.string(patient_id))], None, 1000)
+  |> promise.tap(fn(res) {
+    let candidates = result.map(res, fn(page) { page.items })
+    dispatch(ParentCandidatesLoaded(patient_id, candidates))
+  })
+  Nil
+}
+
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
@@ -493,6 +616,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
       data: model.form_data,
       studies: model.form_studies,
       series_list: model.form_series,
+      parent_groups: model.form_parent_groups,
       errors: model.form_errors,
       loading: model.loading,
       locked_fields: locked,
