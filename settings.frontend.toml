@@ -15,8 +15,6 @@ storage_path = "./data"
 
 # Frontend settings - ENABLE FRONTEND
 frontend_enabled = true
-frontend_build_on_start = false
-frontend_dev_mode = true
 
 # Security (change in production!)
 secret_key = "change-this-secret-key-in-production"
