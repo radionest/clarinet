@@ -481,3 +481,9 @@ async def test_record_type_validation_error_raises_config_load_error(tmp_path, m
 
     with pytest.raises(ConfigLoadError, match="defect-seg"):
         await python_loader._to_record_type_create(rt_def, tmp_path)
+
+
+def test_config_tasks_path_defaults_to_plan() -> None:
+    from clarinet.settings import Settings
+
+    assert Settings.model_fields["config_tasks_path"].default == "./plan/"

@@ -169,10 +169,25 @@ def _disable_toml_export():
     """Prevent API endpoints from writing .toml config files during tests.
 
     Without this, record type create/update endpoints export .toml files
-    to ``./tasks/``, leaving garbage files (especially from schemathesis fuzz).
+    to the config root, leaving garbage files (especially from schemathesis fuzz).
     """
     app.state.config_mode = "test"
     yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _existing_config_root(tmp_path_factory):
+    """Give every app lifespan an empty config root that exists.
+
+    ``activate_plan_package`` refuses a missing root, and the default
+    (``./plan/``) is not present in a checkout. An empty tmp dir also keeps
+    lifespans (including ``TestClient(app)`` in ``test_client``) off whatever
+    the working copy holds. Tests of config behaviour monkeypatch their own.
+    """
+    original = settings.config_tasks_path
+    settings.config_tasks_path = str(tmp_path_factory.mktemp("plan"))
+    yield
+    settings.config_tasks_path = original
 
 
 @pytest.fixture(autouse=True, scope="session")

@@ -85,7 +85,7 @@ def copy_template(template_name: str, dest: str) -> None:
     )
 
     # Ensure essential directories exist
-    for subdir in ("tasks", "static", "data"):
+    for subdir in ("plan", "static", "data"):
         (dest_path / subdir).mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Template '{key}' applied successfully")

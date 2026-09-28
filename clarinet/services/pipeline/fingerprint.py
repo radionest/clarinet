@@ -83,7 +83,7 @@ def compute_fingerprint() -> str:
     """Full version fingerprint (startup snapshot, cached for process life).
 
     ``config_tasks_path`` is resolved to an absolute path; a relative default
-    (``./tasks/``) therefore resolves against the process CWD, so the API and
+    (``./plan/``) therefore resolves against the process CWD, so the API and
     workers must start from the same project root to agree on the hash.
     """
     plan_hash = compute_plan_hash(Path(settings.config_tasks_path).resolve())
