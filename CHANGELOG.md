@@ -737,6 +737,11 @@
 
 ### Changed
 
+- **`effective_api_base_url` is derived from the bind.** Without an explicit
+  `api_base_url`, internal clients now call `http://127.0.0.1:<port><root_url>/api`
+  for a wildcard host (`0.0.0.0`, `::`), or `host` otherwise (IPv6 bracketed),
+  and include `root_url`. The app answers both prefixed and unprefixed paths.
+  Set `api_base_url` behind a TLS proxy or when workers run on another host.
 - **`overview.md` is a project-owned `.claude/CLAUDE.md` seed**, no longer a
   managed rule under `.claude/rules/clarinet/`. Its body tells you to replace
   it, while every `clarinet agent update` used to overwrite it. It is now

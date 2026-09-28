@@ -597,13 +597,20 @@ class Settings(BaseSettings):
 
     @property
     def effective_api_base_url(self) -> str:
-        """Base URL for internal API client connections.
+        """Base URL internal clients (RecordFlow, pipeline tasks) use to reach this API.
 
-        When behind a reverse proxy (e.g. nginx with TLS termination),
-        set ``api_base_url`` to the external URL so that the internal
-        HTTP client receives valid Secure cookies.
+        An explicit ``api_base_url`` wins. Set it behind a TLS-terminating
+        proxy (so the client receives valid Secure cookies) or when workers run
+        on another host. Otherwise it is derived from the bind: a wildcard host
+        is reached via loopback, and ``root_url`` is included because the app
+        is mounted under it (``create_app(root_path=...)``).
         """
-        return self.api_base_url or f"http://{self.host}:{self.port}/api"
+        if self.api_base_url:
+            return self.api_base_url
+        host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"http://{host}:{self.port}{self.root_url.rstrip('/')}/api"
 
     @property
     def session_expire_seconds(self) -> int:
