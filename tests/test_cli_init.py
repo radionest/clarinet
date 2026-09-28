@@ -31,7 +31,13 @@ def test_init_writes_the_skeleton_and_next_steps(tmp_path: Path, capsys) -> None
     assert not (tmp_path / "gitignore").exists() and not (tmp_path / "env.example").exists()
     assert not list(tmp_path.rglob("__pycache__"))
     out = capsys.readouterr().out
-    for step in (".env", "clarinet db init", "RabbitMQ", "pipeline_enabled = false", "clarinet run"):
+    for step in (
+        ".env",
+        "clarinet db init",
+        "RabbitMQ",
+        "pipeline_enabled = false",
+        "clarinet run",
+    ):
         assert step in out
 
 
