@@ -3,29 +3,50 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
     AnonPathError,
     BusinessRuleViolationError,
+    ConcurrentTransitionError,
     RecordEditLockedError,
+    RecordOwnerLacksRoleError,
     UnsafePathError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.exceptions.http import UNPROCESSABLE_ENTITY
 from clarinet.files import Files, join_within
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
+from clarinet.models.actor import Actor, audit_actor_id, can_access
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.events.capture import emit_record_events, mark_pending_audit
 from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
+from clarinet.services.record_lifecycle import (
+    Assign,
+    Claim,
+    Command,
+    Edit,
+    Effect,
+    Fail,
+    InputsVerdict,
+    RecordSnapshot,
+    Restart,
+    SetStatus,
+    Submit,
+    Unassign,
+    Unblock,
+    decide,
+    needs_inputs,
+)
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models import User
+    from clarinet.models.record import RecordType
     from clarinet.models.record_event import RecordEventKind
     from clarinet.repositories.record_event_repository import RecordEventRepository
     from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
@@ -168,6 +189,39 @@ def _stored_checksums(record: RecordRead) -> dict[str, str]:
     return stored
 
 
+_MAX_TRANSITION_ATTEMPTS = 3
+
+
+def _invalidation_note(reason: str | None, source_record_id: int | None) -> str | None:
+    """Text an invalidation appends to ``context_info`` (``None`` = nothing)."""
+    if reason is None and source_record_id is not None:
+        return f"Invalidated by record #{source_record_id}"
+    return reason or None
+
+
+def _appended_note(cmd: Command) -> str | None:
+    match cmd:
+        case Fail(reason=reason):
+            return f"Manually failed: {reason}"
+        case Restart(reason=reason, source_record_id=source_record_id):
+            return _invalidation_note(reason, source_record_id)
+        case _:
+            return None
+
+
+def _changes_nothing(
+    effect: Effect, snap: RecordSnapshot, *, data: RecordData | None, reason: str | None
+) -> bool:
+    """Same status, same owner, no data, no note — and not a hard invalidation (it always fires)."""
+    return (
+        effect.fire == "status"
+        and effect.to_status == snap.status
+        and effect.owner == snap.user_id
+        and data is None
+        and reason is None
+    )
+
+
 class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
@@ -240,7 +294,244 @@ class RecordService:
         """
         mark_pending_audit(self.repo.session, record_id, actor_id)
 
+    async def _transition(
+        self,
+        record_id: int,
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+    ) -> tuple[Record, RecordStatus]:
+        """Decide and apply one command in one transaction; SSE and RecordFlow after it.
+
+        The per-record decide/write/audit work is ``_apply_command``; this
+        wrapper adds the fresh re-read, the one commit, and — only once that
+        commit has landed, so no transaction is open while they run — SSE and
+        RecordFlow.
+
+        Returns:
+            (fresh record, status before). A no-op returns the record unchanged.
+
+        Raises:
+            AuthorizationError | RecordLifecycleError: from ``decide``.
+            RecordOwnerLacksRoleError: 409 — the new owner lacks the type's role.
+            UserNotFoundError: 404 — the new owner does not exist.
+            RecordUniquePerUserError: the new owner violates ``unique_by``.
+            ConcurrentTransitionError: every attempt missed.
+        """
+        record, snap, effect = await self._apply_command(record_id, cmd, actor, data=data)
+        if effect is None:
+            return record, snap.status
+        updated = await self.repo.get_with_relations(record_id, populate_existing=True)
+        await self.repo.session.commit()
+        self._emit_record_updated(updated, actor)
+        await self._fire(effect, updated, snap.status)
+        return updated, snap.status
+
+    async def _apply_command(
+        self,
+        record_id: int,
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+    ) -> tuple[Record, RecordSnapshot, Effect | None]:
+        """Decide and conditionally write one command for one record — no commit, no re-read.
+
+        The per-record core ``_transition`` and (Task 6) the bulk status path
+        share, so a bulk caller can run this once per record inside one
+        transaction instead of copying the block. Snapshot
+        (``populate_existing``) → input-file verdict only when ``needs_inputs``
+        → ``decide`` → a command that changes nothing returns here (``effect``
+        is ``None``, nothing written — the writer itself would still bump
+        ``changed_at``) → new-owner checks → conditional write on the status
+        and owner the decision saw. A miss commits (it wrote nothing; on
+        SQLite the UPDATE already holds the write lock) and re-decides against
+        the fresh state, at most ``_MAX_TRANSITION_ATTEMPTS`` times. On a
+        successful write the audit event and matched input files join its
+        transaction before this returns — no commit, so the caller still owns
+        the transaction boundary.
+
+        Returns:
+            (record as last read, snapshot before, effect). ``effect`` is
+            ``None`` for a derived no-op, and ``record`` is then the
+            unchanged fresh record.
+
+        Raises:
+            AuthorizationError | RecordLifecycleError: from ``decide``.
+            RecordOwnerLacksRoleError: 409 — the new owner lacks the type's role.
+            UserNotFoundError: 404 — the new owner does not exist.
+            RecordUniquePerUserError: the new owner violates ``unique_by``.
+            ConcurrentTransitionError: every attempt missed.
+        """
+        reason = _appended_note(cmd)
+        for _ in range(_MAX_TRANSITION_ATTEMPTS):
+            record = await self.repo.get_with_relations(record_id, populate_existing=True)
+            snap = RecordSnapshot.of(record)
+            inputs: InputsVerdict | None = None
+            matched: dict[str, str] = {}
+            if needs_inputs(cmd, snap):
+                inputs, matched = await self._inputs_verdict(record)
+            effect = decide(cmd, snap, actor, inputs=inputs)
+            if _changes_nothing(effect, snap, data=data, reason=reason):
+                return record, snap, None
+            await self._check_new_owner(record, effect.owner)
+            written = await self.repo.write_transition(
+                record_id,
+                expected_status=snap.status,
+                expected_user_id=snap.user_id,
+                to=effect.to_status,
+                owner=effect.owner,
+                data=data,
+                reason=reason,
+            )
+            if written:
+                break
+            await self.repo.session.commit()  # end the transaction before re-reading
+        else:
+            raise ConcurrentTransitionError(
+                f"Record {record_id} kept changing during '{type(cmd).__name__}'; "
+                f"gave up after {_MAX_TRANSITION_ATTEMPTS} attempts.",
+                status=snap.status.value,
+            )
+        await self._audit_transition(cmd, snap, effect, actor, data=data)
+        if matched and effect.to_status == RecordStatus.pending:
+            await self.repo.set_files(record, matched, commit=False)
+        return record, snap, effect
+
+    async def _parent_read(self, record: Record) -> RecordRead | None:
+        if record.parent_record_id is None:
+            return None
+        return RecordRead.model_validate(
+            await self.repo.get_with_relations(record.parent_record_id)
+        )
+
+    async def _inputs_verdict(self, record: Record) -> tuple[InputsVerdict, dict[str, str]]:
+        """Validate input files; matched files come back for linking on the way to pending."""
+        result = await validate_record_files(
+            RecordRead.model_validate(record), parent=await self._parent_read(record)
+        )
+        if result is None:
+            return "undeclared", {}
+        if not result.valid:
+            return "invalid", {}
+        return "valid", dict(result.matched_files or {})
+
+    async def _ensure_can_own(
+        self, user_id: UUID, record_type: RecordType, *, status: RecordStatus | None
+    ) -> None:
+        """404 for an unknown user; 409 ``OWNER_LACKS_ROLE`` when they cannot access the type."""
+        user = await self.repo.get_user_with_roles(user_id)
+        if not can_access(record_type.role_name, user.is_superuser, user.role_names):
+            raise RecordOwnerLacksRoleError(
+                f"User {user_id} cannot own a '{record_type.name}' record: "
+                "they hold neither its role nor superuser rights.",
+                status=None if status is None else status.value,
+            )
+
+    async def _check_new_owner(self, record: Record, owner: UUID | None) -> None:
+        """A new owner must exist, be able to access the type and keep ``unique_by``."""
+        if owner is None or owner == record.user_id:
+            return
+        await self._ensure_can_own(owner, record.record_type, status=record.status)
+        await self._check_unique_by(owner, record)
+
+    def _emit_record_updated(self, record: Record, actor: Actor) -> None:
+        # sse-capture: explicit emit, UoW-invisible (Core UPDATE in write_transition).
+        emit_record_events(
+            [
+                EntityEvent(
+                    entity="record",
+                    action="updated",
+                    id=str(record.id),
+                    record_type_name=record.record_type_name,
+                    user_id=audit_actor_id(actor),
+                )
+            ]
+        )
+
+    async def _audit_transition(
+        self,
+        cmd: Command,
+        snap: RecordSnapshot,
+        effect: Effect,
+        actor: Actor,
+        *,
+        data: RecordData | None,
+        via: str | None = None,
+    ) -> None:
+        """One audit event per command; from/to only when the status changed."""
+        new_owner = None if effect.owner == snap.user_id else effect.owner
+        new_value: dict[str, Any] = {}
+        reason: str | None = None
+        kind: RecordEventKind
+        match cmd:
+            case Claim():
+                kind = "assigned"
+                new_value = {"user_id": str(effect.owner), "via": "claim"}
+            case Assign(user_id=user_id):
+                kind = "assigned"
+                new_value = {"user_id": str(user_id)}
+            case Unassign():
+                kind = "unassigned"
+            case Submit() | Edit():
+                kind = "data_submitted" if isinstance(cmd, Submit) else "data_updated"
+                new_value = {"fields": sorted((data or {}).keys())}
+                if new_owner is not None:
+                    new_value["user_id"] = str(new_owner)
+                    new_value["via"] = (
+                        "submit"
+                        if snap.user_id is None
+                        else "shared_submit"
+                        if isinstance(cmd, Submit)
+                        else "shared_update"
+                    )
+            case Fail(reason=fail_reason):
+                kind = "failed"
+                reason = fail_reason
+            case Restart(reason=restart_reason, source_record_id=source_record_id):
+                kind = "invalidated"
+                reason = restart_reason
+                new_value = {"mode": "hard", "source_record_id": source_record_id}
+            case SetStatus() | Unblock():
+                kind = "status_changed"
+            case _:
+                assert_never(cmd)
+        if via is not None:
+            new_value["via"] = via
+        changed = effect.to_status != snap.status
+        await self._record_event(
+            record_id=snap.record_id,
+            kind=kind,
+            actor_id=audit_actor_id(actor),
+            from_status=snap.status if changed else None,
+            to_status=effect.to_status if changed else None,
+            new_value=new_value or None,
+            reason=reason,
+        )
+
+    async def _fire(self, effect: Effect, record: Record, old_status: RecordStatus) -> None:
+        match effect.fire:
+            case "invalidation":
+                await self._fire_invalidation(record, old_status)
+            case "data_update":
+                await self._fire_data_update(record)
+            case "status":
+                if effect.to_status != old_status:
+                    await self._fire_status_change(record, old_status)
+            case _:
+                assert_never(effect.fire)
+
     # ── Public methods ───────────────────────────────────────────────────
+
+    def precheck(self, record: Record, cmd: Command, actor: Actor) -> None:
+        """Fail fast with the refusal ``_transition`` would raise, writing nothing.
+
+        For endpoints that do expensive or destructive work before the write
+        (schema validation, ``enforce_output_grids``, the Slicer validator).
+        ``_transition`` re-checks against a fresh snapshot anyway.
+        """
+        decide(cmd, RecordSnapshot.of(record), actor)
 
     async def create_record(self, record: Record, *, actor_id: UUID | None = None) -> Record:
         """Create a record with file validation, blocking, and RecordFlow trigger.

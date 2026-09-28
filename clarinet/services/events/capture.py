@@ -20,6 +20,13 @@ and the record mutation never share an ``after_commit``. To still deliver one
 enriched event (``user_id`` = the acting user, not the record owner) the
 service calls ``mark_pending_audit`` **before** the committing repo write — a
 session-scoped breadcrumb the capture consumes at the mutation's own commit.
+
+Status, owner and data changes go through ``RecordService._transition``
+instead: its Core UPDATE is invisible to this capture, so it publishes the
+enriched record event itself (``emit_record_events``) after its one commit,
+in which the audit row commits too. The breadcrumb serves the service's other
+audited mutations (context info, output-file clearing, soft invalidation).
+
 A record ``updated`` event that changes an audited column with **no** such
 breadcrumb is a drift signal (some path mutated state outside the audited
 service): logged as a warning, or collected for tests under

@@ -363,3 +363,27 @@ def test_images_path() -> Path:
     Place test NRRD/NIfTI files here for Slicer integration tests.
     """
     return Path(__file__).parent / "test_data" / "slicer"
+
+
+@pytest_asyncio.fixture
+async def lc(test_session, test_patient, test_study, test_series):
+    """Lifecycle scaffold — see tests/utils/lifecycle.py."""
+    from tests.conftest import create_mock_user_with_role
+    from tests.utils.lifecycle import OTHER_ROLE, ROLE, Lifecycle
+
+    async def person(email, role, **kw):
+        return await create_mock_user_with_role(test_session, role, email=email, **kw)
+
+    return Lifecycle(
+        session=test_session,
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        owner=await person("lc-owner@test.com", ROLE),
+        colleague=await person("lc-colleague@test.com", ROLE),
+        outsider=await person("lc-outsider@test.com", OTHER_ROLE),
+        admin=await person("lc-admin@test.com", "admin", extra_roles=(ROLE,)),
+        admin_only=await person("lc-admin-only@test.com", "admin"),
+        superuser=await person("lc-root@test.com", OTHER_ROLE, is_superuser=True),
+        service_user=await person("lc-service@test.com", "admin", is_superuser=True),
+    )
