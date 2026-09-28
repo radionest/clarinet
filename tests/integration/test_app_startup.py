@@ -468,3 +468,74 @@ async def test_startup_reconcile_config_error_raises_config_startup_error(
             pass
 
     assert "undefined role" in str(exc_info.value)
+
+
+# ── Test 8: missing / empty config root ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config_mode", ["toml", "python"])
+async def test_startup_missing_config_root_aborts_before_reconcile(
+    startup_settings, monkeypatch, tmp_path, config_mode
+):
+    from clarinet.api import app as app_module
+    from clarinet.api.app import StartupError
+
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(settings, "config_mode", config_mode)
+    monkeypatch.setattr(settings, "config_tasks_path", str(missing))
+    reconcile = AsyncMock()
+    monkeypatch.setattr(app_module, "reconcile_config", reconcile)
+
+    with pytest.raises(StartupError) as exc_info:
+        async with lifespan(FastAPI(lifespan=lifespan)):
+            pass
+
+    assert exc_info.value.component == "Config"
+    assert str(missing.resolve()) in str(exc_info.value)
+    assert "Disable the component" not in str(exc_info.value)
+    reconcile.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defaulted", [True, False])
+async def test_missing_root_hint_names_default_change_only_when_defaulted(
+    startup_settings, monkeypatch, tmp_path, defaulted
+):
+    from clarinet.api.app import StartupError
+
+    monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path / "missing"))
+    # The session fixture and monkeypatch both *assign* the field, which adds it
+    # to model_fields_set; set the provenance explicitly for each case.
+    fields = settings.model_fields_set - {"config_tasks_path"}
+    if not defaulted:
+        fields |= {"config_tasks_path"}
+    monkeypatch.setattr(settings, "__pydantic_fields_set__", fields)
+
+    with pytest.raises(StartupError) as exc_info:
+        async with lifespan(FastAPI(lifespan=lifespan)):
+            pass
+
+    hint = exc_info.value.hint
+    assert "config_tasks_path" in hint
+    names_change = all(
+        s in hint for s in ('"./tasks/"', '"./plan/"', 'config_tasks_path = "./tasks/"')
+    )
+    assert names_change is defaulted
+    if not defaulted:
+        assert "./tasks/" not in hint
+
+
+@pytest.mark.asyncio
+async def test_startup_with_empty_config_root_warns_and_starts(
+    startup_settings, monkeypatch, tmp_path, caplog
+):
+    empty = tmp_path / "plan"
+    empty.mkdir()
+    monkeypatch.setattr(settings, "config_mode", "toml")
+    monkeypatch.setattr(settings, "config_tasks_path", str(empty))
+
+    async with lifespan(FastAPI(lifespan=lifespan)):
+        pass
+
+    assert "No record type configs found" in caplog.text

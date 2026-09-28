@@ -154,7 +154,7 @@ Anchor machinery (`clarinet/config/plan_package.py`):
 
 | Function | Role |
 |---|---|
-| `activate_plan_package(root)` | startup / worker entry: purge any old anchor, install a fresh one, invalidate caches |
+| `activate_plan_package(root)` | startup / worker entry: purge any old anchor, install a fresh one, invalidate caches; refuses a root that is not an existing directory (`ConfigRootError`) |
 | `ensure_plan_root(folder)` | first line of every loader; a folder outside the root raises `ConfigLoadError` (this is what forces `recordflow_paths` to live inside `config_tasks_path`) |
 | `module_name_for(path)` | path → canonical dotted name; owns validation of identifiers and `X.py`/`X/` collisions |
 | `import_plan_module(dotted)` | import + error classification into `ConfigLoadError` |
@@ -208,6 +208,10 @@ Workers follow the same shape in `run_worker`.
 
 A broken plan file must crash startup, never degrade silently.
 
+- `activate_plan_package` raises `ConfigRootError` (a `ConfigLoadError`) when the
+  root is not an existing directory — before any import, in the API and the
+  worker. The startup hint names the `./tasks/` → `./plan/` default change only
+  when `config_tasks_path` was not set. An existing empty root still only warns.
 - Loaders raise `ConfigLoadError` (a `ConfigurationError` subclass; the original
   error stays on `__cause__`).
 - Multi-file loaders attempt every file, then raise one

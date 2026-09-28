@@ -229,7 +229,7 @@ async def run_worker(
             activate_plan_package(settings.config_tasks_path)
             load_task_modules()
         except ConfigLoadError as e:
-            logger.error(f"Cannot start worker — project task modules failed to load: {e}")
+            logger.error(f"Cannot start worker: {e}")
             raise SystemExit(1) from e
 
         if queues is None:

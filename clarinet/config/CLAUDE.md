@@ -161,6 +161,9 @@ tasks/
   (full contract: `.claude/rules/custom-code-loading.md`)
 - Fail-fast: a broken `record_types.py`/`files_catalog.py` raises `ConfigLoadError`
   (→ `StartupError` in lifespan) instead of silently reconciling zero record types
+- A root that is not an existing directory raises `ConfigRootError` from
+  `activate_plan_package` (API lifespan → `StartupError`, worker → exit 1); an
+  existing empty root only warns
 - `files_catalog.py` imports as a `clarinet_plan.` submodule, cached so
   `record_types.py` can import it (e.g. `from clarinet_plan.files_catalog import seg`)
 - File names auto-derived from variable names (in `files_catalog.py` or `record_types.py`)

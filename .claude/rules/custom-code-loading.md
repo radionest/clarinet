@@ -112,6 +112,10 @@ reads of `FileDef.name` see `""`.
 
 A broken plan file must crash startup, never degrade silently:
 
+- `activate_plan_package` raises `ConfigRootError` (a `ConfigLoadError`) when the
+  root is not an existing directory — before any import, in the API and the
+  worker. The startup hint names the `./tasks/` → `./plan/` default change only
+  when `config_tasks_path` was not set. An existing empty root still only warns.
 - loaders raise `ConfigLoadError` (`clarinet/exceptions/domain.py`, subclass of
   `ConfigurationError`; original error in `__cause__`)
 - multi-file loaders (`load_and_register_flows`, `worker.load_task_modules`)

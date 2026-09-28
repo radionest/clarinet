@@ -77,7 +77,9 @@ non-session work (HTTP calls, `asyncio.to_thread` CPU work).
    `_ensure_record_types_imported()` → `compute_fingerprint()` (pins the
    startup snapshot before any later `plan/` edit) → `_load_plan_registries()`.
    See [The clarinet_plan package](./plan-package.md). Must precede step 4 so
-   reconciliation can validate validator and hydrator names.
+   reconciliation can validate validator and hydrator names. A root that is not
+   an existing directory aborts here (`ConfigRootError` →
+   `StartupError(component="Config")`).
 4. `reconcile_config()` → `app.state.config_mode`, `app.state.config_tasks_path`
 5. Project file registry → `app.state.project_file_registry`
 6. SQL and Quarto report registries → `app.state.report_registry`,
