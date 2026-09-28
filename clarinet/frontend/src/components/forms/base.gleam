@@ -235,6 +235,40 @@ pub fn select_with_disabled(
   )
 }
 
+// Select dropdown whose options sit in labelled `<optgroup>`s, below one
+// ungrouped `placeholder` option (e.g. "No parent record"). Used by the
+// parent-record picker to group candidates by level and study.
+pub fn select_grouped(
+  name name: String,
+  value value: String,
+  placeholder placeholder: #(String, String),
+  groups groups: List(#(String, List(#(String, String)))),
+  on_change on_change: fn(String) -> msg,
+) -> Element(msg) {
+  let option = fn(opt: #(String, String)) {
+    let #(val, label) = opt
+    html.option([attribute.value(val), attribute.selected(val == value)], label)
+  }
+  html.select(
+    [
+      attribute.id(name),
+      attribute.name(name),
+      attribute.class("form-select"),
+      event.on_change(on_change),
+    ],
+    [
+      option(placeholder),
+      ..list.map(groups, fn(group) {
+        let #(group_label, options) = group
+        html.optgroup(
+          [attribute.attribute("label", group_label)],
+          list.map(options, option),
+        )
+      })
+    ],
+  )
+}
+
 // Radio button group
 pub fn radio_group(
   name name: String,

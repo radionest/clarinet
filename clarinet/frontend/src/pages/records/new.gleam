@@ -17,7 +17,9 @@ import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise
+import gleam/json
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -42,6 +44,9 @@ pub type Model {
     form_errors: Dict(String, String),
     form_studies: List(Study),
     form_series: List(Series),
+    // Every record of the selected patient — the parent picker offers them
+    // all, whatever their level or study.
+    form_parent_candidates: List(Record),
     loading: Bool,
     // Race guards: each cascading load increments these counters and the
     // result handler discards stale responses whose request_id doesn't match
@@ -49,6 +54,7 @@ pub type Model {
     // can let an older response overwrite the latest one.
     studies_request_id: Int,
     series_request_id: Int,
+    parent_request_id: Int,
   )
 }
 
@@ -60,6 +66,10 @@ pub type Msg {
   SubmitResult(Result(Record, ApiError))
   StudiesLoaded(request_id: Int, result: Result(List(Study), ApiError))
   SeriesLoaded(request_id: Int, result: Result(List(Series), ApiError))
+  ParentCandidatesLoaded(
+    request_id: Int,
+    result: Result(List(Record), ApiError),
+  )
   Cancel
 }
 
@@ -73,9 +83,11 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       form_errors: dict.new(),
       form_studies: [],
       form_series: [],
+      form_parent_candidates: [],
       loading: False,
       studies_request_id: 0,
       series_request_id: 0,
+      parent_request_id: 0,
     )
   // ReloadPatients is required even for non-admins — the form needs the
   // patient picker. The backend is expected to scope `/api/patients` results
@@ -98,8 +110,8 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 /// Initialize this page as the contents of the modal create-record overlay.
 /// Prefills the form with the locked context fields, eagerly loads the studies
 /// list for the patient (so the user can pick a Study/Series RecordType without
-/// extra clicks), and loads the series list when the source page already
-/// pinned a Study UID.
+/// extra clicks), loads the series list when the source page already
+/// pinned a Study UID, and loads the patient's records for the parent picker.
 ///
 /// **Page Module Contract exception:** `.claude/rules/frontend-page-contract.md` §1 lists
 /// only `init` / `update` / `view` / `cleanup` as public symbols of a page
@@ -164,6 +176,14 @@ pub fn init_modal(
     | shared.RecordArgs(_, None, _, _, _)
     | shared.RecordArgs(_, _, Some(_), _, _) -> effect.none()
   }
+  // The parent picker surfaces for a `parent_required` type in every modal
+  // context except create-from-Record, where the parent is preset by args.
+  let parent_eff = case args {
+    shared.PatientArgs(pid)
+    | shared.StudyArgs(pid, _)
+    | shared.SeriesArgs(pid, _, _) -> load_parent_candidates(1, pid)
+    shared.RecordArgs(_, _, _, _, _) -> effect.none()
+  }
   let model =
     Model(
       host_mode: Modal(args),
@@ -171,14 +191,18 @@ pub fn init_modal(
       form_errors: dict.new(),
       form_studies: [],
       form_series: [],
+      form_parent_candidates: [],
       loading: False,
       studies_request_id: 1,
       series_request_id: 1,
+      parent_request_id: 1,
     )
   // The full-page form's `init` also reloads patients and (for admins) users;
   // the modal hides those pickers entirely (`hidden_fields` in the view), so
   // we skip the corresponding HTTP. RecordTypes remain mandatory.
-  #(model, effect.batch([studies_eff, series_eff]), [shared.ReloadRecordTypes])
+  #(model, effect.batch([studies_eff, series_eff, parent_eff]), [
+    shared.ReloadRecordTypes,
+  ])
 }
 
 // --- Update ---
@@ -267,7 +291,25 @@ pub fn update(
         #(m, load_series_for_study(new_id, new_data.study_uid))
       }
 
-      #(updated_model, effect.batch([studies_eff, series_eff]), [])
+      // Parent candidates span the whole patient, so only a patient change
+      // refetches them. Bumping the id even when the patient is cleared
+      // makes any in-flight response for the old patient stale.
+      let #(updated_model, parent_eff) = {
+        use <- bool.guard(!patient_changed, #(updated_model, effect.none()))
+        let new_id = updated_model.parent_request_id + 1
+        let m =
+          Model(
+            ..updated_model,
+            form_parent_candidates: [],
+            parent_request_id: new_id,
+          )
+        case new_data.patient_id {
+          "" -> #(m, effect.none())
+          pid -> #(m, load_parent_candidates(new_id, pid))
+        }
+      }
+
+      #(updated_model, effect.batch([studies_eff, series_eff, parent_eff]), [])
     }
 
     StudiesLoaded(request_id, Ok(studies_list)) -> {
@@ -300,6 +342,26 @@ pub fn update(
         #(model, effect.none(), []),
       )
       #(Model(..model, form_series: []), effect.none(), [])
+    }
+
+    ParentCandidatesLoaded(request_id, Ok(candidates)) -> {
+      use <- bool.guard(
+        request_id != model.parent_request_id,
+        #(model, effect.none(), []),
+      )
+      #(Model(..model, form_parent_candidates: candidates), effect.none(), [])
+    }
+
+    ParentCandidatesLoaded(request_id, Error(err)) -> {
+      use <- bool.guard(
+        request_id != model.parent_request_id,
+        #(model, effect.none(), []),
+      )
+      #(
+        Model(..model, form_parent_candidates: []),
+        effect.none(),
+        handle_error(err, "Failed to load parent records"),
+      )
     }
 
     Submit -> {
@@ -477,6 +539,18 @@ fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
   Nil
 }
 
+// ponytail: one page of at most 1000 records (the /records/find cap) per
+// patient; follow next_cursor if a patient ever outgrows it.
+fn load_parent_candidates(request_id: Int, patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  records.find_records([#("patient_id", json.string(patient_id))], None, 1000)
+  |> promise.tap(fn(res) {
+    let candidates = result.map(res, fn(page) { page.items })
+    dispatch(ParentCandidatesLoaded(request_id, candidates))
+  })
+  Nil
+}
+
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
@@ -493,6 +567,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
       data: model.form_data,
       studies: model.form_studies,
       series_list: model.form_series,
+      parent_candidates: model.form_parent_candidates,
       errors: model.form_errors,
       loading: model.loading,
       locked_fields: locked,

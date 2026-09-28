@@ -6,6 +6,7 @@ import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
@@ -60,8 +61,15 @@ pub fn update(data: RecordFormData, msg: RecordFormMsg) -> RecordFormData {
         study_uid: "",
         series_uid: "",
       )
+    // The parent must belong to the same patient, so a patient switch drops it.
     UpdatePatient(value) ->
-      RecordFormData(..data, patient_id: value, study_uid: "", series_uid: "")
+      RecordFormData(
+        ..data,
+        patient_id: value,
+        study_uid: "",
+        series_uid: "",
+        parent_record_id: "",
+      )
     UpdateStudy(value) ->
       RecordFormData(..data, study_uid: value, series_uid: "")
     UpdateSeries(value) -> RecordFormData(..data, series_uid: value)
@@ -81,10 +89,14 @@ pub fn update(data: RecordFormData, msg: RecordFormMsg) -> RecordFormData {
 // `hidden_fields` — list of field names completely omitted from the form.
 // Used by the modal embedding to drop optional `user_id` and `parent_record_id`
 // for the minimal create flow.
+//
+// `parent_candidates` — every record of the selected patient; the parent
+// picker offers them all, grouped by level and study.
 pub fn view(
   data data: RecordFormData,
   studies studies: List(Study),
   series_list series_list: List(Series),
+  parent_candidates parent_candidates: List(Record),
   errors errors: Dict(String, String),
   loading loading: Bool,
   locked_fields locked_fields: List(String),
@@ -214,17 +226,11 @@ pub fn view(
         form.field(
           label: "Parent Record",
           name: "parent_record_id",
-          input: form.select(
+          input: form.select_grouped(
             name: "parent_record_id",
             value: data.parent_record_id,
-            options: [
-              #("", "No parent record"),
-              ..build_parent_record_options(
-                data.patient_id,
-                data.study_uid,
-                shared.cache.records,
-              )
-            ],
+            placeholder: #("", "No parent record"),
+            groups: parent_record_groups(parent_candidates, data.study_uid),
             on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
           ),
           errors: errors,
@@ -492,42 +498,88 @@ fn build_series_options(series_list: List(Series)) -> List(#(String, String)) {
   })
 }
 
-fn build_parent_record_options(
-  patient_id: String,
+/// Parent-picker options grouped for `<optgroup>` rendering: the selected
+/// study first (`study_uid` may be `""`), then patient-level records, then
+/// every other study newest first. A parent can sit at any level and on any
+/// study of the patient (e.g. a control-MRI form whose parent is the
+/// pre-ablation MRI on an earlier study). Empty groups are dropped.
+/// Public for unit testing.
+pub fn parent_record_groups(
+  candidates: List(Record),
   study_uid: String,
-  records: Dict(String, Record),
-) -> List(#(String, String)) {
-  case patient_id {
-    "" -> []
-    pid ->
-      records
-      |> dict.values
-      |> list.filter(fn(r) { r.patient_id == pid })
-      |> list.filter(fn(r) {
-        case study_uid {
-          "" -> True
-          suid -> r.study_uid == Some(suid)
-        }
-      })
-      |> list.sort(fn(a, b) {
+) -> List(#(String, List(#(String, String)))) {
+  let #(this_study, rest) =
+    list.partition(candidates, fn(r) {
+      study_uid != "" && r.study_uid == Some(study_uid)
+    })
+  let #(patient_level, other_studies) =
+    list.partition(rest, fn(r) { r.study_uid == None })
+  let study_groups =
+    other_studies
+    |> list.sort(fn(a, b) {
+      string.compare(study_date(b), study_date(a))
+      |> order.break_tie(string.compare(
+        option.unwrap(a.study_uid, ""),
+        option.unwrap(b.study_uid, ""),
+      ))
+    })
+    |> list.chunk(fn(r) { r.study_uid })
+    |> list.map(fn(group) { #(study_group_label(group), group) })
+  [
+    #("This study", this_study),
+    #("Patient level", patient_level),
+    ..study_groups
+  ]
+  |> list.filter(fn(group) { group.1 != [] })
+  |> list.map(fn(group) {
+    let records =
+      list.sort(group.1, fn(a, b) {
         int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
       })
-      |> list.map(fn(r) {
-        let id_str = case r.id {
-          Some(id) -> int.to_string(id)
-          None -> "?"
-        }
-        let label =
-          "#"
-          <> id_str
-          <> " — "
-          <> r.record_type_name
-          <> " ("
-          <> status.display_text(r.status)
-          <> ")"
-        #(id_str, label)
-      })
+    #(group.0, list.map(records, parent_option))
+  })
+}
+
+fn study_date(r: Record) -> String {
+  case r.study {
+    Some(s) -> s.date
+    None -> ""
   }
+}
+
+fn study_group_label(group: List(Record)) -> String {
+  case group {
+    [models.Record(study: Some(s), ..), ..] ->
+      case s.study_description {
+        Some(desc) -> "Study " <> s.date <> " · " <> desc
+        None -> "Study " <> s.date
+      }
+    [models.Record(study_uid: Some(uid), ..), ..] -> "Study " <> uid
+    _ -> "Study"
+  }
+}
+
+fn parent_option(r: Record) -> #(String, String) {
+  let id = case r.id {
+    Some(id) -> int.to_string(id)
+    None -> "?"
+  }
+  let type_label = case r.record_type {
+    Some(models.RecordType(label: Some(label), ..)) -> label
+    _ -> r.record_type_name
+  }
+  let series = case r.series {
+    Some(s) -> [format_series_label(s)]
+    None -> []
+  }
+  let label =
+    list.flatten([
+      ["#" <> id, type_label],
+      series,
+      [status.display_text(r.status)],
+    ])
+    |> string.join(" · ")
+  #(id, label)
 }
 
 fn build_user_options(
