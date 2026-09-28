@@ -722,82 +722,28 @@ class RecordService:
         return await self._transition(record_id, Unassign(), actor)
 
     async def submit_data(
-        self,
-        record_id: int,
-        data: RecordData,
-        new_status: RecordStatus,
-        user_id: UUID | None = None,
-        *,
-        actor_id: UUID | None = None,
+        self, record_id: int, data: RecordData, new_status: RecordStatus, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Submit record data with a status transition and fire RecordFlow trigger.
+        """Submit data (``Submit``): pending/inwork/failed/pause → finished, or failed.
 
-        Auto-assigns ``user_id`` when the record has no user yet (admin bypass).
-
-        Args:
-            record_id: Record ID.
-            data: Validated record data.
-            new_status: New status to set alongside data.
-            user_id: Current user ID; assigned to the record when it has no user.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
+        An unassigned record becomes the submitter's — the service account for a
+        system actor; on a ``shared_editing`` type the person submitting a
+        colleague's record becomes its owner. The single ``data_submitted`` event
+        records that owner change too.
 
         Raises:
-            RecordConstraintViolationError: If unique_by is violated on auto-assign.
+            TransitionNotAllowedError: 409 — blocked, preparing or already finished
+                (verbatim texts), or a target other than finished/failed.
+            AuthorizationError: 403 — a person without mutation rights.
+            RecordUniquePerUserError: ``unique_by`` violated by the new owner.
             CustomHTTPException: 422 if an OUTPUT pattern cannot be safely resolved
                 (see ``_validate_output_paths``) — raised before anything is persisted.
         """
         if new_status == RecordStatus.finished:
             await self._validate_output_paths(record_id)
-
-        transfer_to: UUID | None = None
-        if user_id is not None:
-            record_check = await self.repo.get_with_record_type(record_id)
-            if record_check.user_id is None:
-                await self._check_unique_by(user_id, record_check)
-                self._mark_audit(record_id, actor_id)
-                await self.repo.ensure_user_assigned(record_id, user_id)
-                await self._record_event(
-                    record_id=record_id,
-                    kind="assigned",
-                    actor_id=actor_id,
-                    new_value={"user_id": str(user_id), "via": "submit"},
-                )
-            elif (
-                record_check.record_type.shared_editing
-                and record_check.user_id != user_id
-                and actor_id is not None
-            ):
-                transfer_to = user_id
-                await self._record_event(
-                    record_id=record_id,
-                    kind="assigned",
-                    actor_id=actor_id,
-                    new_value={"user_id": str(user_id), "via": "shared_submit"},
-                )
-            else:
-                await self.repo.ensure_user_assigned(record_id, user_id)
-
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_data(
-            record_id, data, new_status=new_status, reassign_to=transfer_to
-        )
-        await self._record_event(
-            record_id=record_id,
-            kind="data_submitted",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-            new_value={"fields": sorted(data.keys())},
-        )
-        await self._fire_status_change(record, old_status)
-
-        # Register output files that appeared on disk and emit file events
+        record, old_status = await self._transition(record_id, Submit(new_status), actor, data=data)
         if new_status == RecordStatus.finished:
             await self.sync_output_files(record)
-
         return record, old_status
 
     async def _validate_output_paths(self, record_id: int) -> None:
@@ -875,56 +821,18 @@ class RecordService:
         return await self.repo.update_data(record_id, data)
 
     async def update_data(
-        self,
-        record_id: int,
-        data: RecordData,
-        *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        self, record_id: int, data: RecordData, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Update record data (no status change) and fire data-update trigger.
+        """Edit a finished record's data (``Edit``); the status stays; fires ``on_data_update``.
 
-        Args:
-            record_id: Record ID.
-            data: Validated record data.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
+        On a ``shared_editing`` type the editing person becomes the owner.
 
         Raises:
-            RecordEditLockedError: If the record is finished and its type
-                locks submitted records for *acting_user*.
+            TransitionNotAllowedError: 409 — the record is not finished.
+            RecordEditLockedError: 409 — the type locks submitted records for this person.
+            AuthorizationError: 403 — a person without mutation rights.
         """
-        transfer_to: UUID | None = None
-        if acting_user is not None:
-            record = await self.repo.get_with_relations(record_id)
-            if not acting_user.is_superuser:
-                ensure_record_editable(record, acting_user)
-            if (
-                record.record_type.shared_editing
-                and record.user_id != acting_user.id
-                and actor_id is not None
-            ):
-                transfer_to = acting_user.id
-                await self._record_event(
-                    record_id=record_id,
-                    kind="assigned",
-                    actor_id=actor_id,
-                    new_value={"user_id": str(acting_user.id), "via": "shared_update"},
-                )
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_data(record_id, data, reassign_to=transfer_to)
-        await self._record_event(
-            record_id=record_id,
-            kind="data_updated",
-            actor_id=actor_id,
-            new_value={"fields": sorted(data.keys())},
-        )
-        await self._fire_data_update(record)
-        return record, old_status
+        return await self._transition(record_id, Edit(), actor, data=data)
 
     async def notify_file_change(self, record: Record) -> None:
         """Fire a file-change trigger for a record.

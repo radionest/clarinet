@@ -88,7 +88,7 @@ from clarinet.services.file_validation import (
     validate_record_files,
 )
 from clarinet.services.grid_policy import enforce_output_grids
-from clarinet.services.record_service import ensure_record_editable
+from clarinet.services.record_lifecycle import Edit, Submit
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
@@ -97,6 +97,7 @@ from clarinet.types import RecordData
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from clarinet.models.actor import Actor
     from clarinet.repositories.record_repository import RecordRepository
     from clarinet.services.record_service import RecordService
     from clarinet.services.record_type_service import RecordTypeService
@@ -583,7 +584,7 @@ async def _process_submission(
     session: AsyncSession | None = None,
     client_ip: str | None = None,
     client_storage_path: str | None = None,
-    actor_id: UUID | None = None,
+    actor: Actor,
 ) -> RecordRead:
     """Validate, optionally run Slicer, and persist record data.
 
@@ -604,6 +605,7 @@ async def _process_submission(
         client_storage_path: Per-client Slicer storage prefix (from
             ``X-Clarinet-Storage-Path-Client`` header). Forwarded to
             ``build_slicer_context_async`` for the validator script.
+        actor: Who submits (the lifecycle policy's subject).
 
     Returns:
         Masked ``RecordRead``.
@@ -679,9 +681,7 @@ async def _process_submission(
         repaired = await enforce_output_grids(record_read, parent=parent_read)
 
     if is_update:
-        updated, _ = await service.update_data(
-            record_id, validated_data, acting_user=user, actor_id=actor_id
-        )
+        updated, _ = await service.update_data(record_id, validated_data, actor=actor)
         # A conform repair rewrote OUTPUT bytes; only submit_data runs the
         # post-commit output sync, so the update path must sync explicitly or
         # RecordFileLink.checksum keeps describing the pre-repair bytes and
@@ -692,24 +692,20 @@ async def _process_submission(
         if file_result and file_result.matched_files:
             await repo.set_files(record, file_result.matched_files)
 
-        updated, _ = await service.submit_data(
-            record_id,
-            validated_data,
-            new_status,
-            user_id=user.id,
-            actor_id=actor_id,
-        )
+        updated, _ = await service.submit_data(record_id, validated_data, new_status, actor=actor)
 
     return await mask_record(updated, user, repo)
-
-
-_SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 
 
 @router.post(
     "/{record_id}/data",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is blocked, preparing or already finished; invalid submit "
+            "status; output file grid mismatch; or the record changed concurrently"
+        }
+    },
 )
 async def submit_record_data(
     record_id: int,
@@ -718,7 +714,7 @@ async def submit_record_data(
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     data: RecordData = Body(),
     submit_status: RecordStatus | None = Query(default=None, alias="status"),
 ) -> RecordRead:
@@ -729,23 +725,9 @@ async def submit_record_data(
     record = authorized_record
     target_status = submit_status or RecordStatus.finished
 
-    if target_status not in _SUBMIT_STATUSES:
-        raise CONFLICT.with_context(
-            f"Invalid submit status '{target_status.value}'. "
-            f"Allowed: {', '.join(s.value for s in _SUBMIT_STATUSES)}."
-        )
-
-    if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context(
-            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
-        )
-
-    if record.status == RecordStatus.preparing:
-        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
-
-    if record.status == RecordStatus.finished:
-        raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
-
+    # Refuse before schema validation and enforce_output_grids (which may repair
+    # or delete OUTPUT files); the service re-checks against a fresh snapshot.
+    service.precheck(authorized_record, Submit(target_status), actor)
     return await _process_submission(
         record_id=record_id,
         record=record,
@@ -756,7 +738,7 @@ async def submit_record_data(
         rt_service=rt_service,
         is_update=False,
         new_status=target_status,
-        actor_id=actor,
+        actor=actor,
     )
 
 
@@ -772,20 +754,17 @@ async def update_record_data(
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     data: RecordData = Body(),
 ) -> RecordRead:
     """Update a record's data.
 
-    409 when the record type forbids post-submit edits (``editable=False``)
-    or the ``edit_window_days`` window has passed (non-superusers only).
+    409 when the record is not finished, or its type locks submitted records
+    for a non-admin.
     """
     record = authorized_record
 
-    if record.status != RecordStatus.finished:
-        raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
-
-    ensure_record_editable(record, user)
+    service.precheck(authorized_record, Edit(), actor)
 
     return await _process_submission(
         record_id=record_id,
@@ -796,7 +775,7 @@ async def update_record_data(
         service=service,
         rt_service=rt_service,
         is_update=True,
-        actor_id=actor,
+        actor=actor,
     )
 
 
@@ -880,7 +859,7 @@ async def submit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
@@ -904,16 +883,7 @@ async def submit_record_with_validation(
     """
     record = authorized_record
 
-    if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context(
-            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
-        )
-
-    if record.status == RecordStatus.preparing:
-        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
-
-    if record.status == RecordStatus.finished:
-        raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
+    service.precheck(authorized_record, Submit(RecordStatus.finished), actor)
 
     return await _process_submission(
         record_id=record_id,
@@ -928,7 +898,7 @@ async def submit_record_with_validation(
         session=session,
         client_ip=client_ip,
         client_storage_path=client_storage_path,
-        actor_id=actor,
+        actor=actor,
     )
 
 
@@ -946,12 +916,15 @@ async def resubmit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
 ) -> RecordRead:
     """Re-submit data for a finished record, running Slicer validation first if configured.
+
+    409 when the record is not finished, or its type locks submitted records
+    for a non-admin.
 
     Args:
         record_id: Record ID.
@@ -966,12 +939,10 @@ async def resubmit_record_with_validation(
     """
     record = authorized_record
 
-    if record.status != RecordStatus.finished:
-        raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
-
-    # Fail fast — the service enforces the lock too, but only after the
-    # Slicer validator has already run in the user's Slicer instance.
-    ensure_record_editable(record, user)
+    # Fail fast before the Slicer validator — the service enforces the lock
+    # too, but only after the Slicer validator has already run in the user's
+    # Slicer instance.
+    service.precheck(authorized_record, Edit(), actor)
 
     return await _process_submission(
         record_id=record_id,
@@ -986,7 +957,7 @@ async def resubmit_record_with_validation(
         session=session,
         client_ip=client_ip,
         client_storage_path=client_storage_path,
-        actor_id=actor,
+        actor=actor,
     )
 
 

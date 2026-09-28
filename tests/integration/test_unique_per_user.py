@@ -353,16 +353,16 @@ class TestSubmitDataUniqueConstraint:
 
     @pytest.mark.asyncio
     async def test_submit_data_auto_assign_raises_when_unique_violated(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+        self, test_session, test_patient, test_study, test_series, upu_role_type, upu_regular_user
     ):
         """submit_data raises RecordConstraintViolationError when auto-assigning
-        user_id to an unassigned record and user already has one for the same context."""
+        the actor to an unassigned record and it already has one for the same context."""
         existing = Record(
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         test_session.add(existing)
@@ -373,7 +373,7 @@ class TestSubmitDataUniqueConstraint:
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
             user_id=None,
-            record_type_name=unique_series_type.name,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.pending,
         )
         test_session.add(new_record)
@@ -386,30 +386,30 @@ class TestSubmitDataUniqueConstraint:
         with pytest.raises(RecordConstraintViolationError):
             await service.submit_data(
                 new_record.id,
-                data={},
-                new_status=RecordStatus.finished,
-                user_id=test_user.id,  # type: ignore[arg-type]
+                {},
+                RecordStatus.finished,
+                actor=SystemActor(service_user_id=upu_regular_user.id),
             )
 
     @pytest.mark.asyncio
     async def test_submit_data_auto_assign_succeeds_non_conflicting(
         self,
         test_session,
-        test_user,
         test_patient,
         test_study,
         test_series,
         second_series,
-        unique_series_type,
+        upu_role_type,
+        upu_regular_user,
     ):
-        """submit_data succeeds when auto-assigning user_id and no uniqueness
+        """submit_data succeeds when auto-assigning the actor and no uniqueness
         conflict exists (record is in a different series context)."""
         existing = Record(
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         test_session.add(existing)
@@ -420,7 +420,7 @@ class TestSubmitDataUniqueConstraint:
             study_uid=test_study.study_uid,
             series_uid=second_series.series_uid,
             user_id=None,
-            record_type_name=unique_series_type.name,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.pending,
         )
         test_session.add(new_record)
@@ -432,15 +432,15 @@ class TestSubmitDataUniqueConstraint:
 
         record, _ = await service.submit_data(
             new_record.id,
-            data={},
-            new_status=RecordStatus.finished,
-            user_id=test_user.id,  # type: ignore[arg-type]
+            {},
+            RecordStatus.finished,
+            actor=SystemActor(service_user_id=upu_regular_user.id),
         )
-        assert record.user_id == test_user.id
+        assert record.user_id == upu_regular_user.id
 
     @pytest.mark.asyncio
     async def test_submit_data_skips_check_when_already_assigned(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+        self, test_session, test_patient, test_study, test_series, upu_role_type, upu_regular_user
     ):
         """submit_data does not check unique_per_user when the record already
         has user_id set (the guard at record_check.user_id is None skips it)."""
@@ -448,8 +448,8 @@ class TestSubmitDataUniqueConstraint:
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         # Second record already assigned to same user (same context) — would
@@ -458,8 +458,8 @@ class TestSubmitDataUniqueConstraint:
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         test_session.add(existing)
@@ -473,11 +473,11 @@ class TestSubmitDataUniqueConstraint:
         # Should not raise — user_id is already set, so no uniqueness check
         record, _ = await service.submit_data(
             pre_assigned.id,
-            data={},
-            new_status=RecordStatus.finished,
-            user_id=test_user.id,  # type: ignore[arg-type]
+            {},
+            RecordStatus.finished,
+            actor=SystemActor(service_user_id=upu_regular_user.id),
         )
-        assert record.user_id == test_user.id
+        assert record.user_id == upu_regular_user.id
 
 
 # ── Section 3: API constraint on POST /api/records/ ──────────────────────────

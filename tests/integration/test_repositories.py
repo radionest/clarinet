@@ -438,38 +438,14 @@ class TestRecordRepository:
 
     @pytest.mark.asyncio
     async def test_update_data(self, env):
+        """update_data is data-only: status and owner are untouched (prefill)."""
         data = {"label": "positive"}
-        rec, old_status = await env["repo"].update_data(
-            env["record"].id, data, RecordStatus.finished
-        )
+        original_user_id = env["user"].id
+        rec, old_status = await env["repo"].update_data(env["record"].id, data)
         assert rec.data == data
         assert old_status == RecordStatus.pending
-
-    @pytest.mark.asyncio
-    async def test_ensure_user_assigned_when_no_user(self, env):
-        # Clear user assignment
-        env["record"].user_id = None
-        await env["session"].commit()
-        new_user = make_user()
-        env["session"].add(new_user)
-        await env["session"].commit()
-        await env["session"].refresh(new_user)
-
-        await env["repo"].ensure_user_assigned(env["record"].id, new_user.id)
-        rec = await env["repo"].get(env["record"].id)
-        assert rec.user_id == new_user.id
-
-    @pytest.mark.asyncio
-    async def test_ensure_user_assigned_noop_when_set(self, env):
-        original_user_id = env["user"].id
-        new_user = make_user()
-        env["session"].add(new_user)
-        await env["session"].commit()
-        await env["session"].refresh(new_user)
-
-        await env["repo"].ensure_user_assigned(env["record"].id, new_user.id)
-        rec = await env["repo"].get(env["record"].id)
-        assert rec.user_id == original_user_id  # should NOT change
+        assert rec.status == RecordStatus.pending
+        assert rec.user_id == original_user_id
 
     @pytest.mark.asyncio
     async def test_invalidate_record_hard(self, env):

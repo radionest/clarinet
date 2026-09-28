@@ -1,11 +1,12 @@
 """Integration tests for post-submit edit locking.
 
 ``RecordType.editable`` / ``RecordType.edit_window_days`` lock finished
-records for non-superusers on the API paths that can change a submitted
+records for non-admins on the API paths that can change a submitted
 answer: PATCH /data, PATCH /submit, and hard POST /invalidate. Raw status
 changes (PATCH /status, PATCH /bulk/status) are admin-only, so the edit
-lock never reaches them — a non-admin gets 403 first. Superusers bypass the
-lock. ``RecordRead.is_editable`` exposes the verdict to the frontend.
+lock never reaches them — a non-admin gets 403 first. Admins (superuser or
+the ``admin`` role) bypass the lock. ``RecordRead.is_editable`` exposes the
+verdict to the frontend.
 """
 
 from datetime import UTC, datetime, timedelta

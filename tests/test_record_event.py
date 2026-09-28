@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from clarinet.models import RecordStatus, RecordType
+from clarinet.models import RecordStatus
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.record_service import RecordService
 
@@ -61,51 +61,6 @@ class TestRecordServiceAuditEvents:
         assert event.to_status is None
         assert event.new_value == {"mode": "soft", "source_record_id": 7}
         assert event.reason == "stale input"
-
-    @pytest.mark.asyncio
-    async def test_submit_data_writes_field_names_only(self) -> None:
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.finished
-
-        repo_mock = AsyncMock()
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
-        service, event_repo = _service(repo_mock)
-
-        with patch("clarinet.services.record_service.RecordRead"):
-            await service.submit_data(
-                1, {"score": 0.9, "label": "x"}, RecordStatus.finished, actor_id=None
-            )
-
-        event = _added_event(event_repo)
-        assert event.kind == "data_submitted"
-        assert event.new_value == {"fields": ["label", "score"]}
-        assert event.old_value is None  # data values are never copied into audit
-
-    @pytest.mark.asyncio
-    async def test_submit_data_audits_auto_assignment(self) -> None:
-        """Auto-assigning an ownerless record on submit must leave an 'assigned' event."""
-        user_id = uuid4()
-        record_check = MagicMock()
-        record_check.user_id = None
-        record_check.record_type = MagicMock(spec=RecordType)
-        record_check.record_type.unique_per_user = False
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.finished
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = record_check
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
-        service, event_repo = _service(repo_mock)
-
-        with patch("clarinet.services.record_service.RecordRead"):
-            await service.submit_data(
-                1, {"score": 1}, RecordStatus.finished, user_id=user_id, actor_id=user_id
-            )
-
-        kinds = [call.args[0].kind for call in event_repo.add.await_args_list]
-        assert kinds == ["assigned", "data_submitted"]
-        assigned = event_repo.add.await_args_list[0].args[0]
-        assert assigned.new_value == {"user_id": str(user_id), "via": "submit"}
 
     @pytest.mark.asyncio
     async def test_create_record_writes_created(self) -> None:

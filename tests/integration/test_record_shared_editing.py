@@ -201,8 +201,9 @@ class TestSharedEditingOwnershipTransfer:
 
         events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
         assert events.status_code == 200
-        vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
-        assert "shared_update" in vias
+        (event,) = [e for e in events.json() if e["kind"] == "data_updated"]
+        assert event["new_value"]["user_id"] == str(editor_user.id)
+        assert event["new_value"]["via"] == "shared_update"
 
     @pytest.mark.asyncio
     async def test_no_spurious_transfer_for_current_owner(
@@ -218,8 +219,9 @@ class TestSharedEditingOwnershipTransfer:
         assert resp.json()["user_id"] == str(editor_user.id)
 
         events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
-        vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
-        assert "shared_update" not in vias
+        (event,) = [e for e in events.json() if e["kind"] == "data_updated"]
+        assert "user_id" not in event["new_value"]
+        assert "via" not in event["new_value"]
 
 
 class TestSharedEditingComputed:

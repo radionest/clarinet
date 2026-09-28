@@ -760,37 +760,15 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
-    async def update_data(
-        self,
-        record_id: int,
-        data: RecordData,
-        new_status: RecordStatus | None = None,
-        *,
-        reassign_to: UUID | None = None,
-    ) -> tuple[Record, RecordStatus]:
-        """Update record data and optionally status / owner.
-
-        Args:
-            record_id: Record ID.
-            data: New record data.
-            new_status: Optional new status to set.
-            reassign_to: When set, reassign ``user_id`` to this user in the same
-                commit (used by shared_editing "last editor owns it"). Unlike
-                ``assign_user`` this has no status side effect.
+    async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
+        """Replace a record's data without touching its status or owner (prefill).
 
         Returns:
-            Tuple of (record with relations loaded, old status).
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
+            Tuple of (record with relations loaded, its status).
         """
         record = await self.get(record_id)
         old_status = record.status
         record.data = data
-        if new_status is not None:
-            record.status = new_status
-        if reassign_to is not None:
-            record.user_id = reassign_to
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
@@ -959,18 +937,6 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(stmt)
         await self.session.commit()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
-
-    async def ensure_user_assigned(self, record_id: int, user_id: UUID) -> None:
-        """Assign user to a record only if it has no user yet.
-
-        Args:
-            record_id: Record ID.
-            user_id: User UUID to assign.
-        """
-        record = await self.get(record_id)
-        if record.user_id is None:
-            record.user_id = user_id
-            await self.session.commit()
 
     async def invalidate_record(
         self,
