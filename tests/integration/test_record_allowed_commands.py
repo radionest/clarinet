@@ -4,8 +4,26 @@ import pytest
 
 from clarinet.models import Record
 from clarinet.models import RecordStatus as S
+from clarinet.models.record import RecordRead
 from tests.utils.lifecycle import client_as
 from tests.utils.urls import ADMIN_RECORDS, RECORDS_BASE, RECORDS_FIND
+
+_MINIMAL_RECORD_READ = {
+    "id": 1,
+    "patient_id": "p1",
+    "record_type_name": "abcde",
+    "patient": {"id": "p1"},
+    "record_type": {"name": "abcde"},
+}
+
+
+def test_allowed_commands_drops_names_unknown_to_this_server_version():
+    """A newer server may report a command this client's RecordCommandName Literal
+    doesn't know about yet. Parsing must drop it, not fail the whole record."""
+    read = RecordRead.model_validate(
+        {**_MINIMAL_RECORD_READ, "allowed_commands": ["claim", "future_cmd"]}
+    )
+    assert read.allowed_commands == ["claim"]
 
 
 @pytest.mark.asyncio

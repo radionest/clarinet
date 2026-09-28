@@ -8,7 +8,7 @@ for backward compatibility.
 
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Annotated, Any, Literal, Optional, Protocol
+from typing import Annotated, Any, Literal, Optional, Protocol, get_args
 from uuid import UUID
 
 from pydantic import (
@@ -17,6 +17,7 @@ from pydantic import (
     StringConstraints,
     Tag,
     computed_field,
+    field_validator,
     model_validator,
 )
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, event, func
@@ -370,6 +371,22 @@ class RecordRead(RecordBase):
     # by ``api/masking.py`` from the lifecycle policy (``record_lifecycle``).
     allowed_commands: list[RecordCommandName] = Field(default_factory=list)
 
+    @field_validator("allowed_commands", mode="before")
+    @classmethod
+    def drop_unknown_commands(cls, v: Any) -> Any:
+        """Tolerate command names this client's Literal doesn't know yet.
+
+        A client one version behind a server that shipped a new lifecycle
+        command would otherwise fail to parse every ``RecordRead`` — the
+        unknown name is dropped instead of raising.
+        """
+        if not isinstance(v, list):
+            return v
+        # RecordCommandName is a PEP 695 alias (TypeAliasType) — get_args needs
+        # the underlying Literal via __value__, not the alias object itself.
+        known = set(get_args(RecordCommandName.__value__))
+        return [name for name in v if name in known]
+
     @model_validator(mode="before")
     @classmethod
     def populate_files_from_links(cls, data: Any) -> Any:
@@ -452,7 +469,8 @@ class RecordRead(RecordBase):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_editable(self) -> bool:
-        """Whether the submitted data may still be changed by non-superusers.
+        """Whether non-admin people (not a superuser, not the `admin` role)
+        may edit or hard-invalidate this finished record.
 
         Server-side verdict for the frontend (form/Re-submit gating) — see
         :func:`is_record_editable`. Superuser bypass is the client's concern.
