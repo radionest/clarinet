@@ -253,11 +253,12 @@ integer literal breaks PG — the PR #149 v1 trap, fixed in #150); `text("true")
 PG via implicit cast but causes spurious alembic autogen diffs).
 
 Autogenerate compiles them with the database it runs against — generated on
-SQLite, `false()` lands in the migration as `sa.text('0')` and PostgreSQL rejects
-it (#450). The generated `env.py` passes `render_item` from
-`clarinet/utils/migrations.py`, which renders them as `sa.true()`/`sa.false()`
-instead; projects whose `env.py` predates the hook add it by hand (CHANGELOG
-entry for #450) — `init-migrations` and `db migrate create` warn until they do.
+SQLite, `false()` lands as `sa.text('0')` and PostgreSQL rejects it (#450).
+`render_item` in `clarinet/utils/migrations.py` renders them (and `func.now()`)
+dialect-neutrally; the generated `env.py` is a shim over `run_env()` there,
+which passes the hook. Projects whose `env.py` predates the shim replace it by
+hand (CHANGELOG entry for #655) — `init-migrations` and `db migrate create`
+warn until they do.
 
 **Alternatives:** nullable `Optional[X]` — only if `None` is domain-meaningful;
 or a hand-written add-nullable → backfill → `alter_column(nullable=False)`

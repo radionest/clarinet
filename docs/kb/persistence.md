@@ -118,14 +118,17 @@ with `server_default=false()`). A metadata guard
 literals. Do **not** use `text("1")` (breaks PG), `text("true")` (SQLite rejects
 it inside some `ALTER TABLE`s), or plain `"1"` (causes spurious autogen diffs).
 
-Autogenerate still compiles a `server_default` with the database it is connected
-to, so on SQLite — the scaffold default — `false()` would land in the migration
-as `sa.text('0')`, which PostgreSQL rejects (#450). The generated `env.py`
-therefore passes the `render_item` hook from `clarinet/utils/migrations.py`,
-which renders these literals as `sa.true()` / `sa.false()` so that the database
-applying the migration compiles them. `env.py` is only written when missing:
-older projects add the hook by hand (CHANGELOG entry for #450), and
-`clarinet init-migrations` / `clarinet db migrate create` warn until they do. The
+Autogenerate compiles a `server_default` with the database it is connected
+to: on SQLite — the scaffold default — `false()` would land as `sa.text('0')`,
+which PostgreSQL rejects (#450); on PostgreSQL `func.now()` would land as
+`sa.text('now()')`, which SQLite rejects. `render_item` in
+`clarinet/utils/migrations.py` renders them as `sa.true()` / `sa.false()` /
+`sa.func.now()`, compiled by the database applying the migration. The
+generated `alembic/env.py` is a three-line shim over `run_env()` in the same
+module, which passes `render_item`, `compare_type=True` and — on SQLite, which
+has no `ALTER COLUMN` — `render_as_batch=True`. `env.py` is written only when
+missing, so an `env.py` from before #655 is replaced by hand (CHANGELOG), and
+`clarinet init-migrations` / `clarinet db migrate create` warn until it is. The
 hook sees model defaults only — a downgrade that re-adds a dropped boolean
 column still renders the reflected `sa.text('0')`.
 

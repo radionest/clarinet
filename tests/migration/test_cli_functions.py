@@ -29,7 +29,6 @@ from clarinet.utils.migrations import (
     cli_pending,
     cli_upgrade,
     create_migration,
-    generate_alembic_env,
     get_alembic_config,
     get_current_revision,
     get_migration_history,
@@ -38,6 +37,7 @@ from clarinet.utils.migrations import (
     render_item,
     rollback_migration,
     run_migrations,
+    show_migration_sql,
 )
 
 from .conftest import (
@@ -85,12 +85,11 @@ class TestInitFileStructure:
         assert (project_path / "alembic.ini").read_text() == ini_content
         assert (project_path / "alembic" / "env.py").read_text() == env_content
 
-    def test_init_env_py_imports_models(self, migration_project):
+    def test_init_env_py_delegates_to_run_env(self, migration_project):
         project_path, _db_url, _engine = migration_project
         init_and_apply(project_path)
 
-        env_py = (project_path / "alembic" / "env.py").read_text()
-        assert "from clarinet.models import *" in env_py
+        assert "run_env()" in (project_path / "alembic" / "env.py").read_text()
 
 
 class TestCliUpgradeDowngrade:
@@ -353,15 +352,34 @@ class TestRenderItem:
         assert "server_default=sqlalchemy.false()" in self._render(column, prefix="sqlalchemy.")
 
 
-class TestEnvPyWithoutRenderItem:
-    """An env.py generated before #450 keeps baking SQLite booleans — say so."""
+# A working env.py as projects had it before run_env() existed.
+LEGACY_ENV_PY = """\
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+from sqlmodel import SQLModel
+
+import clarinet.models  # noqa: F401
+
+config = context.config
+connectable = engine_from_config(
+    config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool
+)
+with connectable.connect() as connection:
+    context.configure(connection=connection, target_metadata=SQLModel.metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+"""
+
+
+class TestOutdatedEnvPy:
+    """An env.py written before run_env() misses every env-level fix — say so."""
 
     @staticmethod
-    def _render_item_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
         return [
             r.getMessage()
             for r in caplog.records
-            if r.levelname == "WARNING" and "render_item" in r.getMessage()
+            if r.levelname == "WARNING" and "run_env" in r.getMessage()
         ]
 
     def test_current_env_py_does_not_warn(
@@ -372,7 +390,7 @@ class TestEnvPyWithoutRenderItem:
 
         create_migration("next", autogenerate=True, project_path=project_path)
 
-        assert not self._render_item_warnings(caplog)
+        assert not self._warnings(caplog)
 
     def test_create_migration_warns(
         self, migration_project: tuple[Path, str, Engine], caplog: pytest.LogCaptureFixture
@@ -380,24 +398,77 @@ class TestEnvPyWithoutRenderItem:
         project_path, _db_url, _engine = migration_project
         init_and_apply(project_path)
 
-        env_py = project_path / "alembic" / "env.py"
-        env_py.write_text(env_py.read_text().replace("render_item=render_item,", ""))
+        (project_path / "alembic" / "env.py").write_text(LEGACY_ENV_PY)
         create_migration("next", autogenerate=True, project_path=project_path)
 
-        assert self._render_item_warnings(caplog)
+        assert self._warnings(caplog)
 
     def test_init_migrations_warns_on_existing_env_py(
         self, migration_project: tuple[Path, str, Engine], caplog: pytest.LogCaptureFixture
     ) -> None:
         project_path, _db_url, _engine = migration_project
         (project_path / "alembic").mkdir()
-        (project_path / "alembic" / "env.py").write_text(
-            generate_alembic_env().replace("render_item=render_item,", "")
-        )
+        (project_path / "alembic" / "env.py").write_text(LEGACY_ENV_PY)
 
         init_alembic_in_project(project_path)
 
-        assert self._render_item_warnings(caplog)
+        assert self._warnings(caplog)
+
+
+class TestSqliteBatchMigrations:
+    """SQLite has no ALTER COLUMN: autogenerate must emit batch ops that keep rows (#655)."""
+
+    def test_legacy_uuid_column_rebuilt_without_data_loss(
+        self, migration_project: tuple[Path, str, Engine]
+    ) -> None:
+        project_path, _db_url, engine = migration_project
+        if engine.dialect.name != "sqlite":
+            pytest.skip("batch mode is SQLite-only")
+        init_and_apply(project_path)
+        uid = "3fa85f6457174562b3fc2c963f66afa6"  # not all-digit: stays TEXT under NUMERIC affinity
+
+        with engine.begin() as conn:
+            # Rebuild "user" as a pre-#655 database has it: id declared UUID.
+            # Children keep pointing at it; FK enforcement is off here, as on
+            # the engine Alembic builds.
+            ddl = conn.execute(
+                text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user'")
+            ).scalar_one()
+            conn.execute(text('DROP TABLE "user"'))
+            conn.execute(text(ddl.replace("id CHAR(32)", "id UUID", 1)))
+            conn.execute(
+                text(
+                    'INSERT INTO "user" (id, email, hashed_password, is_active, is_superuser, '
+                    "is_verified) VALUES (:id, 'a@example.com', 'x', 1, 0, 0)"
+                ),
+                {"id": uid},
+            )
+            conn.execute(text("INSERT INTO userrole (name) VALUES ('doctor')"))
+            conn.execute(
+                text("INSERT INTO userroleslink (user_id, role_name) VALUES (:id, 'doctor')"),
+                {"id": uid},
+            )
+
+        script = create_migration("portable uuid", autogenerate=True, project_path=project_path)
+
+        assert isinstance(script, Script)
+        assert "batch_alter_table('user'" in _upgrade_body(Path(script.path))
+        run_migrations("head", project_path)
+        with engine.connect() as conn:
+            assert conn.execute(text('SELECT id FROM "user"')).scalar_one() == uid
+            assert conn.execute(text("SELECT user_id FROM userroleslink")).scalar_one() == uid
+
+
+class TestRunEnv:
+    def test_offline_sql_through_run_env(
+        self, migration_project: tuple[Path, str, Engine], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project_path, _db_url, _engine = migration_project
+        init_and_apply(project_path)
+
+        show_migration_sql("head", offline=True, project_path=project_path)
+
+        assert "CREATE TABLE" in capsys.readouterr().out
 
 
 class TestCrossDialectRegression:
