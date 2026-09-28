@@ -433,7 +433,7 @@ class TestSqliteBatchMigrations:
     ) -> None:
         project_path, _db_url, engine = migration_project
         if engine.dialect.name != "sqlite":
-            pytest.skip("batch mode is SQLite-only")
+            pytest.skip("rewrites sqlite_master DDL")
         init_and_apply(project_path)
         uid = "3fa85f6457174562b3fc2c963f66afa6"  # not all-digit: stays TEXT under NUMERIC affinity
 

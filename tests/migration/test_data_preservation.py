@@ -354,7 +354,8 @@ class TestAddNotNullBooleanRequiresServerDefault:
     Two independent failure modes must be tested:
 
     1. ``ALTER TABLE ADD COLUMN BOOLEAN NOT NULL`` without any default — PG and
-       SQLite reject this on populated tables with ``contains null values``.
+       SQLite reject this on populated tables: PG with ``contains null values``,
+       SQLite with ``Cannot add a NOT NULL column with default value NULL``.
     2. ``... DEFAULT 1`` (integer literal, what a naive ``text("1")`` produces)
        — PG has no implicit int→bool cast, so even empty tables fail with
        ``default for column is of type integer`` in both CREATE and ALTER.
@@ -405,7 +406,7 @@ class TestAddNotNullBooleanRequiresServerDefault:
             message="add bool not null without default",
         )
 
-        with pytest.raises((IntegrityError, OperationalError, ProgrammingError)):
+        with pytest.raises((IntegrityError, OperationalError, ProgrammingError), match=r"(?i)null"):
             command.upgrade(cfg, "head")
 
         engine.dispose()

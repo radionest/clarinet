@@ -797,7 +797,9 @@
   generated on SQLite, replace
   `server_default=sa.text('0')` / `sa.text('1')` on `sa.Boolean()` columns with
   `sa.false()` / `sa.true()` before running them on PostgreSQL — editing an
-  applied revision is safe, Alembic tracks revision ids, not file contents.
+  applied revision is safe, Alembic tracks revision ids, not file contents. The
+  hand edit to `env.py` is superseded by the `run_env()` shim (the
+  `alembic/env.py` entry below).
 - **`clarinet db migrate create` on SQLite no longer emits a migration that
   cannot be applied.** Five UUID columns (`user.id`, `userroleslink.user_id`,
   `record.user_id`, `record_event.actor_id`, `access_token.user_id`) used
@@ -823,9 +825,11 @@
   so env-level fixes ship with the package instead of as hand edits. `run_env()`
   sets `compare_type=True` explicitly (Alembic < 1.12 defaulted to off; the
   floor is now `alembic>=1.12`) and `render_as_batch=True` — type, nullability
-  and constraint changes render as batch operations: plain `ALTER`s on
+  and index changes render as batch operations: plain `ALTER`s on
   PostgreSQL, table rebuilds on SQLite (which has no `ALTER COLUMN`) — so a
   revision applies on both, whichever database generated it (#655).
+  Foreign-key and unique-constraint changes still need a hand-written step,
+  because the framework's constraints are unnamed.
   **Downstream migration:**
   replace `alembic/env.py` with the shim below, keeping any project model
   imports above the `run_env()` call; `clarinet init-migrations` and

@@ -128,10 +128,11 @@ which PostgreSQL rejects (#450); on PostgreSQL `func.now()` would land as
 `sa.func.now()`, compiled by the database applying the migration. The
 generated `alembic/env.py` is a three-line shim over `run_env()` in the same
 module, which passes `render_item`, `compare_type=True` and
-`render_as_batch=True`: type, nullability and constraint changes render as batch
+`render_as_batch=True`: type, nullability and index changes render as batch
 operations — plain `ALTER`s on PostgreSQL, table rebuilds on SQLite (which has
 no `ALTER COLUMN`) — so a revision applies on both, whichever database generated
-it. `env.py` is written only when
+it. Foreign-key and unique-constraint changes still need a hand-written step,
+because the framework's constraints are unnamed. `env.py` is written only when
 missing, so an `env.py` from before #655 is replaced by hand (CHANGELOG), and
 `clarinet init-migrations` / `clarinet db migrate create` warn until it is. The
 hook sees model defaults only — a downgrade that re-adds a dropped boolean
@@ -163,9 +164,11 @@ autogenerate and tests them:
 4. Every schema change ships a CHANGELOG **Downstream migration** note; new
    framework tables (`record_event`, `pipeline_task_run`, …) need one too.
 
-Autogenerate does not see everything: PostgreSQL enum labels
-(`ALTER TYPE … ADD VALUE`) and `server_default` changes (`compare_server_default`
-is off) need a hand-written step in that note.
+Autogenerate does not handle everything portably: PostgreSQL enum labels
+(`ALTER TYPE … ADD VALUE`), `server_default` changes (`compare_server_default`
+is off) and foreign-key / unique-constraint changes (the framework's constraints
+are unnamed, so the rendered `drop_constraint` fails on the other dialect) need
+a hand-written step in that note.
 
 ## Pitfalls
 

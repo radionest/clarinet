@@ -13,7 +13,7 @@ reference stays in the path-scoped `.claude/rules/`.
 * [Backend architecture](./architecture.md) - How a request flows through routers, services and repositories, what the application lifespan builds, and the async rules that constrain every layer.
 * [Domain model](./domain-model.md) - The Patient/Study/Series/Record hierarchy, what a RecordType declares, the record status lifecycle, and how record data, files and audit events hang off a record.
 * [RecordType flags and uniqueness](./record-types.md) - The behavioural flags a RecordType declares — unique_by partitions, shared_editing, edit locking and record caps — and how their semantics compose.
-* [Persistence conventions](./persistence.md) - How to write SQLModel models, repositories and migrations here — schema naming, eager loading, the server_default rule for additive migrations, and the pitfalls that only surface on PostgreSQL.
+* [Persistence conventions](./persistence.md) - How to write SQLModel models, repositories and migrations here — schema naming, eager loading, the server_default rule for additive migrations, who owns migrations, and dialect pitfalls on PostgreSQL and SQLite.
 
 # Project configuration
 

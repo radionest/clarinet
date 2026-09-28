@@ -267,7 +267,7 @@ migration for values inexpressible as a single SQL literal.
 (metadata scan), `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
 (real `ALTER TABLE` on populated SQLite + PG) and
 `tests/migration/test_cli_functions.py::TestCrossDialectRegression` (autogenerate on
-SQLite, apply on PG). The PG leg = stage 6 of `make test-all-stages`, or
+SQLite, apply on PG). The PG leg runs in CI (`test-postgres` job) and as stages 2b and 6 of `make test-all-stages`, or
 `make test-migration` with `CLARINET_TEST_DATABASE_URL` pointing at any PG
 instance; see `tests/migration/conftest.py`.
 
