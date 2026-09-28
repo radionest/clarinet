@@ -28,7 +28,6 @@ from clarinet.exceptions.domain import (
     RecordParentRequiredError,
     RecordTypeNotFoundError,
     RecordUniquePerUserError,
-    UserNotFoundError,
     ValidationError,
 )
 from clarinet.models import Record
@@ -722,22 +721,6 @@ class RecordRepository(BaseRepository[Record]):
         )
         result = await self.session.execute(stmt)
         return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
-
-    async def get_user_with_roles(self, user_id: UUID) -> User:
-        """The user with roles loaded, for new-owner checks.
-
-        Raises:
-            UserNotFoundError: 404 — the FK alone would surface as a 500.
-        """
-        result = await self.session.execute(
-            select(User)
-            .options(selectinload(User.roles))  # type: ignore[arg-type]
-            .where(col(User.id) == user_id)
-        )
-        user = result.scalar_one_or_none()
-        if user is None:
-            raise UserNotFoundError(user_id)
-        return user
 
     async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Replace a record's data without touching its status or owner (prefill).

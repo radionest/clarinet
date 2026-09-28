@@ -41,7 +41,6 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `update_checksums(record, checksums)` | Update checksum on existing `RecordFileLink` rows (keys: `name` for singular, `name:filename` for collections) |
 | `delete_output_file_links(record)` | Single SQL `DELETE` of OUTPUT file links (race-safe vs concurrent pipeline writers) |
 | `append_context_info(id, note)` | Append `note` to `context_info` (newline-separated, never overwritten) — soft invalidation; hard invalidation appends inside `write_transition` instead |
-| `get_user_with_roles(id)` | The user with roles loaded, for new-owner checks; raises `UserNotFoundError` (404) rather than surfacing the FK as a 500 |
 
 ### Cascade delete
 

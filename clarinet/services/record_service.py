@@ -24,6 +24,7 @@ from clarinet.models.actor import Actor, audit_actor_id, can_access
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.services.events.capture import emit_record_events, mark_pending_audit
 from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
@@ -238,8 +239,9 @@ class RecordService:
 
         The event is flushed immediately — before any RecordFlow dispatch,
         so an engine failure cannot lose it. Lifecycle commands (via
-        ``_transition``), record creation, and cascade delete commit the
-        event together with the mutation, in the same transaction.
+        ``_transition``) and cascade delete commit the event together with
+        the mutation, in the same transaction; record creation commits it
+        right after the INSERT, with the file links and any auto-block.
         Non-transition mutations that don't explicitly commit — context
         info updates, soft invalidation, clearing output files — leave the
         event for the next commit on the shared session (request
@@ -434,7 +436,7 @@ class RecordService:
         self, user_id: UUID, record_type: RecordType, *, status: RecordStatus | None
     ) -> None:
         """404 for an unknown user; 409 ``OWNER_LACKS_ROLE`` when they cannot access the type."""
-        user = await self.repo.get_user_with_roles(user_id)
+        user = await UserRepository(self.repo.session).get_with_roles(user_id)
         if not can_access(record_type.role_name, user.is_superuser, user.role_names):
             raise RecordOwnerLacksRoleError(
                 f"User {user_id} cannot own a '{record_type.name}' record: "
@@ -750,7 +752,7 @@ class RecordService:
     async def _validate_output_paths(self, record_id: int) -> None:
         """Reject an unsafe OUTPUT pattern before ``submit_data`` persists anything.
 
-        ``submit_data`` commits the new data/status via ``update_data`` before
+        ``submit_data`` commits the new data/status via ``_transition`` before
         ``sync_output_files`` ever runs a path-safety check — without this,
         a rejected submission would already be durably stored by the time the
         rejection happens (see ``sync_output_files``'s docstring). Pure

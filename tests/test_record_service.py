@@ -72,7 +72,7 @@ class TestRecordServiceTriggers:
         repo_mock = AsyncMock()
         repo_mock.get_with_relations.return_value = record
         repo_mock.write_transition = AsyncMock(return_value=True)
-        repo_mock.get_user_with_roles = AsyncMock(
+        repo_mock.session.get = AsyncMock(
             return_value=SimpleNamespace(is_superuser=True, role_names=[])
         )
         repo_mock.session.commit = AsyncMock()
@@ -131,7 +131,7 @@ class TestRecordServiceTriggers:
         repo_mock = AsyncMock()
         repo_mock.get_with_relations.return_value = record
         repo_mock.write_transition = AsyncMock(return_value=True)
-        repo_mock.get_user_with_roles = AsyncMock(
+        repo_mock.session.get = AsyncMock(
             return_value=SimpleNamespace(is_superuser=True, role_names=[])
         )
         repo_mock.session.commit = AsyncMock()
@@ -290,7 +290,7 @@ class TestRecordServiceTriggers:
         repo_mock = AsyncMock()
         repo_mock.get_with_relations.return_value = record
         repo_mock.write_transition = AsyncMock(return_value=True)
-        repo_mock.get_user_with_roles = AsyncMock(
+        repo_mock.session.get = AsyncMock(
             return_value=SimpleNamespace(is_superuser=True, role_names=[])
         )
         repo_mock.session.commit = AsyncMock()

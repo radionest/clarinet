@@ -9,7 +9,6 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-from clarinet.exceptions.domain import UserNotFoundError
 from clarinet.models import RecordStatus
 from clarinet.repositories.record_repository import RecordRepository
 from tests.utils.factories import make_record_type, make_user, seed_record
@@ -247,13 +246,3 @@ async def test_concurrent_writers_exactly_one_wins(test_engine, test_session, se
 
     results = await asyncio.gather(claim(user.id), claim(other.id))
     assert sorted(results) == [False, True]
-
-
-@pytest.mark.asyncio
-async def test_get_user_with_roles(test_session, seeded):
-    _, user = seeded
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_user_with_roles(user.id)
-    assert (loaded.id, loaded.role_names) == (user.id, [])
-    with pytest.raises(UserNotFoundError):
-        await repo.get_user_with_roles(uuid4())
