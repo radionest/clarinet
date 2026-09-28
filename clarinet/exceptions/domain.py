@@ -490,6 +490,14 @@ class ConfigLoadError(ConfigurationError):
         )
 
 
+class ConfigRootError(ConfigLoadError):
+    """The plan root (``config_tasks_path``) is not an existing directory.
+
+    Its own type so the startup banner can say "create it / point
+    ``config_tasks_path`` at it" instead of "fix the import error".
+    """
+
+
 class AnonPathError(ConfigurationError):
     """Raised when an anonymized disk path cannot be safely resolved.
 

@@ -16,6 +16,7 @@ from clarinet.exceptions.domain import (
     BusinessRuleViolationError,
     ClarinetError,
     ConfigLoadError,
+    ConfigRootError,
     ConfigurationError,
     DatabaseConnectionError,
     DatabaseError,
@@ -109,6 +110,7 @@ __all__ = [
     # Domain exceptions
     "ClarinetError",
     "ConfigLoadError",
+    "ConfigRootError",
     "ConfigurationError",
     # HTTP exceptions (for backward compatibility)
     "CustomHTTPException",
