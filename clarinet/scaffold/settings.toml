@@ -15,8 +15,8 @@ extra_roles = []
 
 # ── Server / Logging ─────────────────────────────────
 # Internal clients (RecordFlow, pipeline tasks) call
-# http://127.0.0.1:<port><root_url>/api unless api_base_url is set
-# (see settings.custom.toml).
+# http://<host>:<port><root_url>/api (a wildcard host 0.0.0.0 / :: becomes
+# 127.0.0.1) unless api_base_url is set (see settings.custom.toml).
 port = 8111
 host = "0.0.0.0"
 debug = true
