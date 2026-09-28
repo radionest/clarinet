@@ -3,7 +3,7 @@
 All FileDef and RecordDef instances live in this single file. The path is wired
 in settings.toml via ``config_record_types_file``.
 
-See `.claude/rules/definitions.md` for the full reference.
+See `.claude/rules/clarinet/definitions.md` for the full reference.
 """
 
 from clarinet.flow import FileDef, FileRef, RecordDef

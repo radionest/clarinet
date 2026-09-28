@@ -5,7 +5,7 @@ Two halves in this file:
 1. Pipeline tasks — async/sync functions decorated with ``@pipeline_task``.
 2. RecordFlow DSL — declarative event → action rules.
 
-See `.claude/rules/workflows.md` for the full reference.
+See `.claude/rules/clarinet/workflows.md` for the full reference.
 """
 
 from __future__ import annotations
@@ -48,11 +48,11 @@ def example_post_segment(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
 # ---------------------------------------------------------------------------
 # TODO: replace the example flows with your real workflow.
 
-# 1. Когда в проект приходит исследование — создаём первичный осмотр.
+# 1. A study arriving in the project creates the initial review record.
 (study().on_creation().create_record("first-check"))
 
-# 2. Если first-check одобрил study — создаём example-segment.
+# 2. A first-check that approved the study creates an example-segment.
 (record("first-check").on_finished().if_record(F.is_good == True).create_record("example-segment"))
 
-# 3. После завершения сегментации — запускаем post-processing pipeline task.
+# 3. A finished segmentation triggers the post-processing pipeline task.
 (record("example-segment").on_finished().do_task(example_post_segment))
