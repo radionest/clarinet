@@ -33,6 +33,25 @@
 
 ### Breaking
 
+- **`clarinet init` has one path; `--template` / `--list-templates` are gone.**
+  It copies the payload shipped inside the package (`clarinet/scaffold/`):
+  production-shaped `settings.toml`, a fully commented `settings.custom.toml`,
+  `.env.example`, `.gitignore`, the example `plan/`, the managed agent docs and
+  the `.claude/CLAUDE.md` seed. `--template` read `examples/`, which is not in
+  the wheel, so it failed from every pip install (#472). Existing files are
+  never overwritten and re-running is safe. `examples/project_template/` is
+  deleted; `examples/demo/` stays as reading material.
+
+  Upgrading to this release:
+
+  | If your project… | Do |
+  |---|---|
+  | omits `config_tasks_path` and keeps `tasks/` | add `config_tasks_path = "./tasks/"` or rename the directory to `plan/` |
+  | is in TOML mode and never created its folder | create it before starting |
+  | used `clarinet init --template research` | use `clarinet init` |
+  | was scaffolded from the old template | `database_login` → `database_username`, `CLARINET_DATABASE_LOGIN` → `CLARINET_DATABASE_USERNAME`; replace `${VAR}` strings with real values or env vars |
+  | sets `CLARINET_JWT_SECRET_KEY` | rename it to `CLARINET_SECRET_KEY` |
+  | uses `clarinet agent init` docs | run `clarinet agent update` once (moves `overview.md` to `.claude/CLAUDE.md`, prunes stale managed docs) |
 - **`config_tasks_path` defaults to `./plan/` (was `./tasks/`).** A project that
   omits the setting and keeps a `tasks/` directory must set
   `config_tasks_path = "./tasks/"` or rename the directory. The scaffold, the

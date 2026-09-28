@@ -26,9 +26,11 @@ my_project/
       pipeline_flow.py       # RecordFlow DSL
 ```
 
-Scaffold one with `clarinet init <name> --template research|demo`. For an
+Scaffold one with `clarinet init <name>`. For an
 existing project, `clarinet agent init` installs the framework's agent docs into
-`.claude/rules/clarinet/`.
+`.claude/rules/clarinet/` and writes a project-owned `.claude/CLAUDE.md` seed;
+`clarinet agent update` refreshes the managed docs and prunes any the installed
+version no longer ships.
 
 ## Two config modes
 

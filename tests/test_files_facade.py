@@ -291,7 +291,7 @@ class TestPathSafety:
 
         `exists` is `resolve(...).is_file()`, so the collection guard would have
         made it raise -- and the shipped task docs
-        (`examples/project_template/.claude/CLAUDE.md`) tell every project to
+        (`clarinet/docs/agent/claude/overview.md`) tell every project to
         call `ctx.files.exists(output_file_def)`. A collection exists when any
         member matches, which is what `glob` already answers.
         """

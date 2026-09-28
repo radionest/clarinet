@@ -38,9 +38,12 @@ def scaffold_project(project_dir: Path) -> list[Path]:
     their written (dotted) names.
 
     Raises:
-        ProjectScaffoldError: the payload is missing — before anything is written.
+        ProjectScaffoldError: the payload is missing, or *project_dir* is an
+            existing non-directory — before anything is written.
     """
     src = scaffold_source_dir()
+    if project_dir.exists() and not project_dir.is_dir():
+        raise ProjectScaffoldError(f"{project_dir} exists and is not a directory")
     kept: list[Path] = []
     for item in sorted(src.rglob("*")):
         if item.is_dir() or "__pycache__" in item.parts:

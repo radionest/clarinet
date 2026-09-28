@@ -7,7 +7,6 @@ Following KISS and YAGNI principles - minimal, practical implementation.
 import argparse
 import asyncio
 import contextlib
-import json
 import os
 import re
 import shutil
@@ -23,230 +22,36 @@ from pathlib import Path
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
+_INIT_NEXT_STEPS = """
+Next steps:
+  1. cp .env.example .env   — then set the database and RabbitMQ credentials
+  2. clarinet db init       — create the schema and the admin user
+  3. clarinet run           — start the API and the frontend
+"""
 
-def init_project(path: str, template: str | None = None) -> None:
-    """Initialize a new Clarinet project in the specified directory.
 
-    Args:
-        path: Destination directory for the new project.
-        template: Optional template name to bootstrap from.
+def init_project(path: str) -> None:
+    """Scaffold a Clarinet project at *path* from the payload shipped in the package.
+
+    Write-once: existing files are kept and reported, and only the managed
+    agent docs are refreshed (``force=True``), so re-running is safe.
     """
+    from clarinet.exceptions.domain import AgentScaffoldError, ProjectScaffoldError
+    from clarinet.utils.agent_scaffold import scaffold_agent_docs
+    from clarinet.utils.project_scaffold import scaffold_project
+
     project_path = Path(path).resolve()
-
-    if template is not None:
-        from clarinet.cli.templates import copy_template
-
-        copy_template(template, str(project_path))
-        logger.info(f"Project initialized from template '{template}' at {project_path}")
-        return
-
-    # Create directory structure
-    directories = [
-        project_path / "plan",
-        project_path / "static",
-        project_path / "data",
-    ]
-
-    for directory in directories:
-        directory.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created directory: {directory}")
-
-    # Create settings.toml
-    settings_content = """\
-# Clarinet Configuration File
-# Docs: all options can also be set via CLARINET_ env vars
-
-# ── Project ──────────────────────────────────────────
-project_name = "My Project"
-# project_description = "Imaging Research Framework"
-# project_title = "My Project"  # browser tab <title>; defaults to project_name
-
-# ── Server ───────────────────────────────────────────
-port = 8000
-host = "127.0.0.1"
-debug = true
-# root_url = ""
-
-# ── Database ─────────────────────────────────────────
-database_driver = "sqlite"
-database_name = "clarinet"
-# database_host = "localhost"
-# database_port = 5432
-# database_username = "postgres"
-# database_password = "postgres"
-
-# ── Storage ──────────────────────────────────────────
-storage_path = "./data"
-# anon_id_prefix = "CLARINET"
-# anon_names_list = ""         # path to names list for anonymization
-
-# ── Security (change in production!) ─────────────────
-secret_key = "change-this-secret-key-in-production"
-# cors_origins = []            # exact origins allowed to call the API with the session cookie; "*" is rejected
-
-# ── Roles ────────────────────────────────────────────
-# extra_roles = []             # e.g. ["inspector", "technician"]
-
-# ── Admin ────────────────────────────────────────────
-# admin_username = "admin"
-# admin_email = "admin@clarinet.ru"
-# admin_password = ""          # required in production
-# admin_auto_create = true
-# admin_require_strong_password = false
-# registration_enabled = false   # public self-registration; accounts start with no roles
-
-# ── Session ──────────────────────────────────────────
-# cookie_name = "clarinet_session"
-# session_expire_hours = 24
-# session_sliding_refresh = true
-# session_absolute_timeout_days = 30
-# session_idle_timeout_minutes = 60
-# session_concurrent_limit = 5
-# session_ip_check = false
-# session_secure_cookie = true
-# session_cache_ttl_seconds = 30   # /dicom-web auth cache (0 = off)
-
-# ── Failed-login throttling (also covers X-Internal-Token guessing) ──
-# login_max_failures_per_account = 5
-# login_max_failures_per_ip = 20   # looser: users behind one NAT share an IP
-# login_lockout_minutes = 15       # 0 disables throttling
-
-# ── Session cleanup ──────────────────────────────────
-# session_cleanup_enabled = true
-# session_cleanup_interval = 3600
-# session_cleanup_batch_size = 1000
-# session_cleanup_retention_days = 30
-
-# ── Frontend ─────────────────────────────────────────
-# frontend_enabled = true
-
-# ── Config mode ──────────────────────────────────────
-# config_mode = "toml"                          # "toml" or "python"
-# config_tasks_path = "./plan/"
-# config_delete_orphans = false
-# config_record_types_file = "record_types.py"  # python mode only
-# config_files_catalog_file = "files_catalog.py"
-# config_context_hydrators_file = "context_hydrators.py"
-# config_schema_hydrators_file = "hydrators.py"
-
-# ── RecordFlow ───────────────────────────────────────
-# recordflow_enabled = false
-# recordflow_paths = []        # e.g. ["./plan/workflows"]
-
-# ── Pipeline (RabbitMQ) ──────────────────────────────
-# pipeline_enabled = false
-# pipeline_default_timeout = 3600
-# pipeline_retry_count = 3
-# pipeline_retry_delay = 5
-# pipeline_retry_max_delay = 120
-# pipeline_worker_prefetch = 10
-# pipeline_result_backend_url = "" # Redis URL, optional
-
-# ── RabbitMQ connection ──────────────────────────────
-# rabbitmq_host = "localhost"
-# rabbitmq_port = 5672
-# rabbitmq_login = "guest"
-# rabbitmq_password = "guest"
-# rabbitmq_exchange = "clarinet"
-# rabbitmq_management_port = 15672
-# rabbitmq_max_consumers = 0
-
-# ── Worker capabilities ──────────────────────────────
-# have_gpu = false
-# have_dicom = false
-# have_quarto = false
-# have_keras = false
-# have_torch = false
-
-# ── DICOM local node ────────────────────────────────
-# dicom_aet = "CLARINET"
-# dicom_port = 11112
-# dicom_ip = ""
-# dicom_max_pdu = 16384
-# dicom_max_concurrent_associations = 8 # per process: API + each worker
-# dicom_log_identifiers = false
-
-# ── PACS remote (backend DICOM service) ──────────────
-# pacs_host = "localhost"
-# pacs_port = 4242
-# pacs_aet = "ORTHANC"
-
-# ── 3D Slicer ────────────────────────────────────────
-# slicer_script_paths = []
-# slicer_port = 2016
-# slicer_timeout = 10.0
-
-# ── DICOMweb proxy ───────────────────────────────────
-# dicomweb_enabled = true
-# dicomweb_cache_ttl_hours = 24
-# dicomweb_cache_max_size_gb = 10.0
-# dicomweb_memory_cache_ttl_minutes = 30
-# dicomweb_memory_cache_max_entries = 200
-# dicomweb_cache_cleanup_enabled = true
-# dicomweb_cache_cleanup_interval = 86400
-# dicomweb_disk_write_concurrency = 4
-
-# ── OHIF Viewer ──────────────────────────────────────
-# ohif_enabled = true
-# ohif_default_version = "3.12.0"
-
-# ── Anonymization ────────────────────────────────────
-# anon_uid_salt = "clarinet-anon-salt-change-in-production"
-# anon_save_to_disk = true
-# anon_send_to_pacs = false
-# anon_failure_threshold = 0.5
-
-# ── Series filter ────────────────────────────────────
-# series_filter_excluded_modalities = ["SR","KO","PR","DOC","RTDOSE","RTPLAN","RTSTRUCT","REG","FID","RWV"]
-# series_filter_min_instance_count = 0
-# series_filter_unknown_modality_policy = "include"
-# series_filter_on_import = false
-
-# ── Logging ──────────────────────────────────────────
-# log_level = "INFO"
-# log_to_file = true
-# log_dir = ""                 # defaults to {storage_path}/logs
-# log_rotation = "20 MB"
-# log_retention = "1 week"
-# log_serialize = true
-# log_console_level = ""       # defaults to log_level
-# log_noisy_libraries = ["pynetdicom", "aiormq", "aio_pika", "pamqp"]
-# log_silenced_libraries = ["pydicom"]
-"""
-
-    settings_file = project_path / "settings.toml"
-    if not settings_file.exists():
-        settings_file.write_text(settings_content)
-        logger.info(f"Created settings file: {settings_file}")
-
-    # Create example task design
-    example_task = {
-        "name": "Example Task",
-        "description": "An example task design",
-        "fields": [{"name": "field1", "type": "text", "label": "Example Field", "required": True}],
-    }
-
-    task_file = project_path / "plan" / "example.json"
-    if not task_file.exists():
-        task_file.write_text(json.dumps(example_task, indent=2))
-        logger.info(f"Created example task: {task_file}")
-
-    # Create .env example
-    env_example = """# Environment variables (optional)
-# CLARINET_DATABASE_DRIVER=postgresql+asyncpg
-# CLARINET_DATABASE_HOST=localhost
-# CLARINET_DATABASE_PORT=5432
-# CLARINET_DATABASE_NAME=dbname
-# CLARINET_DATABASE_USERNAME=user
-# CLARINET_DATABASE_PASSWORD=pass
-# CLARINET_JWT_SECRET_KEY=your-secret-key
-"""
-
-    env_file = project_path / ".env.example"
-    env_file.write_text(env_example)
-    logger.info(f"Created .env.example: {env_file}")
-
+    try:
+        kept = scaffold_project(project_path)
+        scaffold_agent_docs("claude", project_dir=project_path, mode="init", force=True)
+    except (ProjectScaffoldError, AgentScaffoldError) as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    if kept:
+        logger.info(f"Kept existing files: {', '.join(p.as_posix() for p in kept)}")
     logger.info(f"Project initialized at {project_path}")
+    logger.complete()  # console sink is enqueued; flush before the plain print
+    print(_INIT_NEXT_STEPS)
 
 
 def run_server(host: str | None = None, port: int | None = None, headless: bool = False) -> None:
@@ -1538,16 +1343,6 @@ def main() -> None:
         default=".",
         help="Path where to create the project (default: current directory)",
     )
-    init_parser.add_argument(
-        "--template",
-        "-t",
-        help="Initialize from a template (use --list-templates to see available)",
-    )
-    init_parser.add_argument(
-        "--list-templates",
-        action="store_true",
-        help="List available project templates",
-    )
 
     # run command
     run_parser = subparsers.add_parser("run", help="Run the development server")
@@ -1969,12 +1764,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "init":
-        if getattr(args, "list_templates", False):
-            from clarinet.cli.templates import list_templates
-
-            list_templates()
-        else:
-            init_project(args.path, template=getattr(args, "template", None))
+        init_project(args.path)
     elif args.command == "run":
         run_server(args.host, args.port, headless=args.headless)
     elif args.command == "db":
