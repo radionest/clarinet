@@ -409,3 +409,4 @@ class TestCrossDialectRegression:
             columns = get_columns(engine, "recordtype")
             assert columns["mask_patient_data"]["default"] == "true"
             assert columns["shared_editing"]["default"] == "false"
+            assert columns["releasable"]["default"] == "false"

@@ -32,6 +32,7 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "editable",
     "edit_window_days",
     "shared_editing",
+    "releasable",
     "viewer_mode",
     "slicer_script",
     "slicer_result_validator",

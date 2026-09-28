@@ -187,6 +187,8 @@ class RecordDef(BaseModel):
         shared_editing: Any role-holder may edit any record of this type;
             each edit reassigns ownership to the editor. Requires
             'user' not in unique_by.
+        releasable: The owner of a pending or inwork record may give it
+            back (unassign themselves). Admins may always unassign.
         viewer_mode: How many series the viewer loads (single vs all series).
         allowed_viewers: Restrict the DICOM viewers shown for this type to these
             viewer names (matching ``ViewerInfo.name``); None/empty = all
@@ -223,6 +225,7 @@ class RecordDef(BaseModel):
     editable: bool = True
     edit_window_days: int | None = None
     shared_editing: bool = False
+    releasable: bool = False
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
     allowed_viewers: list[str] | None = None
 

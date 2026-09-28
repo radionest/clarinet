@@ -201,6 +201,18 @@ class RecordTypeBase(SQLModel):
         ),
     )
 
+    # See ``mask_patient_data`` above for the rationale on ``server_default`` and
+    # the dialect-aware ``sql_expression.false()`` literal.
+    releasable: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": sql_expression.false()},
+        description=(
+            "Whether the owner of a pending or inwork record of this type may give it "
+            "back (DELETE /records/{id}/user): the owner is cleared and inwork falls "
+            "back to pending. Admins and the service token may always unassign."
+        ),
+    )
+
     viewer_mode: ViewerMode = Field(
         default=ViewerMode.SINGLE_SERIES,
         sa_column=Column(String(20), server_default="single_series", nullable=False),
@@ -471,6 +483,7 @@ class RecordTypeOptional(SQLModel):
     parent_required: bool | None = Field(default=None)
     inherit_user_from_parent: bool | None = Field(default=None)
     editable: bool | None = Field(default=None)
+    releasable: bool | None = Field(default=None)
     edit_window_days: int | None = Field(default=None, ge=0, le=3650)
     level: DicomQueryLevel | None = None
 
