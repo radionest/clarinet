@@ -650,6 +650,26 @@ pub fn switching_patient_drops_previous_candidates_test() {
   m.form_parent_candidates |> should.equal([])
 }
 
+pub fn failed_parent_load_retries_on_type_change_not_keystroke_test() {
+  let s = make_shared()
+  let update = fn(m, msg) {
+    let #(m, _, _) = record_new.update(m, msg, s)
+    m
+  }
+  let #(m, _, _) = record_new.init(s)
+  let m =
+    update(m, record_new.UpdateForm(record_form.UpdatePatient("P001")))
+    |> update(record_new.ParentCandidatesLoaded(
+      "P001",
+      Error(types.NetworkError("down")),
+    ))
+  m.parent_candidates_for |> should.equal("")
+  let m = update(m, record_new.UpdateForm(record_form.UpdateContextInfo("x")))
+  m.parent_candidates_for |> should.equal("")
+  let m = update(m, record_new.UpdateForm(record_form.UpdateRecordType("t")))
+  m.parent_candidates_for |> should.equal("P001")
+}
+
 pub fn view_renders_grouped_parent_picker_test() {
   let s = make_shared()
   let #(m, _, _) = record_new.init(s)

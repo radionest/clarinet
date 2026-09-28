@@ -291,7 +291,9 @@ pub fn update(
 
       // Parent candidates span the whole patient: fetched once per patient,
       // and only while the picker shows — the modal hides it unless the type
-      // is `parent_required`.
+      // is `parent_required`. Only a patient or type change can show the
+      // picker, so only those (re)fetch: a failed load retries on the next one,
+      // not on every Context Info keystroke.
       let updated_model = case patient_changed {
         True ->
           Model(
@@ -314,6 +316,7 @@ pub fn update(
         use <- bool.guard(
           picker_hidden
             || new_data.patient_id == ""
+            || !{ patient_changed || type_changed }
             || updated_model.parent_candidates_for == new_data.patient_id,
           #(updated_model, effect.none()),
         )
@@ -387,7 +390,9 @@ pub fn update(
         #(model, effect.none(), []),
       )
       #(
-        with_parent_groups(Model(..model, form_parent_candidates: [])),
+        with_parent_groups(
+          Model(..model, form_parent_candidates: [], parent_candidates_for: ""),
+        ),
         effect.none(),
         handle_error(err, "Failed to load parent records"),
       )
