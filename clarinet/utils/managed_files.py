@@ -8,20 +8,13 @@ policy (refresh, refuse, prune) and asks ``is_managed``. Seeds carry no header
 and are written only when their target is absent.
 """
 
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 
+from clarinet.utils.version import clarinet_version
+
 # Prefix only, no version: a file written by an older clarinet is still managed.
 _MARKERS = ("# managed by clarinet", "<!-- managed by clarinet")
-
-
-def clarinet_version() -> str:
-    """Installed clarinet version, or ``"unknown"`` in a source tree."""
-    try:
-        return version("clarinet")
-    except PackageNotFoundError:  # pragma: no cover - source-tree fallback
-        return "unknown"
 
 
 def managed_header(comment: Literal["#", "<!--"], refresh_cmd: str) -> str:

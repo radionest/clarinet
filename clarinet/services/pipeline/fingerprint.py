@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from clarinet.settings import settings
-from clarinet.utils.managed_files import clarinet_version
+from clarinet.utils.version import clarinet_version
 
 # Non-source artifacts that differ between deploys/hosts without meaning a code
 # change — host-local config, editor/build scratch, VCS internals.

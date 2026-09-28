@@ -8,7 +8,7 @@ import pytest
 
 import clarinet
 from clarinet.cli.main import init_project, main
-from clarinet.utils.managed_files import clarinet_version
+from clarinet.utils.version import clarinet_version
 
 SKELETON = [
     "settings.toml",

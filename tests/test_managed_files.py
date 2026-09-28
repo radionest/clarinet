@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 
 from clarinet.utils.managed_files import (
-    clarinet_version,
     is_managed,
     managed_header,
     strip_header,
     with_header,
 )
+from clarinet.utils.version import clarinet_version
 
 MD = managed_header("<!--", "clarinet agent update")
 HASH = managed_header("#", "clarinet quality update")
