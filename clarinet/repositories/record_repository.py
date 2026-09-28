@@ -7,13 +7,13 @@ SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
 import random
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from itertools import batched
 from typing import Any, assert_never
 from uuid import UUID
 
-from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
+from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_, update
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -451,7 +451,9 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordNotFoundError(record_id)
         return record
 
-    async def get_with_relations(self, record_id: int, *, lock: bool = False) -> Record:
+    async def get_with_relations(
+        self, record_id: int, *, lock: bool = False, populate_existing: bool = False
+    ) -> Record:
         """Get a single record with all relationships eagerly loaded.
 
         Args:
@@ -459,6 +461,9 @@ class RecordRepository(BaseRepository[Record]):
             lock: When ``True``, acquire a row-level lock on the record
                 (``SELECT ... FOR UPDATE``). Caller must keep the transaction
                 open until the lock is no longer needed.
+            populate_existing: re-read the row over whatever the identity map
+                holds — required after ``write_transition``, whose Core
+                UPDATE bypasses it.
 
         Returns:
             Record with patient, study, series, and record_type loaded
@@ -479,6 +484,8 @@ class RecordRepository(BaseRepository[Record]):
         )
         if lock:
             statement = statement.with_for_update()
+        if populate_existing:
+            statement = statement.execution_options(populate_existing=True)
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
@@ -659,6 +666,77 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record.id)  # type: ignore
 
+    async def write_transition(
+        self,
+        record_id: int,
+        *,
+        expected_status: RecordStatus,
+        expected_user_id: UUID | None,
+        to: RecordStatus,
+        owner: UUID | None,
+        data: RecordData | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        """Apply one decided transition with a single conditional UPDATE; never commits.
+
+        The only code that writes ``Record.status`` / ``Record.user_id`` after the
+        INSERT (the listener in ``models/record.py`` refuses attribute writes;
+        ``tests/test_status_write_guard.py`` catches stray SQL). The row changes
+        only if its status and owner still equal what the decision saw
+        (``IS NOT DISTINCT FROM`` — ``IS`` on SQLite); otherwise nothing is written
+        and ``False`` lets the caller re-decide. ``owner`` is the owner *after* the
+        command — writing an unchanged owner is harmless, the WHERE clause pins the
+        old one. The caller owns the transaction; no row lock outlives it.
+
+        ``reason`` is appended to ``context_info`` in SQL (newline-separated,
+        never overwritten); ``started_at`` / ``finished_at`` are stamped only when
+        the status *changes* to inwork / finished; ``data=None`` keeps the data.
+
+        The UPDATE bypasses the identity map (re-read with
+        ``get_with_relations(..., populate_existing=True)``) and the SSE capture
+        (the caller emits the record event).
+        """
+        values: dict[str, Any] = {"status": to, "user_id": owner}
+        if data is not None:
+            values["data"] = data
+        if reason:
+            # NULL || text is NULL, hence the coalesce.
+            values["context_info"] = func.coalesce(
+                col(Record.context_info).concat("\n" + reason), reason
+            )
+        if to != expected_status and to == RecordStatus.inwork:
+            values["started_at"] = datetime.now(UTC)
+        if to != expected_status and to == RecordStatus.finished:
+            values["finished_at"] = datetime.now(UTC)
+        stmt = (
+            update(Record)
+            .where(
+                col(Record.id) == record_id,
+                col(Record.status) == expected_status,
+                col(Record.user_id).is_not_distinct_from(expected_user_id),
+            )
+            .values(values)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.session.execute(stmt)
+        return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
+
+    async def get_user_with_roles(self, user_id: UUID) -> User:
+        """The user with roles loaded, for new-owner checks.
+
+        Raises:
+            UserNotFoundError: 404 — the FK alone would surface as a 500.
+        """
+        result = await self.session.execute(
+            select(User)
+            .options(selectinload(User.roles))  # type: ignore[arg-type]
+            .where(col(User.id) == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise UserNotFoundError(user_id)
+        return user
+
     async def update_status(
         self, record_id: int, new_status: RecordStatus
     ) -> tuple[Record, RecordStatus]:
@@ -812,6 +890,8 @@ class RecordRepository(BaseRepository[Record]):
         self,
         record: Record,
         matched_files: dict[str, str],
+        *,
+        commit: bool = True,
     ) -> None:
         """Set matched files on a record by creating RecordFileLink rows.
 
@@ -822,6 +902,8 @@ class RecordRepository(BaseRepository[Record]):
             record: Record with ``record_type.file_links`` eagerly loaded
                 (via ``get_with_relations()`` or ``create_with_relations()``).
             matched_files: Dict mapping file definition name to matched filename.
+            commit: When ``False``, only flush — keeps the links in the
+                caller's transaction (``RecordService._transition``).
         """
         # Build name → FileDefinition map from eager-loaded M2M links
         fd_map = {
@@ -843,7 +925,10 @@ class RecordRepository(BaseRepository[Record]):
                 filename=filename,
             )
             self.session.add(link)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
 
     async def delete_output_file_links(self, record: Record) -> int:
         """Delete RecordFileLink rows for OUTPUT file definitions.
