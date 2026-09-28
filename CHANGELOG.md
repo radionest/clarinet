@@ -768,7 +768,8 @@
   Pandoc now writes the file itself (`-o`), and the result replaces
   `reference.docx` only once it validates as a docx, so a failed run no longer
   leaves a file the next `quarto new` would reuse (#684).
-- **The New record form's parent picker offers every record of the patient.**
+- **The New record form's parent picker offers every record of the patient you
+  can see.**
   It listed only records of the selected study, and only those the browser
   happened to have cached, so a parent on another study (a control-MRI form
   whose parent is the pre-ablation MRI) or at patient level could never be

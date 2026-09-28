@@ -466,7 +466,7 @@ fn parent_candidates() -> List(models.Record) {
 pub fn parent_groups_with_study_test() {
   // A STUDY/SERIES-level child: its own study first, then patient-level
   // records, then the other studies newest first.
-  record_form.parent_record_groups(parent_candidates(), "1.3")
+  record_form.parent_record_groups(parent_candidates(), [], "1.3")
   |> should.equal([
     #("This study", [
       #("70", "#70 · first-check · Completed"),
@@ -483,7 +483,7 @@ pub fn parent_groups_with_study_test() {
 pub fn parent_groups_without_study_test() {
   // A PATIENT-level child (no study picked): patient-level records first,
   // then every study newest first — no "This study" group.
-  record_form.parent_record_groups(parent_candidates(), "")
+  record_form.parent_record_groups(parent_candidates(), [], "")
   |> should.equal([
     #("Patient level", [#("52", "#52 · ablation · Completed")]),
     #("Study 2026-05-12 · MRI control", [
@@ -506,10 +506,33 @@ pub fn parent_option_uses_record_type_label_test() {
         Some("MRI before ablation"),
       )),
     )
-  record_form.parent_record_groups([labeled], "")
+  record_form.parent_record_groups([labeled], [], "")
   |> should.equal([
     #("Study 2026-02-03 · MRI liver", [
       #("41", "#41 · MRI before ablation · Completed"),
+    ]),
+  ])
+}
+
+pub fn parent_groups_unmask_study_test() {
+  // A non-superuser gets a masked record back: anon study UID, sentinel date,
+  // no description. The patient's (unmasked) studies map it to the real
+  // study, so it joins its unmasked sibling in one group — "This study" here.
+  let masked =
+    make_record(42, "masked-type", Some(make_study("2.1", "1976-01-01", None)))
+  let studies = [models.Study(..study_pre(), anon_uid: Some("2.1"))]
+  record_form.parent_record_groups([masked, pre_ablation()], studies, "1.1")
+  |> should.equal([
+    #("This study", [
+      #("41", "#41 · mri-pre-ablation · Completed"),
+      #("42", "#42 · masked-type · Completed"),
+    ]),
+  ])
+  record_form.parent_record_groups([masked, pre_ablation()], studies, "")
+  |> should.equal([
+    #("Study 2026-02-03 · MRI liver", [
+      #("41", "#41 · mri-pre-ablation · Completed"),
+      #("42", "#42 · masked-type · Completed"),
     ]),
   ])
 }

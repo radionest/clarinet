@@ -154,16 +154,15 @@ pub fn init_modal(
       parent_record_id: parent_record_id_str,
       context_info: context_info_str,
     )
-  // Studies list is only needed when the user can actually pick a study
-  // (i.e. the source page didn't already pin one). Otherwise the studies
-  // dropdown is replaced by a locked input, and an HTTP fetch would be wasted.
-  // For RecordArgs we eagerly load when no study_uid is pinned.
+  // Studies list feeds the study dropdown (when the source page didn't pin a
+  // study) and the parent picker's study groups (every context but
+  // RecordArgs, whose parent is preset). With neither, the fetch is wasted.
   let studies_eff = case args {
-    shared.PatientArgs(pid) -> load_studies_for_patient(1, pid)
-    shared.RecordArgs(pid, None, _, _, _) -> load_studies_for_patient(1, pid)
-    shared.StudyArgs(_, _)
-    | shared.SeriesArgs(_, _, _)
-    | shared.RecordArgs(_, Some(_), _, _, _) -> effect.none()
+    shared.PatientArgs(pid)
+    | shared.StudyArgs(pid, _)
+    | shared.SeriesArgs(pid, _, _)
+    | shared.RecordArgs(pid, None, _, _, _) -> load_studies_for_patient(1, pid)
+    shared.RecordArgs(_, Some(_), _, _, _) -> effect.none()
   }
   // Series list is only needed when a study is pinned but no series — i.e.
   // the user is on a Study page picking a series-level RecordType.

@@ -230,7 +230,11 @@ pub fn view(
             name: "parent_record_id",
             value: data.parent_record_id,
             placeholder: #("", "No parent record"),
-            groups: parent_record_groups(parent_candidates, data.study_uid),
+            groups: parent_record_groups(
+              parent_candidates,
+              studies,
+              data.study_uid,
+            ),
             on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
           ),
           errors: errors,
@@ -503,11 +507,15 @@ fn build_series_options(series_list: List(Series)) -> List(#(String, String)) {
 /// every other study newest first. A parent can sit at any level and on any
 /// study of the patient (e.g. a control-MRI form whose parent is the
 /// pre-ablation MRI on an earlier study). Empty groups are dropped.
+/// `studies` (the patient's, unmasked) restores the real study of a record
+/// that masking handed back under its anon UID and a sentinel date.
 /// Public for unit testing.
 pub fn parent_record_groups(
   candidates: List(Record),
+  studies: List(Study),
   study_uid: String,
 ) -> List(#(String, List(#(String, String)))) {
+  let candidates = list.map(candidates, unmask_study(_, studies))
   let #(this_study, rest) =
     list.partition(candidates, fn(r) {
       study_uid != "" && r.study_uid == Some(study_uid)
@@ -538,6 +546,18 @@ pub fn parent_record_groups(
       })
     #(group.0, list.map(records, parent_option))
   })
+}
+
+fn unmask_study(r: Record, studies: List(Study)) -> Record {
+  let found = case r.study_uid {
+    Some(uid) ->
+      list.find(studies, fn(s) { s.study_uid == uid || s.anon_uid == Some(uid) })
+    None -> Error(Nil)
+  }
+  case found {
+    Ok(s) -> models.Record(..r, study_uid: Some(s.study_uid), study: Some(s))
+    Error(_) -> r
+  }
 }
 
 fn study_date(r: Record) -> String {
