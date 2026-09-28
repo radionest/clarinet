@@ -59,7 +59,8 @@ File flows: `.on_update()` + `.invalidate_all_records()` / `.call()`. Event sour
 
 ## Invalidation Semantics
 
-Hard invalidation (`mode='hard'`) always fires `on_status('pending')` for the target record —
+Hard invalidation (`mode='hard'`) always fires `on_status('pending')` for the target record
+(a `preparing` record keeps its status and re-fires `on_status('preparing')`) —
 **even when it was already `pending`** (pending → pending). Every re-invalidation re-runs all
 matching flows, including flows without a status trigger (those match any status event).
 

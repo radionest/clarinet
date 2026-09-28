@@ -92,7 +92,7 @@
       and nothing is created.
   11. `POST /api/records/claim-next` no longer lets two concurrent callers take
       the same record (SQLite has no row locks; the second silently took it
-      over): the loser picks another record, at most 3 times — 404 only when
+      over): the loser picks another record, 3 picks in all — 404 only when
       the pool is empty, 409 `CONCURRENT_TRANSITION` ("Every record picked from
       the pool was taken first; try again.") after three lost races.
 

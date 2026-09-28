@@ -32,7 +32,7 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent — ex
 
 ## API surface
 
-- **P13.** New mutable endpoints (POST/PUT/PATCH/DELETE) on records use `authorize_mutable_record_access` (`MutableRecordDep`), NOT the base `AuthorizedRecordDep` which only checks read access — except owner changes (`PATCH`/`DELETE /records/{id}/user`), whose rights `record_lifecycle.decide` owns. Every status/owner/data change goes through a `RecordService` method with `actor=` from `ActorDep`; never add router-level status or edit-lock checks — the lifecycle policy owns them.
+- **P13.** New mutable endpoints (POST/PUT/PATCH/DELETE) on records use `authorize_mutable_record_access` (`MutableRecordDep`), NOT the base `AuthorizedRecordDep` which only checks read access — except owner changes (`PATCH`/`DELETE /records/{id}/user`), whose rights `record_lifecycle.decide` owns. Every status/owner/data change goes through a `RecordService` method with `actor=` from `ActorDep`; never add router-level status or edit-lock checks — the lifecycle policy owns them. Prefill is not a lifecycle command: `RecordService.prefill_data` takes no actor and `_do_prefill` checks `_PREFILL_STATUSES` in the router.
 - **P14.** Any new endpoint is reflected in `.claude/rules/api-urls.md` (URL + status codes + auth requirements).
 - **P15.** Request/response models are Pydantic/SQLModel — no raw dicts as public API contracts.
 

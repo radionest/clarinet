@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from clarinet.models.record import Record, RecordType
     from clarinet.types import RecordCommandName
 
+# Downstream projects string-match these 409 texts — never reword them; new clients branch on `code`.
 BLOCKED_TEXT = (
     "Record is blocked — prerequisites not met; see check-files or validate-files for details."
 )

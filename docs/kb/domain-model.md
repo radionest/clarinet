@@ -155,7 +155,7 @@ and a refused system write fails silently (workers never retry a 4xx, `.call()`
 swallows exceptions) — do not tighten system-actor rules without checking every
 downstream project. A new owner (assign, or create with a given or inherited
 `user_id`) must hold the type's role or be a superuser, for every actor
-including the service token — 409 `OWNER_LACKS_ROLE` otherwise. A person
+including the service token — 409 `OWNER_LACKS_ROLE` otherwise. A non-admin
 creating a record may name only themselves or nobody as `user_id` (403); that
 covers the payload `user_id` only — an owner inherited via
 `inherit_user_from_parent` passes only the role check. A refusal is

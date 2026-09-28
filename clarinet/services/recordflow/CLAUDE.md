@@ -88,7 +88,7 @@ for `record('X').any()/.all()` and `update_record(strategy=...)` are documented 
 - Patient-level change can invalidate series-level records
 
 Modes:
-- **hard**: reset status to `pending`, append reason to `context_info` (keeps `user_id`). Always fires `on_status("pending")` flows — re-fire/idempotency/cycle semantics: `.claude/rules/recordflow-dsl.md` (Invalidation Semantics)
+- **hard**: reset status to `pending`, append reason to `context_info` (keeps `user_id`). Always fires `on_status("pending")` flows (a `preparing` record keeps its status and re-fires `on_status("preparing")`) — re-fire/idempotency/cycle semantics: `.claude/rules/recordflow-dsl.md` (Invalidation Semantics)
 - **soft**: only append reason to `context_info`; never fires triggers
 
 Optional `callback(record, source_record, client)` for per-project custom behavior.
