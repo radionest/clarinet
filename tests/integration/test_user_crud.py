@@ -6,8 +6,12 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 
+from clarinet.models.base import RecordStatus
+from clarinet.models.record import Record
 from clarinet.models.user import User, UserRole
 from clarinet.utils.auth import get_password_hash, verify_password
+from tests.utils.factories import make_record_type, seed_record
+from tests.utils.urls import USERS_BASE
 
 
 @pytest.mark.asyncio
@@ -82,6 +86,70 @@ async def test_delete_user(test_session):
     # Check that user is deleted
     deleted_user = await test_session.get(User, user_id)
     assert deleted_user is None
+
+
+@pytest.mark.asyncio
+async def test_delete_user_owning_records_clears_ownership(
+    client, test_session, test_patient, test_study, test_series
+):
+    """DELETE /api/user/{id} for a user who owns records must succeed (#F2 regression).
+
+    The direct-write guard on Record.status/Record.user_id (record-transition-gateway)
+    refuses an ORM attribute set on a saved record from anywhere but the lifecycle
+    writer. Without a guard-aware nullify path, SQLAlchemy's default FK-nullify
+    behaviour on `session.delete(user)` would go through that same instrumented
+    attribute and 500. Today's semantics must be kept: the user is deleted, each
+    owned record's user_id becomes NULL, and its status is untouched.
+    """
+    owner = User(
+        id=uuid4(),
+        email="owns-records@example.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(owner)
+    await test_session.commit()
+
+    test_session.add(make_record_type("owner-del-rt", unique_by=None))
+    await test_session.commit()
+
+    inwork = await seed_record(
+        test_session,
+        test_patient.id,
+        test_study.study_uid,
+        test_series.series_uid,
+        "owner-del-rt",
+        status=RecordStatus.inwork,
+        user_id=owner.id,
+    )
+    finished = await seed_record(
+        test_session,
+        test_patient.id,
+        test_study.study_uid,
+        test_series.series_uid,
+        "owner-del-rt",
+        status=RecordStatus.finished,
+        user_id=owner.id,
+    )
+    # Captured before expire_all(): a bare attribute access on an expired
+    # instance outside an awaited call raises MissingGreenlet.
+    inwork_id, finished_id = inwork.id, finished.id
+
+    resp = await client.delete(f"{USERS_BASE}/{owner.id}")
+    assert resp.status_code == 204
+
+    deleted_user = await test_session.get(User, owner.id)
+    assert deleted_user is None
+
+    test_session.expire_all()
+    fresh_inwork = await test_session.get(Record, inwork_id)
+    fresh_finished = await test_session.get(Record, finished_id)
+    assert fresh_inwork.status == RecordStatus.inwork
+    assert fresh_inwork.user_id is None
+    assert fresh_finished.status == RecordStatus.finished
+    assert fresh_finished.user_id is None
 
 
 @pytest.mark.asyncio

@@ -2,11 +2,12 @@
 
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 
-from clarinet.models import User, UserRole
+from clarinet.models import Record, User, UserRole
 from clarinet.repositories.base import BaseRepository
 from clarinet.utils.session import revoke_user_sessions
 
@@ -18,6 +19,25 @@ class UserRepository(BaseRepository[User]):
         """Initialize user repository with session."""
         super().__init__(session, User)
         self._role_repo = BaseRepository(session, UserRole)
+
+    async def clear_owned_records(self, user_id: UUID) -> None:
+        """Null ``Record.user_id`` for every record owned by *user_id*; leaves status untouched.
+
+        Run before ``session.delete(user)`` in ``UserService.delete_user``:
+        without this, SQLAlchemy's own FK-nullify-on-parent-delete cascade
+        would set ``Record.user_id`` on each owned record through the mapped
+        attribute during flush, tripping the direct-lifecycle-write guard in
+        ``models/record.py`` (only ``RecordRepository.write_transition`` may
+        write ``status``/``user_id`` on a saved record). A Core UPDATE with
+        ``synchronize_session=False`` bypasses that attribute entirely — the
+        same technique ``write_transition`` itself uses.
+        """
+        await self.session.execute(
+            update(Record)
+            .where(col(Record.user_id) == user_id)
+            .values(user_id=None)
+            .execution_options(synchronize_session=False)
+        )
 
     async def get_with_roles(self, user_id: UUID) -> User:
         """Get user with roles loaded.

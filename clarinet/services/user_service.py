@@ -106,6 +106,11 @@ class UserService:
     async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
 
+        Records this user owns keep their status; ownership is cleared first
+        (``clear_owned_records`` — a Core UPDATE, not an ORM attribute write)
+        so the FK-nullify-on-delete SQLAlchemy would otherwise perform through
+        the mapped attribute never runs into the direct-lifecycle-write guard.
+
         Args:
             user_id: User ID to delete
 
@@ -113,6 +118,7 @@ class UserService:
             EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
+        await self.user_repo.clear_owned_records(user_id)
         await self.user_repo.delete(user)
 
     async def authenticate(self, username: str, password: str) -> User:
