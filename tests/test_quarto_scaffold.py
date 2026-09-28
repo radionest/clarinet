@@ -1,7 +1,9 @@
 """Unit tests for clarinet.utils.quarto_scaffold."""
 
 import io
+import stat
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -626,6 +628,22 @@ def test_generate_default_reference_raises_on_timeout(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_generate_default_reference_is_world_readable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The temp file's mkstemp 0600 must not stick to the published reference.docx."""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        _pandoc_out(cmd).write_bytes(_zip_bytes("word/document.xml"))
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    dest = tmp_path / "reference.docx"
+    generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o644
+
+
 # ---------------------------------------------------------------------------
 # scaffold_quarto_report tests
 # ---------------------------------------------------------------------------
@@ -870,7 +888,6 @@ def test_cmd_quarto_new_exits_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 import shutil  # noqa: E402
-import sys  # noqa: E402
 
 _QUARTO_BIN = shutil.which("quarto")
 

@@ -370,6 +370,8 @@ def _atomic_write(dest: Path) -> Iterator[Path]:
     tmp_path = Path(tmp_name)
     try:
         yield tmp_path
+        # ponytail: mkstemp's 0600 would stick to dest; fixed 0644 ignores a stricter umask
+        os.chmod(tmp_path, 0o644)
         os.replace(tmp_path, dest)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
