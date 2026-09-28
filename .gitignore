@@ -70,6 +70,8 @@ REFACTOR.md
 
 # Test RecordType configs (scratch/development)
 /plan/
+# Legacy pre-./plan/ default root: existing clones hold untracked leftovers; drop after one release
+/tasks/
 
 # Dev notes (centralized storage via symlink)
 dev-notes
