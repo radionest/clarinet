@@ -212,9 +212,9 @@ class TestServerDefaultsForAdditiveMigrations:
     When a NOT NULL Boolean column is added to an SQLModel that already has
     deployed data, alembic autogenerate emits ``ALTER TABLE ... ADD COLUMN ...
     BOOLEAN NOT NULL`` and PostgreSQL refuses with ``contains null values``.
-    SQLite is more lenient and accepts the same DDL, which is how this bug
-    slipped into PR #144 — the SQLite-only test matrix never exercised the
-    failure path.
+    SQLite rejects it on a populated table too, but both accept it on an empty
+    one — and every test database is empty, which is how this bug slipped into
+    PR #144.
 
     The fix is to declare
     ``sa_column_kwargs={"server_default": sql_expression.true()}`` (or

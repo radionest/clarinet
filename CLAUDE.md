@@ -137,7 +137,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - Docstrings on non-trivial public functions
 - No secrets in code
 - Conventional commit messages
-- DB migrations created for schema changes
+- Schema change → CHANGELOG "Downstream migration" note (the framework ships no migrations — `docs/kb/persistence.md`)
 
 ## Documentation Structure
 
@@ -149,7 +149,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 |---|---|
 | [Architecture](docs/kb/architecture.md) | layers, DI, exception flow, lifespan order, async-session rule |
 | [Domain model](docs/kb/domain-model.md) | patient/study/series/record, record types, status lifecycle, audit, RBAC |
-| [Persistence](docs/kb/persistence.md) | SQLModel + repository conventions, eager loading, migrations, PG-only pitfalls |
+| [Persistence](docs/kb/persistence.md) | SQLModel + repository conventions, eager loading, migrations, SQLite/PostgreSQL pitfalls |
 | [clarinet_plan package](docs/kb/plan-package.md) | project config modes, custom-code loading, fail-fast contract |
 | [RecordFlow](docs/kb/recordflow.md) | workflow DSL, triggers, evaluation context, invalidation semantics |
 | [Pipeline](docs/kb/pipeline.md) | TaskIQ queues, task contract, chains, retry/DLQ, run audit |

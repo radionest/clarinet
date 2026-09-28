@@ -351,26 +351,24 @@ class TestRenameColumn:
 class TestAddNotNullBooleanRequiresServerDefault:
     """Regression for PR #144 (``mask_patient_data`` on RecordType).
 
-    Two independent failure modes must be tested, both PostgreSQL-specific:
+    Two independent failure modes must be tested:
 
-    1. ``ALTER TABLE ADD COLUMN BOOLEAN NOT NULL`` without any default — PG
-       rejects this on populated tables with ``contains null values``.
+    1. ``ALTER TABLE ADD COLUMN BOOLEAN NOT NULL`` without any default — PG and
+       SQLite reject this on populated tables with ``contains null values``.
     2. ``... DEFAULT 1`` (integer literal, what a naive ``text("1")`` produces)
        — PG has no implicit int→bool cast, so even empty tables fail with
        ``default for column is of type integer`` in both CREATE and ALTER.
 
-    SQLite accepts both bad forms silently, which is how each bug slipped
-    through the test matrix. The good form uses
+    SQLite accepts mode 2, and both dialects accept mode 1 on an empty table —
+    every test database is empty, which is how each bug slipped through the
+    test matrix. The good form uses
     ``sqlalchemy.sql.expression.true()`` / ``false()`` — the only dialect-aware
     Boolean literal (``true`` on PG, ``1`` on SQLite).
     """
 
-    def test_without_server_default_fails_on_postgres(self, tmp_path, db_backend):
-        """Mode 1: ALTER ADD COLUMN BOOLEAN NOT NULL on populated PG."""
-        if db_backend != "postgresql":
-            pytest.skip("This failure mode is PostgreSQL-specific")
-
-        from sqlalchemy.exc import IntegrityError, ProgrammingError
+    def test_without_server_default_fails_on_populated_table(self, tmp_path, db_backend):
+        """Mode 1: ALTER ADD COLUMN BOOLEAN NOT NULL on a populated table — PG and SQLite both reject it."""
+        from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
         db_url = _setup_db_url(tmp_path, db_backend)
         project = tmp_path / "project"
@@ -407,7 +405,7 @@ class TestAddNotNullBooleanRequiresServerDefault:
             message="add bool not null without default",
         )
 
-        with pytest.raises((IntegrityError, ProgrammingError)):
+        with pytest.raises((IntegrityError, OperationalError, ProgrammingError)):
             command.upgrade(cfg, "head")
 
         engine.dispose()

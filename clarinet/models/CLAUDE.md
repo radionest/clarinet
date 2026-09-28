@@ -224,8 +224,7 @@ only, it never aborts startup.
 
 Without it, alembic autogenerate emits `ALTER TABLE ... ADD COLUMN ... NOT NULL`,
 which PostgreSQL rejects with `column "..." of relation "..." contains null values`
-on any populated database. SQLite is more lenient and silently accepts the same DDL,
-so SQLite-only test runs do **not** catch this — the bug surfaces only against PG.
+on any populated database. SQLite rejects the same DDL on a populated table too (`Cannot add a NOT NULL column with default value NULL`) but accepts it on an empty one — and test databases are empty, so the test suite alone does **not** catch this.
 
 **Pattern (booleans):**
 ```python
