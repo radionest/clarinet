@@ -21,6 +21,7 @@ from clarinet.api.auth_config import (
 from clarinet.exceptions import ClarinetError
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import Record, User
+from clarinet.models.actor import Actor, SystemActor, can_access
 from clarinet.models.capability import Capability, resolve_capabilities
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
@@ -252,6 +253,25 @@ async def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None
 
 
 AuditActorDep = Annotated[UUID | None, Depends(get_audit_actor)]
+
+
+async def get_actor(request: Request, user: CurrentUserDep) -> Actor:
+    """Build this request's one actor for the record service.
+
+    A valid ``X-Internal-Token`` makes it a ``SystemActor`` — even when a session
+    cookie rides along — carrying the admin row the token resolved to. Anything
+    else is the session user as a ``HumanActor``.
+
+    ``async`` although it never awaits: a plain ``def`` dependency runs in the
+    threadpool, and ``is_service_request`` touches the failed-auth ``TTLCache``,
+    which is not thread-safe.
+    """
+    if is_service_request(request):
+        return SystemActor(service_user_id=user.id)
+    return user.as_actor()
+
+
+ActorDep = Annotated[Actor, Depends(get_actor)]
 
 # Service factory functions
 
@@ -498,12 +518,8 @@ def is_admin(user: User) -> bool:
     write guard on record PATCH, the actor-email
     masking in the record audit feed, and ``SseConnection.is_admin``, which
     decides whether a live event stream may carry admin-only frames.
-
-    One further copy of the same predicate survives in
-    ``models/capability.py::resolve_capabilities``, which is derived from
-    primitives and deliberately cannot import this module.
     """
-    return user.is_superuser or "admin" in get_user_role_names(user)
+    return user.is_admin
 
 
 async def current_admin_user(
@@ -610,7 +626,7 @@ async def authorize_record_access(
     user: CurrentUserDep,
     repo: RecordRepositoryDep,
 ) -> Record:
-    """Authorize access to a record based on user roles.
+    """Authorize access to a record based on user roles (``models.actor.can_access``).
 
     Superusers can access any record. Non-superusers can only access records
     whose RecordType.role_name matches one of their roles. Records with
@@ -630,17 +646,8 @@ async def authorize_record_access(
     """
     record = await repo.get_with_relations(record_id)
 
-    if user.is_superuser:
-        return record
-
-    role_name = record.record_type.role_name
-    if role_name is None:
+    if not can_access(record.record_type.role_name, user.is_superuser, get_user_role_names(user)):
         raise AuthorizationError("Insufficient permissions to access this record")
-
-    user_roles = get_user_role_names(user)
-    if role_name not in user_roles:
-        raise AuthorizationError("Insufficient permissions to access this record")
-
     return record
 
 
