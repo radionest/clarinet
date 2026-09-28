@@ -55,12 +55,24 @@ def test_project_template_ships_same_section_rules() -> None:
     ``clarinet init --template research`` copies this tree verbatim, so a rule
     added to the agent-docs payload without a template twin silently reaches no
     template-created project. The cyrillic check globs ``*.md`` and so passes
-    vacuously for a missing file; this asserts presence. Content parity is not
-    covered here — the twins differ by their deep-doc link form.
+    vacuously for a missing file; this asserts presence. Content parity is
+    ``test_project_template_section_rules_match_payload``.
     """
     assert PROJECT_TEMPLATE_CLAUDE_MD.is_file()
     for name in SECTION_RULES:
         assert (PROJECT_TEMPLATE_RULES / f"{name}.md").is_file()
+
+
+@pytest.mark.parametrize("name", SECTION_RULES)
+def test_project_template_section_rules_match_payload(name: str) -> None:
+    """Each template twin equals its payload doc up to the deep-doc link form.
+
+    A fix landed in only one copy (as #511's revert did to ``definitions.md``)
+    would otherwise ship stale guidance through the other delivery path.
+    """
+    payload = (AGENT_CLAUDE / f"{name}.md").read_text(encoding="utf-8")
+    twin = (PROJECT_TEMPLATE_RULES / f"{name}.md").read_text(encoding="utf-8")
+    assert twin.replace("<clarinet>/clarinet/.claude/rules/", "{{CLARINET_DOCS}}/") == payload
 
 
 def test_no_unresolved_clarinet_repo_links() -> None:
