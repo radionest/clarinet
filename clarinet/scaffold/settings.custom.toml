@@ -1,0 +1,49 @@
+# Production overrides — loaded after settings.toml; any key set here wins.
+# Ships fully commented: uncomment only what differs in production.
+#
+# Secrets do NOT belong here. Clarinet performs no ${VAR} substitution: a
+# literal "${CLARINET_PORT}" is read as that string and fails validation.
+# Put secrets in CLARINET_* environment variables (.env.example); they win
+# over both TOML files.
+
+# debug = false            # debug = true also makes the session cookie non-Secure
+# log_level = "INFO"
+
+# ── Server ───────────────────────────────────────────
+# Production bind (all interfaces): only behind a proxy / firewall, with
+# debug = false and CLARINET_ADMIN_PASSWORD set.
+# host = "0.0.0.0"
+# port = 8111
+# Set only behind a TLS-terminating proxy, or when pipeline workers run on
+# another host: the URL internal clients call. Unset, it is derived as
+# http://<host>:<port><root_url>/api (a wildcard host becomes its loopback:
+# 0.0.0.0 -> 127.0.0.1, :: -> [::1]).
+# api_base_url = "https://clarinet.example.org/my_project/api"
+# cors_origins = []              # exact origins allowed to call the API with the session cookie; "*" is rejected
+
+# ── Accounts ─────────────────────────────────────────
+# registration_enabled = false   # public self-registration; accounts start with no roles
+# login_max_failures_per_account = 5
+# login_max_failures_per_ip = 20
+# login_lockout_minutes = 15     # 0 disables throttling
+# session_cache_ttl_seconds = 30 # a revoked session keeps /dicom-web access up to this long; 0 disables (#681)
+
+# ── Database (PostgreSQL) ────────────────────────────
+# Credentials: CLARINET_DATABASE_USERNAME / CLARINET_DATABASE_PASSWORD in .env
+# database_name = "my_project"
+# database_host = "localhost"
+# database_port = 5432
+
+# ── Storage ──────────────────────────────────────────
+# storage_path = "/srv/clarinet/my_project"
+
+# ── RabbitMQ (pipeline) ──────────────────────────────
+# rabbitmq_host = "localhost"
+
+# ── DICOM / PACS ─────────────────────────────────────
+# dicom_aet = "CLARINET"
+# dicom_port = 11112
+# pacs_aet = "ORTHANC"
+# pacs_host = "localhost"
+# pacs_port = 4242
+# dicom_max_concurrent_associations = 8   # per process: API + N workers hold up to (N+1) x this (#648)

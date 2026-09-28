@@ -10,13 +10,13 @@ optional extras and ``[tool.uv]`` settings, and no automatic merge of those is
 safe. Pure file/CLI logic — no DB, no app state.
 """
 
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 
 import clarinet
 from clarinet.exceptions.domain import QualityScaffoldError
 from clarinet.utils.logger import logger
+from clarinet.utils.managed_files import is_managed, managed_header
 
 # payload filename → destination filename (the ruff config gains its leading dot
 # here; shipping a dotfile inside the package is fragile across build backends).
@@ -27,38 +27,6 @@ PAYLOAD: dict[str, str] = {
 }
 
 FRAGMENT_NAME = "pyproject.fragment.toml"
-
-# Comment syntax per destination — a '#'-prefixed header is valid in ini, toml
-# and make alike, so one form covers every payload file.
-_HEADER_PREFIX = "#"
-
-# Prefix-only (no version number): a file managed by an older clarinet must
-# still be recognised as managed so `update` can refresh it.
-_MANAGED_MARKER = f"{_HEADER_PREFIX} managed by clarinet"
-
-
-def _clarinet_version() -> str:
-    try:
-        return version("clarinet")
-    except PackageNotFoundError:  # pragma: no cover - source-tree fallback
-        return "unknown"
-
-
-def _is_managed(path: Path) -> bool:
-    """True if ``path`` exists and its first line carries clarinet's managed marker.
-
-    An unreadable or undecodable destination (permission error, or a
-    hand-written file that isn't UTF-8) is not clarinet's -- treated as
-    "not managed" rather than letting the error escape uncaught.
-    """
-    if not path.is_file():
-        return False
-    try:
-        with path.open(encoding="utf-8") as f:
-            first_line = f.readline()
-    except (OSError, UnicodeDecodeError):
-        return False
-    return first_line.startswith(_MANAGED_MARKER)
 
 
 def payload_dir() -> Path:
@@ -112,11 +80,11 @@ def scaffold_quality_config(
     # Makefile must never be mistaken for a stale clarinet config (see the
     # review that added this check: bare existence let `init` misdirect an
     # operator into `update`, which then clobbered it with no `--force`).
-    managed = any(_is_managed(project_dir / dest) for dest in PAYLOAD.values())
+    managed = any(is_managed(project_dir / dest) for dest in PAYLOAD.values())
     unmanaged = [
         dest
         for dest in PAYLOAD.values()
-        if (project_dir / dest).is_file() and not _is_managed(project_dir / dest)
+        if (project_dir / dest).is_file() and not is_managed(project_dir / dest)
     ]
 
     # Checked before "managed", on both modes: a mixed project -- one
@@ -153,10 +121,7 @@ def scaffold_quality_config(
             f"{project_dir} has no managed quality config; run 'clarinet quality init' first"
         )
 
-    header = (
-        f"{_HEADER_PREFIX} managed by clarinet v{_clarinet_version()} — "
-        f"do not edit; run 'clarinet quality update' to refresh\n"
-    )
+    header = managed_header("#", "clarinet quality update")
 
     project_dir.mkdir(parents=True, exist_ok=True)
     # Guarded like the read phase, for the mirror-image failure: a permission

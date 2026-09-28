@@ -33,6 +33,27 @@
 
 ### Breaking
 
+- **`clarinet init` has one path; `--template` / `--list-templates` are gone.**
+  It copies the payload shipped inside the package (`clarinet/scaffold/`):
+  production-shaped `settings.toml` (bound to `127.0.0.1` while `debug = true`
+  and the default admin password apply), a fully commented `settings.custom.toml`,
+  `.env.example`, `.gitignore`, the example `plan/`, the managed agent docs and
+  the `.claude/CLAUDE.md` seed. `--template` read `examples/`, which is not in
+  the wheel, so it failed from every pip install (#472). Existing files are
+  never overwritten and re-running is safe. `examples/project_template/` is
+  deleted; `examples/demo/` stays as reading material.
+
+  Upgrading to this release:
+
+  | If your project… | Do |
+  |---|---|
+  | omits `config_tasks_path` and keeps `tasks/` | add `config_tasks_path = "./tasks/"` or rename the directory to `plan/` |
+  | is in TOML mode and never created its folder | create it before starting |
+  | used `clarinet init --template research` | use `clarinet init` |
+  | was scaffolded with `--template research` (header-less `.claude/rules/{anonymization,definitions,schemas,scripting,slicer,utils,workflows}.md`) | delete those copies, then run `clarinet agent init` |
+  | was scaffolded from the old template | `database_login` → `database_username`, `CLARINET_DATABASE_LOGIN` → `CLARINET_DATABASE_USERNAME`; replace `${VAR}` strings with real values or env vars |
+  | sets `CLARINET_JWT_SECRET_KEY` | rename it to `CLARINET_SECRET_KEY` |
+  | uses `clarinet agent init` docs | run `clarinet agent update` once (moves `overview.md` to `.claude/CLAUDE.md`, prunes stale managed docs) |
 - **`config_tasks_path` defaults to `./plan/` (was `./tasks/`).** A project that
   omits the setting and keeps a `tasks/` directory must set
   `config_tasks_path = "./tasks/"` or rename the directory. The scaffold, the
@@ -726,7 +747,7 @@
   `anon scrub-db` operator commands. `workflows.md` § Built-in tasks gains
   `anonymize_study_pipeline` and `prefetch_dicom_web`, and now spells out that task-name
   collisions are on the **bare function name** (`{namespace}:{function_name}`, not
-  module-qualified). The `research` project template ships the same doc.
+  module-qualified). `clarinet init` installs the same doc.
 
 ### Improved
 
@@ -737,6 +758,26 @@
 
 ### Changed
 
+- **`effective_api_base_url` is derived from the bind.** Without an explicit
+  `api_base_url`, internal clients now call `http://<host>:<port><root_url>/api`,
+  with a wildcard host replaced by its loopback (`0.0.0.0` → `127.0.0.1`,
+  `::` → `[::1]`; IPv6 bracketed),
+  and include `root_url`. The app answers both prefixed and unprefixed paths.
+  Set `api_base_url` behind a TLS proxy or when workers run on another host.
+- **`overview.md` is a project-owned `.claude/CLAUDE.md` seed**, no longer a
+  managed rule under `.claude/rules/clarinet/`. Its body tells you to replace
+  it, while every `clarinet agent update` used to overwrite it. It is now
+  written once and never rewritten. Run `clarinet agent update` once after
+  upgrading: a managed `overview.md` from an earlier version moves to
+  `.claude/CLAUDE.md` (header stripped) when that path is free; otherwise it
+  stays and a warning names both files. The seed holds no machine-specific
+  path: its links to the framework reference docs moved into the managed
+  `.claude/rules/clarinet/reference.md`, which `clarinet agent update`
+  re-resolves. A migrated `overview.md` keeps whatever paths it already had.
+- **`clarinet agent update` removes managed docs the installed version no
+  longer ships.** Only files carrying the managed header are removed; files you
+  add to `.claude/rules/clarinet/` are left alone. `agent init` now refuses only
+  when a managed doc is present, not any `*.md`.
 - **Entity detail pages are quieter.** On the record and patient pages the
   Activity feed — and, for admins, the record's Workflow graph — now sit at
   the bottom, after the action buttons, collapsed until clicked; an expanded

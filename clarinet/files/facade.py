@@ -186,7 +186,7 @@ class Files:
 
         Branches on ``multiple`` rather than inheriting ``resolve``'s refusal:
         a collection exists when any member matches, and the shipped task
-        pattern (``examples/project_template/.claude/CLAUDE.md``) tells every
+        pattern (``clarinet/docs/agent/claude/overview.md``) tells every
         project to call ``ctx.files.exists(output_file_def)`` — including for
         collections, which would otherwise raise here.
         """

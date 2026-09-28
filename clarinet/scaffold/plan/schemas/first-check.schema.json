@@ -1,4 +1,5 @@
 {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$comment": "Example schema for the first-check record type. Replace with your project's data shape.",
     "type": "object",
     "properties": {

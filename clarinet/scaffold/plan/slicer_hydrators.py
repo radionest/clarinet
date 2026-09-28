@@ -6,7 +6,7 @@ Loaded automatically at startup. The path is wired in settings.toml via
 Each hydrator returns a dict whose keys become variables in Slicer scripts and
 validators. Return ``{}`` if the data is unavailable — never raise.
 
-See `.claude/rules/slicer.md` (Part A) for the full reference.
+See `.claude/rules/clarinet/slicer.md` (Part A) for the full reference.
 """
 
 from typing import Any

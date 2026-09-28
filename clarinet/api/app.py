@@ -434,7 +434,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             raise StartupError(
                 component="Pipeline",
                 reason=str(e),
-                hint="Start RabbitMQ or check CLARINET_BROKER_URL",
+                hint="Start RabbitMQ or check rabbitmq_host / rabbitmq_port (CLARINET_RABBITMQ_HOST, CLARINET_RABBITMQ_PORT)",
             ) from e
 
     if settings.session_cleanup_enabled:

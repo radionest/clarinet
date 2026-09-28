@@ -5,27 +5,29 @@ Copies framework-authored Claude guidance shipped in the package
 substituting the ``{{CLARINET_DOCS}}`` token with the resolved on-disk path of
 ``clarinet/docs`` so links to the deep reference docs are valid in the running
 environment. Pure file/CLI logic — no DB, no app state (mirror of quarto_scaffold).
+
+Most payload docs are *managed* (``utils.managed_files``): rewritten on every
+run and stamped with the header. ``SEED_DOCS`` are project-owned — written once
+under ``<project>/.claude/`` and never rewritten, because their body asks the
+user to replace it. Each run also prunes managed docs the installed version no
+longer ships, moving a formerly managed seed to its seed path instead.
 """
 
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 
 import clarinet
 from clarinet.exceptions.domain import AgentScaffoldError
 from clarinet.utils.logger import logger
+from clarinet.utils.managed_files import is_managed, managed_header, strip_header, with_header
 
 # agent name → namespace subdir under <project>/.claude/rules/
 KNOWN_AGENTS: dict[str, str] = {"claude": "clarinet"}
 
+# payload doc → seed path under <project>/.claude/
+SEED_DOCS: dict[str, str] = {"overview.md": "CLAUDE.md"}
+
 _DOCS_TOKEN = "{{CLARINET_DOCS}}"
-
-
-def _clarinet_version() -> str:
-    try:
-        return version("clarinet")
-    except PackageNotFoundError:  # pragma: no cover - source-tree fallback
-        return "unknown"
 
 
 def _package_docs_dir() -> Path:
@@ -48,21 +50,6 @@ def agent_source_dir(agent: str) -> Path:
     return src
 
 
-def _with_header(text: str, header: str) -> str:
-    """Insert ``header`` after the YAML frontmatter, or at the top if there is none.
-
-    A leading HTML comment before ``---`` would stop the rules loader recognising
-    ``paths:`` frontmatter, so for frontmatter files the header goes right after the
-    closing delimiter.
-    """
-    if text.startswith("---\n"):
-        end = text.find("\n---\n", 4)
-        if end != -1:
-            insert = end + len("\n---\n")
-            return text[:insert] + header + text[insert:]
-    return header + text
-
-
 def scaffold_agent_docs(
     agent: str = "claude",
     *,
@@ -70,35 +57,85 @@ def scaffold_agent_docs(
     mode: Literal["init", "update"],
     force: bool = False,
 ) -> Path:
-    """Install (``mode="init"``) or refresh (``mode="update"``) the managed agent docs.
+    """Install (``init``) or refresh (``update``) the agent docs; return the managed dir.
 
-    Writes every ``*.md`` from the package payload into
-    ``project_dir/.claude/rules/<namespace>/``, substituting ``{{CLARINET_DOCS}}``
-    with the resolved package docs path and prepending a managed-header comment.
-    Returns the managed dir.
+    Writes every payload ``*.md`` except ``SEED_DOCS`` into
+    ``project_dir/.claude/rules/<namespace>/`` with ``{{CLARINET_DOCS}}``
+    resolved and the managed header added, prunes managed docs the payload no
+    longer ships, then writes each seed whose target is absent. An existing
+    file without the managed header is project-owned: kept, with a warning.
 
     Raises:
-        AgentScaffoldError: unknown agent / missing payload; ``init`` over an
-            already-populated managed dir without ``force``; ``update`` when the
-            managed dir holds no docs.
+        AgentScaffoldError: unknown agent / missing payload; ``init`` when the
+            managed dir already holds a managed doc and ``force`` is off;
+            ``update`` when it holds none.
     """
     src = agent_source_dir(agent)
     dest = project_dir / ".claude" / "rules" / KNOWN_AGENTS[agent]
-    populated = dest.is_dir() and any(dest.glob("*.md"))
+    has_managed = any(is_managed(p) for p in dest.glob("*.md"))
 
-    if mode == "init" and populated and not force:
+    if mode == "init" and has_managed and not force:
         raise AgentScaffoldError(
             f"{dest} already has managed docs; run 'clarinet agent update' (or pass --force)"
         )
-    if mode == "update" and not populated:
+    if mode == "update" and not has_managed:
         raise AgentScaffoldError(f"{dest} has no managed docs; run 'clarinet agent init' first")
 
-    docs_root = _package_docs_dir()
-    header = f"<!-- managed by clarinet v{_clarinet_version()} — do not edit; run 'clarinet agent update' -->\n"
-
+    docs_root = _package_docs_dir().as_posix()
+    header = managed_header("<!--", "clarinet agent update")
     dest.mkdir(parents=True, exist_ok=True)
     for md in sorted(src.glob("*.md")):
-        text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root.as_posix())
-        (dest / md.name).write_text(_with_header(text, header), encoding="utf-8")
-        logger.info(f"Wrote {dest / md.name}")
+        if md.name in SEED_DOCS:
+            continue
+        target = dest / md.name
+        if target.exists() and not is_managed(target):
+            logger.warning(
+                f"Kept {target}: it has no managed header, so it is project-owned. "
+                f"Delete it to receive clarinet's {md.name}"
+            )
+            continue
+        text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root)
+        target.write_text(with_header(text, header), encoding="utf-8")
+        logger.info(f"Wrote {target}")
+
+    # Prune before seeding: a legacy managed overview.md can move to the seed
+    # path only while that path is still free.
+    _prune(dest, src=src, project_dir=project_dir)
+
+    for name, seed_name in SEED_DOCS.items():
+        seed = project_dir / ".claude" / seed_name
+        if seed.exists() or seed.is_symlink():  # a dangling link is kept, not written through
+            continue
+        # Copied verbatim: a seed is committed and never refreshed, so it must not
+        # carry this machine's package path (its links point into the managed dir).
+        seed.write_text((src / name).read_text(encoding="utf-8"), encoding="utf-8")
+        logger.info(f"Wrote {seed}")
     return dest
+
+
+def _prune(dest: Path, *, src: Path, project_dir: Path) -> None:
+    """Remove managed docs the payload no longer ships; move a legacy managed seed.
+
+    Files without the managed header are never touched. A legacy seed moves
+    (header stripped) only when its seed path is free; otherwise it stays and a
+    warning names both paths, so no user edit is lost.
+    """
+    shipped = {p.name for p in src.glob("*.md")} - set(SEED_DOCS)
+    for stale in sorted(dest.glob("*.md")):
+        if stale.name in shipped or not is_managed(stale):
+            continue
+        seed_name = SEED_DOCS.get(stale.name)
+        if seed_name is None:
+            stale.unlink()
+            logger.info(f"Removed {stale}: no longer shipped by clarinet")
+            continue
+        seed = project_dir / ".claude" / seed_name
+        if seed.exists() or seed.is_symlink():  # a dangling link is kept, not written through
+            logger.warning(
+                f"Kept {stale}: {seed} already exists. Move anything you need from "
+                f"{stale} into {seed}, then delete {stale}"
+            )
+            continue
+        seed.write_text(strip_header(stale.read_text(encoding="utf-8")), encoding="utf-8")
+        stale.unlink()
+        logger.info(f"Moved {stale} to {seed}")

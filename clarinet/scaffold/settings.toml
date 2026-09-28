@@ -1,26 +1,34 @@
-# Clarinet research project — development settings
-# See `.claude/CLAUDE.md` for an overview of the available keys.
+# Clarinet research project — settings.
+# Secrets and host-specific values go in .env (copy .env.example); environment
+# variables win over this file. settings.custom.toml loads after this file and
+# holds commented production overrides.
 
 # ── Project ──────────────────────────────────────────
 project_name = "TODO: Project Name"
 project_description = "TODO: short description of the research"
 # project_title = "TODO: browser tab title"  # defaults to project_name
 root_url = "/my_project"
-api_base_url = "http://127.0.0.1:8111/my_project/api"
 
 # Custom roles beyond the standard admin / user / doctor / auto / expert.
 # Any RecordDef.role that is not standard MUST appear here.
 extra_roles = []
 
 # ── Server / Logging ─────────────────────────────────
-host = "0.0.0.0"
+# Internal clients (RecordFlow, pipeline tasks) call
+# http://<host>:<port><root_url>/api unless api_base_url is set
+# (see settings.custom.toml).
+# Loopback only: with debug = true and CLARINET_ADMIN_PASSWORD unset the admin
+# password is admin123, which must not face the network. The production bind
+# is in settings.custom.toml.
+port = 8111
+host = "127.0.0.1"
 debug = true
 log_level = "INFO"
 log_console_level = "INFO"
 
 # ── Database ─────────────────────────────────────────
 database_driver = "postgresql+asyncpg"
-# database_name, database_host, ... — see settings.custom.toml (env vars)
+# Name, host and credentials: .env (see .env.example).
 
 # ── Storage ──────────────────────────────────────────
 anon_id_prefix = "MY_PROJECT"
@@ -38,8 +46,12 @@ config_record_types_file = "definitions/record_types.py"
 # config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
 recordflow_paths = ["./plan/workflows"]
 
-# ── External Viewers ─────────────────────────────────
-# Enable viewers that support URI schemes (radiant://, weasis://, etc.)
+# ── DICOM ────────────────────────────────────────────
+dicom_retrieve_mode = "c-move"
+anon_send_to_pacs = false
+
+# ── External Viewers (tables stay last) ──────────────
+# Viewers that support URI schemes (radiant://, weasis://, …);
 # API: GET /api/records/{id}/viewers
 #
 # [viewers.radiant]
@@ -49,11 +61,3 @@ recordflow_paths = ["./plan/workflows"]
 # [viewers.weasis]
 # enabled = true
 # base_url = "http://pacs:8080/weasis-pacs-connector"
-#
-# [viewers.custom_name]
-# enabled = true
-# uri_template = "https://dcm4chee.local/studies/{study_uid}"
-
-# ── DICOM ────────────────────────────────────────────
-dicom_retrieve_mode = "c-move"
-anon_send_to_pacs = false

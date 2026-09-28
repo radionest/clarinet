@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import hashlib
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from clarinet.settings import settings
+from clarinet.utils.version import clarinet_version
 
 # Non-source artifacts that differ between deploys/hosts without meaning a code
 # change — host-local config, editor/build scratch, VCS internals.
@@ -41,14 +41,6 @@ def _is_source_file(p: Path) -> bool:
         and p.name not in _SKIP_NAMES
         and not p.name.endswith("~")  # editor backups
     )
-
-
-def clarinet_version() -> str:
-    """Installed clarinet package version, or ``"unknown"`` if not installed."""
-    try:
-        return version("clarinet")
-    except PackageNotFoundError:
-        return "unknown"
 
 
 def compute_plan_hash(root: Path) -> str:

@@ -444,6 +444,11 @@ class QualityScaffoldError(ClarinetError):
     an unmanaged file at a destination name, update with none)."""
 
 
+class ProjectScaffoldError(ClarinetError):
+    """Raised when the packaged project-scaffold payload is missing (e.g. a
+    wheel built without ``clarinet/scaffold``)."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

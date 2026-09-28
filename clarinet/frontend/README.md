@@ -90,7 +90,6 @@ make frontend-build
 1. Enable frontend in your `settings.toml`:
 ```toml
 frontend_enabled = true
-frontend_dev_mode = true
 ```
 
 2. Start the development server:

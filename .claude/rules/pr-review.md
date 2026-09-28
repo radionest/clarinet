@@ -86,4 +86,4 @@ When the diff touches these paths, open the corresponding rule file before finis
 - `tests/schema/**`, `schemathesis.toml` → `.claude/rules/schemathesis.md`
 - `tests/**`, `scripts/run_tests.sh` → `.claude/rules/test-debugging.md`
 - `deploy/test/e2e/**` → `.claude/rules/e2e-tests.md`
-- `settings.toml`, `plan/**`, `examples/**` → `.claude/rules/project-setup.md`
+- `settings.toml`, `plan/**`, `examples/**`, `clarinet/scaffold/**` → `.claude/rules/project-setup.md`
