@@ -478,6 +478,12 @@ async def add_record(
     "/bulk/status",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,  # Required: PEP 563 makes -> None a truthy ForwardRef, triggering FastAPI 204 body assertion
+    responses={
+        409: {
+            "description": "A preparing record may not jump to inwork/finished, "
+            "or a record changed concurrently"
+        }
+    },
 )
 async def bulk_update_record_status(
     record_ids: list[Annotated[int, Body(ge=1, le=2147483647)]],
@@ -494,7 +500,16 @@ async def bulk_update_record_status(
     await service.bulk_update_status(record_ids, new_status, actor=actor)
 
 
-@router.patch("/{record_id}/status", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/status",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "A preparing record may not jump to inwork/finished, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
@@ -512,7 +527,17 @@ async def update_record_status(
     return await mask_record(record, user, service.repo)
 
 
-@router.patch("/{record_id}/user", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/user",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "A claim outside pending/inwork; the new owner lacks the type's "
+            "role (code=OWNER_LACKS_ROLE); unique_by violated; or the record changed "
+            "concurrently"
+        }
+    },
+)
 async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
@@ -758,7 +783,12 @@ async def submit_record_data(
 @router.patch(
     "/{record_id}/data",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is not finished; its type locks submitted records "
+            "(non-admins); output file grid mismatch; or the record changed concurrently"
+        }
+    },
 )
 async def update_record_data(
     record_id: int,
@@ -861,7 +891,12 @@ async def prefill_record_data_patch(
 @router.post(
     "/{record_id}/submit",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is blocked, preparing or already finished; output file "
+            "grid mismatch; or the record changed concurrently"
+        }
+    },
 )
 async def submit_record_with_validation(
     record_id: int,
@@ -918,7 +953,12 @@ async def submit_record_with_validation(
 @router.patch(
     "/{record_id}/submit",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is not finished; its type locks submitted records "
+            "(non-admins); output file grid mismatch; or the record changed concurrently"
+        }
+    },
 )
 async def resubmit_record_with_validation(
     record_id: int,
@@ -1025,7 +1065,11 @@ async def validate_files_endpoint(
     return await report_record_files(record_read, parent=parent_read)
 
 
-@router.post("/{record_id}/check-files", response_model=FileCheckResult)
+@router.post(
+    "/{record_id}/check-files",
+    response_model=FileCheckResult,
+    responses={409: {"description": "The record changed concurrently while unblocking"}},
+)
 async def check_record_files(
     record_id: int,
     _authorized_record: MutableRecordDep,
@@ -1148,7 +1192,16 @@ async def download_output_file(
     return FileResponse(path=file_path, filename=safe_name, media_type=media_type)
 
 
-@router.post("/{record_id}/fail", response_model=RecordRead)
+@router.post(
+    "/{record_id}/fail",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "The record is not pending/inwork, the reason is blank, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def fail_record(
     record_id: int,
     _authorized_record: MutableRecordDep,
@@ -1169,7 +1222,16 @@ async def fail_record(
     return await mask_record(updated, user, service.repo)
 
 
-@router.post("/{record_id}/invalidate", response_model=RecordRead)
+@router.post(
+    "/{record_id}/invalidate",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "Hard mode on a finished record whose type locks submitted "
+            "records (non-admins), or the record changed concurrently"
+        }
+    },
+)
 async def invalidate_record(
     record_id: int,
     _authorized_record: MutableRecordDep,
