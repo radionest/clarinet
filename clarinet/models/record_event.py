@@ -12,8 +12,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, func
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, Uuid, func
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import PortableJSON
@@ -57,7 +56,7 @@ class RecordEventBase(SQLModel):
     actor_id: UUID | None = Field(
         default=None,
         sa_column=Column(
-            PG_UUID(as_uuid=True),
+            Uuid,
             ForeignKey("user.id", ondelete="SET NULL"),
             nullable=True,
         ),

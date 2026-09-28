@@ -5,8 +5,7 @@ Session storage model for cookie authentication with lifecycle management.
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Uuid
 from sqlmodel import Field, SQLModel
 
 
@@ -24,7 +23,7 @@ class AccessToken(SQLModel, table=True):
     token: str = Field(primary_key=True, index=True)
     user_id: UUID = Field(
         sa_column=Column(
-            PG_UUID(as_uuid=True),
+            Uuid,
             ForeignKey("user.id", ondelete="CASCADE"),
             nullable=False,
         ),

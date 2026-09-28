@@ -19,8 +19,18 @@ from pydantic import (
     computed_field,
     model_validator,
 )
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, event, func
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+    event,
+    func,
+)
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
@@ -216,7 +226,7 @@ class Record(RecordBase, table=True):
     user_id: UUID | None = Field(
         default=None,
         sa_column=Column(
-            PG_UUID(as_uuid=True),
+            Uuid,
             ForeignKey("user.id"),
             nullable=True,
         ),

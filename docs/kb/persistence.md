@@ -152,6 +152,11 @@ migration for each new framework table (`record_event`, `pipeline_task_run`, …
   for them. Use the `PortableJSON` alias from `clarinet/types.py`
   (`JSON().with_variant(JSONB(), "postgresql")`) so PostgreSQL gets JSONB and its
   GROUP BY / DISTINCT / equality support.
+- **UUID columns use `sqlalchemy.Uuid`**, never `postgresql.UUID` / `sa.UUID`
+  (the same class). SQLite keeps the declared name `UUID` and reflects it as
+  `NUMERIC`, so autogenerate never reaches an empty diff and emits
+  `alter_column` ops SQLite rejects (#655). `Uuid` is native `UUID` on
+  PostgreSQL and `CHAR(32)` on SQLite.
 - **`SQLModel.Field()` takes `schema_extra`, not `json_schema_extra`.** The
   Pydantic spelling silently does nothing on SQLModel subclasses.
 - **Primary keys are `int | None`** until flush, so mypy flags passing

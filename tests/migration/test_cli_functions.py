@@ -16,6 +16,7 @@ import pytest
 from alembic.autogenerate import render_python_code
 from alembic.operations import ops
 from alembic.runtime.migration import MigrationContext
+from alembic.script import Script
 from sqlalchemy import Boolean, Column, DateTime, func
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql import expression as sql_expression
@@ -48,6 +49,12 @@ from .conftest import (
 )
 
 pytestmark = pytest.mark.migration
+
+
+def _upgrade_body(script_path: Path) -> str:
+    """Source between ``def upgrade`` and ``def downgrade`` of a generated revision."""
+    source = script_path.read_text()
+    return source.split("def upgrade() -> None:", 1)[1].split("def downgrade() -> None:", 1)[0]
 
 
 class TestInitFileStructure:
@@ -221,14 +228,15 @@ class TestCreateMigration:
         project_path, _db_url, _engine = migration_project
         init_and_apply(project_path)
 
-        versions_before = set((project_path / "alembic" / "versions").glob("*.py"))
+        script = create_migration("test migration", autogenerate=True, project_path=project_path)
 
-        create_migration("test migration", autogenerate=True, project_path=project_path)
-
-        versions_after = set((project_path / "alembic" / "versions").glob("*.py"))
-        new_files = versions_after - versions_before
-        assert len(new_files) == 1
-        assert "test_migration" in new_files.pop().name
+        # Models unchanged since init: autogenerate must find nothing on either
+        # dialect (#655 — SQLite reflected the PostgreSQL UUID columns as
+        # NUMERIC), and the empty revision must apply.
+        assert isinstance(script, Script)
+        assert "test_migration" in Path(script.path).name
+        assert "op." not in _upgrade_body(Path(script.path))
+        run_migrations("head", project_path)
 
 
 class TestRollbackMultipleSteps:
@@ -238,9 +246,7 @@ class TestRollbackMultipleSteps:
         project_path, _db_url, _engine = migration_project
         init_and_apply(project_path)
 
-        # Create a second empty migration (autogenerate=False to avoid
-        # ALTER TABLE statements that SQLite can't handle)
-        create_migration("second", autogenerate=False, project_path=project_path)
+        create_migration("second", autogenerate=True, project_path=project_path)
         run_migrations("head", project_path)
 
         history = get_migration_history(project_path)

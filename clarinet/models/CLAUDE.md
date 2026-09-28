@@ -274,3 +274,8 @@ instance; see `tests/migration/conftest.py`.
 ## Type Aliases (`clarinet/types.py`)
 
 `PortableJSON = JSON().with_variant(JSONB(), "postgresql")` — JSONB on PostgreSQL (supports GROUP BY / DISTINCT / equality), JSON on SQLite. Use for all JSON columns.
+
+UUID columns: `Column(Uuid, …)` (`from sqlalchemy import Uuid`) — never
+`sqlalchemy.dialects.postgresql.UUID` / `sa.UUID` (one class): SQLite reflects a
+declared `UUID` as `NUMERIC`, so autogenerate never comes back empty and emits
+`alter_column` ops SQLite rejects (#655).
