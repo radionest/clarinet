@@ -1078,7 +1078,7 @@ def cmd_agent_init(args: argparse.Namespace) -> None:
         dest = scaffold_agent_docs(
             args.agent, project_dir=Path(args.path), mode="init", force=args.force
         )
-    except AgentScaffoldError as exc:
+    except (AgentScaffoldError, OSError) as exc:
         logger.error(f"{exc}")
         sys.exit(1)
     logger.info(f"Agent docs installed at {dest}")
@@ -1091,7 +1091,7 @@ def cmd_agent_update(args: argparse.Namespace) -> None:
 
     try:
         dest = scaffold_agent_docs(args.agent, project_dir=Path(args.path), mode="update")
-    except AgentScaffoldError as exc:
+    except (AgentScaffoldError, OSError) as exc:
         logger.error(f"{exc}")
         sys.exit(1)
     logger.info(f"Agent docs updated at {dest}")

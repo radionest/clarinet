@@ -308,6 +308,35 @@ def test_headerless_doc_with_payload_name_is_kept_and_warned(
     assert "managed by clarinet v" in (dest / "definitions.md").read_text(encoding="utf-8")
 
 
+def test_dangling_seed_symlink_is_kept_not_written_through(tmp_path: Path) -> None:
+    seed = tmp_path / SEED
+    seed.parent.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    try:
+        seed.symlink_to(outside)
+    except OSError as e:
+        pytest.skip(f"cannot create symlinks on this host: {e}")
+
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+
+    assert seed.is_symlink() and not outside.exists()
+
+
+def test_cli_init_under_a_file_exits_1(tmp_path: Path) -> None:
+    blocker = tmp_path / "somefile"
+    blocker.write_text("x", encoding="utf-8")
+    args = argparse.Namespace(
+        command="agent",
+        agent_command="init",
+        path=str(blocker / "sub"),
+        agent="claude",
+        force=False,
+    )
+    with pytest.raises(SystemExit) as exc:
+        handle_agent_command(args)
+    assert exc.value.code == 1
+
+
 def test_update_without_managed_docs_raises(tmp_path: Path) -> None:
     dest = tmp_path / MANAGED
     dest.mkdir(parents=True)

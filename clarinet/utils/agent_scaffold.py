@@ -104,7 +104,7 @@ def scaffold_agent_docs(
 
     for name, seed_name in SEED_DOCS.items():
         seed = project_dir / ".claude" / seed_name
-        if seed.exists():
+        if seed.exists() or seed.is_symlink():  # a dangling link is kept, not written through
             continue
         text = (src / name).read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root)
         seed.write_text(text, encoding="utf-8")
@@ -129,7 +129,7 @@ def _prune(dest: Path, *, src: Path, project_dir: Path) -> None:
             logger.info(f"Removed {stale}: no longer shipped by clarinet")
             continue
         seed = project_dir / ".claude" / seed_name
-        if seed.exists():
+        if seed.exists() or seed.is_symlink():  # a dangling link is kept, not written through
             logger.warning(
                 f"Kept {stale}: {seed} already exists. Move anything you need from "
                 f"{stale} into {seed}, then delete {stale}"
