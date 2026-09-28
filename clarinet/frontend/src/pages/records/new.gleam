@@ -54,7 +54,6 @@ pub type Model {
     // can let an older response overwrite the latest one.
     studies_request_id: Int,
     series_request_id: Int,
-    parent_request_id: Int,
   )
 }
 
@@ -66,8 +65,10 @@ pub type Msg {
   SubmitResult(Result(Record, ApiError))
   StudiesLoaded(request_id: Int, result: Result(List(Study), ApiError))
   SeriesLoaded(request_id: Int, result: Result(List(Series), ApiError))
+  // Keyed by patient, not a request id: ids restart with every modal, so a
+  // closed modal's late response could pass a reopened one's guard.
   ParentCandidatesLoaded(
-    request_id: Int,
+    patient_id: String,
     result: Result(List(Record), ApiError),
   )
   Cancel
@@ -87,7 +88,6 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       loading: False,
       studies_request_id: 0,
       series_request_id: 0,
-      parent_request_id: 0,
     )
   // ReloadPatients is required even for non-admins — the form needs the
   // patient picker. The backend is expected to scope `/api/patients` results
@@ -180,7 +180,7 @@ pub fn init_modal(
   let parent_eff = case args {
     shared.PatientArgs(pid)
     | shared.StudyArgs(pid, _)
-    | shared.SeriesArgs(pid, _, _) -> load_parent_candidates(1, pid)
+    | shared.SeriesArgs(pid, _, _) -> load_parent_candidates(pid)
     shared.RecordArgs(_, _, _, _, _) -> effect.none()
   }
   let model =
@@ -194,7 +194,6 @@ pub fn init_modal(
       loading: False,
       studies_request_id: 1,
       series_request_id: 1,
-      parent_request_id: 1,
     )
   // The full-page form's `init` also reloads patients and (for admins) users;
   // the modal hides those pickers entirely (`hidden_fields` in the view), so
@@ -291,20 +290,13 @@ pub fn update(
       }
 
       // Parent candidates span the whole patient, so only a patient change
-      // refetches them. Bumping the id even when the patient is cleared
-      // makes any in-flight response for the old patient stale.
+      // refetches them.
       let #(updated_model, parent_eff) = {
         use <- bool.guard(!patient_changed, #(updated_model, effect.none()))
-        let new_id = updated_model.parent_request_id + 1
-        let m =
-          Model(
-            ..updated_model,
-            form_parent_candidates: [],
-            parent_request_id: new_id,
-          )
+        let m = Model(..updated_model, form_parent_candidates: [])
         case new_data.patient_id {
           "" -> #(m, effect.none())
-          pid -> #(m, load_parent_candidates(new_id, pid))
+          pid -> #(m, load_parent_candidates(pid))
         }
       }
 
@@ -343,17 +335,17 @@ pub fn update(
       #(Model(..model, form_series: []), effect.none(), [])
     }
 
-    ParentCandidatesLoaded(request_id, Ok(candidates)) -> {
+    ParentCandidatesLoaded(patient_id, Ok(candidates)) -> {
       use <- bool.guard(
-        request_id != model.parent_request_id,
+        patient_id != model.form_data.patient_id,
         #(model, effect.none(), []),
       )
       #(Model(..model, form_parent_candidates: candidates), effect.none(), [])
     }
 
-    ParentCandidatesLoaded(request_id, Error(err)) -> {
+    ParentCandidatesLoaded(patient_id, Error(err)) -> {
       use <- bool.guard(
-        request_id != model.parent_request_id,
+        patient_id != model.form_data.patient_id,
         #(model, effect.none(), []),
       )
       #(
@@ -540,12 +532,12 @@ fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
 
 // ponytail: one page of at most 1000 records (the /records/find cap) per
 // patient; follow next_cursor if a patient ever outgrows it.
-fn load_parent_candidates(request_id: Int, patient_id: String) -> Effect(Msg) {
+fn load_parent_candidates(patient_id: String) -> Effect(Msg) {
   use dispatch <- effect.from
   records.find_records([#("patient_id", json.string(patient_id))], None, 1000)
   |> promise.tap(fn(res) {
     let candidates = result.map(res, fn(page) { page.items })
-    dispatch(ParentCandidatesLoaded(request_id, candidates))
+    dispatch(ParentCandidatesLoaded(patient_id, candidates))
   })
   Nil
 }

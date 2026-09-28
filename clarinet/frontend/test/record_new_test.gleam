@@ -1,6 +1,8 @@
 // Unit tests for the pure functions of `pages/records/new.gleam`.
 // `compute_locked_fields` / `compute_hidden_fields` are pure projections of
 // `HostMode`; `init_modal` is exercised via a minimal synthetic `Shared`.
+// Also covers the parent picker it renders: `record_form.parent_record_groups`
+// and the parent reset in `record_form.update`.
 import api/models
 import api/types
 import cache
@@ -559,11 +561,10 @@ pub fn switching_patient_drops_previous_candidates_test() {
       record_new.UpdateForm(record_form.UpdatePatient("P001")),
       s,
     )
-  let first_request = m.parent_request_id
   let #(m, _, _) =
     record_new.update(
       m,
-      record_new.ParentCandidatesLoaded(first_request, Ok([ablation()])),
+      record_new.ParentCandidatesLoaded("P001", Ok([ablation()])),
       s,
     )
   m.form_parent_candidates |> should.equal([ablation()])
@@ -579,7 +580,7 @@ pub fn switching_patient_drops_previous_candidates_test() {
   let #(m, _, _) =
     record_new.update(
       m,
-      record_new.ParentCandidatesLoaded(first_request, Ok([ablation()])),
+      record_new.ParentCandidatesLoaded("P001", Ok([ablation()])),
       s,
     )
   m.form_parent_candidates |> should.equal([])
@@ -598,7 +599,7 @@ pub fn view_renders_grouped_parent_picker_test() {
     record_new.update(
       m,
       record_new.ParentCandidatesLoaded(
-        m.parent_request_id,
+        "P001",
         Ok([pre_ablation(), ablation()]),
       ),
       s,
