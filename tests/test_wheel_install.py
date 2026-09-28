@@ -12,6 +12,8 @@ _EXE = ".exe" if os.name == "nt" else ""
 _CHECK = """
 import asyncio
 from pathlib import Path
+import clarinet
+print(Path(clarinet.__file__).resolve())
 from clarinet.config.python_loader import load_python_config
 from clarinet.settings import Settings, settings
 
@@ -36,7 +38,7 @@ def test_wheel_install_scaffolds_a_loadable_project(built_wheel: Path, tmp_path:
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("CLARINET_", "VIRTUAL_ENV", "UV_PROJECT"))
+        if not k.startswith(("CLARINET_", "VIRTUAL_ENV", "UV_PROJECT", "PYTHONPATH", "PYTHONHOME"))
     }
     venv = tmp_path / "venv"
     _run(["uv", "venv", "--python", sys.executable, str(venv)], tmp_path, env)
@@ -49,8 +51,7 @@ def test_wheel_install_scaffolds_a_loadable_project(built_wheel: Path, tmp_path:
     _run([str(cli), "init", "proj"], outside, env)
     project = outside / "proj"
 
-    assert (
-        _run([str(python), "-c", _CHECK], project, env).strip()
-        == "['example-segment', 'first-check']"
-    )
+    clarinet_file, names = _run([str(python), "-c", _CHECK], project, env).strip().splitlines()
+    assert Path(clarinet_file).is_relative_to(venv.resolve()), clarinet_file  # the wheel, not src
+    assert names == "['example-segment', 'first-check']"
     _run([str(cli), "--help"], project, env)
