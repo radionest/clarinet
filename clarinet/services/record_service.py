@@ -304,10 +304,13 @@ class RecordService:
     ) -> tuple[Record, RecordStatus]:
         """Decide and apply one command in one transaction; SSE and RecordFlow after it.
 
-        The per-record decide/write/audit work is ``_apply_command``; this
-        wrapper adds the fresh re-read, the one commit, and — only once that
-        commit has landed, so no transaction is open while they run — SSE and
-        RecordFlow.
+        Owns the transaction boundary: loops ``_decide_one`` → ``_write_one``
+        (neither ever commits), committing itself on a miss — it wrote
+        nothing, and on SQLite the UPDATE already holds the write lock — and
+        re-deciding against the fresh state, at most
+        ``_MAX_TRANSITION_ATTEMPTS`` times. On a hit, the fresh re-read and
+        the one commit follow; only once that commit has landed, so no
+        transaction is open while they run, do SSE and RecordFlow fire.
 
         Returns:
             (fresh record, status before). A no-op returns the record unchanged.
@@ -319,73 +322,11 @@ class RecordService:
             RecordUniquePerUserError: the new owner violates ``unique_by``.
             ConcurrentTransitionError: every attempt missed.
         """
-        record, snap, effect = await self._apply_command(record_id, cmd, actor, data=data)
-        if effect is None:
-            return record, snap.status
-        updated = await self.repo.get_with_relations(record_id, populate_existing=True)
-        await self.repo.session.commit()
-        self._emit_record_updated(updated, actor)
-        await self._fire(effect, updated, snap.status)
-        return updated, snap.status
-
-    async def _apply_command(
-        self,
-        record_id: int,
-        cmd: Command,
-        actor: Actor,
-        *,
-        data: RecordData | None = None,
-    ) -> tuple[Record, RecordSnapshot, Effect | None]:
-        """Decide and conditionally write one command for one record — no commit, no re-read.
-
-        The per-record core ``_transition`` and (Task 6) the bulk status path
-        share, so a bulk caller can run this once per record inside one
-        transaction instead of copying the block. Snapshot
-        (``populate_existing``) → input-file verdict only when ``needs_inputs``
-        → ``decide`` → a command that changes nothing returns here (``effect``
-        is ``None``, nothing written — the writer itself would still bump
-        ``changed_at``) → new-owner checks → conditional write on the status
-        and owner the decision saw. A miss commits (it wrote nothing; on
-        SQLite the UPDATE already holds the write lock) and re-decides against
-        the fresh state, at most ``_MAX_TRANSITION_ATTEMPTS`` times. On a
-        successful write the audit event and matched input files join its
-        transaction before this returns — no commit, so the caller still owns
-        the transaction boundary.
-
-        Returns:
-            (record as last read, snapshot before, effect). ``effect`` is
-            ``None`` for a derived no-op, and ``record`` is then the
-            unchanged fresh record.
-
-        Raises:
-            AuthorizationError | RecordLifecycleError: from ``decide``.
-            RecordOwnerLacksRoleError: 409 — the new owner lacks the type's role.
-            UserNotFoundError: 404 — the new owner does not exist.
-            RecordUniquePerUserError: the new owner violates ``unique_by``.
-            ConcurrentTransitionError: every attempt missed.
-        """
-        reason = _appended_note(cmd)
         for _ in range(_MAX_TRANSITION_ATTEMPTS):
-            record = await self.repo.get_with_relations(record_id, populate_existing=True)
-            snap = RecordSnapshot.of(record)
-            inputs: InputsVerdict | None = None
-            matched: dict[str, str] = {}
-            if needs_inputs(cmd, snap):
-                inputs, matched = await self._inputs_verdict(record)
-            effect = decide(cmd, snap, actor, inputs=inputs)
-            if _changes_nothing(effect, snap, data=data, reason=reason):
-                return record, snap, None
-            await self._check_new_owner(record, effect.owner)
-            written = await self.repo.write_transition(
-                record_id,
-                expected_status=snap.status,
-                expected_user_id=snap.user_id,
-                to=effect.to_status,
-                owner=effect.owner,
-                data=data,
-                reason=reason,
-            )
-            if written:
+            record, snap, effect, matched = await self._decide_one(record_id, cmd, actor, data=data)
+            if effect is None:
+                return record, snap.status
+            if await self._write_one(record, snap, effect, matched, cmd, actor, data=data):
                 break
             await self.repo.session.commit()  # end the transaction before re-reading
         else:
@@ -394,10 +335,94 @@ class RecordService:
                 f"gave up after {_MAX_TRANSITION_ATTEMPTS} attempts.",
                 status=snap.status.value,
             )
+        updated = await self.repo.get_with_relations(record_id, populate_existing=True)
+        await self.repo.session.commit()
+        self._emit_record_updated(updated, actor)
+        await self._fire(effect, updated, snap.status)
+        return updated, snap.status
+
+    async def _decide_one(
+        self,
+        record_id: int,
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+    ) -> tuple[Record, RecordSnapshot, Effect | None, dict[str, str]]:
+        """Snapshot ``record_id`` and decide ``cmd`` against it. Never writes, never commits.
+
+        Snapshot (``populate_existing``) → input-file verdict only when
+        ``needs_inputs`` says so → ``decide``. Never touches the DB beyond the
+        read, so a bulk caller can run this for every record in a batch
+        before writing any of them (decide-all-then-write-all).
+
+        Returns:
+            (record as read, snapshot, effect, matched). ``effect`` is
+            ``None`` for a command that changes nothing (a derived no-op —
+            the caller must not call ``_write_one``; the writer itself would
+            still bump ``changed_at``). ``matched`` is the input-file match
+            set for linking on the way to ``pending``, computed only when
+            ``needs_inputs`` says so (``{}`` otherwise).
+
+        Raises:
+            AuthorizationError | RecordLifecycleError: from ``decide``.
+        """
+        record = await self.repo.get_with_relations(record_id, populate_existing=True)
+        snap = RecordSnapshot.of(record)
+        inputs: InputsVerdict | None = None
+        matched: dict[str, str] = {}
+        if needs_inputs(cmd, snap):
+            inputs, matched = await self._inputs_verdict(record)
+        effect = decide(cmd, snap, actor, inputs=inputs)
+        if _changes_nothing(effect, snap, data=data, reason=_appended_note(cmd)):
+            return record, snap, None, matched
+        return record, snap, effect, matched
+
+    async def _write_one(
+        self,
+        record: Record,
+        snap: RecordSnapshot,
+        effect: Effect,
+        matched: dict[str, str],
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+    ) -> bool:
+        """Conditionally write one decided (non-no-op) command. Never commits.
+
+        New-owner checks, then the conditional write on the status and owner
+        ``_decide_one`` saw. On a hit the audit event and matched input files
+        join this same transaction before returning. Never commits — a bulk
+        caller runs this once per record inside one shared transaction and
+        rolls the whole batch back on the first miss (``False``); ``_transition``
+        commits itself on a miss and retries.
+
+        Returns:
+            Whether the write landed. ``False`` means the record changed
+            since ``_decide_one`` snapshotted it — nothing was written.
+
+        Raises:
+            RecordOwnerLacksRoleError: 409 — the new owner lacks the type's role.
+            UserNotFoundError: 404 — the new owner does not exist.
+            RecordUniquePerUserError: the new owner violates ``unique_by``.
+        """
+        await self._check_new_owner(record, effect.owner)
+        written = await self.repo.write_transition(
+            snap.record_id,
+            expected_status=snap.status,
+            expected_user_id=snap.user_id,
+            to=effect.to_status,
+            owner=effect.owner,
+            data=data,
+            reason=_appended_note(cmd),
+        )
+        if not written:
+            return False
         await self._audit_transition(cmd, snap, effect, actor, data=data)
         if matched and effect.to_status == RecordStatus.pending:
             await self.repo.set_files(record, matched, commit=False)
-        return record, snap, effect
+        return True
 
     async def _parent_read(self, record: Record) -> RecordRead | None:
         if record.parent_record_id is None:
