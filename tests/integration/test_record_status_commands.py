@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlmodel import select
 
-from clarinet.exceptions.domain import AuthorizationError, TransitionNotAllowedError
+from clarinet.exceptions.domain import (
+    AuthorizationError,
+    ConcurrentTransitionError,
+    TransitionNotAllowedError,
+)
 from clarinet.models import RecordStatus as S
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.file_validation import FileValidationResult
@@ -159,6 +163,7 @@ async def test_service_token_is_a_system_actor(lc, test_settings, service_token)
 class TestBulk:
     @pytest.mark.asyncio
     async def test_one_refusal_changes_nothing(self, lc):
+        """A decide-phase refusal (raised before any write) leaves everything untouched."""
         rt = await lc.record_type("lc-bulk-refuse")
         ok = await lc.seed(rt, status=S.pending)
         preparing = await lc.seed(rt, status=S.preparing)
@@ -167,6 +172,42 @@ class TestBulk:
                 [ok.id, preparing.id], S.finished, actor=lc.system
             )
         assert (await _fresh(lc, ok.id)).status == S.pending
+        assert await _events(lc, ok.id) == []
+        assert lc.engine.calls == []
+
+    @pytest.mark.asyncio
+    async def test_write_miss_rolls_back_everything(self, lc, monkeypatch):
+        """F7: the first write miss rolls back the whole batch — no retry, all-or-nothing.
+
+        Unlike ``test_one_refusal_changes_nothing`` (a decide-phase refusal, raised
+        before any write), this forces a miss inside ``_write_one`` itself, after an
+        earlier record in the same batch already wrote (and its audit event flushed).
+        The rollback must undo that earlier write too — nothing committed, nothing
+        emitted or fired for either record.
+        """
+        rt = await lc.record_type("lc-bulk-miss")
+        first_id = (await lc.seed(rt, status=S.pending)).id
+        second_id = (await lc.seed(rt, status=S.pending)).id
+        assert first_id < second_id  # bulk processes ascending ids — real write, then the miss
+        service = lc.service()
+        real_write = service.repo.write_transition
+
+        async def spy(record_id, **kw):
+            if record_id == second_id:
+                return False
+            return await real_write(record_id, **kw)
+
+        monkeypatch.setattr(service.repo, "write_transition", spy)
+        with pytest.raises(ConcurrentTransitionError) as exc_info:
+            await service.bulk_update_status([first_id, second_id], S.pause, actor=lc.system)
+        assert exc_info.value.status == "pending"
+        # session.rollback() expires every ORM object in it — re-fetch by the
+        # ids captured above, never through the now-expired `first`/`second`.
+        assert (await _fresh(lc, first_id)).status == S.pending
+        assert (await _fresh(lc, second_id)).status == S.pending
+        assert await _events(lc, first_id) == []
+        assert await _events(lc, second_id) == []
+        assert lc.engine.calls == []
 
     @pytest.mark.asyncio
     async def test_non_admin_is_refused(self, lc):
