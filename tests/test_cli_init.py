@@ -71,6 +71,26 @@ def test_path_that_is_a_file_exits_1(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "not a dir"
 
 
+def test_path_under_a_file_exits_1(tmp_path: Path) -> None:
+    blocker = tmp_path / "somefile"
+    blocker.write_text("x", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        init_project(str(blocker / "sub"))
+    assert exc.value.code == 1
+    assert blocker.read_text(encoding="utf-8") == "x"
+
+
+def test_headerless_agent_doc_survives_init(tmp_path: Path, caplog) -> None:
+    mine = tmp_path / ".claude" / "rules" / "clarinet" / "workflows.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_bytes(b"project-owned\n")
+
+    init_project(str(tmp_path))
+
+    assert mine.read_bytes() == b"project-owned\n"
+    assert str(mine) in caplog.text
+
+
 @pytest.mark.parametrize("flag", [["--template", "research"], ["--list-templates"]])
 def test_legacy_flags_are_rejected(tmp_path: Path, monkeypatch, flag) -> None:
     monkeypatch.setattr(sys, "argv", ["clarinet", "init", *flag, str(tmp_path / "p")])

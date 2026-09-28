@@ -3,6 +3,7 @@
 import argparse
 import re
 from pathlib import Path, PureWindowsPath
+from typing import Literal
 
 import pytest
 
@@ -108,7 +109,8 @@ def test_update_requires_existing(tmp_path: Path) -> None:
 
 def test_update_overwrites_and_reresolves(tmp_path: Path) -> None:
     dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
-    (dest / "definitions.md").write_text("STALE", encoding="utf-8")
+    doc = dest / "definitions.md"
+    doc.write_text(doc.read_text(encoding="utf-8") + "STALE", encoding="utf-8")
     scaffold_agent_docs("claude", project_dir=tmp_path, mode="update")
     refreshed = (dest / "definitions.md").read_text(encoding="utf-8")
     assert "STALE" not in refreshed
@@ -286,6 +288,24 @@ def test_init_proceeds_when_only_user_docs_exist(tmp_path: Path) -> None:
 
     assert (dest / "mine.md").read_text(encoding="utf-8") == "hand-written\n"
     assert (dest / "definitions.md").is_file()
+
+
+@pytest.mark.parametrize(("mode", "force"), [("init", False), ("init", True), ("update", False)])
+def test_headerless_doc_with_payload_name_is_kept_and_warned(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, mode: Literal["init", "update"], force: bool
+) -> None:
+    if mode == "update":
+        scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    dest = tmp_path / MANAGED
+    dest.mkdir(parents=True, exist_ok=True)
+    mine = dest / "workflows.md"
+    mine.write_bytes(b"my own workflows\r\n")
+
+    scaffold_agent_docs("claude", project_dir=tmp_path, mode=mode, force=force)
+
+    assert mine.read_bytes() == b"my own workflows\r\n"
+    assert str(mine) in caplog.text
+    assert "managed by clarinet v" in (dest / "definitions.md").read_text(encoding="utf-8")
 
 
 def test_update_without_managed_docs_raises(tmp_path: Path) -> None:

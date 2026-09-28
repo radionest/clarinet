@@ -44,7 +44,7 @@ def init_project(path: str) -> None:
     try:
         kept = scaffold_project(project_path)
         scaffold_agent_docs("claude", project_dir=project_path, mode="init", force=True)
-    except (ProjectScaffoldError, AgentScaffoldError) as exc:
+    except (ProjectScaffoldError, AgentScaffoldError, OSError) as exc:
         logger.error(f"{exc}")
         sys.exit(1)
     if kept:

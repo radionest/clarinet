@@ -62,7 +62,8 @@ def scaffold_agent_docs(
     Writes every payload ``*.md`` except ``SEED_DOCS`` into
     ``project_dir/.claude/rules/<namespace>/`` with ``{{CLARINET_DOCS}}``
     resolved and the managed header added, prunes managed docs the payload no
-    longer ships, then writes each seed whose target is absent.
+    longer ships, then writes each seed whose target is absent. An existing
+    file without the managed header is project-owned: kept, with a warning.
 
     Raises:
         AgentScaffoldError: unknown agent / missing payload; ``init`` when the
@@ -86,9 +87,16 @@ def scaffold_agent_docs(
     for md in sorted(src.glob("*.md")):
         if md.name in SEED_DOCS:
             continue
+        target = dest / md.name
+        if target.exists() and not is_managed(target):
+            logger.warning(
+                f"Kept {target}: it has no managed header, so it is project-owned. "
+                f"Delete it to receive clarinet's {md.name}"
+            )
+            continue
         text = md.read_text(encoding="utf-8").replace(_DOCS_TOKEN, docs_root)
-        (dest / md.name).write_text(with_header(text, header), encoding="utf-8")
-        logger.info(f"Wrote {dest / md.name}")
+        target.write_text(with_header(text, header), encoding="utf-8")
+        logger.info(f"Wrote {target}")
 
     # Prune before seeding: a legacy managed overview.md can move to the seed
     # path only while that path is still free.
