@@ -4,7 +4,7 @@ This module provides type aliases for commonly used types across the application
 improving type safety and reducing repetition.
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from annotated_types import Ge, Gt, Le
 from sqlalchemy import JSON
@@ -23,6 +23,12 @@ type RecordSchema = dict[str, Any]
 type RecordContextInfo = dict[str, str | int | float | "RecordContextInfo"]
 type SlicerHydratorNames = list[str]
 type ValidatorNames = list[str]
+
+# Lifecycle commands a viewer may run on a record (``RecordRead.allowed_commands``),
+# decided by ``services/record_lifecycle.allowed_commands``.
+type RecordCommandName = Literal[
+    "claim", "assign", "unassign", "submit", "edit", "fail", "restart", "set_status", "unblock"
+]
 
 # Authentication types
 type AuthResponse = dict[str, str]

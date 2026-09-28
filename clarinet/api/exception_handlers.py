@@ -79,6 +79,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         QuartoNotInstalledError,
         QuartoRenderNotReadyError,
         RecordDataValidationError,
+        RecordLifecycleError,
         RecordLimitReachedError,
         RecordParentRequiredError,
         RecordUniquePerUserError,
@@ -325,6 +326,18 @@ def setup_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc) if str(exc) else "Business rule violation"},
         )
+
+    @app.exception_handler(RecordLifecycleError)
+    async def handle_record_lifecycle_error(_: Request, exc: RecordLifecycleError) -> JSONResponse:
+        """409 with a machine-readable ``code`` and the record's status (``metadata``).
+
+        ``detail`` keeps the exact text — downstream clients still match it.
+        """
+        content: dict[str, Any] = {"detail": str(exc), "code": exc.error_code}
+        meta = exc.metadata()
+        if meta:
+            content["metadata"] = meta
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content=content)
 
     @app.exception_handler(OutputGridMismatchError)
     async def handle_output_grid_mismatch(_: Request, exc: OutputGridMismatchError) -> JSONResponse:

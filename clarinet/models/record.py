@@ -8,7 +8,7 @@ for backward compatibility.
 
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Protocol
 from uuid import UUID
 
 from pydantic import (
@@ -300,12 +300,22 @@ class RecordContextInfoUpdate(SQLModel):
     context_info: str | None = Field(default=None, max_length=3000)
 
 
+class EditLockRules(Protocol):
+    """What the edit lock reads from a record type (``RecordTypeBase`` or ``TypeRules``)."""
+
+    @property
+    def editable(self) -> bool: ...
+
+    @property
+    def edit_window_days(self) -> int | None: ...
+
+
 def is_record_editable(
     status: RecordStatus,
     finished_at: datetime | None,
-    record_type: RecordTypeBase,
+    record_type: EditLockRules,
 ) -> bool:
-    """Whether a record's submitted data may still be changed by non-superusers.
+    """Whether a record's submitted data may still be changed by non-admin people.
 
     Non-finished records are always editable — nothing has been submitted yet
     (POST submission paths gate on status separately). For finished records
@@ -320,8 +330,8 @@ def is_record_editable(
     if not record_type.editable:
         return False
     if record_type.edit_window_days is None or finished_at is None:
-        # finished_at is None only on legacy/imported rows (the status event
-        # listener always sets it) — fail open rather than lock them forever.
+        # finished_at is None only on legacy/imported rows (the status writer
+        # always sets it) — fail open rather than lock them forever.
         return True
     if finished_at.tzinfo is None:
         # SQLite returns naive datetimes; stored values are UTC.
