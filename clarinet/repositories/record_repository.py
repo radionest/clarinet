@@ -681,8 +681,9 @@ class RecordRepository(BaseRepository[Record]):
         """Apply one decided transition with a single conditional UPDATE; never commits.
 
         The only code that writes ``Record.status`` / ``Record.user_id`` after the
-        INSERT (the listener in ``models/record.py`` refuses attribute writes;
-        ``tests/test_status_write_guard.py`` catches stray SQL). The row changes
+        INSERT, except ``UserRepository.clear_owned_records`` nulling ``user_id``
+        on user deletion (the listener in ``models/record.py`` refuses attribute
+        writes; ``tests/test_status_write_guard.py`` catches stray SQL). The row changes
         only if its status and owner still equal what the decision saw
         (``IS NOT DISTINCT FROM`` — ``IS`` on SQLite); otherwise nothing is written
         and ``False`` lets the caller re-decide. ``owner`` is the owner *after* the

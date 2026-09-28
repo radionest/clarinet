@@ -741,7 +741,8 @@ async def _process_submission(
     responses={
         409: {
             "description": "Record is blocked, preparing or already finished; invalid submit "
-            "status; output file grid mismatch; or the record changed concurrently"
+            "status; output file grid mismatch; auto-assigning the submitter violates "
+            "unique_by; or the record changed concurrently"
         }
     },
 )
@@ -894,7 +895,8 @@ async def prefill_record_data_patch(
     responses={
         409: {
             "description": "Record is blocked, preparing or already finished; output file "
-            "grid mismatch; or the record changed concurrently"
+            "grid mismatch; auto-assigning the submitter violates unique_by; or the record "
+            "changed concurrently"
         }
     },
 )
