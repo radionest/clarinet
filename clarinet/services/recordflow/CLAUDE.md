@@ -149,7 +149,7 @@ collect). Contract: `.claude/rules/custom-code-loading.md`.
 ## API Integration
 
 Triggers are dispatched via the **service layer** (awaited during request), not from routers:
-- `RecordService` fires record-level triggers on `update_status`, `submit_data`, `update_data`, `notify_file_change`, `bulk_update_status`, `notify_file_updates`
+- `RecordService` fires record triggers after each lifecycle command commits — full list: [RecordFlow → How triggers get dispatched](../../../docs/kb/recordflow.md#how-triggers-get-dispatched)
 - `StudyService` fires entity triggers via `engine.fire()` (fire-and-forget) on entity creation
 - `POST /records/{id}/invalidate` → hard mode fires RecordFlow triggers
 - `POST /patients/{id}/file-events` → `notify_file_updates()` (called by pipeline task wrapper)

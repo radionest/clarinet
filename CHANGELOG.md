@@ -8,9 +8,7 @@
   `inwork` record of the type may give it back — `DELETE /api/records/{id}/user`
   clears the owner and returns `inwork` to `pending` (`on_status("pending")`
   flows fire, as for an admin unassign). Admins and the service token may call
-  it on any record. Schema change: new column `recordtype.releasable` (NOT NULL,
-  server default `false`) — downstream projects must generate an Alembic
-  migration (`make db-migration && make db-upgrade`).
+  it on any record. Schema change — see Breaking.
 - **Record responses carry `allowed_commands`** — the lifecycle commands the
   caller may run on the record now, decided by the same policy that guards the
   endpoints. The frontend shows its record actions from it.
@@ -92,6 +90,16 @@
       `role_name = null` types, which are superuser-only — now fail the same
       way (409 `OWNER_LACKS_ROLE`): the flow logs it at ERROR and continues,
       and nothing is created.
+  11. `POST /api/records/claim-next` no longer lets two concurrent callers take
+      the same record (SQLite has no row locks; the second silently took it
+      over): the loser picks another record, at most 3 times — 404 only when
+      the pool is empty, 409 `CONCURRENT_TRANSITION` ("Every record picked from
+      the pool was taken first; try again.") after three lost races.
+
+  **Downstream migration:** generate an Alembic revision adding
+  `recordtype.releasable` (NOT NULL, `server_default=false`) — required even if
+  no type sets the flag; without it every RecordType query fails, and
+  `verify_migrations_applied` cannot catch it.
 
   Audit: `from_status` / `to_status` are null when a command did not change the
   status (e.g. assigning a finished record); a submit that auto-assigns an
@@ -100,10 +108,10 @@
   `new_value.user_id`/`via`) instead of a separate `assigned` event — the
   activity feed's "assigned" filter no longer shows them. Deleting a user now
   clears the records it owned with one SQL `UPDATE` (`user_id = NULL`, status
-  untouched, outside the transition gateway) — the base nulled `record.user_id`
-  via the ORM's FK-nullify-on-delete cascade when `session.delete(user)`
-  flushed, which the new direct-write guard on `Record.user_id` would now
-  trip; the raw UPDATE sidesteps the guard, still writes no audit row, and
+  untouched, outside the transition gateway) — previously the ORM's
+  FK-nullify-on-delete cascade nulled `record.user_id` when
+  `session.delete(user)` flushed, which the new direct-write guard on
+  `Record.user_id` would now trip; the raw UPDATE sidesteps the guard, still writes no audit row, and
   publishes the record `updated` SSE events the ORM nullify used to.
   Python API: every mutating `RecordService` method takes a required keyword-only
   `actor` (`clarinet.models.actor.SystemActor | HumanActor`); `acting_user=`,

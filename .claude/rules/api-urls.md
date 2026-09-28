@@ -91,6 +91,11 @@ first" (`CONCURRENT_TRANSITION` raised without a status —
 `allowed_commands` — the lifecycle commands the caller may run on the record
 right now.
 
+Never reword the lifecycle 409 `detail` texts (`record_lifecycle.BLOCKED_TEXT`,
+`PREPARING_TEXT`, `FINISHED_TEXT`, `NOT_FINISHED_TEXT`, the fail/claim texts):
+downstream projects string-match them (e.g. "Record already finished. Use PATCH
+to update the record data."); new clients branch on `code`.
+
 ### Record Types (`/api/records/types`)
 
 | URL | Method | Status | Description |

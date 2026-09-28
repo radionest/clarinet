@@ -72,7 +72,7 @@ Record supports optional parent-child links via `parent_record_id` — fully ind
 **Record**: `parent_record_id` (FK → `record.id`, ON DELETE CASCADE — was `SET NULL`) links to a specific parent record; a DB-level delete now removes descendants too, instead of just orphaning them. The framework's own cascade-delete flow (`RecordRepository.delete_records`) already pre-collects the full subtree before deleting, so this FK is a safety net for any deletion path that doesn't.
 - Self-referencing FK with `Relationship` (parent_record / child_records)
 - Parent existence validated in `RecordService.create_record()` (raises `RecordNotFoundError` → 404)
-- `user_id` is inherited from parent only when the child's `RecordType.inherit_user_from_parent` is `True` and no explicit `user_id` is given (applied in `RecordService.create_record`)
+- `user_id` is inherited from parent only when the child's `RecordType.inherit_user_from_parent` is `True` and no explicit `user_id` is given (applied in `RecordService.create_record`); the owner, given or inherited, must hold the child type's role or be a superuser (409 `OWNER_LACKS_ROLE`)
 
 **RecordFlow**: `CreateRecordAction` supports explicit `parent_record_id` kwarg and inherits `user_id` from the triggering record if `inherit_user=True`.
 
@@ -154,7 +154,7 @@ files, or a declared INPUT file whose grid no longer matches its reference
 - `POST /records/{id}/check-files` auto-unblocks when files are present and grid-matched → transitions to `pending`
 
 `preparing` contract: "the system is actively preparing the record".
-- Set via `RecordCreate(status="preparing")` or `update_status` / RecordFlow `update_record(status='preparing')`
+- Set via `RecordCreate(status="preparing")` or `update_status` / RecordFlow `update_record(status='preparing')` — admins and the service token only (others: 409 on create, 403 on set-status)
 - Creation-time auto-blocking is skipped for `preparing` records (files are checked on exit instead)
 - `check_files` is a no-op for `preparing` records (early return: no auto-unblock,
   no checksum scan, no file triggers) — this is what removes the race between
@@ -206,6 +206,12 @@ populated via `model_validator(mode="before")`. See `RecordType.file_registry`
 **`list`/`dict` fields in `table=True` models need `sa_column=Column(JSON)`.**
 Without it, SQLModel raises `ValueError: <class 'list'> has no matching SQLAlchemy type`
 because every inherited field becomes a DB column.
+
+**`table=True` constructors skip enum coercion.** `Record(status="pending", ...)`
+keeps a plain `str` in `status` (SQLModel skips Pydantic validation on table
+models); since `RecordStatus` is a `str` subclass it only surfaces on `.value`.
+Pure code reading an ORM enum attribute normalises at its boundary
+(`RecordStatus(record.status)`, as `RecordSnapshot.of` does).
 
 **`SQLModel.Field()` uses `schema_extra`, not `json_schema_extra`.**
 Classes inheriting `SQLModel` (even `table=False` DTOs) take `schema_extra={...}`;

@@ -457,7 +457,7 @@ re-validating files per record on a `preparing` → `pending` exit) before
 writing any of them (`_write_one`). None of these call
 `enforce_output_grids`.
 
-`enforce_output_grids` itself takes no acting user, so this is not a
+`enforce_output_grids` itself takes no actor, so this is not a
 human-vs-machine split. A pipeline task's auto-submit
 (`clarinet/services/pipeline/task.py:102`) calls
 `ClarinetClient.submit_record_data`, which issues `POST /records/{id}/data`

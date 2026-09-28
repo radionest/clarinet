@@ -64,6 +64,10 @@ DICOMweb requests return 401.
 
 ## Pitfalls
 
+`started_at`/`finished_at` are stamped only by `RecordRepository.write_transition`;
+a fixture building a finished record (e.g. for `edit_window_days`) must set
+`finished_at` itself.
+
 ### MagicMock Auto-Creates Attributes
 
 `MagicMock()` returns a new mock object (truthy) for any attribute access — not `None`.
@@ -138,6 +142,9 @@ Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table 
 | `create_mock_superuser(session, email=)` | `conftest.py` | async, commits + expunges | `User` | overriding `client` fixture in e2e/auth tests |
 | `create_authenticated_client(user, session, settings)` | `conftest.py` | async generator | `AsyncClient` | drop-in replacement for the `client` fixture |
 | `next_auto_id()` | `factories.py` | sync, no DB | `int` | shared counter — `make_patient` and `PatientFactory` both call it; do NOT instantiate `Patient(...)` directly |
+| `force_status(session, record, status, **columns)` | `lifecycle.py` | async, commits | — | put a *saved* record in a status for setup; `record.status = …` / `record.user_id = …` on a saved record raises `DirectRecordWriteError` (build new records with their status: `seed_record(..., status=)`) |
+| `lc` fixture (`Lifecycle`) | `integration/conftest.py`, `lifecycle.py` | async | `Lifecycle` | lifecycle tests: one series; owner/colleague/outsider/admin/admin_only/superuser/service_user; `lc.system`; `lc.service()` with `RecordingEngine`; `lc.record_type()`, `lc.seed()` |
+| `client_as(user, session, settings, service_token=)` | `lifecycle.py` | async ctx mgr | `AsyncClient` | HTTP as a user; with the `service_token` fixture the request is a `SystemActor` |
 
 #### Recipe: permission test
 

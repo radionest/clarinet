@@ -21,7 +21,7 @@ paths:
 - `.match(F.field)` — start pattern matching on a field; absorbs preceding `if_record()` as guard
 - `.case(value)` — add a case branch (`guard AND field == value`); stop-on-first-match semantics
 - `.default()` — fallback branch; fires only when no case matched (and guard is True)
-- `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id`, `inherit_user` kwargs)
+- `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id`, `inherit_user` kwargs) — an owner (explicit `user_id`, `inherit_user=True`, or the type's `inherit_user_from_parent`) must hold the created type's role or be a superuser, else 409 `OWNER_LACKS_ROLE`: logged at ERROR, nothing created
 - `.create_record('type1', 'type2', inherit_user=False)` — convenience wrapper calling `.add_record()` for each name
 - `.update_record('name', status='new_status', strategy='single'|'all')` → `UpdateRecordAction`. `strategy='single'` (default): skip with error log if context contains 0 or >1 matching records. `strategy='all'`: apply to every match.
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`

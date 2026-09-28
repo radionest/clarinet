@@ -135,7 +135,7 @@ written by `RecordRepository.write_transition`:
 
 | Command | Endpoint(s) | Contract | Person | Admin | System |
 |---|---|---|---|---|---|
-| `create` | `POST /records` | initial status `pending` (`preparing` for admin/system) | ✓ (own type role) | ✓ | ✓ |
+| `create` | `POST /records` | initial status `pending` (`preparing` for admin/system) | ✓ (own type role; owner self or none) | ✓ | ✓ |
 | `claim` | `POST /claim-next`, `PATCH /{id}/user` (self) | `pending`/`inwork`, unassigned or own | ✓ | ✓ | ✓ |
 | `assign` | `PATCH /{id}/user`, admin `PATCH .../assign` | sets owner; only `pending` moves to `inwork` | — | ✓ | ✓ |
 | `unassign` | `DELETE /{id}/user`, admin `DELETE .../user` | clears owner; `inwork` falls back to `pending` | owner only, `releasable` type | ✓ | ✓ |
@@ -149,9 +149,16 @@ written by `RecordRepository.write_transition`:
 A person also needs mutation rights (the type's role or superuser, **and**
 admin, owner, unassigned, or `shared_editing`) and, for `edit`/`restart`, must
 clear the edit lock; system actors get the contracts only — no mutation-rights
-or edit-lock check. A new owner (assign, or create with a given or inherited
+or edit-lock check. Downstream flows and workers rely on transitions outside
+the nominal lifecycle (restarts from any status, lock/release round trips),
+and a refused system write fails silently (workers never retry a 4xx, `.call()`
+swallows exceptions) — do not tighten system-actor rules without checking every
+downstream project. A new owner (assign, or create with a given or inherited
 `user_id`) must hold the type's role or be a superuser, for every actor
-including the service token — 409 `OWNER_LACKS_ROLE` otherwise. A refusal is
+including the service token — 409 `OWNER_LACKS_ROLE` otherwise. A person
+creating a record may name only themselves or nobody as `user_id` (403); that
+covers the payload `user_id` only — an owner inherited via
+`inherit_user_from_parent` passes only the role check. A refusal is
 403 when the actor may not run the command on this record at all, and 409 when
 the command's contract refuses the record's current status; a 409 body carries
 `code` (`TRANSITION_NOT_ALLOWED`, `RECORD_EDIT_LOCKED`, `CONCURRENT_TRANSITION`,
@@ -170,6 +177,14 @@ event. `RecordRead.allowed_commands` lists the commands the viewer may run on
 the record right now (`record_lifecycle.allowed_commands`, filled by
 `api/masking.py`) — it does not reflect checks that need I/O (`unique_by`, the
 new owner's roles, input files); the endpoint still enforces those.
+
+Why a conditional UPDATE and not a row lock: `SELECT … FOR UPDATE` is a no-op
+on SQLite and would hold the lock across the flows' nested API calls; a version
+column would pull every `Record` writer (prefill, context-info, viewer lists)
+into the locking and needs a migration. The price: status + owner is the whole
+write condition, so two concurrent in-place edits of a finished record, or an
+A→B→A change between decide and write, go undetected — system edits stay
+last-write-wins; #691 removes in-place edits for people.
 
 ## Record data vs context_info
 

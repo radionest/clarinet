@@ -59,7 +59,7 @@ Config mode guards on `/types` endpoints — see `clarinet/config/CLAUDE.md`.
 
 RecordFlow triggers are dispatched via the **service layer**, not directly from routers:
 
-- `RecordService` wraps record mutations (`update_status`, `assign_user`, `submit_data`, `update_data`, `notify_file_change`, `bulk_update_status`, `notify_file_updates`) and fires the appropriate engine trigger (awaited directly).
+- `RecordService` fires record triggers after each lifecycle command commits — full list: [RecordFlow → How triggers get dispatched](../../docs/kb/recordflow.md#how-triggers-get-dispatched)
 - `StudyService` fires entity-creation triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`.
 - Engine is injected via `get_recordflow_engine(request)` in `dependencies.py` (returns `None` when disabled).
 
