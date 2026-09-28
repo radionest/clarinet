@@ -737,6 +737,17 @@
 
 ### Changed
 
+- **`overview.md` is a project-owned `.claude/CLAUDE.md` seed**, no longer a
+  managed rule under `.claude/rules/clarinet/`. Its body tells you to replace
+  it, while every `clarinet agent update` used to overwrite it. It is now
+  written once and never rewritten. Run `clarinet agent update` once after
+  upgrading: a managed `overview.md` from an earlier version moves to
+  `.claude/CLAUDE.md` (header stripped) when that path is free; otherwise it
+  stays and a warning names both files.
+- **`clarinet agent update` removes managed docs the installed version no
+  longer ships.** Only files carrying the managed header are removed; files you
+  add to `.claude/rules/clarinet/` are left alone. `agent init` now refuses only
+  when a managed doc is present, not any `*.md`.
 - **Entity detail pages are quieter.** On the record and patient pages the
   Activity feed — and, for admins, the record's Workflow graph — now sit at
   the bottom, after the action buttons, collapsed until clicked; an expanded
