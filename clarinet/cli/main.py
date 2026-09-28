@@ -26,7 +26,8 @@ _INIT_NEXT_STEPS = """
 Next steps:
   1. cp .env.example .env   — then set the database and RabbitMQ credentials
   2. clarinet db init       — create the schema and the admin user
-  3. clarinet run           — start the API and the frontend
+  3. start RabbitMQ         — or set pipeline_enabled = false in settings.toml
+  4. clarinet run           — start the API and the frontend
 """
 
 
