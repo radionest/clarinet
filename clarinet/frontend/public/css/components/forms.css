@@ -409,7 +409,13 @@ formosh-form::part(readonly-td) {
    controls (remove, move up/down) also expose no `part` at all, so class is
    the only surface that reaches them. Reach for ::part() to outrank an adopted
    rule (the outer context wins for normal declarations regardless of
-   specificity) or where upstream sets a part but no class. */
+   specificity) or where upstream sets a part but no class.
+
+   Class rules cannot override formosh's own defaults (the ui:layout Row grid,
+   the array-item-body fold): main.css uses @import, so Lustre clones its
+   <link> ahead of formosh's `@layer formosh` <style> and every layer here
+   ranks below `formosh`. Use ::part() or the --formosh-* tokens on
+   formosh-form for those. */
 .array-item {
     border: 1px solid var(--hairline);
     border-radius: var(--radius-md);

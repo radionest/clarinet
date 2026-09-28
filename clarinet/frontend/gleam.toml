@@ -12,7 +12,7 @@ gleam_stdlib = "~> 0.63"
 gleam_http = "~> 4.3"
 modem = "~> 2.1"
 gleam_fetch = "~> 1.3"
-formosh = { git = "git@github.com:radionest/gleam_formosh.git", ref = "ecc3302dd9181fd41ed33c9d5dbce923e19347e8" }
+formosh = { git = "git@github.com:radionest/gleam_formosh.git", ref = "587fada97f35036192824e8064467e1f2950172a" }
 plinth = "~> 0.7.2"
 gleam_time = "~> 1.7"
 lazy_const = "~> 1.0"
