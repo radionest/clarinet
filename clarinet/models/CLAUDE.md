@@ -47,11 +47,16 @@ select(Record).options(
 )
 ```
 
-## Event Listener: Record Timestamps
+## Record Timestamps and the write guard
 
-`@event.listens_for(Record.status, "set")` in `record.py` auto-updates:
-- `started_at` ← when status becomes `RecordStatus.inwork`
-- `finished_at` ← when status becomes `RecordStatus.finished`
+`RecordRepository.write_transition` stamps `started_at` ← entering
+`RecordStatus.inwork` and `finished_at` ← entering `RecordStatus.finished`, in
+the same conditional UPDATE as the status write. The `set` listener on
+`Record.status` / `Record.user_id` (`refuse_direct_lifecycle_writes` in
+`record.py`) raises `DirectRecordWriteError` on a saved record — only a new,
+unsaved record may set them (create); loads and refreshes fire no `set`
+event. Tests that need to force a status outside the lifecycle policy use
+`tests/utils/lifecycle.force_status`.
 
 ## Record Level Validation
 
@@ -165,8 +170,8 @@ files, or a declared INPUT file whose grid no longer matches its reference
   unchanged) — preparation owns the exit
 - Prefill is allowed (like `blocked`); submit returns 409
 
-Both `preparing` and `blocked` records cannot be assigned to users or claimed
-(`assign_user` / `claim_record` raise) and cannot accept data submissions;
+Neither `preparing` nor `blocked` records can be claimed (409); an admin may
+assign them — owner only, status unchanged. Neither accepts data submissions;
 `find_pending_by_user()` excludes both.
 
 ## Frontend Consistency

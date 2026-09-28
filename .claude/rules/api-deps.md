@@ -59,13 +59,13 @@ ClientStoragePathDep    # Annotated[str | None, Depends(get_client_storage_path)
 ```python
 AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]   # record read access
 MutableRecordDep    = Annotated[Record, Depends(authorize_mutable_record_access)]  # + admin/owner/unassigned
-AuditActorDep       = Annotated[UUID | None, Depends(get_audit_actor)]  # current user id, or None for X-Internal-Token (system)
+ActorDep = Annotated[Actor, Depends(get_actor)]  # SystemActor for X-Internal-Token (even with a cookie), else HumanActor (User.as_actor())
 ```
 
 - `get_user_role_names(user)` — returns `set(user.role_names)`; delegates to the `User.role_names` computed_field, which logs a warning when `roles` was not eagerly loaded
-- `is_admin(user)` — `is_superuser` OR membership in the built-in `admin` role. The single definition for every caller that can import it: `current_admin_user` turns it into a 403, and the sites that branch on it inline read it directly (the `clarinet_storage_path` guard and the create-time `check_record_type_role` and the owner bypass on `PATCH /{id}/user` and the viewer-list write guard on `PATCH /{id}` in `record.py`, the owner bypass in `authorize_mutable_record_access`, actor-email masking in the record audit feed, `SseConnection.is_admin`). Never re-spell the predicate inline. One copy survives in `models/capability.py::resolve_capabilities`, which is derived from primitives and cannot import this module
-- `authorize_record_access` — checks superuser -> role_name match -> raises `AuthorizationError`
-- `authorize_mutable_record_access` (`MutableRecordDep`) — builds on `AuthorizedRecordDep`; mutation allowed for an admin (`is_admin` — superuser or `admin` role; a non-superuser admin still needs the type's role for the read gate), the assigned user, or an unassigned record. Additionally bypasses the owner check when `record.record_type.shared_editing` is `True`; any role-holder may then mutate the record regardless of `user_id`
+- `is_admin(user)` — returns `user.is_admin`; the one definition is `is_admin_by` in `clarinet/models/actor.py`, which `User.is_admin`, `HumanActor.is_admin` and `resolve_capabilities` also call; its sibling `can_access` is the one access test (read gate, mutation rights, new-owner eligibility)
+- `authorize_record_access` — checks superuser -> role_name match -> raises `AuthorizationError`, via `can_access`
+- `authorize_mutable_record_access` (`MutableRecordDep`) — builds on `AuthorizedRecordDep`; mutation allowed for an admin (`is_admin` — superuser or `admin` role; a non-superuser admin still needs the type's role for the read gate), the assigned user, or an unassigned record. Additionally bypasses the owner check when `record.record_type.shared_editing` is `True`; any role-holder may then mutate the record regardless of `user_id`. It grants only an early 403 for endpoints that do expensive or destructive work before the write — the record service re-checks the same rights itself (`record_lifecycle.decide`) against a fresh snapshot
 - `require_mutable_config(request)` — raises `AuthorizationError` when `app.state.config_mode == "python"` (RecordType mutations disabled — Python files are the single source of truth)
 - `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
 - `current_role_holder` — passes an admin (`is_admin`) or a user with at least one role; 403 otherwise. For routers with no per-object authorization of their own (the `/dicom-web` router uses its cached twin, `current_dicomweb_user`): a role-less account — e.g. freshly self-registered — must not reach patient data just by being authenticated.
@@ -85,7 +85,7 @@ analyst = ["reports"]
 ```
 Roles named here are auto-created at startup; unknown capabilities fail-fast.
 
-- `await mask_records(records, user, repo)` / `await mask_record(record, user, repo)` — converts `Record` -> `RecordRead` + masks patient data for non-superusers; `repo` resolves the viewer-list anon UIDs. Lives in `clarinet/api/masking.py` (not `dependencies.py`); used by `record.py`. The sync `mask_record_patient_data` without a UID map all but empties the viewer lists (only the record's own study/series stay) — use it only where they are not returned
+- `await mask_records(records, user, repo)` / `await mask_record(record, user, repo)` — converts `Record` -> `RecordRead` + masks patient data for non-superusers; `repo` resolves the viewer-list anon UIDs. Also fills `RecordRead.allowed_commands` for the caller (`record_read_for`, `record_lifecycle.allowed_commands`). Lives in `clarinet/api/masking.py` (not `dependencies.py`); used by `record.py`. The sync `mask_record_patient_data` without a UID map all but empties the viewer lists (only the record's own study/series stay) — use it only where they are not returned
 
 ### Factory pattern for new repos/services
 

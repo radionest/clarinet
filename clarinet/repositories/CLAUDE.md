@@ -86,7 +86,7 @@ Accessing a relationship after plain `update()` causes `MissingGreenlet` in asyn
 
 Alternatives when you don't use `options`:
 - Re-fetch via `repo.get()` (if the repo overrides `get()` with eager loading)
-- Use domain-specific methods like `update_status()`, `update_data()` that handle this internally
+- Use domain-specific methods like `write_transition()`, `update_data()` that handle this internally
 
 ### M2M Link Lifecycle
 

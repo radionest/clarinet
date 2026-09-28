@@ -17,14 +17,14 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | Method | Description |
 |---|---|
 | `get_with_record_type(id)` | Eager-loads `record_type` |
-| `get_with_relations(id, *, lock=False)` | Eager-loads patient, study, series, record_type, file_links. `lock=True` adds `SELECT ... FOR UPDATE` |
+| `get_with_relations(id, *, lock=False, populate_existing=False)` | Eager-loads patient, study, series, record_type, file_links. `lock=True` adds `SELECT ... FOR UPDATE`. `populate_existing=True` re-reads the row over whatever the identity map holds — required after `write_transition`, whose Core UPDATE bypasses it |
 | `get_all_with_relations(skip, limit)` | All records with full eager load |
 | `get_all_for_user_roles(role_names, skip, limit)` | Records whose `RecordType.role_name` ∈ roles (NULL excluded — superuser-only) |
 | `find_by_user(user_id, ...)` | Records for specific user |
 | `find_pending_by_user(user_id)` | Pending/inwork records |
 | `find_by_criteria(criteria)` | Complex search via `RecordSearchCriteria` (legacy, offset pagination) |
 | `find_page(criteria, *, cursor, limit, sort)` | Cursor-based keyset pagination via `RecordSearchCriteria` |
-| `find_random(criteria, *, for_update=False)` | Single random record (`ORDER BY random() LIMIT 1`) matching criteria. `for_update=True` adds `FOR UPDATE OF record SKIP LOCKED` (PG) so concurrent claim-from-pool callers can't select the same row (no-op on SQLite) |
+| `find_random(criteria, *, for_update=False)` | Single random record (`ORDER BY random() LIMIT 1`) matching criteria. `for_update=True` adds `FOR UPDATE OF record SKIP LOCKED` (PG) so concurrent claim-from-pool callers can't select the same row (no-op on SQLite). `RecordSearchCriteria.exclude_ids: set[int]` excludes ids a pool pick must skip — `claim_random_from_pool` grows it with each lost race |
 | `get_viewer_anon_uids(uids, patient_ids)` | `{patient_id: {uid: anon_uid}}` for masking the viewer lists. A raw UID resolves only for its own patient (else writing a foreign raw UID leaks its anon UID); a known anon UID maps to itself for every patient (else keep/drop reveals which studies share a patient). UIDs with no anon counterpart are absent. Queries in `_VIEWER_UID_CHUNK` batches (asyncpg bind-param cap) |
 | `get_record_type(name, *, with_files=True)` | RecordType by name with `file_links` eagerly loaded (raises `RecordTypeNotFoundError`). `with_files=False` → `session.get` by PK (identity-map hit, no eager `file_links` — scalars only) |
 
@@ -33,19 +33,15 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | Method | Description |
 |---|---|
 | `create_with_relations(record)` | Create with eager load after commit |
-| `update_status(id, status)` | Status transition with validation |
-| `update_data(id, data, new_status)` | Update data and optionally status |
+| `write_transition(id, *, expected_status, expected_user_id, to, owner, data=None, reason=None) -> bool` | The only status/owner writer: one conditional UPDATE on status and owner (`WHERE status = expected_status AND user_id IS NOT DISTINCT FROM expected_user_id`); `False` means the record changed since the caller decided, nothing written. Always writes the resulting `owner` (unchanged is harmless). Appends `reason` to `context_info` in SQL (newline-separated, never overwritten). Stamps `started_at`/`finished_at` only when the status *changes* to inwork/finished. Never commits — the caller owns the transaction. Bypasses the identity map (re-read with `get_with_relations(..., populate_existing=True)`) and the SSE capture |
+| `update_data(id, data)` | Replace data only (prefill) — status and owner untouched |
 | `update_fields(record_id, update_data)` | Update arbitrary fields from a dict |
-| `set_files(record, matched_files)` | Create `RecordFileLink` rows; builds fd_map internally from eager-loaded `record_type.file_links` |
+| `set_files(record, matched_files, *, commit=True)` | Create `RecordFileLink` rows; builds fd_map internally from eager-loaded `record_type.file_links`. `commit=False` keeps the links in the caller's transaction (`RecordService._transition`) |
 | `add_file_links(record, matched_files)` | Additive `set_files`: creates links only for unlinked definitions (DB-dedupe via SELECT), existing links/checksums untouched; appends to `record.file_links` in memory. Returns links created; PK race vs concurrent writer → rollback + in-place reload, returns 0 |
 | `update_checksums(record, checksums)` | Update checksum on existing `RecordFileLink` rows (keys: `name` for singular, `name:filename` for collections) |
 | `delete_output_file_links(record)` | Single SQL `DELETE` of OUTPUT file links (race-safe vs concurrent pipeline writers) |
-| `assign_user(id, user_id)` | Assign record to user |
-| `unassign_user(id)` | Remove user; inwork -> pending |
-| `ensure_user_assigned(id, user_id)` | Assign user only if record has no user yet |
-| `claim_record(id, user_id)` | Claim unassigned record |
-| `bulk_update_status(ids, status)` | Batch status update |
-| `fail_record(id, reason)` | `status -> failed` + appends `"Manually failed: {reason}"` to `context_info` |
+| `append_context_info(id, note)` | Append `note` to `context_info` (newline-separated, never overwritten) — soft invalidation; hard invalidation appends inside `write_transition` instead |
+| `get_user_with_roles(id)` | The user with roles loaded, for new-owner checks; raises `UserNotFoundError` (404) rather than surfacing the FK as a 500 |
 
 ### Cascade delete
 
@@ -92,10 +88,12 @@ the idempotent re-check case (re-validating an existing row passes).
 
 ## Record Invalidation
 
-`invalidate_record(record_id, mode, source_record_id=None, reason=None)`:
-- **hard**: `status` -> `pending`, append reason to `context_info` (keeps `user_id`)
-- **soft**: only append reason to `context_info` (status unchanged)
-- Default reason: `"Invalidated by record #{source_record_id}"`
+`RecordService.invalidate_record(record_id, mode, source_record_id=None, reason=None, *, actor)`:
+- **hard**: the `Restart` command through `_transition` — any status but `preparing`
+  returns to `pending` (data and owner kept), reason appended in the same
+  `write_transition` UPDATE, always fires even pending → pending
+- **soft**: `RecordRepository.append_context_info` only — no status change, no flows
+- Default note: `"Invalidated by record #{source_record_id}"`
 - `context_info` is appended (newline-separated), never overwritten
 
 ## Destructive Operations (delete, cascade)
