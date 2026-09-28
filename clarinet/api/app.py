@@ -38,6 +38,7 @@ from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
 from clarinet.exceptions.domain import (
     ConfigLoadError,
+    ConfigRootError,
     ConfigurationError,
     RecordConstraintViolationError,
     RecordFlowError,
@@ -129,19 +130,26 @@ def _load_plan_registries() -> None:
 
 
 def _config_startup_error(e: ConfigLoadError) -> StartupError:
-    """Uniform startup banner for project custom-code import failures.
+    """Uniform startup banner for project config-root and custom-code failures.
 
-    Flow/pipeline modules may live outside plan/ (``recordflow_paths``), so
-    the hint points at the failing file when known instead of hardcoding a
-    folder name.
+    A missing root gets its own remedy. When the path came from the default
+    (not in ``model_fields_set``), the hint also names the ``./tasks/`` →
+    ``./plan/`` default change, which is what breaks such a project. A project
+    that set the path explicitly never used the old default, so it is not told
+    to restore it. Import failures point at the failing file when known —
+    flow/pipeline modules may live outside plan/ (``recordflow_paths``).
     """
-    target = e.path or "the project's custom Python files"
-    return StartupError(
-        component="Config",
-        reason=str(e),
-        hint=f"Fix the import error in {target}, then restart",
-        disableable=False,
-    )
+    if isinstance(e, ConfigRootError):
+        hint = f"Create {e.path} or point config_tasks_path at an existing directory, then restart"
+        if "config_tasks_path" not in settings.model_fields_set:
+            hint += (
+                '. The path came from the default, which changed from "./tasks/" to "./plan/"'
+                ' — a project that keeps tasks/ sets config_tasks_path = "./tasks/"'
+            )
+    else:
+        target = e.path or "the project's custom Python files"
+        hint = f"Fix the import error in {target}, then restart"
+    return StartupError(component="Config", reason=str(e), hint=hint, disableable=False)
 
 
 def _file_within(base: Path, url_remainder: str) -> Path | None:

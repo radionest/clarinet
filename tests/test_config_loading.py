@@ -40,6 +40,28 @@ class TestPlanPackage:
         assert pp.plan_root() == root.resolve()
         assert pp.PLAN_PACKAGE in sys.modules
 
+    @pytest.mark.parametrize("kind", ["missing", "file"])
+    def test_activate_rejects_root_that_is_not_a_directory(self, tmp_path, caplog, kind):
+        from clarinet.config import plan_package as pp
+        from clarinet.exceptions.domain import ConfigRootError
+
+        root = tmp_path / "plan"
+        if kind == "file":
+            root.write_text("", encoding="utf-8")
+        problem = "is not a directory" if kind == "file" else "does not exist"
+
+        with pytest.raises(ConfigRootError, match=problem) as exc_info:
+            pp.activate_plan_package(root)
+
+        resolved = str(root.resolve())
+        assert resolved in str(exc_info.value)
+        assert exc_info.value.path == resolved
+        assert isinstance(exc_info.value, ConfigLoadError)
+        assert pp.plan_root() is None  # nothing installed
+        # Callers surface the message (API StartupError banner, worker log) —
+        # the raise site must not log it a second time.
+        assert not any(r.levelname == "ERROR" for r in caplog.records)
+
     def test_reactivation_replaces_stale_anchor(self, tmp_path):
         from clarinet.config import plan_package as pp
 
@@ -461,3 +483,9 @@ async def test_record_type_validation_error_raises_config_load_error(tmp_path, m
 
     with pytest.raises(ConfigLoadError, match="defect-seg"):
         await python_loader._to_record_type_create(rt_def, tmp_path)
+
+
+def test_config_tasks_path_defaults_to_plan() -> None:
+    from clarinet.settings import Settings
+
+    assert Settings.model_fields["config_tasks_path"].default == "./plan/"

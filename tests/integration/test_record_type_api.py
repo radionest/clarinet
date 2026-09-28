@@ -667,3 +667,34 @@ class TestSharedFileDefinitions:
         seg = await _seg_entry(client, auth_headers, guarded_type)
         assert seg["grid_conform_to"] is None
         assert seg["on_grid_mismatch"] is None
+
+
+@pytest.mark.asyncio
+async def test_toml_mode_create_exports_under_startup_root(client, tmp_path, monkeypatch):
+    """The export folder is the root the lifespan recorded — never a literal fallback."""
+    from clarinet.api.app import app
+
+    monkeypatch.setattr(app.state, "config_mode", "toml")
+    monkeypatch.setattr(app.state, "config_tasks_path", str(tmp_path), raising=False)
+
+    resp = await client.post(RECORD_TYPES, json={"name": "export-root-probe", "level": "SERIES"})
+
+    assert resp.status_code == 201, resp.text
+    assert (tmp_path / "export-root-probe.toml").is_file()
+
+
+@pytest.mark.asyncio
+async def test_toml_mode_create_without_startup_root_has_no_tasks_fallback(
+    client, tmp_path, monkeypatch
+):
+    """No lifespan-recorded root: the export fails loudly instead of writing ``./tasks/``."""
+    from clarinet.api.app import app
+
+    monkeypatch.setattr(app.state, "config_mode", "toml")
+    monkeypatch.delattr(app.state, "config_tasks_path", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(AttributeError):
+        await client.post(RECORD_TYPES, json={"name": "no-fallback-probe", "level": "SERIES"})
+
+    assert not (tmp_path / "tasks").exists()

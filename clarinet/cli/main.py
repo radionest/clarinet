@@ -42,7 +42,7 @@ def init_project(path: str, template: str | None = None) -> None:
 
     # Create directory structure
     directories = [
-        project_path / "tasks",
+        project_path / "plan",
         project_path / "static",
         project_path / "data",
     ]
@@ -122,7 +122,7 @@ secret_key = "change-this-secret-key-in-production"
 
 # ── Config mode ──────────────────────────────────────
 # config_mode = "toml"                          # "toml" or "python"
-# config_tasks_path = "./tasks/"
+# config_tasks_path = "./plan/"
 # config_delete_orphans = false
 # config_record_types_file = "record_types.py"  # python mode only
 # config_files_catalog_file = "files_catalog.py"
@@ -131,7 +131,7 @@ secret_key = "change-this-secret-key-in-production"
 
 # ── RecordFlow ───────────────────────────────────────
 # recordflow_enabled = false
-# recordflow_paths = []        # e.g. ["./tasks/workflows"]
+# recordflow_paths = []        # e.g. ["./plan/workflows"]
 
 # ── Pipeline (RabbitMQ) ──────────────────────────────
 # pipeline_enabled = false
@@ -226,7 +226,7 @@ secret_key = "change-this-secret-key-in-production"
         "fields": [{"name": "field1", "type": "text", "label": "Example Field", "required": True}],
     }
 
-    task_file = project_path / "tasks" / "example.json"
+    task_file = project_path / "plan" / "example.json"
     if not task_file.exists():
         task_file.write_text(json.dumps(example_task, indent=2))
         logger.info(f"Created example task: {task_file}")

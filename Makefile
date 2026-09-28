@@ -71,11 +71,13 @@ frontend-check: ## Type-check frontend (no build)
 .PHONY: run-dev
 run-dev: ## Run development server with frontend (default)
 	@echo "Starting development server with frontend..."
+	@mkdir -p plan
 	@uv run clarinet run
 
 .PHONY: run-api
 run-api: ## Run API server only (no frontend)
 	@echo "Starting API server..."
+	@mkdir -p plan
 	@uv run clarinet run --headless
 
 # =============================================================================

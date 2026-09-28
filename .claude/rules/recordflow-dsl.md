@@ -1,6 +1,7 @@
 ---
 paths:
   - "clarinet/services/recordflow/**"
+  - "plan/**/*_flow.py"
   - "tasks/**/*_flow.py"
 ---
 

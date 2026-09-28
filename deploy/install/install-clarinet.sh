@@ -86,6 +86,20 @@ install_project() {
             log "Removing previous project bundle artifacts (plan/, review/)..."
             rm -rf "${INSTALL_DIR}/plan" "${INSTALL_DIR}/review" "$PROJECT_MARKER"
         fi
+        # The API refuses to start without its config root (default ./plan/
+        # under WorkingDirectory=/opt/clarinet); a bare stand runs on an empty one.
+        # A server upgraded from the old ./tasks/ default must not get an empty
+        # plan/ — the API would start on zero record types instead of failing
+        # with the ConfigRootError hint.
+        if [[ -d "${INSTALL_DIR}/tasks" && ! -e "${INSTALL_DIR}/plan" ]]; then
+            warn "!!! ${INSTALL_DIR}/tasks/ exists but ${INSTALL_DIR}/plan/ does not."
+            warn "!!! The config_tasks_path default changed from ./tasks/ to ./plan/."
+            warn "!!! Set config_tasks_path = \"./tasks/\" in settings, or rename tasks/ -> plan/."
+            warn "!!! Not creating an empty plan/ — the API will refuse to start until this is fixed."
+            return
+        fi
+        mkdir -p "${INSTALL_DIR}/plan"
+        chown clarinet:clarinet "${INSTALL_DIR}/plan"
         return
     fi
     if [[ ! -d "$bundle/plan" || ! -f "$bundle/settings.toml" ]]; then

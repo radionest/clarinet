@@ -47,7 +47,7 @@ from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
 from types import ModuleType
 
-from clarinet.exceptions.domain import ConfigLoadError
+from clarinet.exceptions.domain import ConfigLoadError, ConfigRootError
 from clarinet.utils.logger import logger
 
 PLAN_PACKAGE = "clarinet_plan"
@@ -79,8 +79,15 @@ def activate_plan_package(root: str | Path) -> None:
     Raises:
         ConfigLoadError: If a real ``clarinet_plan`` distribution is importable
             from ``sys.path`` (it would make the in-memory anchor ambiguous).
+        ConfigRootError: *root* is not an existing directory — startup must not
+            proceed on an empty definition set (the app would keep serving its
+            previously reconciled DB rows).
     """
     resolved = Path(root).resolve()
+
+    if not resolved.is_dir():
+        problem = "is not a directory" if resolved.exists() else "does not exist"
+        raise ConfigRootError(f"config root {resolved} {problem}", path=resolved)
 
     real = PathFinder.find_spec(PLAN_PACKAGE, None)
     if real is not None:

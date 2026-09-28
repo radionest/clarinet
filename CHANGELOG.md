@@ -33,6 +33,20 @@
 
 ### Breaking
 
+- **`config_tasks_path` defaults to `./plan/` (was `./tasks/`).** A project that
+  omits the setting and keeps a `tasks/` directory must set
+  `config_tasks_path = "./tasks/"` or rename the directory. The scaffold, the
+  demo and the docs already used `plan/`; the default was the last holdout.
+  The plan hash in pipeline queue names now covers `./plan/` for projects on
+  the default — restart the API and workers together.
+- **A config root that is not an existing directory aborts startup.** The API
+  lifespan (TOML and Python mode) fails with `StartupError(component="Config")`
+  and `clarinet worker` exits 1. Before, the API logged a warning, reconciled
+  zero record types and kept serving the rows it had reconciled earlier. The
+  message names the absolute path and, when the value came from the default,
+  the default change. TOML-mode projects that relied on the first API write to
+  create the folder must create it before starting. An existing empty root
+  still starts, with a warning.
 - **`clarinet.api.masking.mask_records` is async and takes a repository.**
   `await mask_records(records, user, repo)` (and the new single-record
   `mask_record`) resolve the viewer-list anon UIDs through

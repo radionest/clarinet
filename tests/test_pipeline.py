@@ -1012,6 +1012,21 @@ class TestLoadTaskModulesFailFast:
         assert exc_info.value.code == 1
 
     @pytest.mark.asyncio
+    async def test_run_worker_exits_on_missing_config_root(self, tmp_path, monkeypatch):
+        from clarinet.services.pipeline.worker import run_worker
+
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path / "missing"))
+        with (
+            patch("clarinet.services.pipeline.worker.reconfigure_for_worker"),
+            patch("clarinet.services.pipeline.worker.load_task_modules") as load,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            await run_worker(queues=[DEFAULT_QUEUE])
+
+        assert exc_info.value.code == 1
+        load.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_run_worker_installs_dicom_association_cap(self, monkeypatch):
         """#551: the cap is process-local, so the worker must install its own."""
         from clarinet.exceptions.domain import ConfigLoadError
