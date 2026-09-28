@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from clarinet.models import RecordStatus
+from clarinet.models.actor import SystemActor
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.record_service import RecordService
 
@@ -24,36 +25,21 @@ def _added_event(event_repo: AsyncMock) -> RecordEvent:
 
 class TestRecordServiceAuditEvents:
     @pytest.mark.asyncio
-    async def test_fail_record_writes_failed_with_reason(self) -> None:
-        actor = uuid4()
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.failed
-
-        repo_mock = AsyncMock()
-        repo_mock.fail_record.return_value = (record_mock, RecordStatus.inwork)
-        service, event_repo = _service(repo_mock)
-
-        await service.fail_record(1, "broken series", actor_id=actor)
-
-        event = _added_event(event_repo)
-        assert event.kind == "failed"
-        assert event.reason == "broken series"
-        assert event.from_status == "inwork"
-        assert event.to_status == "failed"
-
-    @pytest.mark.asyncio
     async def test_soft_invalidate_writes_event_without_transition(self) -> None:
-        old_record = MagicMock()
-        old_record.status = RecordStatus.finished
         record_mock = MagicMock()
         record_mock.status = RecordStatus.finished
 
         repo_mock = AsyncMock()
-        repo_mock.get.return_value = old_record
-        repo_mock.invalidate_record.return_value = record_mock
+        repo_mock.append_context_info.return_value = record_mock
         service, event_repo = _service(repo_mock)
 
-        await service.invalidate_record(1, "soft", source_record_id=7, reason="stale input")
+        await service.invalidate_record(
+            1,
+            "soft",
+            source_record_id=7,
+            reason="stale input",
+            actor=SystemActor(service_user_id=uuid4()),
+        )
 
         event = _added_event(event_repo)
         assert event.kind == "invalidated"

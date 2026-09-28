@@ -892,94 +892,50 @@ class RecordService:
         source_record_id: int | None = None,
         reason: str | None = None,
         *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        actor: Actor,
     ) -> Record:
-        """Invalidate a record and fire RecordFlow trigger on hard mode.
+        """Invalidate a record.
 
-        Hard mode always fires the status trigger — even when the record was
-        already pending — so on_status("pending") flows re-run on every
-        re-invalidation. Soft mode never changes status and never fires.
-
-        Args:
-            record_id: ID of the record to invalidate.
-            mode: "hard" resets to pending, "soft" only appends reason.
-            source_record_id: ID of the triggering record.
-            reason: Human-readable reason.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock. Only hard mode is
-                gated — soft mode never changes data or status.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Updated record with relations.
+        Hard mode is ``Restart``: any status except preparing returns to pending,
+        data and owner kept, the reason appended; it always fires
+        ``handle_record_invalidation`` — even pending → pending — so
+        ``on_status("pending")`` flows re-run. People need mutation rights and get
+        409 on a locked finished record. Soft mode only appends the reason: no
+        status change, no flows, no lifecycle check.
 
         Raises:
-            RecordEditLockedError: On hard mode, if the record is finished
-                and its type locks submitted records for *acting_user*.
+            RecordEditLockedError: hard mode, a non-admin on a locked finished record.
+            AuthorizationError: hard mode, a person without mutation rights.
         """
-        if mode == "hard" and acting_user is not None and not acting_user.is_superuser:
-            with_type = await self.repo.get_with_relations(record_id)
-            ensure_record_editable(with_type, acting_user)
-
-        old_record = await self.repo.get(record_id)
-        old_status = old_record.status
-
-        self._mark_audit(record_id, actor_id)
-        record = await self.repo.invalidate_record(
-            record_id=record_id,
-            mode=mode,
-            source_record_id=source_record_id,
-            reason=reason,
-        )
-
-        status_changed = old_status != record.status
+        if mode == "hard":
+            record, _ = await self._transition(
+                record_id, Restart(reason=reason, source_record_id=source_record_id), actor
+            )
+            return record
+        note = _invalidation_note(reason, source_record_id)
+        if note is None:
+            record = await self.repo.get_with_relations(record_id)
+        else:
+            self._mark_audit(record_id, audit_actor_id(actor))
+            record = await self.repo.append_context_info(record_id, note)
         await self._record_event(
             record_id=record_id,
             kind="invalidated",
-            actor_id=actor_id,
-            from_status=old_status if status_changed else None,
-            to_status=record.status if status_changed else None,
-            new_value={"mode": mode, "source_record_id": source_record_id},
+            actor_id=audit_actor_id(actor),
+            new_value={"mode": "soft", "source_record_id": source_record_id},
             reason=reason,
         )
-
-        # Hard invalidation means "needs processing again" — fire even when the
-        # status didn't change (pending → pending), so on_status("pending")
-        # flows re-run. Handlers must be idempotent.
-        if mode == "hard":
-            await self._fire_invalidation(record, old_status)
-
         return record
 
-    async def fail_record(
-        self, record_id: int, reason: str, *, actor_id: UUID | None = None
-    ) -> Record:
-        """Mark a record as failed with a reason and fire RecordFlow triggers.
+    async def fail_record(self, record_id: int, reason: str, *, actor: Actor) -> Record:
+        """Mark a pending/inwork record failed (``Fail``), noting ``"Manually failed: <reason>"``.
 
-        Args:
-            record_id: ID of the record to fail.
-            reason: Human-readable reason for failure.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Updated record with relations.
+        Raises:
+            TransitionNotAllowedError: 409 — the record is not pending/inwork.
+            AuthorizationError: 403 — a person without mutation rights.
         """
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.fail_record(record_id, reason)
+        record, _ = await self._transition(record_id, Fail(reason=reason), actor)
         logger.info(f"Record {record_id} manually failed")
-
-        await self._record_event(
-            record_id=record_id,
-            kind="failed",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-            reason=reason,
-        )
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
-
         return record
 
     async def check_files(

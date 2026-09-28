@@ -938,72 +938,15 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
-    async def invalidate_record(
-        self,
-        record_id: int,
-        mode: str,
-        source_record_id: int | None = None,
-        reason: str | None = None,
-    ) -> Record:
-        """Invalidate a record by resetting its status and/or appending reason.
+    async def append_context_info(self, record_id: int, note: str) -> Record:
+        """Append ``note`` to ``context_info`` (newline-separated, never overwritten).
 
-        Args:
-            record_id: ID of the record to invalidate.
-            mode: "hard" resets status to pending (keeps user_id); a
-                  ``preparing`` record keeps its status — preparation owns the
-                  exit, only the reason is appended.
-                  "soft" only appends reason to context_info.
-            source_record_id: ID of the record that triggered invalidation.
-            reason: Human-readable reason. Defaults to a generated message.
-
-        Returns:
-            Updated record with relations loaded.
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
+        Soft invalidation; hard invalidation appends inside ``write_transition``.
         """
         record = await self.get(record_id)
-
-        if reason is None and source_record_id is not None:
-            reason = f"Invalidated by record #{source_record_id}"
-
-        if reason:
-            if record.context_info:
-                record.context_info = f"{record.context_info}\n{reason}"
-            else:
-                record.context_info = reason
-
-        if mode == "hard" and record.status != RecordStatus.preparing:
-            record.status = RecordStatus.pending
-
+        record.context_info = f"{record.context_info}\n{note}" if record.context_info else note
         await self.session.commit()
         return await self.get_with_relations(record_id)
-
-    async def fail_record(self, record_id: int, reason: str) -> tuple[Record, RecordStatus]:
-        """Mark a record as failed with a reason appended to context_info.
-
-        Args:
-            record_id: ID of the record to fail.
-            reason: Human-readable reason for failure.
-
-        Returns:
-            Tuple of (record with relations loaded, old status).
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
-        """
-        record = await self.get(record_id)
-        old_status = record.status
-
-        prefixed = f"Manually failed: {reason}"
-        if record.context_info:
-            record.context_info = f"{record.context_info}\n{prefixed}"
-        else:
-            record.context_info = prefixed
-
-        record.status = RecordStatus.failed
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
 
     async def count_by_type_and_context(
         self,

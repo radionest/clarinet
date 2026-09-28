@@ -448,37 +448,17 @@ class TestRecordRepository:
         assert rec.user_id == original_user_id
 
     @pytest.mark.asyncio
-    async def test_invalidate_record_hard(self, env):
-        # Set to inwork first
-        env["record"].status = RecordStatus.inwork
-        await env["session"].commit()
-
-        rec = await env["repo"].invalidate_record(
-            env["record"].id, mode="hard", source_record_id=42
-        )
-        assert rec.status == RecordStatus.pending
-        assert "Invalidated by record #42" in rec.context_info
-
-    @pytest.mark.asyncio
-    async def test_invalidate_record_hard_keeps_preparing(self, env):
-        env["record"].status = RecordStatus.preparing
-        await env["session"].commit()
-
-        rec = await env["repo"].invalidate_record(
-            env["record"].id, mode="hard", source_record_id=42
-        )
-        # Preparation owns the exit — hard mode must not flip preparing to pending
-        assert rec.status == RecordStatus.preparing
-        assert "Invalidated by record #42" in rec.context_info
-
-    @pytest.mark.asyncio
-    async def test_invalidate_record_soft(self, env):
-        rec = await env["repo"].invalidate_record(
-            env["record"].id, mode="soft", reason="Manual note"
-        )
+    async def test_append_context_info(self, env):
+        rec = await env["repo"].append_context_info(env["record"].id, "Manual note")
         assert "Manual note" in rec.context_info
-        # Status unchanged
+        # Soft-only: append_context_info never touches status
         assert rec.status == RecordStatus.pending
+
+    @pytest.mark.asyncio
+    async def test_append_context_info_appends_to_existing(self, env):
+        await env["repo"].append_context_info(env["record"].id, "first")
+        rec = await env["repo"].append_context_info(env["record"].id, "second")
+        assert rec.context_info == "first\nsecond"
 
     @pytest.mark.asyncio
     async def test_count_by_type_and_context(self, env):

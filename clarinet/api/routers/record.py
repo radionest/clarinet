@@ -1135,33 +1135,24 @@ async def download_output_file(
     return FileResponse(path=file_path, filename=safe_name, media_type=media_type)
 
 
-_MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
-
-
 @router.post("/{record_id}/fail", response_model=RecordRead)
 async def fail_record(
     record_id: int,
-    authorized_record: MutableRecordDep,
+    _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     reason: str = Body(embed=True, min_length=1),
 ) -> RecordRead:
     """Manually mark a record as failed with a reason.
 
-    Only records in ``pending`` or ``inwork`` status can be failed manually.
+    Only pending/inwork records can be failed (409 otherwise).
     """
     reason = reason.strip()
     if not reason:
         raise CONFLICT.with_context("Reason cannot be empty or whitespace-only.")
 
-    if authorized_record.status not in _MANUALLY_FAILABLE_STATUSES:
-        raise CONFLICT.with_context(
-            f"Cannot fail record in '{authorized_record.status.value}' status. "
-            f"Allowed: {', '.join(s.value for s in _MANUALLY_FAILABLE_STATUSES)}."
-        )
-
-    updated = await service.fail_record(record_id, reason, actor_id=actor)
+    updated = await service.fail_record(record_id, reason, actor=actor)
     return await mask_record(updated, user, service.repo)
 
 
@@ -1171,7 +1162,7 @@ async def invalidate_record(
     _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     mode: Literal["hard", "soft"] = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
@@ -1183,8 +1174,8 @@ async def invalidate_record(
     already pending, re-running the cascade. Soft mode only appends the
     reason to context_info.
 
-    Hard mode returns 409 for non-superusers when the record is finished and
-    its type locks submitted records (``editable`` / ``edit_window_days``).
+    Hard mode returns 409 for non-admin people when the record is finished
+    and its type locks submitted records.
 
     Args:
         record_id: ID of the record to invalidate.
@@ -1200,8 +1191,7 @@ async def invalidate_record(
         mode=mode,
         source_record_id=source_record_id,
         reason=reason,
-        acting_user=user,
-        actor_id=actor,
+        actor=actor,
     )
     return await mask_record(record, user, service.repo)
 
