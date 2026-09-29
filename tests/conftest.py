@@ -327,11 +327,14 @@ async def create_mock_user_with_role(
     role_name: str,
     email: str = "roled@test.com",
     is_superuser: bool = False,
+    extra_roles: tuple[str, ...] = (),
 ) -> User:
     """Create a user with one role, roles eagerly loaded then detached.
 
     Mirrors ``create_mock_superuser`` but attaches a ``UserRole`` so
     ``role_names`` / ``capabilities`` resolve in capability-gated endpoint tests.
+    ``extra_roles`` adds further roles (each created if missing) via their own
+    ``UserRolesLink``.
     """
     from sqlalchemy.orm import selectinload
     from sqlmodel import select
@@ -356,6 +359,11 @@ async def create_mock_user_with_role(
 
     user_id = user.id
     session.add(UserRolesLink(user_id=user_id, role_name=role_name))
+    for extra_role in extra_roles:
+        if await session.get(UserRole, extra_role) is None:
+            session.add(UserRole(name=extra_role))
+            await session.commit()
+        session.add(UserRolesLink(user_id=user_id, role_name=extra_role))
     await session.commit()
     session.expire_all()
 
@@ -363,6 +371,17 @@ async def create_mock_user_with_role(
         select(User).options(selectinload(User.roles)).where(User.id == user_id)
     )
     loaded = result.scalar_one()
+    # Expunge the UserRole rows too, not just the User: a role name shared by
+    # several callers (e.g. the same ROLE across several Lifecycle people) is
+    # one identity-mapped UserRole object. A later call's own
+    # ``session.expire_all()`` would otherwise re-expire it after this one
+    # loaded it, leaving THIS user's already-detached ``roles`` collection
+    # holding an expired object — reading ``.name`` on it lazy-loads outside
+    # any awaited context and raises ``MissingGreenlet``. Expunging makes each
+    # returned user's role snapshot fully independent and immune to that.
+    for role in loaded.roles:
+        if role in session:
+            session.expunge(role)
     session.expunge(loaded)
     return loaded
 

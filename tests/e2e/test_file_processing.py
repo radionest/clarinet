@@ -27,6 +27,7 @@ from tests.utils.urls import (
     PATIENTS_BASE,
     RECORD_TYPES,
     RECORDS_BASE,
+    RECORDS_BULK_STATUS,
 )
 
 # Fixed hierarchy IDs
@@ -709,12 +710,7 @@ class TestFileEvents:
 
 
 class TestBulkStatusUpdate:
-    """Bulk status update via repository.
-
-    Note: The ``PATCH /bulk/status`` API route is shadowed by
-    ``PATCH /{record_id}/status`` due to FastAPI route ordering.
-    These tests exercise the repository method directly instead.
-    """
+    """Bulk status update via ``PATCH /records/bulk/status``."""
 
     @pytest.mark.asyncio
     async def test_bulk_status_update(
@@ -725,17 +721,14 @@ class TestBulkStatusUpdate:
         rt_without_files: dict,
         working_dir: Path,
     ):
-        """Create 3 records -> bulk_update_status -> all records updated."""
-        from clarinet.models.base import RecordStatus
-        from clarinet.repositories.record_repository import RecordRepository
-
+        """Create 3 records -> bulk status PATCH -> all records updated."""
         record_ids = []
         for _ in range(3):
             rec = await _create_record(client, "annotation", test_hierarchy)
             record_ids.append(rec["id"])
 
-        repo = RecordRepository(test_session)
-        await repo.bulk_update_status(record_ids, RecordStatus.inwork)
+        resp = await client.patch(f"{RECORDS_BULK_STATUS}?new_status=inwork", json=record_ids)
+        assert resp.status_code == 204
 
         # Verify all records updated via API
         for rid in record_ids:
@@ -752,14 +745,11 @@ class TestBulkStatusUpdate:
         working_dir: Path,
     ):
         """Mix of real + fake IDs -> real record updated, no error."""
-        from clarinet.models.base import RecordStatus
-        from clarinet.repositories.record_repository import RecordRepository
-
         rec = await _create_record(client, "annotation", test_hierarchy)
         real_id = rec["id"]
 
-        repo = RecordRepository(test_session)
-        await repo.bulk_update_status([real_id, 99999], RecordStatus.inwork)
+        resp = await client.patch(f"{RECORDS_BULK_STATUS}?new_status=inwork", json=[real_id, 99999])
+        assert resp.status_code == 204
 
         get_resp = await client.get(f"{RECORDS_BASE}/{real_id}")
         assert get_resp.json()["status"] == "inwork"

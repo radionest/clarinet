@@ -19,7 +19,8 @@ in TOML or Python. This page covers the behavioural flags and how they compose.
 |---|---|
 | `unique_by` | uniqueness partition set, a subset of `{"user", "parent"}` (default both). At most one record per partition tuple, scoped within the type's own DICOM level. `None` disables uniqueness; an empty set is rejected |
 | `shared_editing` | any role-holder may edit any record of the type; each edit reassigns ownership to the editor. Requires `'user' not in unique_by` |
-| `editable` / `edit_window_days` | when false or expired, non-superusers get 409 on mutating a finished record |
+| `editable` / `edit_window_days` | when false or expired, a non-admin person gets 409 on editing or hard-invalidating a finished record; admins (superuser or `admin` role) and system actors bypass it |
+| `releasable` (default false) | the owner of a pending or inwork record may give it back (`DELETE /api/records/{id}/user`; inwork → pending) |
 | `inherit_user_from_parent` | a created child inherits `user_id` from its `parent_record_id` when no explicit user is given |
 | `parent_required` | creation without `parent_record_id` returns 409 `PARENT_REQUIRED` |
 | `max_records` | hard cap per DICOM-level context; exceeding it raises `RecordLimitReachedError`. `max_records=0` is the deprecation sentinel — blocks new records while keeping the type registered |

@@ -27,6 +27,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.exceptions.domain import RecordConstraintViolationError
+from clarinet.models.actor import SystemActor
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.record import Record, RecordType
 from clarinet.models.user import User, UserRole, UserRolesLink
@@ -146,12 +147,17 @@ class TestAssignUserUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         with pytest.raises(RecordConstraintViolationError):
-            await service.assign_user(new_record.id, test_user.id)  # type: ignore[arg-type]
+            await service.assign_user(  # type: ignore[arg-type]
+                new_record.id, test_user.id, actor=SystemActor(service_user_id=test_user.id)
+            )
 
     @pytest.mark.asyncio
     async def test_assign_user_succeeds_when_unique_per_user_false(
@@ -181,12 +187,17 @@ class TestAssignUserUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         # Should not raise
-        record, _ = await service.assign_user(new_record.id, test_user.id)  # type: ignore[arg-type]
+        record, _ = await service.assign_user(  # type: ignore[arg-type]
+            new_record.id, test_user.id, actor=SystemActor(service_user_id=test_user.id)
+        )
         assert record.user_id == test_user.id
 
     @pytest.mark.asyncio
@@ -226,12 +237,17 @@ class TestAssignUserUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         # Should not raise
-        record, _ = await service.assign_user(new_record.id, test_user.id)  # type: ignore[arg-type]
+        record, _ = await service.assign_user(  # type: ignore[arg-type]
+            new_record.id, test_user.id, actor=SystemActor(service_user_id=test_user.id)
+        )
         assert record.user_id == test_user.id
 
 
@@ -269,12 +285,17 @@ class TestClaimRecordUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
         with pytest.raises(RecordConstraintViolationError):
-            await service.claim_record(new_record.id, test_user.id)  # type: ignore[arg-type]
+            await service.claim_record(  # type: ignore[arg-type]
+                new_record.id, actor=SystemActor(service_user_id=test_user.id)
+            )
 
     @pytest.mark.asyncio
     async def test_claim_record_succeeds_for_different_context(
@@ -311,11 +332,16 @@ class TestClaimRecordUniqueConstraint:
         test_session.add(new_record)
         await test_session.commit()
         await test_session.refresh(new_record)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
+        await test_session.commit()
 
         repo = RecordRepository(test_session)
         service = RecordService(repo)
 
-        record = await service.claim_record(new_record.id, test_user.id)  # type: ignore[arg-type]
+        record = await service.claim_record(  # type: ignore[arg-type]
+            new_record.id, actor=SystemActor(service_user_id=test_user.id)
+        )
         assert record.user_id == test_user.id
 
 
@@ -327,16 +353,16 @@ class TestSubmitDataUniqueConstraint:
 
     @pytest.mark.asyncio
     async def test_submit_data_auto_assign_raises_when_unique_violated(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+        self, test_session, test_patient, test_study, test_series, upu_role_type, upu_regular_user
     ):
         """submit_data raises RecordConstraintViolationError when auto-assigning
-        user_id to an unassigned record and user already has one for the same context."""
+        the actor to an unassigned record and it already has one for the same context."""
         existing = Record(
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         test_session.add(existing)
@@ -347,7 +373,7 @@ class TestSubmitDataUniqueConstraint:
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
             user_id=None,
-            record_type_name=unique_series_type.name,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.pending,
         )
         test_session.add(new_record)
@@ -360,30 +386,30 @@ class TestSubmitDataUniqueConstraint:
         with pytest.raises(RecordConstraintViolationError):
             await service.submit_data(
                 new_record.id,
-                data={},
-                new_status=RecordStatus.finished,
-                user_id=test_user.id,  # type: ignore[arg-type]
+                {},
+                RecordStatus.finished,
+                actor=SystemActor(service_user_id=upu_regular_user.id),
             )
 
     @pytest.mark.asyncio
     async def test_submit_data_auto_assign_succeeds_non_conflicting(
         self,
         test_session,
-        test_user,
         test_patient,
         test_study,
         test_series,
         second_series,
-        unique_series_type,
+        upu_role_type,
+        upu_regular_user,
     ):
-        """submit_data succeeds when auto-assigning user_id and no uniqueness
+        """submit_data succeeds when auto-assigning the actor and no uniqueness
         conflict exists (record is in a different series context)."""
         existing = Record(
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         test_session.add(existing)
@@ -394,7 +420,7 @@ class TestSubmitDataUniqueConstraint:
             study_uid=test_study.study_uid,
             series_uid=second_series.series_uid,
             user_id=None,
-            record_type_name=unique_series_type.name,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.pending,
         )
         test_session.add(new_record)
@@ -406,15 +432,15 @@ class TestSubmitDataUniqueConstraint:
 
         record, _ = await service.submit_data(
             new_record.id,
-            data={},
-            new_status=RecordStatus.finished,
-            user_id=test_user.id,  # type: ignore[arg-type]
+            {},
+            RecordStatus.finished,
+            actor=SystemActor(service_user_id=upu_regular_user.id),
         )
-        assert record.user_id == test_user.id
+        assert record.user_id == upu_regular_user.id
 
     @pytest.mark.asyncio
     async def test_submit_data_skips_check_when_already_assigned(
-        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+        self, test_session, test_patient, test_study, test_series, upu_role_type, upu_regular_user
     ):
         """submit_data does not check unique_per_user when the record already
         has user_id set (the guard at record_check.user_id is None skips it)."""
@@ -422,8 +448,8 @@ class TestSubmitDataUniqueConstraint:
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         # Second record already assigned to same user (same context) — would
@@ -432,8 +458,8 @@ class TestSubmitDataUniqueConstraint:
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             series_uid=test_series.series_uid,
-            user_id=test_user.id,
-            record_type_name=unique_series_type.name,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
             status=RecordStatus.inwork,
         )
         test_session.add(existing)
@@ -447,11 +473,11 @@ class TestSubmitDataUniqueConstraint:
         # Should not raise — user_id is already set, so no uniqueness check
         record, _ = await service.submit_data(
             pre_assigned.id,
-            data={},
-            new_status=RecordStatus.finished,
-            user_id=test_user.id,  # type: ignore[arg-type]
+            {},
+            RecordStatus.finished,
+            actor=SystemActor(service_user_id=upu_regular_user.id),
         )
-        assert record.user_id == test_user.id
+        assert record.user_id == upu_regular_user.id
 
 
 # ── Section 3: API constraint on POST /api/records/ ──────────────────────────
@@ -559,6 +585,8 @@ class TestCreateRecordApiConstraint:
             status=RecordStatus.pending,
         )
         test_session.add(existing)
+        test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+        test_session.add(test_user)
         await test_session.commit()
 
         resp = await client.post(

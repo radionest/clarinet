@@ -26,52 +26,29 @@ pub fn is_reports_only(user: User) -> Bool {
   !is_admin_user(user) && list.contains(user.capabilities, reports_capability)
 }
 
-/// Check if user has permission to act on a record
-pub fn has_record_permission(user: Option(User), record: Record) -> Bool {
-  case user {
-    Some(u) ->
-      is_admin_user(u)
-      || record.user_id == Some(u.id)
-      || record.user_id == option.None
-      || record.shared_editing
-    _ -> False
-  }
+/// Whether the server lets the current viewer run `command` on this record —
+/// `RecordRead.allowed_commands`, computed per request by the lifecycle policy
+/// (type role, ownership / shared editing, the edit lock, admin rights).
+pub fn allows(record: Record, command: String) -> Bool {
+  list.contains(record.allowed_commands, command)
 }
 
-/// Check if user can fill a record (Pending or InWork + permission)
-pub fn can_fill_record(record: Record, user: Option(User)) -> Bool {
+/// Check if the viewer can fill a record (Pending or InWork, and the server allows submit)
+pub fn can_fill_record(record: Record, _user: Option(User)) -> Bool {
   case record.status {
-    types.Pending | types.InWork -> has_record_permission(user, record)
+    types.Pending | types.InWork -> allows(record, "submit")
     _ -> False
   }
 }
 
-/// Check if user can edit a finished record (Finished + permission + the
-/// record type allows post-submit edits — `is_editable` is the server-side
-/// verdict on RecordType.editable / edit_window_days; superusers bypass it,
-/// mirroring the backend guard)
-pub fn can_edit_record(record: Record, user: Option(User)) -> Bool {
-  case record.status {
-    types.Finished ->
-      has_record_permission(user, record)
-      && { record.is_editable || is_superuser(user) }
-    _ -> False
-  }
+/// Check if the viewer can edit a finished record's data
+pub fn can_edit_record(record: Record, _user: Option(User)) -> Bool {
+  allows(record, "edit")
 }
 
-fn is_superuser(user: Option(User)) -> Bool {
-  case user {
-    Some(u) -> u.is_superuser
-    None -> False
-  }
-}
-
-/// Check if a user can manually fail a record (Pending or InWork + permission)
-pub fn can_fail_record(record: Record, user: Option(User)) -> Bool {
-  case record.status {
-    types.Pending | types.InWork -> has_record_permission(user, record)
-    _ -> False
-  }
+/// Check if the viewer can manually fail a record
+pub fn can_fail_record(record: Record, _user: Option(User)) -> Bool {
+  allows(record, "fail")
 }
 
 /// Check if the current user can delete a record (admin-only cascade).
@@ -82,7 +59,8 @@ pub fn can_delete_record(_record: Record, user: Option(User)) -> Bool {
   }
 }
 
-/// Check if an admin can restart a record (Finished or Failed + auto/slicer + admin)
+/// Check if an admin can restart a record (Finished or Failed + auto/slicer +
+/// admin, and the server allows restart)
 pub fn can_restart_record(record: Record, user: Option(User)) -> Bool {
   let has_slicer = case record.record_type {
     Some(models.RecordType(slicer_script: Some(_), ..)) -> True
@@ -100,5 +78,14 @@ pub fn can_restart_record(record: Record, user: Option(User)) -> Bool {
     Some(u) -> is_admin_user(u)
     None -> False
   }
-  { is_auto || has_slicer } && is_restartable && is_admin
+  { is_auto || has_slicer }
+  && is_restartable
+  && is_admin
+  && allows(record, "restart")
+}
+
+/// Whether the viewer may give the record back — its owner on a `releasable`
+/// type, or an admin
+pub fn can_release_record(record: Record) -> Bool {
+  allows(record, "unassign")
 }

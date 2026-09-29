@@ -7,13 +7,13 @@ SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
 import random
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from itertools import batched
 from typing import Any, assert_never
 from uuid import UUID
 
-from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
+from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_, update
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,6 @@ from clarinet.exceptions.domain import (
     RecordParentRequiredError,
     RecordTypeNotFoundError,
     RecordUniquePerUserError,
-    UserNotFoundError,
     ValidationError,
 )
 from clarinet.models import Record
@@ -78,6 +77,8 @@ class RecordSearchCriteria:
     # selected, the same parent). Requires ``user_id`` to be set;
     # ``_build_criteria_query`` joins ``RecordType`` automatically.
     exclude_unique_violations: bool = False
+    # Record ids a pool pick must skip (claim-next after a lost race).
+    exclude_ids: set[int] = field(default_factory=set)
     data_queries: list[RecordFindResult] = field(default_factory=list)
 
 
@@ -451,7 +452,9 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordNotFoundError(record_id)
         return record
 
-    async def get_with_relations(self, record_id: int, *, lock: bool = False) -> Record:
+    async def get_with_relations(
+        self, record_id: int, *, lock: bool = False, populate_existing: bool = False
+    ) -> Record:
         """Get a single record with all relationships eagerly loaded.
 
         Args:
@@ -459,6 +462,9 @@ class RecordRepository(BaseRepository[Record]):
             lock: When ``True``, acquire a row-level lock on the record
                 (``SELECT ... FOR UPDATE``). Caller must keep the transaction
                 open until the lock is no longer needed.
+            populate_existing: re-read the row over whatever the identity map
+                holds — required after ``write_transition``, whose Core
+                UPDATE bypasses it.
 
         Returns:
             Record with patient, study, series, and record_type loaded
@@ -479,6 +485,8 @@ class RecordRepository(BaseRepository[Record]):
         )
         if lock:
             statement = statement.with_for_update()
+        if populate_existing:
+            statement = statement.execution_options(populate_existing=True)
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
@@ -659,58 +667,71 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record.id)  # type: ignore
 
-    async def update_status(
-        self, record_id: int, new_status: RecordStatus
-    ) -> tuple[Record, RecordStatus]:
-        """Update record status.
-
-        Args:
-            record_id: Record ID
-            new_status: New status to set
-
-        Returns:
-            Tuple of (record with relations loaded, old status)
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
-        """
-        record = await self.get(record_id)
-        old_status = record.status
-        record.status = new_status
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
-
-    async def update_data(
+    async def write_transition(
         self,
         record_id: int,
-        data: RecordData,
-        new_status: RecordStatus | None = None,
         *,
-        reassign_to: UUID | None = None,
-    ) -> tuple[Record, RecordStatus]:
-        """Update record data and optionally status / owner.
+        expected_status: RecordStatus,
+        expected_user_id: UUID | None,
+        to: RecordStatus,
+        owner: UUID | None,
+        data: RecordData | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        """Apply one decided transition with a single conditional UPDATE; never commits.
 
-        Args:
-            record_id: Record ID.
-            data: New record data.
-            new_status: Optional new status to set.
-            reassign_to: When set, reassign ``user_id`` to this user in the same
-                commit (used by shared_editing "last editor owns it"). Unlike
-                ``assign_user`` this has no status side effect.
+        The only code that writes ``Record.status`` / ``Record.user_id`` after the
+        INSERT, except ``UserRepository.clear_owned_records`` nulling ``user_id``
+        on user deletion (the listener in ``models/record.py`` refuses attribute
+        writes; ``tests/test_status_write_guard.py`` catches stray SQL). The row changes
+        only if its status and owner still equal what the decision saw
+        (``IS NOT DISTINCT FROM`` — ``IS`` on SQLite); otherwise nothing is written
+        and ``False`` lets the caller re-decide. ``owner`` is the owner *after* the
+        command — writing an unchanged owner is harmless, the WHERE clause pins the
+        old one. The caller owns the transaction; no row lock outlives it.
+
+        ``reason`` is appended to ``context_info`` in SQL (newline-separated,
+        never overwritten); ``started_at`` / ``finished_at`` are stamped only when
+        the status *changes* to inwork / finished; ``data=None`` keeps the data.
+
+        The UPDATE bypasses the identity map (re-read with
+        ``get_with_relations(..., populate_existing=True)``) and the SSE capture
+        (the caller emits the record event).
+        """
+        values: dict[str, Any] = {"status": to, "user_id": owner}
+        if data is not None:
+            values["data"] = data
+        if reason:
+            # NULL || text is NULL, hence the coalesce.
+            values["context_info"] = func.coalesce(
+                col(Record.context_info).concat("\n" + reason), reason
+            )
+        if to != expected_status and to == RecordStatus.inwork:
+            values["started_at"] = datetime.now(UTC)
+        if to != expected_status and to == RecordStatus.finished:
+            values["finished_at"] = datetime.now(UTC)
+        stmt = (
+            update(Record)
+            .where(
+                col(Record.id) == record_id,
+                col(Record.status) == expected_status,
+                col(Record.user_id).is_not_distinct_from(expected_user_id),
+            )
+            .values(values)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.session.execute(stmt)
+        return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
+
+    async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
+        """Replace a record's data without touching its status or owner (prefill).
 
         Returns:
-            Tuple of (record with relations loaded, old status).
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
+            Tuple of (record with relations loaded, its status).
         """
         record = await self.get(record_id)
         old_status = record.status
         record.data = data
-        if new_status is not None:
-            record.status = new_status
-        if reassign_to is not None:
-            record.user_id = reassign_to
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
@@ -812,6 +833,8 @@ class RecordRepository(BaseRepository[Record]):
         self,
         record: Record,
         matched_files: dict[str, str],
+        *,
+        commit: bool = True,
     ) -> None:
         """Set matched files on a record by creating RecordFileLink rows.
 
@@ -822,6 +845,8 @@ class RecordRepository(BaseRepository[Record]):
             record: Record with ``record_type.file_links`` eagerly loaded
                 (via ``get_with_relations()`` or ``create_with_relations()``).
             matched_files: Dict mapping file definition name to matched filename.
+            commit: When ``False``, only flush — keeps the links in the
+                caller's transaction (``RecordService._transition``).
         """
         # Build name → FileDefinition map from eager-loaded M2M links
         fd_map = {
@@ -843,7 +868,10 @@ class RecordRepository(BaseRepository[Record]):
                 filename=filename,
             )
             self.session.add(link)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
 
     async def delete_output_file_links(self, record: Record) -> int:
         """Delete RecordFileLink rows for OUTPUT file definitions.
@@ -873,171 +901,15 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
-    async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
-        """Assign a user to a record and set status to inwork.
+    async def append_context_info(self, record_id: int, note: str) -> Record:
+        """Append ``note`` to ``context_info`` (newline-separated, never overwritten).
 
-        Args:
-            record_id: Record ID
-            user_id: User UUID
-
-        Returns:
-            Tuple of (record with relations loaded, old status)
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
-            UserNotFoundError: If user doesn't exist
-            ValidationError: If record is blocked or preparing
+        Soft invalidation; hard invalidation appends inside ``write_transition``.
         """
         record = await self.get(record_id)
-        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
-            raise ValidationError(f"Cannot assign user to a {record.status.value} record")
-        user = await self.session.get(User, user_id)
-        if not user:
-            raise UserNotFoundError(user_id)
-        old_status = record.status
-        record.user_id = user_id
-        record.status = RecordStatus.inwork
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
-
-    async def unassign_user(self, record_id: int) -> tuple[Record, RecordStatus]:
-        """Remove user assignment from a record.
-
-        If the record is currently inwork, status is reset to pending.
-
-        Args:
-            record_id: Record ID.
-
-        Returns:
-            Tuple of (record with relations loaded, old status).
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
-        """
-        record = await self.get(record_id)
-        old_status = record.status
-        record.user_id = None
-        if record.status == RecordStatus.inwork:
-            record.status = RecordStatus.pending
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
-
-    async def ensure_user_assigned(self, record_id: int, user_id: UUID) -> None:
-        """Assign user to a record only if it has no user yet.
-
-        Args:
-            record_id: Record ID.
-            user_id: User UUID to assign.
-        """
-        record = await self.get(record_id)
-        if record.user_id is None:
-            record.user_id = user_id
-            await self.session.commit()
-
-    async def claim_record(self, record_id: int, user_id: UUID) -> Record:
-        """Assign user and set status to inwork.
-
-        Args:
-            record_id: Record ID
-            user_id: User UUID
-
-        Returns:
-            Updated record
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
-            ValidationError: If record is blocked or preparing
-        """
-        record = await self.get(record_id)
-        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
-            raise ValidationError(f"Cannot claim a {record.status.value} record")
-        record.user_id = user_id
-        record.status = RecordStatus.inwork
-        await self.session.commit()
-        await self.session.refresh(record)
-        return record
-
-    async def bulk_update_status(self, record_ids: list[int], new_status: RecordStatus) -> None:
-        """Update status for multiple records.
-
-        Records that don't exist are silently skipped.
-
-        Args:
-            record_ids: List of record IDs
-            new_status: New status to set
-        """
-        for record_id in record_ids:
-            record = await self.get_optional(record_id)
-            if record:
-                record.status = new_status
-        await self.session.commit()
-
-    async def invalidate_record(
-        self,
-        record_id: int,
-        mode: str,
-        source_record_id: int | None = None,
-        reason: str | None = None,
-    ) -> Record:
-        """Invalidate a record by resetting its status and/or appending reason.
-
-        Args:
-            record_id: ID of the record to invalidate.
-            mode: "hard" resets status to pending (keeps user_id); a
-                  ``preparing`` record keeps its status — preparation owns the
-                  exit, only the reason is appended.
-                  "soft" only appends reason to context_info.
-            source_record_id: ID of the record that triggered invalidation.
-            reason: Human-readable reason. Defaults to a generated message.
-
-        Returns:
-            Updated record with relations loaded.
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
-        """
-        record = await self.get(record_id)
-
-        if reason is None and source_record_id is not None:
-            reason = f"Invalidated by record #{source_record_id}"
-
-        if reason:
-            if record.context_info:
-                record.context_info = f"{record.context_info}\n{reason}"
-            else:
-                record.context_info = reason
-
-        if mode == "hard" and record.status != RecordStatus.preparing:
-            record.status = RecordStatus.pending
-
+        record.context_info = f"{record.context_info}\n{note}" if record.context_info else note
         await self.session.commit()
         return await self.get_with_relations(record_id)
-
-    async def fail_record(self, record_id: int, reason: str) -> tuple[Record, RecordStatus]:
-        """Mark a record as failed with a reason appended to context_info.
-
-        Args:
-            record_id: ID of the record to fail.
-            reason: Human-readable reason for failure.
-
-        Returns:
-            Tuple of (record with relations loaded, old status).
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist.
-        """
-        record = await self.get(record_id)
-        old_status = record.status
-
-        prefixed = f"Manually failed: {reason}"
-        if record.context_info:
-            record.context_info = f"{record.context_info}\n{prefixed}"
-        else:
-            record.context_info = prefixed
-
-        record.status = RecordStatus.failed
-        await self.session.commit()
-        return await self.get_with_relations(record_id), old_status
 
     async def count_by_type_and_context(
         self,
@@ -1479,6 +1351,9 @@ class RecordRepository(BaseRepository[Record]):
         # Parent record filter
         if criteria.parent_record_id is not None:
             statement = statement.where(Record.parent_record_id == criteria.parent_record_id)
+
+        if criteria.exclude_ids:
+            statement = statement.where(col(Record.id).not_in(criteria.exclude_ids))
 
         # Role-based access filter
         if criteria.role_names is not None:

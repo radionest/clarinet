@@ -15,6 +15,7 @@ from sqlmodel import select
 from clarinet.models import Record, RecordStatus, RecordType, User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from tests.conftest import create_authenticated_client
+from tests.utils.lifecycle import force_status
 from tests.utils.urls import RECORDS_BASE
 
 ROLE_NAME = "shared-edit-role"
@@ -131,8 +132,7 @@ class TestSharedEditingAuthz:
         rec = await _seed_record(
             test_session, test_patient, test_study, test_series, rt, owner_user
         )
-        rec.status = RecordStatus.inwork
-        await test_session.commit()
+        await force_status(test_session, rec, RecordStatus.inwork)
         resp = await editor_client.patch(
             f"{RECORDS_BASE}/{rec.id}/user", params={"user_id": str(editor_user.id)}
         )
@@ -201,8 +201,9 @@ class TestSharedEditingOwnershipTransfer:
 
         events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
         assert events.status_code == 200
-        vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
-        assert "shared_update" in vias
+        (event,) = [e for e in events.json() if e["kind"] == "data_updated"]
+        assert event["new_value"]["user_id"] == str(editor_user.id)
+        assert event["new_value"]["via"] == "shared_update"
 
     @pytest.mark.asyncio
     async def test_no_spurious_transfer_for_current_owner(
@@ -218,8 +219,9 @@ class TestSharedEditingOwnershipTransfer:
         assert resp.json()["user_id"] == str(editor_user.id)
 
         events = await editor_client.get(f"{RECORDS_BASE}/{rec.id}/events")
-        vias = [e.get("new_value", {}).get("via") for e in events.json() if e["kind"] == "assigned"]
-        assert "shared_update" not in vias
+        (event,) = [e for e in events.json() if e["kind"] == "data_updated"]
+        assert "user_id" not in event["new_value"]
+        assert "via" not in event["new_value"]
 
 
 class TestSharedEditingComputed:

@@ -16,6 +16,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from clarinet.utils.fastapi_users_db import SQLModelBaseUserDB
 
+from .actor import HumanActor, is_admin_by
 from .base import BaseModel
 
 if TYPE_CHECKING:
@@ -86,6 +87,17 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
         from clarinet.models.capability import resolve_capabilities
 
         return resolve_capabilities(self.role_names, self.is_superuser)
+
+    @property
+    def is_admin(self) -> bool:
+        """Superuser OR the built-in ``admin`` role (``models.actor.is_admin_by``)."""
+        return is_admin_by(self.is_superuser, self.role_names)
+
+    def as_actor(self) -> HumanActor:
+        """This user as the record service's actor — ``roles`` must be loaded."""
+        return HumanActor(
+            user_id=self.id, is_superuser=self.is_superuser, role_names=frozenset(self.role_names)
+        )
 
 
 class UserRead(schemas.BaseUser[UUID]):

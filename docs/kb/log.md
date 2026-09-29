@@ -1,5 +1,12 @@
 # Update Log
 
+## 2026-09-28
+
+* **Update**: [Domain model](./domain-model.md) — the status lifecycle is now ten commands behind one transition gateway: a Transitions section (command table, person/admin/system rights, new-owner role check, 403-vs-409 codes, `allowed_commands`, why a conditional UPDATE), writer-stamped timestamps and the direct-write guard, one-transaction audit, and the access-control rules (assign changes the owner only, owner release, admin edit-lock bypass).
+* **Update**: [RecordType flags and uniqueness](./record-types.md) — added `releasable`; the edit lock now yields to admins (superuser or `admin` role) and system actors.
+* **Update**: [Backend architecture](./architecture.md) — record mutations go through `RecordService._transition` with a required `Actor`.
+* **Update**: [RecordFlow](./recordflow.md) — created records need an owner who holds the type's role (409 `OWNER_LACKS_ROLE`), and every record command fires its flows only after its transaction commits.
+
 ## 2026-09-27
 
 * **Update**: [Domain model](./domain-model.md) — the DICOMweb proxy gate is now `current_dicomweb_user`: the same admin-or-role check as `current_role_holder`, with a passed session cookie reused for `session_cache_ttl_seconds`.

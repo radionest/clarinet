@@ -38,6 +38,14 @@ def test_legacy_key_translated_on_patch():
     assert p.unique_by == frozenset({"user"}) and "unique_by" in p.model_fields_set
 
 
+def test_releasable_defaults_to_false():
+    """Owner release is opt-in per type; the DB default matches (schema-integrity guard)."""
+    from clarinet.models import RecordType
+
+    assert RecordType(name="rel-rt").releasable is False
+    assert RecordType.__table__.columns["releasable"].server_default is not None
+
+
 def test_optional_unique_by_canonicalized_at_dto_layer():
     from clarinet.models.record_type import RecordTypeOptional
 

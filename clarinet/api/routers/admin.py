@@ -8,15 +8,16 @@ from fastapi import APIRouter
 from fastapi import Path as PathParam
 
 from clarinet.api.dependencies import (
+    ActorDep,
     AdminServiceDep,
     AdminUserDep,
-    AuditActorDep,
     PaginationDep,
     RecordEventRepositoryDep,
     RecordServiceDep,
     SessionDep,
 )
-from clarinet.models import Record, RecordEventFind, RecordEventRead, RecordRead
+from clarinet.api.masking import record_read_for
+from clarinet.models import RecordEventFind, RecordEventRead, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
@@ -57,73 +58,95 @@ async def get_admin_stats(
     return await service.get_stats()
 
 
-@router.patch("/records/{record_id}/assign", response_model=RecordRead)
+@router.patch(
+    "/records/{record_id}/assign",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "The user cannot access the record type, unique_by violated, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def admin_assign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     user_id: UUID,
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
-) -> Record:
-    """Assign a user to a record (admin only).
+    actor: ActorDep,
+) -> RecordRead:
+    """Make ``user_id`` the owner (admin only). Only a pending record moves to inwork.
 
     Args:
         record_id: The record to assign.
         user_id: The user UUID to assign.
-        _current_user: Authenticated admin user (superuser or admin role).
+        current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
-    return record
+    record, _ = await service.assign_user(record_id, user_id, actor=actor)
+    return record_read_for(record, current_user)
 
 
-@router.patch("/records/{record_id}/status", response_model=RecordRead)
+@router.patch(
+    "/records/{record_id}/status",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "A preparing record may not jump to inwork/finished, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def admin_update_record_status(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     record_status: RecordStatus,
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
-) -> Record:
+    actor: ActorDep,
+) -> RecordRead:
     """Set any status on a record (admin only).
 
     Args:
         record_id: The record to update.
         record_status: New status to set.
-        _current_user: Authenticated admin user (superuser or admin role).
+        current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.update_status(record_id, record_status, actor_id=actor)
-    return record
+    record, _ = await service.update_status(record_id, record_status, actor=actor)
+    return record_read_for(record, current_user)
 
 
-@router.delete("/records/{record_id}/user", response_model=RecordRead)
+@router.delete(
+    "/records/{record_id}/user",
+    response_model=RecordRead,
+    responses={409: {"description": "The record changed concurrently"}},
+)
 async def admin_unassign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
-) -> Record:
+    actor: ActorDep,
+) -> RecordRead:
     """Remove user assignment from a record (admin only).
 
     If the record is inwork, status is reset to pending.
 
     Args:
         record_id: The record to unassign.
-        _current_user: Authenticated admin user (superuser or admin role).
+        current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.unassign_user(record_id, actor_id=actor)
-    return record
+    record, _ = await service.unassign_user(record_id, actor=actor)
+    return record_read_for(record, current_user)
 
 
 @router.delete(
@@ -135,13 +158,13 @@ async def delete_record_cascade(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> DeleteRecordResult:
     """Delete a record with all descendants and their OUTPUT files (admin only).
 
     Aborts with 409 Conflict if any record in the subtree is in ``inwork`` status.
     """
-    deleted_ids, files_removed = await service.delete_record_cascade(record_id, actor_id=actor)
+    deleted_ids, files_removed = await service.delete_record_cascade(record_id, actor=actor)
     return DeleteRecordResult(deleted_ids=deleted_ids, files_removed=files_removed)
 
 
@@ -150,13 +173,13 @@ async def clear_record_output_files(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> ClearOutputFilesResult:
     """Delete OUTPUT files from disk for a non-finished record (admin only).
 
     Intended for clearing stale output files before retrying a failed pipeline task.
     """
-    deleted_files, deleted_links = await service.clear_output_files(record_id, actor_id=actor)
+    deleted_files, deleted_links = await service.clear_output_files(record_id, actor=actor)
     return ClearOutputFilesResult(deleted_files=deleted_files, deleted_links=deleted_links)
 
 

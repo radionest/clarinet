@@ -193,7 +193,7 @@ def test_update_record_status(case):
 
     Targets: RecordStatus enum validation, state machine transitions,
     RecordFlow triggers on status change, AuthorizedRecordDep RBAC,
-    timestamp auto-update (started_at/finished_at via event listener).
+    timestamp auto-update (started_at/finished_at via the writer).
     """
     case.call_and_validate()
 

@@ -11,7 +11,6 @@ from clarinet.exceptions.domain import (
     RecordNotFoundError,
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
-    ValidationError,
 )
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
@@ -432,135 +431,28 @@ class TestRecordRepository:
         assert len(records) >= 1
 
     @pytest.mark.asyncio
-    async def test_update_status(self, env):
-        rec, old_status = await env["repo"].update_status(env["record"].id, RecordStatus.inwork)
-        assert old_status == RecordStatus.pending
-        assert rec.status == RecordStatus.inwork
-
-    @pytest.mark.asyncio
     async def test_update_data(self, env):
+        """update_data is data-only: status and owner are untouched (prefill)."""
         data = {"label": "positive"}
-        rec, old_status = await env["repo"].update_data(
-            env["record"].id, data, RecordStatus.finished
-        )
+        original_user_id = env["user"].id
+        rec, old_status = await env["repo"].update_data(env["record"].id, data)
         assert rec.data == data
         assert old_status == RecordStatus.pending
-
-    @pytest.mark.asyncio
-    async def test_assign_user(self, env):
-        new_user = make_user()
-        env["session"].add(new_user)
-        await env["session"].commit()
-        await env["session"].refresh(new_user)
-        rec, _old_status = await env["repo"].assign_user(env["record"].id, new_user.id)
-        assert rec.user_id == new_user.id
-        assert rec.status == RecordStatus.inwork
-
-    @pytest.mark.asyncio
-    async def test_claim_record(self, env):
-        rec = await env["repo"].claim_record(env["record"].id, env["user"].id)
-        assert rec.user_id == env["user"].id
-        assert rec.status == RecordStatus.inwork
-
-    @pytest.mark.asyncio
-    async def test_claim_record_rejects_preparing(self, env):
-        env["record"].status = RecordStatus.preparing
-        await env["session"].commit()
-        with pytest.raises(ValidationError):
-            await env["repo"].claim_record(env["record"].id, env["user"].id)
-
-    @pytest.mark.asyncio
-    async def test_claim_record_rejects_blocked(self, env):
-        env["record"].status = RecordStatus.blocked
-        await env["session"].commit()
-        with pytest.raises(ValidationError):
-            await env["repo"].claim_record(env["record"].id, env["user"].id)
-
-    @pytest.mark.asyncio
-    async def test_ensure_user_assigned_when_no_user(self, env):
-        # Clear user assignment
-        env["record"].user_id = None
-        await env["session"].commit()
-        new_user = make_user()
-        env["session"].add(new_user)
-        await env["session"].commit()
-        await env["session"].refresh(new_user)
-
-        await env["repo"].ensure_user_assigned(env["record"].id, new_user.id)
-        rec = await env["repo"].get(env["record"].id)
-        assert rec.user_id == new_user.id
-
-    @pytest.mark.asyncio
-    async def test_ensure_user_assigned_noop_when_set(self, env):
-        original_user_id = env["user"].id
-        new_user = make_user()
-        env["session"].add(new_user)
-        await env["session"].commit()
-        await env["session"].refresh(new_user)
-
-        await env["repo"].ensure_user_assigned(env["record"].id, new_user.id)
-        rec = await env["repo"].get(env["record"].id)
-        assert rec.user_id == original_user_id  # should NOT change
-
-    @pytest.mark.asyncio
-    async def test_unassign_user(self, env):
-        # Start with inwork + assigned user
-        env["record"].status = RecordStatus.inwork
-        await env["session"].commit()
-
-        rec, old_status = await env["repo"].unassign_user(env["record"].id)
-        assert rec.user_id is None
         assert rec.status == RecordStatus.pending
-        assert old_status == RecordStatus.inwork
+        assert rec.user_id == original_user_id
 
     @pytest.mark.asyncio
-    async def test_unassign_user_finished_keeps_status(self, env):
-        env["record"].status = RecordStatus.finished
-        await env["session"].commit()
-
-        rec, old_status = await env["repo"].unassign_user(env["record"].id)
-        assert rec.user_id is None
-        assert rec.status == RecordStatus.finished
-        assert old_status == RecordStatus.finished
-
-    @pytest.mark.asyncio
-    async def test_bulk_update_status(self, env):
-        await env["repo"].bulk_update_status([env["record"].id], RecordStatus.pause)
-        rec = await env["repo"].get(env["record"].id)
-        assert rec.status == RecordStatus.pause
-
-    @pytest.mark.asyncio
-    async def test_invalidate_record_hard(self, env):
-        # Set to inwork first
-        env["record"].status = RecordStatus.inwork
-        await env["session"].commit()
-
-        rec = await env["repo"].invalidate_record(
-            env["record"].id, mode="hard", source_record_id=42
-        )
-        assert rec.status == RecordStatus.pending
-        assert "Invalidated by record #42" in rec.context_info
-
-    @pytest.mark.asyncio
-    async def test_invalidate_record_hard_keeps_preparing(self, env):
-        env["record"].status = RecordStatus.preparing
-        await env["session"].commit()
-
-        rec = await env["repo"].invalidate_record(
-            env["record"].id, mode="hard", source_record_id=42
-        )
-        # Preparation owns the exit — hard mode must not flip preparing to pending
-        assert rec.status == RecordStatus.preparing
-        assert "Invalidated by record #42" in rec.context_info
-
-    @pytest.mark.asyncio
-    async def test_invalidate_record_soft(self, env):
-        rec = await env["repo"].invalidate_record(
-            env["record"].id, mode="soft", reason="Manual note"
-        )
+    async def test_append_context_info(self, env):
+        rec = await env["repo"].append_context_info(env["record"].id, "Manual note")
         assert "Manual note" in rec.context_info
-        # Status unchanged
+        # Soft-only: append_context_info never touches status
         assert rec.status == RecordStatus.pending
+
+    @pytest.mark.asyncio
+    async def test_append_context_info_appends_to_existing(self, env):
+        await env["repo"].append_context_info(env["record"].id, "first")
+        rec = await env["repo"].append_context_info(env["record"].id, "second")
+        assert rec.context_info == "first\nsecond"
 
     @pytest.mark.asyncio
     async def test_count_by_type_and_context(self, env):

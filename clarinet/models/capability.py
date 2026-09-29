@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from enum import StrEnum
 
 from clarinet.exceptions.domain import ConfigurationError
+from clarinet.models.actor import is_admin_by
 from clarinet.settings import settings
 
 
@@ -31,7 +32,7 @@ def resolve_capabilities(role_names: Iterable[str], is_superuser: bool) -> list[
     their roles via ``settings.role_capabilities``.
     """
     names = set(role_names)
-    if is_superuser or "admin" in names:
+    if is_admin_by(is_superuser, names):
         return sorted(KNOWN_CAPABILITIES)
     granted: set[str] = set()
     for role in names:

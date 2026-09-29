@@ -25,9 +25,14 @@ Choose `method` based on `record.data`: use `PATCH` if data exists, `POST` other
 
 Post-submit locking: `RecordType.editable=False` (or an expired
 `RecordType.edit_window_days` window) makes PATCH on finished records return
-409 for non-superusers — same for any status change of a finished record and
-hard invalidation. Pipeline service tokens are superusers, so workflow code
-is unaffected.
+409 for non-admins (superuser or `admin` role bypass it) — same for hard
+invalidation of a finished record. A raw status change on a non-admin is 403
+regardless of status — the edit lock never even runs for it; only admins and
+the service token may set status directly. System actors (RecordFlow,
+pipeline workers, cron) bypass the edit lock too, but because
+`record_lifecycle.decide` only runs person-only checks for a `HumanActor` —
+not because the service account is a superuser — so workflow code is
+unaffected either way.
 
 ## `record.context_info` — narrow markdown sidecar (NOT `record.data`)
 

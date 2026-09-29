@@ -152,7 +152,8 @@ Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.
 - `services/dicom/` — DICOM client (pynetdicom)
 - `services/slicer/` — 3D Slicer integration
 - `services/image/` — Image processing (numpy)
-- `services/record_service.py` — Record mutations with RecordFlow triggers + `check_files()` (auto-unblock, checksum comparison, file-change notifications)
+- `services/record_service.py` — Record mutations with RecordFlow triggers + `check_files()` (auto-unblock, checksum comparison, file-change notifications) — every status/owner/data change goes through `_transition` (`services/record_lifecycle.py` decides, `RecordRepository.write_transition` writes, one transaction with the audit row)
+  - Adding a lifecycle command: a `Command` dataclass + its arms in `record_lifecycle.py` (`_authorize_person`, `_apply_contract`), a `_PROBES` entry and a `clarinet.types.RecordCommandName` member (feeds `allowed_commands`), rows in `tests/test_record_lifecycle_policy.py`; nothing else may write `status`/`user_id` (sole exception: `UserRepository.clear_owned_records` nulling `user_id` on user deletion) — the ORM listener refuses attribute writes, `tests/test_status_write_guard.py` catches stray SQL status writes
 - `services/study_service.py` — Study management with entity-creation triggers
 
 `clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow and pipeline tasks). See file for full method list.

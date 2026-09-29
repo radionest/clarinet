@@ -160,6 +160,9 @@ async def test_parent_partition_blocks_same_parent(
     different parent for the same user is a distinct tuple and succeeds."""
     p1 = await _make_anchor(test_session, seed_none_type, test_patient, test_study, test_series)
     p2 = await _make_anchor(test_session, seed_none_type, test_patient, test_study, test_series)
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     r1 = await create_record(
         client,
@@ -202,8 +205,10 @@ async def test_parentless_default_collapses_to_per_user(
 ):
     """Default unique_by ({"user","parent"}) collapses to plain per-user
     matching when no record ever sets a parent (NULL == NULL on both sides)."""
-    other_user = make_user()
+    other_user = make_user(is_superuser=True)
     test_session.add(other_user)
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
     await test_session.commit()
     await test_session.refresh(other_user)
 
@@ -272,9 +277,10 @@ async def test_quota_and_uniqueness_together(
     """max_records=2 (STUDY) + unique_by={"user"}: 2 distinct users fill the
     quota; a duplicate creation by an existing user 409s on uniqueness before
     the quota is reached; a third distinct user 409s on the quota instead."""
-    user_a = make_user()
-    user_b = make_user()
-    user_c = make_user()
+    # superuser: passes the new-owner role check (type has no role)
+    user_a = make_user(is_superuser=True)
+    user_b = make_user(is_superuser=True)
+    user_c = make_user(is_superuser=True)
     test_session.add_all([user_a, user_b, user_c])
     await test_session.commit()
     for u in (user_a, user_b, user_c):
@@ -405,6 +411,9 @@ async def test_unassigned_does_not_block_assigned(
         parent_record_id=anchor.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp = await create_record(
         client,
@@ -463,6 +472,9 @@ async def test_claim_enforces_partitions(
         parent_record_id=q.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp_p = await client.patch(
         f"{RECORDS_BASE}/{candidate_p.id}/user", params={"user_id": str(test_user.id)}
@@ -568,6 +580,9 @@ async def test_claim_parent_only_record_succeeds(
         parent_record_id=anchor.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp = await client.patch(
         f"{RECORDS_BASE}/{child.id}/user", params={"user_id": str(test_user.id)}
@@ -650,6 +665,9 @@ async def test_assign_excludes_only_self_not_other_conflicts(
         parent_record_id=p.id,
         status=RecordStatus.pending,
     )
+    test_user.is_superuser = True  # passes the new-owner role check (type has no role)
+    test_session.add(test_user)
+    await test_session.commit()
 
     resp = await client.patch(
         f"{RECORDS_BASE}/{candidate.id}/user", params={"user_id": str(test_user.id)}

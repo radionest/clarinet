@@ -4,6 +4,18 @@
 
 ### Added
 
+- **`RecordType.releasable`** (default `false`): the owner of a `pending` or
+  `inwork` record of the type may give it back — `DELETE /api/records/{id}/user`
+  clears the owner and returns `inwork` to `pending` (`on_status("pending")`
+  flows fire, as for an admin unassign). Admins and the service token may call
+  it on any record. Schema change — see Breaking.
+- **Record responses carry `allowed_commands`** — the lifecycle commands the
+  caller may run on the record now, decided by the same policy that guards the
+  endpoints. The frontend shows its record actions from it.
+- **Lifecycle 409s carry a machine-readable `code`** (`TRANSITION_NOT_ALLOWED`,
+  `RECORD_EDIT_LOCKED`, `CONCURRENT_TRANSITION`, `OWNER_LACKS_ROLE`) and the
+  record's current status in `metadata.status`; `detail` texts are unchanged,
+  so clients can move off matching them.
 - **The NRRD header to LPS grid resolver is public.**
   `clarinet.services.image.nrrd_grid_from_header(header, source=None, *,
   spatial=slice(0, 3))` and its `NrrdGrid` result place a pynrrd header's
@@ -33,6 +45,84 @@
 
 ### Breaking
 
+- **Record status, owner and submitted data change only through one transition
+  gateway (#629).** Each change is a command (`create`, `claim`, `assign`,
+  `unassign`, `submit`, `edit`, `fail`, `restart`, `set_status`, `unblock`)
+  decided by one policy (`clarinet/services/record_lifecycle.py`), written by
+  one conditional UPDATE (`RecordRepository.write_transition`) and committed in
+  one transaction with its audit event, so a concurrent change is re-evaluated
+  instead of overwritten and no transition is left without its event.
+  Service-token callers (RecordFlow, workers, cron, operator scripts) keep every
+  transition they use, the 409 texts and the hard-invalidation semantics,
+  except that a new owner must hold the record type's role or be a superuser
+  (items 8/10 below) — the service token is not exempt from that check.
+  Behaviour changes:
+  1. `PATCH /api/records/{id}/status` and `PATCH /api/records/bulk/status` are
+     admin and service-token only — other people get 403 (the owner could set
+     any status).
+  2. Assign (`PATCH /api/records/{id}/user`, `PATCH /api/admin/records/{id}/assign`)
+     sets the owner only; just `pending` moves to `inwork`. It no longer re-opens
+     a finished record (the dashboard "Change" included) and now works on
+     `blocked` / `preparing` (was 422). Re-open a record by setting its status.
+  3. `POST /api/records` accepts only `status: pending` (`preparing` for admins
+     and the service token), 409 otherwise, and a non-admin may name only
+     themselves or nobody as `user_id` (403).
+  4. The edit lock (`editable=False`, `edit_window_days`) yields to admins —
+     superuser **or** `admin` role — instead of superusers only, in the API and
+     the frontend.
+  5. A non-admin claiming an unassigned record outside `pending`/`inwork` —
+     finished, failed, paused, blocked, or preparing — gets 409 (was 403).
+  6. An `admin`-role user who lacks a record type's role gets 403 on
+     `/api/admin/records/{id}/status|assign|user` for records of that type.
+  7. Kept: a system submit of an unassigned record makes the service account
+     its owner.
+  8. A new owner must hold the record type's role or be a superuser — on
+     assign, and on create with a given or inherited `user_id` — for every
+     caller, the service token included: 409 `OWNER_LACKS_ROLE` (was accepted;
+     the owner could then neither see nor submit the record). Check flows and
+     scripts that assign records or create them for a user.
+  9. Submitting `?status=failed` to an already failed record no longer re-fires
+     `on_status("failed")`: status flows fire only on a status change (hard
+     invalidation still always fires). A command that changes nothing (e.g.
+     re-claiming one's own record) writes no audit event.
+  10. RecordFlow / pipeline creates using `inherit_user` / `inherit_user_from_parent`
+      onto a type whose inherited owner lacks the type's role — including
+      `role_name = null` types, which are superuser-only — now fail the same
+      way (409 `OWNER_LACKS_ROLE`): the flow logs it at ERROR and continues,
+      and nothing is created.
+  11. `POST /api/records/claim-next` no longer lets two concurrent callers take
+      the same record (SQLite has no row locks; the second silently took it
+      over): the loser picks another record, 3 picks in all — 404 only when
+      the pool is empty, 409 `CONCURRENT_TRANSITION` ("Every record picked from
+      the pool was taken first; try again.") after three lost races.
+
+  **Downstream migration:** generate an Alembic revision adding
+  `recordtype.releasable` (NOT NULL, `server_default=false`) — required even if
+  no type sets the flag; without it every RecordType query fails, and
+  `verify_migrations_applied` cannot catch it.
+
+  Audit: `from_status` / `to_status` are null when a command did not change the
+  status (e.g. assigning a finished record); a submit that auto-assigns an
+  unassigned record, and a shared-editing owner transfer, now write ONE event
+  (`data_submitted` / `data_updated` carrying the owner change in
+  `new_value.user_id`/`via`) instead of a separate `assigned` event — the
+  activity feed's "assigned" filter no longer shows them. Deleting a user now
+  clears the records it owned with one SQL `UPDATE` (`user_id = NULL`, status
+  untouched, outside the transition gateway) — previously the ORM's
+  FK-nullify-on-delete cascade nulled `record.user_id` when
+  `session.delete(user)` flushed, which the new direct-write guard on
+  `Record.user_id` would now trip; the raw UPDATE sidesteps the guard, still writes no audit row, and
+  publishes the record `updated` SSE events the ORM nullify used to.
+  Python API: every mutating `RecordService` method takes a required keyword-only
+  `actor` (`clarinet.models.actor.SystemActor | HumanActor`); `acting_user=`,
+  `actor_id=`, `claim_record(..., user_id)`, `claim_random_from_pool(..., user_id)`,
+  `submit_data(..., user_id=)`, `ensure_record_editable`, `AuditActorDep` and the
+  `RecordRepository` status writers are gone. Assigning `record.status` or
+  `record.user_id` on a saved record raises `DirectRecordWriteError`;
+  `started_at` / `finished_at` are stamped by the writer only.
+  Related, out of scope: #607 (`AuthorizedRecordDep` still does not recognise
+  the `admin` role — unchanged). Follow-up: #691 — edit a finished record by
+  reopening it.
 - **`clarinet.api.masking.mask_records` is async and takes a repository.**
   `await mask_records(records, user, repo)` (and the new single-record
   `mask_record`) resolve the viewer-list anon UIDs through

@@ -31,7 +31,7 @@ from starlette.responses import Response
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
-    AuditActorDep,
+    ActorDep,
     AuthorizedRecordDep,
     ClientStoragePathDep,
     CurrentUserDep,
@@ -43,10 +43,8 @@ from clarinet.api.dependencies import (
     RecordServiceDep,
     RecordTypeRepositoryDep,
     RecordTypeServiceDep,
-    SeriesRepositoryDep,
     SessionDep,
     SlicerServiceDep,
-    authorize_mutable_record_access,
     get_client_ip,
     get_user_role_names,
     is_admin,
@@ -80,6 +78,7 @@ from clarinet.models import (
     RecordTypeRead,
     User,
 )
+from clarinet.models.actor import HumanActor
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import (
     FileValidationResult,
@@ -87,7 +86,7 @@ from clarinet.services.file_validation import (
     validate_record_files,
 )
 from clarinet.services.grid_policy import enforce_output_grids
-from clarinet.services.record_service import ensure_record_editable
+from clarinet.services.record_lifecycle import Edit, Submit
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
@@ -96,6 +95,7 @@ from clarinet.types import RecordData
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from clarinet.models.actor import Actor
     from clarinet.repositories.record_repository import RecordRepository
     from clarinet.services.record_service import RecordService
     from clarinet.services.record_type_service import RecordTypeService
@@ -271,14 +271,17 @@ async def get_my_available_record_types(
     response_model=RecordRead,
     responses={
         404: {"description": "No claimable record of this type in the pool"},
-        409: {"description": "unique_by violated for this user and type"},
+        409: {
+            "description": "unique_by violated for this user and type, "
+            "or every picked record was taken first"
+        },
     },
 )
 async def claim_next_record(
     record_type_name: Annotated[str, Query(min_length=1)],
     service: RecordServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
     """Claim a random unassigned pending record of ``record_type_name`` from the pool.
 
@@ -300,7 +303,7 @@ async def claim_next_record(
         user_id=None if user.is_superuser else user.id,
     )
     criteria = _build_record_search_criteria(query, user)
-    record = await service.claim_random_from_pool(criteria, user.id, actor_id=actor)
+    record = await service.claim_random_from_pool(criteria, actor=actor)
     if record is None:
         raise NOT_FOUND.with_context(f"No available record of type '{record_type_name}' to claim")
     return await mask_record(record, user, service.repo)
@@ -435,14 +438,28 @@ async def check_record_type_role(
         Depends(check_record_constraints),
         Depends(check_storage_path_admin_only),
     ],
+    responses={
+        404: {"description": "Unknown owner user_id"},
+        409: {
+            "description": "Initial status other than pending (or preparing for admins and "
+            "the service token); the owner, given or inherited, lacks the type's role "
+            "(code=OWNER_LACKS_ROLE); or a max_records/unique_by constraint"
+        },
+    },
 )
 async def add_record(
     new_record: RecordCreate,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     user: CurrentUserDep,
 ) -> RecordRead:
     """Create a new record.
+
+    Only ``status: pending`` may be requested (``preparing`` too for admins
+    and the service token) — 409 otherwise; a non-admin may name only
+    themselves or nobody as ``user_id`` — 403 otherwise; the owner, given or
+    inherited, must hold the type's role or be a superuser — 409
+    ``OWNER_LACKS_ROLE`` otherwise.
 
     If the RecordType defines required input files and they are not yet
     present, the record is created with ``blocked`` status instead of
@@ -452,7 +469,7 @@ async def add_record(
     parent record only if the RecordType has ``inherit_user_from_parent``
     enabled and no explicit ``user_id`` is provided.
     """
-    record = await service.create_record(Record(**new_record.model_dump()), actor_id=actor)
+    record = await service.create_record(Record(**new_record.model_dump()), actor=actor)
     return await mask_record(record, user, service.repo)
 
 
@@ -460,86 +477,112 @@ async def add_record(
     "/bulk/status",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,  # Required: PEP 563 makes -> None a truthy ForwardRef, triggering FastAPI 204 body assertion
+    responses={
+        409: {
+            "description": "A preparing record may not jump to inwork/finished, "
+            "or a record changed concurrently"
+        }
+    },
 )
 async def bulk_update_record_status(
     record_ids: list[Annotated[int, Body(ge=1, le=2147483647)]],
     new_status: RecordStatus,
     service: RecordServiceDep,
-    user: CurrentUserDep,
-    repo: RecordRepositoryDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> None:
-    """Update status for multiple records at once.
+    """Set one status on many records — admins and the service token only (403 otherwise).
 
-    Non-superusers need the type's role and ``MutableRecordDep`` rights on
-    every target record. 409 when any target record is finished and its type
-    locks submitted records (``editable`` / ``edit_window_days``) —
-    non-superusers only.
+    All or nothing: 409 when any target's status refuses it (preparing →
+    inwork/finished) or it changed concurrently. Preparing → pending re-validates
+    files per record (may land in blocked).
     """
-    if not user.is_superuser:
-        user_roles = get_user_role_names(user)
-        for rid in record_ids:
-            record = await repo.get_with_relations(rid)
-            role_name = record.record_type.role_name
-            if role_name is None or role_name not in user_roles:
-                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
-            await authorize_mutable_record_access(record, user)
-    await service.bulk_update_status(record_ids, new_status, acting_user=user, actor_id=actor)
+    await service.bulk_update_status(record_ids, new_status, actor=actor)
 
 
-@router.patch("/{record_id}/status", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/status",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "A preparing record may not jump to inwork/finished, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
     service: RecordServiceDep,
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
-    """Update a record's status.
+    """Set a record's status — admins and the service token only (403 otherwise).
 
-    409 for non-superusers on any status change of a finished record whose
-    type locks submitted records (``editable`` / ``edit_window_days``) —
-    re-opening would let the user change the answer via a fresh POST.
+    409 on preparing → inwork/finished; preparing → pending re-validates
+    files (may land in blocked); the current status again is a no-op.
     """
-    record, _ = await service.update_status(
-        record_id, record_status, acting_user=user, actor_id=actor
-    )
+    record, _ = await service.update_status(record_id, record_status, actor=actor)
     return await mask_record(record, user, service.repo)
 
 
-@router.patch("/{record_id}/user", response_model=RecordRead)
+@router.patch(
+    "/{record_id}/user",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "A claim outside pending/inwork; the new owner lacks the type's "
+            "role (code=OWNER_LACKS_ROLE); unique_by violated; or the record changed "
+            "concurrently"
+        }
+    },
+)
 async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
     service: RecordServiceDep,
-    authorized_record: AuthorizedRecordDep,
+    _authorized_record: AuthorizedRecordDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
     """Assign a record to a user.
 
-    Non-admins may only claim for themselves an unassigned ``pending`` /
-    ``inwork`` record — what the frontend's auto-assign on open does.
-    Re-targeting a colleague's record would side-step the owner check of
-    ``MutableRecordDep``, and assigning forces ``inwork``, so claiming a
-    finished record would re-open it past its edit lock. Admins may assign
-    anyone, but still only past the read gate: a non-superuser admin needs
-    the type's role.
+    A non-admin naming themselves claims the record — unassigned or already
+    theirs, pending or inwork (the frontend's auto-assign on open). Anything
+    else is an assign, which only admins and the service token may do; it sets
+    the owner, and only a pending record moves to inwork.
     """
-    # ponytail: check-then-write, not atomic — a self-claim racing another assign
-    # of the same free record: last wins. Fix with a conditional
-    # UPDATE ... WHERE user_id IS NULL (a row lock alone won't do).
-    if not is_admin(user) and (
-        user_id != user.id
-        or authorized_record.user_id is not None
-        or authorized_record.status not in (RecordStatus.pending, RecordStatus.inwork)
-    ):
-        raise AuthorizationError(
-            "Only an admin can assign another user, take an assigned record, "
-            "or claim one that is not pending or inwork"
-        )
-    record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
+    if isinstance(actor, HumanActor) and not actor.is_admin and user_id == actor.user_id:
+        record = await service.claim_record(record_id, actor=actor)
+    else:
+        record, _ = await service.assign_user(record_id, user_id, actor=actor)
+    return await mask_record(record, user, service.repo)
+
+
+@router.delete(
+    "/{record_id}/user",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "The owner may release only a pending or inwork record, "
+            "or the record changed concurrently"
+        }
+    },
+)
+async def release_record(
+    record_id: int,
+    service: RecordServiceDep,
+    _authorized_record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+    actor: ActorDep,
+) -> RecordRead:
+    """Clear the record's owner; inwork falls back to pending.
+
+    The owner may release their own pending/inwork record when its type is
+    ``releasable``; admins and the service token may unassign any record.
+    403 otherwise.
+    """
+    record, _ = await service.unassign_user(record_id, actor=actor)
     return await mask_record(record, user, service.repo)
 
 
@@ -550,7 +593,7 @@ async def update_record_context_info(
     service: RecordServiceDep,
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> RecordRead:
     """Replace ``context_info`` (markdown source) on a record.
 
@@ -559,7 +602,7 @@ async def update_record_context_info(
     unassigned. Pass ``null`` to clear the field. The rendered HTML is
     available on the response as ``context_info_html``.
     """
-    record = await service.update_context_info(record_id, body.context_info, actor_id=actor)
+    record = await service.update_context_info(record_id, body.context_info, actor=actor)
     return await mask_record(record, user, service.repo)
 
 
@@ -578,7 +621,7 @@ async def _process_submission(
     session: AsyncSession | None = None,
     client_ip: str | None = None,
     client_storage_path: str | None = None,
-    actor_id: UUID | None = None,
+    actor: Actor,
 ) -> RecordRead:
     """Validate, optionally run Slicer, and persist record data.
 
@@ -599,6 +642,7 @@ async def _process_submission(
         client_storage_path: Per-client Slicer storage prefix (from
             ``X-Clarinet-Storage-Path-Client`` header). Forwarded to
             ``build_slicer_context_async`` for the validator script.
+        actor: Who submits (the lifecycle policy's subject).
 
     Returns:
         Masked ``RecordRead``.
@@ -674,9 +718,7 @@ async def _process_submission(
         repaired = await enforce_output_grids(record_read, parent=parent_read)
 
     if is_update:
-        updated, _ = await service.update_data(
-            record_id, validated_data, acting_user=user, actor_id=actor_id
-        )
+        updated, _ = await service.update_data(record_id, validated_data, actor=actor)
         # A conform repair rewrote OUTPUT bytes; only submit_data runs the
         # post-commit output sync, so the update path must sync explicitly or
         # RecordFileLink.checksum keeps describing the pre-repair bytes and
@@ -687,24 +729,21 @@ async def _process_submission(
         if file_result and file_result.matched_files:
             await repo.set_files(record, file_result.matched_files)
 
-        updated, _ = await service.submit_data(
-            record_id,
-            validated_data,
-            new_status,
-            user_id=user.id,
-            actor_id=actor_id,
-        )
+        updated, _ = await service.submit_data(record_id, validated_data, new_status, actor=actor)
 
     return await mask_record(updated, user, repo)
-
-
-_SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 
 
 @router.post(
     "/{record_id}/data",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is blocked, preparing or already finished; invalid submit "
+            "status; output file grid mismatch; auto-assigning the submitter violates "
+            "unique_by; or the record changed concurrently"
+        }
+    },
 )
 async def submit_record_data(
     record_id: int,
@@ -713,7 +752,7 @@ async def submit_record_data(
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     data: RecordData = Body(),
     submit_status: RecordStatus | None = Query(default=None, alias="status"),
 ) -> RecordRead:
@@ -724,23 +763,9 @@ async def submit_record_data(
     record = authorized_record
     target_status = submit_status or RecordStatus.finished
 
-    if target_status not in _SUBMIT_STATUSES:
-        raise CONFLICT.with_context(
-            f"Invalid submit status '{target_status.value}'. "
-            f"Allowed: {', '.join(s.value for s in _SUBMIT_STATUSES)}."
-        )
-
-    if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context(
-            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
-        )
-
-    if record.status == RecordStatus.preparing:
-        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
-
-    if record.status == RecordStatus.finished:
-        raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
-
+    # Refuse before schema validation and enforce_output_grids (which may repair
+    # or delete OUTPUT files); the service re-checks against a fresh snapshot.
+    service.precheck(authorized_record, Submit(target_status), actor)
     return await _process_submission(
         record_id=record_id,
         record=record,
@@ -751,14 +776,19 @@ async def submit_record_data(
         rt_service=rt_service,
         is_update=False,
         new_status=target_status,
-        actor_id=actor,
+        actor=actor,
     )
 
 
 @router.patch(
     "/{record_id}/data",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is not finished; its type locks submitted records "
+            "(non-admins); output file grid mismatch; or the record changed concurrently"
+        }
+    },
 )
 async def update_record_data(
     record_id: int,
@@ -767,20 +797,17 @@ async def update_record_data(
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     data: RecordData = Body(),
 ) -> RecordRead:
     """Update a record's data.
 
-    409 when the record type forbids post-submit edits (``editable=False``)
-    or the ``edit_window_days`` window has passed (non-superusers only).
+    409 when the record is not finished, or its type locks submitted records
+    for a non-admin.
     """
     record = authorized_record
 
-    if record.status != RecordStatus.finished:
-        raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
-
-    ensure_record_editable(record, user)
+    service.precheck(authorized_record, Edit(), actor)
 
     return await _process_submission(
         record_id=record_id,
@@ -791,7 +818,7 @@ async def update_record_data(
         service=service,
         rt_service=rt_service,
         is_update=True,
-        actor_id=actor,
+        actor=actor,
     )
 
 
@@ -864,7 +891,13 @@ async def prefill_record_data_patch(
 @router.post(
     "/{record_id}/submit",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is blocked, preparing or already finished; output file "
+            "grid mismatch; auto-assigning the submitter violates unique_by; or the record "
+            "changed concurrently"
+        }
+    },
 )
 async def submit_record_with_validation(
     record_id: int,
@@ -875,7 +908,7 @@ async def submit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
@@ -899,16 +932,7 @@ async def submit_record_with_validation(
     """
     record = authorized_record
 
-    if record.status == RecordStatus.blocked:
-        raise CONFLICT.with_context(
-            "Record is blocked — prerequisites not met; see check-files or validate-files for details."
-        )
-
-    if record.status == RecordStatus.preparing:
-        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
-
-    if record.status == RecordStatus.finished:
-        raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
+    service.precheck(authorized_record, Submit(RecordStatus.finished), actor)
 
     return await _process_submission(
         record_id=record_id,
@@ -923,14 +947,19 @@ async def submit_record_with_validation(
         session=session,
         client_ip=client_ip,
         client_storage_path=client_storage_path,
-        actor_id=actor,
+        actor=actor,
     )
 
 
 @router.patch(
     "/{record_id}/submit",
     response_model=RecordRead,
-    responses={409: {"description": "Output file grid does not match its declared reference"}},
+    responses={
+        409: {
+            "description": "Record is not finished; its type locks submitted records "
+            "(non-admins); output file grid mismatch; or the record changed concurrently"
+        }
+    },
 )
 async def resubmit_record_with_validation(
     record_id: int,
@@ -941,12 +970,15 @@ async def resubmit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
 ) -> RecordRead:
     """Re-submit data for a finished record, running Slicer validation first if configured.
+
+    409 when the record is not finished, or its type locks submitted records
+    for a non-admin.
 
     Args:
         record_id: Record ID.
@@ -961,12 +993,10 @@ async def resubmit_record_with_validation(
     """
     record = authorized_record
 
-    if record.status != RecordStatus.finished:
-        raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
-
-    # Fail fast — the service enforces the lock too, but only after the
-    # Slicer validator has already run in the user's Slicer instance.
-    ensure_record_editable(record, user)
+    # Fail fast before the Slicer validator — the service enforces the lock
+    # too, but only after the Slicer validator has already run in the user's
+    # Slicer instance.
+    service.precheck(authorized_record, Edit(), actor)
 
     return await _process_submission(
         record_id=record_id,
@@ -981,7 +1011,7 @@ async def resubmit_record_with_validation(
         session=session,
         client_ip=client_ip,
         client_storage_path=client_storage_path,
-        actor_id=actor,
+        actor=actor,
     )
 
 
@@ -1036,19 +1066,23 @@ async def validate_files_endpoint(
     return await report_record_files(record_read, parent=parent_read)
 
 
-@router.post("/{record_id}/check-files", response_model=FileCheckResult)
+@router.post(
+    "/{record_id}/check-files",
+    response_model=FileCheckResult,
+    responses={409: {"description": "The record changed concurrently while unblocking"}},
+)
 async def check_record_files(
     record_id: int,
     _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
 ) -> FileCheckResult:
     """Compute current file checksums, compare with stored, trigger invalidation if changed.
 
     For ``blocked`` records, this endpoint also checks whether the required
     input files have appeared and auto-transitions to ``pending`` if so.
     """
-    changed_files, checksums = await service.check_files(record_id, actor_id=actor)
+    changed_files, checksums = await service.check_files(record_id, actor=actor)
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
 
 
@@ -1159,43 +1193,52 @@ async def download_output_file(
     return FileResponse(path=file_path, filename=safe_name, media_type=media_type)
 
 
-_MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
-
-
-@router.post("/{record_id}/fail", response_model=RecordRead)
+@router.post(
+    "/{record_id}/fail",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "The record is not pending/inwork, the reason is blank, "
+            "or the record changed concurrently"
+        }
+    },
+)
 async def fail_record(
     record_id: int,
-    authorized_record: MutableRecordDep,
+    _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     reason: str = Body(embed=True, min_length=1),
 ) -> RecordRead:
     """Manually mark a record as failed with a reason.
 
-    Only records in ``pending`` or ``inwork`` status can be failed manually.
+    Only pending/inwork records can be failed (409 otherwise).
     """
     reason = reason.strip()
     if not reason:
         raise CONFLICT.with_context("Reason cannot be empty or whitespace-only.")
 
-    if authorized_record.status not in _MANUALLY_FAILABLE_STATUSES:
-        raise CONFLICT.with_context(
-            f"Cannot fail record in '{authorized_record.status.value}' status. "
-            f"Allowed: {', '.join(s.value for s in _MANUALLY_FAILABLE_STATUSES)}."
-        )
-
-    updated = await service.fail_record(record_id, reason, actor_id=actor)
+    updated = await service.fail_record(record_id, reason, actor=actor)
     return await mask_record(updated, user, service.repo)
 
 
-@router.post("/{record_id}/invalidate", response_model=RecordRead)
+@router.post(
+    "/{record_id}/invalidate",
+    response_model=RecordRead,
+    responses={
+        409: {
+            "description": "Hard mode on a finished record whose type locks submitted "
+            "records (non-admins), or the record changed concurrently"
+        }
+    },
+)
 async def invalidate_record(
     record_id: int,
     _authorized_record: MutableRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
-    actor: AuditActorDep,
+    actor: ActorDep,
     mode: Literal["hard", "soft"] = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
@@ -1207,8 +1250,8 @@ async def invalidate_record(
     already pending, re-running the cascade. Soft mode only appends the
     reason to context_info.
 
-    Hard mode returns 409 for non-superusers when the record is finished and
-    its type locks submitted records (``editable`` / ``edit_window_days``).
+    Hard mode returns 409 for non-admin people when the record is finished
+    and its type locks submitted records.
 
     Args:
         record_id: ID of the record to invalidate.
@@ -1224,8 +1267,7 @@ async def invalidate_record(
         mode=mode,
         source_record_id=source_record_id,
         reason=reason,
-        acting_user=user,
-        actor_id=actor,
+        actor=actor,
     )
     return await mask_record(record, user, service.repo)
 
@@ -1345,57 +1387,3 @@ async def find_records(
         limit=query.limit,
         sort=query.sort,
     )
-
-
-# Dependency functions (used by other parts of the application)
-
-
-async def assign_user_to_record(
-    record_id: int,
-    service: RecordServiceDep,
-    actor: AuditActorDep,
-    user: User = Depends(current_active_user),
-) -> Record:
-    """Assign the current user to a record with uniqueness constraint check."""
-    return await service.claim_record(record_id, user.id, actor_id=actor)
-
-
-async def add_demo_records_for_user(
-    user: User,
-    repo: RecordRepositoryDep,
-    series_repo: SeriesRepositoryDep,
-    record_type_repo: RecordTypeRepositoryDep,
-) -> None:
-    """Add demo records for a new user."""
-    series = await series_repo.get_random()
-
-    record_types = await record_type_repo.find(RecordTypeFind(name="demo"))
-
-    if not record_types:
-        raise NOT_FOUND.with_context("No demo record types found")
-
-    # Create a record for each demo record type
-    records: list[Record] = []
-    for record_type in record_types:
-        if record_type.level not in ("SERIES", "STUDY"):
-            continue
-
-        new_record = RecordCreate(
-            status=RecordStatus.pending,
-            user_id=user.id,
-            study_uid=series.study_uid,
-            patient_id=series.study.patient_id,
-            record_type_name=record_type.name,
-            series_uid=series.series_uid if record_type.level == "SERIES" else None,
-        )
-        # No check_storage_path_admin_only here on purpose. `user` is the
-        # record OWNER these demo records are created for, not the
-        # authenticated caller, so passing it would authorize against the
-        # wrong subject — granting or denying by the target user's roles.
-        # The invariant is structural instead: RecordCreate is built field by
-        # field just above and never takes clarinet_storage_path from input.
-        # Anything that changes that must add the caller's own check.
-        records.append(Record(**new_record.model_dump()))
-
-    if records:
-        await repo.create_many(records)

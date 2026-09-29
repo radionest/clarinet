@@ -2,62 +2,61 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
     AnonPathError,
+    AuthorizationError,
     BusinessRuleViolationError,
-    RecordEditLockedError,
+    ConcurrentTransitionError,
+    RecordOwnerLacksRoleError,
+    TransitionNotAllowedError,
     UnsafePathError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.exceptions.http import UNPROCESSABLE_ENTITY
 from clarinet.files import Files, join_within
-from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
+from clarinet.models import Record, RecordRead, RecordStatus
+from clarinet.models.actor import Actor, audit_actor_id, can_access
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.services.events.capture import emit_record_events, mark_pending_audit
 from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
+from clarinet.services.record_lifecycle import (
+    Assign,
+    Claim,
+    Command,
+    Create,
+    Edit,
+    Effect,
+    Fail,
+    InputsVerdict,
+    RecordSnapshot,
+    Restart,
+    SetStatus,
+    Submit,
+    TypeRules,
+    Unassign,
+    Unblock,
+    decide,
+    decide_create,
+    needs_inputs,
+)
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
-    from clarinet.models import User
+    from clarinet.models.record import RecordType
     from clarinet.models.record_event import RecordEventKind
     from clarinet.repositories.record_event_repository import RecordEventRepository
     from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
-
-
-def ensure_record_editable(record: Record, acting_user: User | None) -> None:
-    """Raise when *acting_user* may not change a submitted (finished) record.
-
-    Enforces ``RecordType.editable`` / ``RecordType.edit_window_days``.
-    ``acting_user=None`` marks a trusted caller — in-process service calls
-    (RecordFlow triggers, check-files auto-unblock) and admin endpoints that
-    deliberately bypass the lock. Superusers (including pipeline service
-    tokens) also bypass. Requires ``record.record_type`` to be loaded.
-
-    Raises:
-        RecordEditLockedError: 409 via the BusinessRuleViolationError handler.
-    """
-    if acting_user is None or acting_user.is_superuser:
-        return
-    if is_record_editable(record.status, record.finished_at, record.record_type):
-        return
-    if not record.record_type.editable:
-        raise RecordEditLockedError(
-            f"Record {record.id}: record type '{record.record_type_name}' "
-            f"does not allow changing submitted records."
-        )
-    raise RecordEditLockedError(
-        f"Record {record.id}: editing window of "
-        f"{record.record_type.edit_window_days} days after submission has passed."
-    )
 
 
 def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
@@ -168,12 +167,45 @@ def _stored_checksums(record: RecordRead) -> dict[str, str]:
     return stored
 
 
+_MAX_TRANSITION_ATTEMPTS = 3
+
+
+def _invalidation_note(reason: str | None, source_record_id: int | None) -> str | None:
+    """Text an invalidation appends to ``context_info`` (``None`` = nothing)."""
+    if reason is None and source_record_id is not None:
+        return f"Invalidated by record #{source_record_id}"
+    return reason or None
+
+
+def _appended_note(cmd: Command) -> str | None:
+    match cmd:
+        case Fail(reason=reason):
+            return f"Manually failed: {reason}"
+        case Restart(reason=reason, source_record_id=source_record_id):
+            return _invalidation_note(reason, source_record_id)
+        case _:
+            return None
+
+
+def _changes_nothing(
+    effect: Effect, snap: RecordSnapshot, *, data: RecordData | None, reason: str | None
+) -> bool:
+    """Same status, same owner, no data, no note — and not a hard invalidation (it always fires)."""
+    return (
+        effect.fire == "status"
+        and effect.to_status == snap.status
+        and effect.owner == snap.user_id
+        and data is None
+        and reason is None
+    )
+
+
 class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
     When *event_repo* is provided, every mutation also appends a
-    :class:`RecordEvent` audit row (``actor_id=None`` marks system /
-    worker / RecordFlow calls — see ``get_audit_actor``).
+    :class:`RecordEvent` audit row (``actor_id=None`` marks a system actor —
+    see ``models/actor.py``).
 
     Args:
         record_repo: Record repository instance.
@@ -206,12 +238,16 @@ class RecordService:
         """Append an audit event right after a record mutation.
 
         The event is flushed immediately — before any RecordFlow dispatch,
-        so an engine failure cannot lose it — and committed by the next
-        commit on the shared session (request teardown). A process crash
-        between the mutation's own commit and teardown loses the event but
-        never the mutation (accepted trade-off; cascade delete is the one
-        path where events share the mutation's transaction). No-op when
-        auditing is disabled (``event_repo is None``).
+        so an engine failure cannot lose it. Lifecycle commands (via
+        ``_transition``) and cascade delete commit the event together with
+        the mutation, in the same transaction; record creation commits it
+        right after the INSERT, with the file links and any auto-block.
+        Non-transition mutations that don't explicitly commit — context
+        info updates, soft invalidation, clearing output files — leave the
+        event for the next commit on the shared session (request
+        teardown); a crash before that loses the event but never the
+        mutation for those paths. No-op when auditing is disabled
+        (``event_repo is None``).
         """
         if self.event_repo is None:
             return
@@ -232,343 +268,491 @@ class RecordService:
     def _mark_audit(self, record_id: int | None, actor_id: UUID | None) -> None:
         """Announce the *next* committing record mutation to the SSE capture.
 
-        The repo write commits internally and the matching ``RecordEvent``
-        commits later, so the SSE capture cannot pair them per-commit. Setting
+        Only needed for non-transition mutations that commit on their own
+        (soft invalidation, context info updates) — the repo write commits
+        internally and the matching ``RecordEvent`` commits later at request
+        teardown, so the SSE capture cannot pair them per-commit. Setting
         this breadcrumb right before the committing write lets the capture emit
         one enriched record event (``user_id`` = the acting user) and skip the
-        drift warning. No-op when SSE is off (see ``mark_pending_audit``).
+        drift warning. Lifecycle commands never call this — ``_transition``
+        commits the audit row together with the change, so the capture pairs
+        them per-commit already. No-op when SSE is off (see
+        ``mark_pending_audit``).
         """
         mark_pending_audit(self.repo.session, record_id, actor_id)
 
+    async def _transition(
+        self,
+        record_id: int,
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+    ) -> tuple[Record, RecordStatus]:
+        """Decide and apply one command in one transaction; SSE and RecordFlow after it.
+
+        Owns the transaction boundary: loops ``_decide_one`` → ``_write_one``
+        (neither ever commits), committing itself on a miss — it wrote
+        nothing, and on SQLite the UPDATE already holds the write lock — and
+        re-deciding against the fresh state, at most
+        ``_MAX_TRANSITION_ATTEMPTS`` times. On a hit, the fresh re-read and
+        the one commit follow; only once that commit has landed, so no
+        transaction is open while they run, do SSE and RecordFlow fire.
+
+        Returns:
+            (fresh record, status before). A no-op returns the record unchanged.
+
+        Raises:
+            AuthorizationError | RecordLifecycleError: from ``decide``.
+            RecordOwnerLacksRoleError: 409 — the new owner lacks the type's role.
+            UserNotFoundError: 404 — the new owner does not exist.
+            RecordUniquePerUserError: the new owner violates ``unique_by``.
+            ConcurrentTransitionError: every attempt missed.
+        """
+        for _ in range(_MAX_TRANSITION_ATTEMPTS):
+            record, snap, effect, matched = await self._decide_one(record_id, cmd, actor, data=data)
+            if effect is None:
+                return record, snap.status
+            if await self._write_one(record, snap, effect, matched, cmd, actor, data=data):
+                break
+            await self.repo.session.commit()  # end the transaction before re-reading
+        else:
+            raise ConcurrentTransitionError(
+                f"Record {record_id} kept changing during '{type(cmd).__name__}'; "
+                f"gave up after {_MAX_TRANSITION_ATTEMPTS} attempts.",
+                status=snap.status.value,
+            )
+        updated = await self.repo.get_with_relations(record_id, populate_existing=True)
+        await self.repo.session.commit()
+        self._emit_record_updated(updated, actor)
+        await self._fire(effect, updated, snap.status)
+        return updated, snap.status
+
+    async def _decide_one(
+        self,
+        record_id: int,
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+    ) -> tuple[Record, RecordSnapshot, Effect | None, dict[str, str]]:
+        """Snapshot ``record_id`` and decide ``cmd`` against it. Never writes, never commits.
+
+        Snapshot (``populate_existing``) → reads the parent (and may do file
+        I/O for the inputs verdict) only when ``needs_inputs`` says so →
+        ``decide``. Never writes to the DB, so a bulk caller can run this for
+        every record in a batch before writing any of them
+        (decide-all-then-write-all).
+
+        Returns:
+            (record as read, snapshot, effect, matched). ``effect`` is
+            ``None`` for a command that changes nothing (a derived no-op —
+            the caller must not call ``_write_one``; the writer itself would
+            still bump ``changed_at``). ``matched`` is the input-file match
+            set for linking on the way to ``pending``, computed only when
+            ``needs_inputs`` says so (``{}`` otherwise).
+
+        Raises:
+            AuthorizationError | RecordLifecycleError: from ``decide``.
+        """
+        record = await self.repo.get_with_relations(record_id, populate_existing=True)
+        snap = RecordSnapshot.of(record)
+        inputs: InputsVerdict | None = None
+        matched: dict[str, str] = {}
+        if needs_inputs(cmd, snap):
+            inputs, matched = await self._inputs_verdict(record)
+        effect = decide(cmd, snap, actor, inputs=inputs)
+        if _changes_nothing(effect, snap, data=data, reason=_appended_note(cmd)):
+            return record, snap, None, matched
+        return record, snap, effect, matched
+
+    async def _write_one(
+        self,
+        record: Record,
+        snap: RecordSnapshot,
+        effect: Effect,
+        matched: dict[str, str],
+        cmd: Command,
+        actor: Actor,
+        *,
+        data: RecordData | None = None,
+        via: str | None = None,
+    ) -> bool:
+        """Conditionally write one decided (non-no-op) command. Never commits.
+
+        New-owner checks, then the conditional write on the status and owner
+        ``_decide_one`` saw. On a hit the audit event and matched input files
+        join this same transaction before returning. Never commits — a bulk
+        caller runs this once per record inside one shared transaction and
+        rolls the whole batch back on the first miss (``False``); ``_transition``
+        commits itself on a miss and retries. ``via`` is stamped on the audit
+        event's ``new_value`` (e.g. ``"bulk"``) — see ``_audit_transition``.
+
+        Returns:
+            Whether the write landed. ``False`` means the record changed
+            since ``_decide_one`` snapshotted it — nothing was written.
+
+        Raises:
+            RecordOwnerLacksRoleError: 409 — the new owner lacks the type's role.
+            UserNotFoundError: 404 — the new owner does not exist.
+            RecordUniquePerUserError: the new owner violates ``unique_by``.
+        """
+        await self._check_new_owner(record, effect.owner)
+        written = await self.repo.write_transition(
+            snap.record_id,
+            expected_status=snap.status,
+            expected_user_id=snap.user_id,
+            to=effect.to_status,
+            owner=effect.owner,
+            data=data,
+            reason=_appended_note(cmd),
+        )
+        if not written:
+            return False
+        await self._audit_transition(cmd, snap, effect, actor, data=data, via=via)
+        if matched and effect.to_status == RecordStatus.pending:
+            await self.repo.set_files(record, matched, commit=False)
+        return True
+
+    async def _parent_read(self, record: Record) -> RecordRead | None:
+        if record.parent_record_id is None:
+            return None
+        return RecordRead.model_validate(
+            await self.repo.get_with_relations(record.parent_record_id)
+        )
+
+    async def _inputs_verdict(self, record: Record) -> tuple[InputsVerdict, dict[str, str]]:
+        """Validate input files; matched files come back for linking on the way to pending."""
+        result = await validate_record_files(
+            RecordRead.model_validate(record), parent=await self._parent_read(record)
+        )
+        if result is None:
+            return "undeclared", {}
+        if not result.valid:
+            return "invalid", {}
+        return "valid", dict(result.matched_files or {})
+
+    async def _ensure_can_own(
+        self, user_id: UUID, record_type: RecordType, *, status: RecordStatus | None
+    ) -> None:
+        """404 for an unknown user; 409 ``OWNER_LACKS_ROLE`` when they cannot access the type."""
+        user = await UserRepository(self.repo.session).get_with_roles(user_id)
+        if not can_access(record_type.role_name, user.is_superuser, user.role_names):
+            raise RecordOwnerLacksRoleError(
+                f"User {user_id} cannot own a '{record_type.name}' record: "
+                "they hold neither its role nor superuser rights.",
+                status=None if status is None else status.value,
+            )
+
+    async def _check_new_owner(self, record: Record, owner: UUID | None) -> None:
+        """A new owner must exist, be able to access the type and keep ``unique_by``."""
+        if owner is None or owner == record.user_id:
+            return
+        await self._ensure_can_own(owner, record.record_type, status=record.status)
+        await self._check_unique_by(owner, record)
+
+    def _emit_record_updated(self, record: Record, actor: Actor) -> None:
+        # sse-capture: explicit emit, UoW-invisible (Core UPDATE in write_transition).
+        emit_record_events(
+            [
+                EntityEvent(
+                    entity="record",
+                    action="updated",
+                    id=str(record.id),
+                    record_type_name=record.record_type_name,
+                    user_id=audit_actor_id(actor),
+                )
+            ]
+        )
+
+    async def _audit_transition(
+        self,
+        cmd: Command,
+        snap: RecordSnapshot,
+        effect: Effect,
+        actor: Actor,
+        *,
+        data: RecordData | None,
+        via: str | None = None,
+    ) -> None:
+        """One audit event per command; from/to only when the status changed."""
+        new_owner = None if effect.owner == snap.user_id else effect.owner
+        new_value: dict[str, Any] = {}
+        reason: str | None = None
+        kind: RecordEventKind
+        match cmd:
+            case Claim():
+                kind = "assigned"
+                new_value = {"user_id": str(effect.owner), "via": "claim"}
+            case Assign(user_id=user_id):
+                kind = "assigned"
+                new_value = {"user_id": str(user_id)}
+            case Unassign():
+                kind = "unassigned"
+            case Submit() | Edit():
+                kind = "data_submitted" if isinstance(cmd, Submit) else "data_updated"
+                new_value = {"fields": sorted((data or {}).keys())}
+                if new_owner is not None:
+                    new_value["user_id"] = str(new_owner)
+                    new_value["via"] = (
+                        "shared_update"
+                        if isinstance(cmd, Edit)
+                        else "submit"
+                        if snap.user_id is None
+                        else "shared_submit"
+                    )
+            case Fail(reason=fail_reason):
+                kind = "failed"
+                reason = fail_reason
+            case Restart(reason=restart_reason, source_record_id=source_record_id):
+                kind = "invalidated"
+                reason = restart_reason
+                new_value = {"mode": "hard", "source_record_id": source_record_id}
+            case SetStatus() | Unblock():
+                kind = "status_changed"
+            case _:
+                assert_never(cmd)
+        if via is not None:
+            new_value["via"] = via
+        changed = effect.to_status != snap.status
+        await self._record_event(
+            record_id=snap.record_id,
+            kind=kind,
+            actor_id=audit_actor_id(actor),
+            from_status=snap.status if changed else None,
+            to_status=effect.to_status if changed else None,
+            new_value=new_value or None,
+            reason=reason,
+        )
+
+    async def _fire(self, effect: Effect, record: Record, old_status: RecordStatus) -> None:
+        match effect.fire:
+            case "invalidation":
+                await self._fire_invalidation(record, old_status)
+            case "data_update":
+                await self._fire_data_update(record)
+            case "status":
+                if effect.to_status != old_status:
+                    await self._fire_status_change(record, old_status)
+            case _:
+                assert_never(effect.fire)
+
     # ── Public methods ───────────────────────────────────────────────────
 
-    async def create_record(self, record: Record, *, actor_id: UUID | None = None) -> Record:
+    def precheck(self, record: Record, cmd: Command, actor: Actor) -> None:
+        """Fail fast with the refusal ``_transition`` would raise, writing nothing.
+
+        For endpoints that do expensive or destructive work before the write
+        (schema validation, ``enforce_output_grids``, the Slicer validator).
+        ``_transition`` re-checks against a fresh snapshot anyway.
+        """
+        decide(cmd, RecordSnapshot.of(record), actor)
+
+    async def create_record(self, record: Record, *, actor: Actor) -> Record:
         """Create a record with file validation, blocking, and RecordFlow trigger.
 
-        When ``parent_record_id`` is set, the parent is validated to exist
-        (raises ``RecordNotFoundError`` otherwise). ``user_id`` is inherited
-        from the parent only when the record's type has
+        The requested status must be pending (or preparing for admins and
+        system actors), a non-admin person may name only themselves or
+        nobody as the owner — refused before the INSERT (``decide_create``)
+        — and an owner, given or inherited from the parent, must hold the
+        type's role or be a superuser (409 ``OWNER_LACKS_ROLE``, every
+        actor). When ``parent_record_id`` is set, the parent is validated to
+        exist (raises ``RecordNotFoundError`` otherwise). ``user_id`` is
+        inherited from the parent only when the record's type has
         ``inherit_user_from_parent`` enabled and no explicit ``user_id`` was
         provided.
 
         Args:
             record: Record ORM instance to persist.
+            actor: Who is creating the record.
 
         Returns:
             Created record with relations loaded.
         """
+        record_type = await self.repo.get_record_type(record.record_type_name, with_files=False)
+        decide_create(
+            Create(status=record.status, owner_id=record.user_id), TypeRules.of(record_type), actor
+        )
         # Fetch parent up front: validates existence, drives opt-in user_id
         # inheritance, and feeds fallback file-pattern resolution below.
         parent_read = None
         if record.parent_record_id is not None:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
-            if record.user_id is None:
-                record_type = await self.repo.get_record_type(
-                    record.record_type_name, with_files=False
+            if (
+                record.user_id is None
+                and record_type.inherit_user_from_parent
+                and parent.user_id is not None
+            ):
+                # The route-level constraint check ran with user_id=None
+                # and could not see the inherited user — re-check here.
+                await self.repo.ensure_unique_by(
+                    record_type,
+                    user_id=parent.user_id,
+                    parent_record_id=record.parent_record_id,
+                    patient_id=record.patient_id,
+                    study_uid=record.study_uid,
+                    series_uid=record.series_uid,
                 )
-                if record_type.inherit_user_from_parent and parent.user_id is not None:
-                    # The route-level constraint check ran with user_id=None
-                    # and could not see the inherited user — re-check here.
-                    await self.repo.ensure_unique_by(
-                        record_type,
-                        user_id=parent.user_id,
-                        parent_record_id=record.parent_record_id,
-                        patient_id=record.patient_id,
-                        study_uid=record.study_uid,
-                        series_uid=record.series_uid,
-                    )
-                    record.user_id = parent.user_id
+                record.user_id = parent.user_id
+        if record.user_id is not None:
+            await self._ensure_can_own(record.user_id, record_type, status=None)
 
         record = await self.repo.create_with_relations(record)
+        assert record.id is not None  # persisted
 
-        # Validate input files
-        record_read = RecordRead.model_validate(record)
-        file_result = await validate_record_files(record_read, parent=parent_read)
-
+        file_result = await validate_record_files(
+            RecordRead.model_validate(record), parent=parent_read
+        )
+        auto_blocked = False
         if file_result is not None:
             if file_result.valid and file_result.matched_files:
-                await self.repo.set_files(record, file_result.matched_files)
-                record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
+                await self.repo.set_files(record, file_result.matched_files, commit=False)
             elif not file_result.valid and record.status != RecordStatus.preparing:
-                self._mark_audit(record.id, actor_id)
-                record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
-
+                # A miss means someone moved the new record first; the re-read shows it.
+                auto_blocked = await self.repo.write_transition(
+                    record.id,
+                    expected_status=record.status,
+                    expected_user_id=record.user_id,
+                    to=RecordStatus.blocked,
+                    owner=record.user_id,
+                )
+        record = await self.repo.get_with_relations(record.id, populate_existing=True)
         await self._record_event(
             record_id=record.id,
             kind="created",
-            actor_id=actor_id,
+            actor_id=audit_actor_id(actor),
             to_status=record.status,
             new_value={"record_type_name": record.record_type_name},
         )
-
-        # Fire status-change trigger for the initial status
+        await self.repo.session.commit()
+        if auto_blocked:
+            self._emit_record_updated(record, actor)
         await self._fire_status_change(record, old_status=None)
-
         return record
 
     async def update_status(
-        self,
-        record_id: int,
-        new_status: RecordStatus,
-        *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        self, record_id: int, new_status: RecordStatus, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Update record status and fire RecordFlow trigger if status changed.
+        """Raw status change (``SetStatus``) — admins and system actors only.
 
-        When a record leaves ``preparing`` for ``pending``, input files are
-        re-validated *before* any status is written: an invalid file set sends
-        the record to ``blocked`` instead (check-files unblocks it later once
-        files appear), so the record is never observable as
-        pending-with-invalid-files. Direct ``preparing`` → ``inwork``/
-        ``finished`` transitions are rejected — a preparing record must exit
-        via ``pending``.
-
-        Args:
-            record_id: Record ID.
-            new_status: New status to set.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
+        A preparing record may not jump to inwork/finished; ``preparing → pending``
+        re-validates input files first and lands in ``blocked`` when they are
+        invalid (never observable as pending-with-invalid-files); writing the
+        current status again is a no-op — no audit, no flows.
 
         Returns:
-            Tuple of (updated record, old status). The record's final status
-            may differ from ``new_status`` (see above).
-
-        Raises:
-            RecordEditLockedError: If the record is finished and its type
-                locks submitted records for *acting_user*.
-            BusinessRuleViolationError: On a direct preparing → inwork/finished
-                transition.
+            (fresh record, status before) — the final status may differ from
+            ``new_status`` (see above).
         """
-        if acting_user is not None and not acting_user.is_superuser:
-            record = await self.repo.get_with_relations(record_id)
-            ensure_record_editable(record, acting_user)
-        target_status = new_status
-        matched_files: dict[str, str] = {}
-        current = await self.repo.get(record_id)
-        if current.status == RecordStatus.preparing:
-            target_status, matched_files = await self._resolve_preparing_exit(record_id, new_status)
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_status(record_id, target_status)
-        if matched_files:
-            await self.repo.set_files(record, matched_files)
-            record = await self.repo.get_with_relations(record_id)
-        if old_status != record.status:
-            await self._record_event(
-                record_id=record_id,
-                kind="status_changed",
-                actor_id=actor_id,
-                from_status=old_status,
-                to_status=record.status,
-            )
-            await self._fire_status_change(record, old_status)
-        return record, old_status
+        return await self._transition(record_id, SetStatus(new_status), actor)
 
     async def assign_user(
-        self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
+        self, record_id: int, user_id: UUID, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Assign user to a record and fire RecordFlow trigger if status changed.
+        """Make ``user_id`` the owner — admins and system actors only.
 
-        Args:
-            record_id: Record ID.
-            user_id: User UUID.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
+        Only a pending record moves (to inwork, firing ``on_status("inwork")``);
+        every other status — finished, blocked and preparing included — stays.
 
         Raises:
-            RecordConstraintViolationError: If unique_by is violated.
+            AuthorizationError: 403 for a non-admin person.
+            UserNotFoundError: 404 — no such user.
+            RecordOwnerLacksRoleError: 409 — the user cannot access the type.
+            RecordUniquePerUserError: ``unique_by`` violated for the new owner.
         """
-        record = await self.repo.get_with_record_type(record_id)
-        await self._check_unique_by(user_id, record)
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.assign_user(record_id, user_id)
-        await self._record_event(
-            record_id=record_id,
-            kind="assigned",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-            new_value={"user_id": str(user_id)},
-        )
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
-        return record, old_status
+        return await self._transition(record_id, Assign(user_id), actor)
 
-    async def claim_record(
-        self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
-    ) -> Record:
-        """Claim a record for a user with uniqueness constraint check.
+    async def claim_record(self, record_id: int, *, actor: Actor) -> Record:
+        """Take an unassigned (or already own) pending/inwork record for the actor.
 
-        Mirrors ``assign_user``: assigns the user, moves the record to
-        ``inwork`` and fires the RecordFlow status-change trigger, so taking a
-        task from the pool runs the same automation as an admin assignment.
-
-        Args:
-            record_id: Record ID.
-            user_id: User UUID claiming the record.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Updated record (relations loaded) with inwork status.
+        The claimant is the person, or the service account for a system actor.
+        pending → inwork fires ``on_status("inwork")``; re-claiming one's own
+        inwork record changes nothing.
 
         Raises:
-            RecordConstraintViolationError: If unique_by is violated.
+            AuthorizationError: 403 — someone else's record, or no type role.
+            TransitionNotAllowedError: 409 — the record is not pending/inwork.
+            RecordUniquePerUserError: ``unique_by`` violated.
         """
-        record = await self.repo.get_with_record_type(record_id)
-        old_status = record.status
-        await self._check_unique_by(user_id, record)
-        self._mark_audit(record_id, actor_id)
-        await self.repo.claim_record(record_id, user_id)
-        updated = await self.repo.get_with_relations(record_id)
-        await self._record_event(
-            record_id=record_id,
-            kind="assigned",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=updated.status,
-            new_value={"user_id": str(user_id), "via": "claim"},
-        )
-        if old_status != updated.status:
-            await self._fire_status_change(updated, old_status)
-        return updated
+        record, _ = await self._transition(record_id, Claim(), actor)
+        return record
 
     async def claim_random_from_pool(
-        self,
-        criteria: RecordSearchCriteria,
-        user_id: UUID,
-        *,
-        actor_id: UUID | None = None,
+        self, criteria: RecordSearchCriteria, *, actor: Actor
     ) -> Record | None:
-        """Claim a random record matching ``criteria`` for ``user_id``.
+        """Claim a random record matching ``criteria`` for the actor; ``None`` for an empty pool.
 
-        Picks one random record from the pool (typically an unassigned
-        ``pending`` record of a given type) and claims it via ``claim_record``.
-        Returns ``None`` when nothing matches, so the router can answer 404
-        without reaching into the repository itself.
-
-        ``find_random`` runs with ``for_update=True`` (``FOR UPDATE SKIP
-        LOCKED``): the chosen row is locked for this transaction until
-        ``claim_record`` commits, so a concurrent claimer skips it and two
-        users can never win the same pool record.
-        """
-        record = await self.repo.find_random(criteria, for_update=True)
-        if record is None:
-            return None
-        assert record.id is not None  # find_random returns a persisted record
-        return await self.claim_record(record.id, user_id, actor_id=actor_id)
-
-    async def unassign_user(
-        self, record_id: int, *, actor_id: UUID | None = None
-    ) -> tuple[Record, RecordStatus]:
-        """Remove user from a record and fire RecordFlow trigger if status changed.
-
-        Args:
-            record_id: Record ID.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
-        """
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.unassign_user(record_id)
-        await self._record_event(
-            record_id=record_id,
-            kind="unassigned",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-        )
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
-        return record, old_status
-
-    async def submit_data(
-        self,
-        record_id: int,
-        data: RecordData,
-        new_status: RecordStatus,
-        user_id: UUID | None = None,
-        *,
-        actor_id: UUID | None = None,
-    ) -> tuple[Record, RecordStatus]:
-        """Submit record data with a status transition and fire RecordFlow trigger.
-
-        Auto-assigns ``user_id`` when the record has no user yet (admin bypass).
-
-        Args:
-            record_id: Record ID.
-            data: Validated record data.
-            new_status: New status to set alongside data.
-            user_id: Current user ID; assigned to the record when it has no user.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
+        ``find_random(for_update=True)`` locks the pick (``FOR UPDATE SKIP LOCKED``
+        on PostgreSQL), so concurrent claimers get different records. Without row
+        locks (SQLite) two claimers can pick the same one: the loser's claim is
+        refused on the fresh state, and the next pick skips that record — at most
+        ``_MAX_TRANSITION_ATTEMPTS`` picks.
 
         Raises:
-            RecordConstraintViolationError: If unique_by is violated on auto-assign.
+            ConcurrentTransitionError: 409 — every pick was taken first.
+            RecordUniquePerUserError: ``unique_by`` violated.
+        """
+        taken: set[int] = set()
+        for _ in range(_MAX_TRANSITION_ATTEMPTS):
+            pick = await self.repo.find_random(
+                replace(criteria, exclude_ids=taken), for_update=True
+            )
+            if pick is None:
+                return None
+            assert pick.id is not None  # find_random returns a persisted record
+            try:
+                return await self.claim_record(pick.id, actor=actor)
+            except (AuthorizationError, TransitionNotAllowedError) as exc:
+                logger.info(
+                    f"claim-next: record {pick.id} was taken first ({exc}); picking another"
+                )
+                taken = taken | {pick.id}
+        raise ConcurrentTransitionError(
+            "Every record picked from the pool was taken first; try again."
+        )
+
+    async def unassign_user(self, record_id: int, *, actor: Actor) -> tuple[Record, RecordStatus]:
+        """Clear the owner; inwork falls back to pending (``on_status("pending")``).
+
+        Admins and system actors on any status; the owner of a pending/inwork
+        record whose type is ``releasable``.
+
+        Raises:
+            AuthorizationError: 403 — anyone else.
+            TransitionNotAllowedError: 409 — the owner releasing another status.
+        """
+        return await self._transition(record_id, Unassign(), actor)
+
+    async def submit_data(
+        self, record_id: int, data: RecordData, new_status: RecordStatus, *, actor: Actor
+    ) -> tuple[Record, RecordStatus]:
+        """Submit data (``Submit``): pending/inwork/failed/pause → finished, or failed.
+
+        An unassigned record becomes the submitter's — the service account for a
+        system actor; on a ``shared_editing`` type the person submitting a
+        colleague's record becomes its owner. The single ``data_submitted`` event
+        records that owner change too.
+
+        Raises:
+            TransitionNotAllowedError: 409 — blocked, preparing or already finished
+                (verbatim texts), or a target other than finished/failed.
+            AuthorizationError: 403 — a person without mutation rights.
+            RecordUniquePerUserError: ``unique_by`` violated by the new owner.
             CustomHTTPException: 422 if an OUTPUT pattern cannot be safely resolved
                 (see ``_validate_output_paths``) — raised before anything is persisted.
         """
         if new_status == RecordStatus.finished:
             await self._validate_output_paths(record_id)
-
-        transfer_to: UUID | None = None
-        if user_id is not None:
-            record_check = await self.repo.get_with_record_type(record_id)
-            if record_check.user_id is None:
-                await self._check_unique_by(user_id, record_check)
-                self._mark_audit(record_id, actor_id)
-                await self.repo.ensure_user_assigned(record_id, user_id)
-                await self._record_event(
-                    record_id=record_id,
-                    kind="assigned",
-                    actor_id=actor_id,
-                    new_value={"user_id": str(user_id), "via": "submit"},
-                )
-            elif (
-                record_check.record_type.shared_editing
-                and record_check.user_id != user_id
-                and actor_id is not None
-            ):
-                transfer_to = user_id
-                await self._record_event(
-                    record_id=record_id,
-                    kind="assigned",
-                    actor_id=actor_id,
-                    new_value={"user_id": str(user_id), "via": "shared_submit"},
-                )
-            else:
-                await self.repo.ensure_user_assigned(record_id, user_id)
-
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_data(
-            record_id, data, new_status=new_status, reassign_to=transfer_to
-        )
-        await self._record_event(
-            record_id=record_id,
-            kind="data_submitted",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-            new_value={"fields": sorted(data.keys())},
-        )
-        await self._fire_status_change(record, old_status)
-
-        # Register output files that appeared on disk and emit file events
+        record, old_status = await self._transition(record_id, Submit(new_status), actor, data=data)
         if new_status == RecordStatus.finished:
             await self.sync_output_files(record)
-
         return record, old_status
 
     async def _validate_output_paths(self, record_id: int) -> None:
         """Reject an unsafe OUTPUT pattern before ``submit_data`` persists anything.
 
-        ``submit_data`` commits the new data/status via ``update_data`` before
+        ``submit_data`` commits the new data/status via ``_transition`` before
         ``sync_output_files`` ever runs a path-safety check — without this,
         a rejected submission would already be durably stored by the time the
         rejection happens (see ``sync_output_files``'s docstring). Pure
@@ -640,56 +824,18 @@ class RecordService:
         return await self.repo.update_data(record_id, data)
 
     async def update_data(
-        self,
-        record_id: int,
-        data: RecordData,
-        *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        self, record_id: int, data: RecordData, *, actor: Actor
     ) -> tuple[Record, RecordStatus]:
-        """Update record data (no status change) and fire data-update trigger.
+        """Edit a finished record's data (``Edit``); the status stays; fires ``on_data_update``.
 
-        Args:
-            record_id: Record ID.
-            data: Validated record data.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Tuple of (updated record, old status).
+        On a ``shared_editing`` type the editing person becomes the owner.
 
         Raises:
-            RecordEditLockedError: If the record is finished and its type
-                locks submitted records for *acting_user*.
+            TransitionNotAllowedError: 409 — the record is not finished.
+            RecordEditLockedError: 409 — the type locks submitted records for this person.
+            AuthorizationError: 403 — a person without mutation rights.
         """
-        transfer_to: UUID | None = None
-        if acting_user is not None:
-            record = await self.repo.get_with_relations(record_id)
-            if not acting_user.is_superuser:
-                ensure_record_editable(record, acting_user)
-            if (
-                record.record_type.shared_editing
-                and record.user_id != acting_user.id
-                and actor_id is not None
-            ):
-                transfer_to = acting_user.id
-                await self._record_event(
-                    record_id=record_id,
-                    kind="assigned",
-                    actor_id=actor_id,
-                    new_value={"user_id": str(acting_user.id), "via": "shared_update"},
-                )
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.update_data(record_id, data, reassign_to=transfer_to)
-        await self._record_event(
-            record_id=record_id,
-            kind="data_updated",
-            actor_id=actor_id,
-            new_value={"fields": sorted(data.keys())},
-        )
-        await self._fire_data_update(record)
-        return record, old_status
+        return await self._transition(record_id, Edit(), actor, data=data)
 
     async def notify_file_change(self, record: Record) -> None:
         """Fire a file-change trigger for a record.
@@ -700,76 +846,47 @@ class RecordService:
         await self._fire_file_change(record)
 
     async def bulk_update_status(
-        self,
-        record_ids: list[int],
-        new_status: RecordStatus,
-        *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        self, record_ids: list[int], new_status: RecordStatus, *, actor: Actor
     ) -> None:
-        """Update status for multiple records and fire triggers for each changed record.
+        """Set one status on many records — all of them or none.
 
-        ``preparing`` records are routed through :meth:`update_status` one by
-        one so the exit re-validation applies (preparing → pending may land in
-        ``blocked``) — the bulk repo path would bypass it.
-
-        Args:
-            record_ids: List of record IDs.
-            new_status: New status to set.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Raises:
-            RecordEditLockedError: If any target record is finished and its
-                type locks submitted records for *acting_user*. Raised before
-                any status is mutated.
-            BusinessRuleViolationError: If any target record is preparing and
-                ``new_status`` is inwork/finished. Raised before any status
-                is mutated.
+        Ids are deduplicated and sorted, so every bulk request locks rows in the
+        same order and two of them cannot deadlock. Every record is decided
+        (``_decide_one``, read-only) before anything is written, so one refusal
+        (403/409) leaves every record untouched; the writes (``_write_one``)
+        then share this one transaction — the first miss rolls the whole batch
+        back and raises ``ConcurrentTransitionError`` (unlike ``_transition``,
+        bulk never retries). SSE and RecordFlow fire per written record only
+        after the commit. Unknown ids are skipped.
         """
-        # Capture old statuses (and enforce the edit lock) before bulk update
-        old_statuses: dict[int, RecordStatus] = {}
-        preparing_ids: list[int] = []
-        for record_id in record_ids:
-            record = await self.repo.get_optional(record_id)
-            if record:
-                if acting_user is not None and not acting_user.is_superuser:
-                    with_type = await self.repo.get_with_relations(record_id)
-                    ensure_record_editable(with_type, acting_user)
-                if record.status == RecordStatus.preparing:
-                    if new_status in (RecordStatus.inwork, RecordStatus.finished):
-                        raise BusinessRuleViolationError(
-                            f"Record {record_id} is still preparing — it must leave "
-                            f"via 'pending' (with file re-validation) before "
-                            f"'{new_status.value}'."
-                        )
-                    preparing_ids.append(record_id)
-                    continue
-                old_statuses[record_id] = record.status
+        cmd = SetStatus(new_status)
+        decided: list[tuple[Record, RecordSnapshot, Effect, dict[str, str]]] = []
+        for record_id in sorted(set(record_ids)):
+            if await self.repo.get_optional(record_id) is None:
+                continue
+            record, snap, effect, matched = await self._decide_one(record_id, cmd, actor)
+            if effect is not None:
+                decided.append((record, snap, effect, matched))
 
-        for marked_id in old_statuses:
-            self._mark_audit(marked_id, actor_id)
-        await self.repo.bulk_update_status(list(old_statuses), new_status)
-
-        # Preparing records take the single-record path: exit re-validation
-        # applies and each fires its own trigger.
-        for record_id in preparing_ids:
-            await self.update_status(record_id, new_status, acting_user=acting_user)
-
-        # Fire triggers for each record whose status actually changed
-        for record_id, old_status in old_statuses.items():
-            if old_status != new_status:
-                updated = await self.repo.get_with_relations(record_id)
-                await self._record_event(
-                    record_id=record_id,
-                    kind="status_changed",
-                    actor_id=actor_id,
-                    from_status=old_status,
-                    to_status=new_status,
-                    new_value={"via": "bulk"},
+        written: list[tuple[RecordSnapshot, Effect]] = []
+        for record, snap, effect, matched in decided:
+            if not await self._write_one(record, snap, effect, matched, cmd, actor, via="bulk"):
+                await self.repo.session.rollback()
+                raise ConcurrentTransitionError(
+                    f"Record {snap.record_id} changed during the bulk status update; "
+                    f"no record was changed.",
+                    status=snap.status.value,
                 )
-                await self._fire_status_change(updated, old_status)
+            written.append((snap, effect))
+
+        updated = [
+            await self.repo.get_with_relations(snap.record_id, populate_existing=True)
+            for snap, _ in written
+        ]
+        await self.repo.session.commit()
+        for (snap, effect), record in zip(written, updated, strict=True):
+            self._emit_record_updated(record, actor)
+            await self._fire(effect, record, snap.status)
 
     async def invalidate_record(
         self,
@@ -778,101 +895,58 @@ class RecordService:
         source_record_id: int | None = None,
         reason: str | None = None,
         *,
-        acting_user: User | None = None,
-        actor_id: UUID | None = None,
+        actor: Actor,
     ) -> Record:
-        """Invalidate a record and fire RecordFlow trigger on hard mode.
+        """Invalidate a record.
 
-        Hard mode always fires the status trigger — even when the record was
-        already pending — so on_status("pending") flows re-run on every
-        re-invalidation. Soft mode never changes status and never fires.
-
-        Args:
-            record_id: ID of the record to invalidate.
-            mode: "hard" resets to pending, "soft" only appends reason.
-            source_record_id: ID of the triggering record.
-            reason: Human-readable reason.
-            acting_user: API caller; ``None`` marks a trusted in-process call
-                that bypasses the post-submit edit lock. Only hard mode is
-                gated — soft mode never changes data or status.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Updated record with relations.
+        Hard mode is ``Restart``: any status except preparing returns to pending,
+        data and owner kept, the reason appended; it always fires
+        ``handle_record_invalidation`` — even pending → pending — so
+        ``on_status("pending")`` flows re-run. People need mutation rights and get
+        409 on a locked finished record. Soft mode only appends the reason: no
+        status change, no flows, no lifecycle check.
 
         Raises:
-            RecordEditLockedError: On hard mode, if the record is finished
-                and its type locks submitted records for *acting_user*.
+            RecordEditLockedError: hard mode, a non-admin on a locked finished record.
+            AuthorizationError: hard mode, a person without mutation rights.
         """
-        if mode == "hard" and acting_user is not None and not acting_user.is_superuser:
-            with_type = await self.repo.get_with_relations(record_id)
-            ensure_record_editable(with_type, acting_user)
-
-        old_record = await self.repo.get(record_id)
-        old_status = old_record.status
-
-        self._mark_audit(record_id, actor_id)
-        record = await self.repo.invalidate_record(
-            record_id=record_id,
-            mode=mode,
-            source_record_id=source_record_id,
-            reason=reason,
-        )
-
-        status_changed = old_status != record.status
+        if mode == "hard":
+            record, _ = await self._transition(
+                record_id, Restart(reason=reason, source_record_id=source_record_id), actor
+            )
+            return record
+        note = _invalidation_note(reason, source_record_id)
+        if note is None:
+            record = await self.repo.get_with_relations(record_id)
+        else:
+            self._mark_audit(record_id, audit_actor_id(actor))
+            record = await self.repo.append_context_info(record_id, note)
         await self._record_event(
             record_id=record_id,
             kind="invalidated",
-            actor_id=actor_id,
-            from_status=old_status if status_changed else None,
-            to_status=record.status if status_changed else None,
-            new_value={"mode": mode, "source_record_id": source_record_id},
+            actor_id=audit_actor_id(actor),
+            new_value={"mode": "soft", "source_record_id": source_record_id},
             reason=reason,
         )
-
-        # Hard invalidation means "needs processing again" — fire even when the
-        # status didn't change (pending → pending), so on_status("pending")
-        # flows re-run. Handlers must be idempotent.
-        if mode == "hard":
-            await self._fire_invalidation(record, old_status)
-
         return record
 
-    async def fail_record(
-        self, record_id: int, reason: str, *, actor_id: UUID | None = None
-    ) -> Record:
-        """Mark a record as failed with a reason and fire RecordFlow triggers.
+    async def fail_record(self, record_id: int, reason: str, *, actor: Actor) -> Record:
+        """Mark a pending/inwork record failed (``Fail``), noting ``"Manually failed: <reason>"``.
 
-        Args:
-            record_id: ID of the record to fail.
-            reason: Human-readable reason for failure.
-            actor_id: Audit actor; ``None`` marks a system/worker call.
-
-        Returns:
-            Updated record with relations.
+        Raises:
+            TransitionNotAllowedError: 409 — the record is not pending/inwork.
+            AuthorizationError: 403 — a person without mutation rights.
         """
-        self._mark_audit(record_id, actor_id)
-        record, old_status = await self.repo.fail_record(record_id, reason)
+        record, _ = await self._transition(record_id, Fail(reason=reason), actor)
         logger.info(f"Record {record_id} manually failed")
-
-        await self._record_event(
-            record_id=record_id,
-            kind="failed",
-            actor_id=actor_id,
-            from_status=old_status,
-            to_status=record.status,
-            reason=reason,
-        )
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
-
         return record
 
     async def check_files(
-        self, record_id: int, *, actor_id: UUID | None = None
+        self, record_id: int, *, actor: Actor
     ) -> tuple[list[str], dict[str, str]]:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
+        A person needs the lifecycle policy's mutation rights (``Unblock``).
         For preparing records: no-op — prefill / file generation is in flight,
         so neither auto-unblock nor checksum bookkeeping may run.
         For blocked records: validates input files, transitions to pending if valid.
@@ -884,30 +958,15 @@ class RecordService:
             Empty tuple ([], {}) if record stays blocked or is preparing.
         """
         record = await self.repo.get_with_relations(record_id)
-        record_read = RecordRead.model_validate(record)
-
+        self.precheck(record, Unblock(), actor)
         if record.status == RecordStatus.preparing:
             return [], {}
-
-        # Fetch parent once — feeds fallback pattern resolution for both
-        # input validation (blocked records) and the OUTPUT checksum scan.
-        parent_read = None
-        if record.parent_record_id is not None:
-            parent = await self.repo.get_with_relations(record.parent_record_id)
-            parent_read = RecordRead.model_validate(parent)
-
-        # Auto-unblock: if record is blocked, check whether input files are now present
         if record.status == RecordStatus.blocked:
-            file_result = await validate_record_files(record_read, parent=parent_read)
-            if file_result is not None and file_result.valid:
-                if file_result.matched_files:
-                    await self.repo.set_files(record, file_result.matched_files)
-                record, _ = await self.update_status(
-                    record_id, RecordStatus.pending, actor_id=actor_id
-                )
-                record_read = RecordRead.model_validate(record)
-            else:
+            record, _ = await self._transition(record_id, Unblock(), actor)
+            if record.status == RecordStatus.blocked:
                 return [], {}
+        record_read = RecordRead.model_validate(record)
+        parent_read = await self._parent_read(record)
 
         new_checksums = await Files.for_reader(record_read, parent=parent_read).checksums(
             record_read.record_type.file_registry or []
@@ -924,9 +983,7 @@ class RecordService:
 
         return list(changed), new_checksums
 
-    async def delete_record_cascade(
-        self, record_id: int, *, actor_id: UUID | None = None
-    ) -> tuple[list[int], int]:
+    async def delete_record_cascade(self, record_id: int, *, actor: Actor) -> tuple[list[int], int]:
         """Delete a record, all its descendants, and their OUTPUT files.
 
         Check-and-delete runs inside a single DB transaction with row locks
@@ -991,7 +1048,7 @@ class RecordService:
             await self._record_event(
                 record_id=rid,
                 kind="deleted",
-                actor_id=actor_id,
+                actor_id=audit_actor_id(actor),
                 from_status=snapshot.status,
                 old_value={
                     "record_id": rid,
@@ -1148,9 +1205,7 @@ class RecordService:
             )
         return paths
 
-    async def clear_output_files(
-        self, record_id: int, *, actor_id: UUID | None = None
-    ) -> tuple[list[str], int]:
+    async def clear_output_files(self, record_id: int, *, actor: Actor) -> tuple[list[str], int]:
         """Delete OUTPUT files from disk and their RecordFileLink rows.
 
         Only allowed for records NOT in ``finished`` status. Intended for
@@ -1194,7 +1249,7 @@ class RecordService:
         await self._record_event(
             record_id=record_id,
             kind="files_cleared",
-            actor_id=actor_id,
+            actor_id=audit_actor_id(actor),
             new_value={"files": deleted_files, "links": deleted_links},
         )
 
@@ -1205,20 +1260,21 @@ class RecordService:
         return deleted_files, deleted_links
 
     async def update_context_info(
-        self, record_id: int, context_info: str | None, *, actor_id: UUID | None = None
+        self, record_id: int, context_info: str | None, *, actor: Actor
     ) -> Record:
         """Replace ``context_info`` on a record with an audit event.
 
         Args:
             record_id: Record ID.
             context_info: New markdown source (``None`` clears the field).
-            actor_id: Audit actor; ``None`` marks a system/worker call.
+            actor: Who is making the change.
 
         Returns:
             Updated record with relations loaded.
         """
         record = await self.repo.get(record_id)
         old_value = record.context_info
+        actor_id = audit_actor_id(actor)
         self._mark_audit(record_id, actor_id)
         updated = await self.repo.update_fields(record_id, {"context_info": context_info})
         await self._record_event(
@@ -1284,46 +1340,6 @@ class RecordService:
             series_uid=record.series_uid,
             exclude_record_id=record.id,
         )
-
-    async def _resolve_preparing_exit(
-        self, record_id: int, new_status: RecordStatus
-    ) -> tuple[RecordStatus, dict[str, str]]:
-        """Resolve the target status for a record leaving ``preparing``.
-
-        Records created as ``preparing`` skip creation-time auto-blocking, so
-        missing input files are caught on exit instead. For the ``pending``
-        target the files are validated before any status is written; an
-        invalid set redirects the transition to ``blocked`` (check-files
-        unblocks it later). No file registry → pending. ``inwork`` and
-        ``finished`` are rejected — a preparing record must pass through
-        ``pending`` and its file re-validation first.
-
-        Returns:
-            Tuple of (resolved status, matched files for ``set_files``).
-
-        Raises:
-            BusinessRuleViolationError: On a direct preparing → inwork/finished
-                transition (→ 409).
-        """
-        if new_status in (RecordStatus.inwork, RecordStatus.finished):
-            raise BusinessRuleViolationError(
-                f"Record {record_id} is still preparing — it must leave via "
-                f"'pending' (with file re-validation) before '{new_status.value}'."
-            )
-        if new_status != RecordStatus.pending:
-            return new_status, {}
-        record = await self.repo.get_with_relations(record_id)
-        record_read = RecordRead.model_validate(record)
-        parent_read = None
-        if record.parent_record_id is not None:
-            parent = await self.repo.get_with_relations(record.parent_record_id)
-            parent_read = RecordRead.model_validate(parent)
-        file_result = await validate_record_files(record_read, parent=parent_read)
-        if file_result is None:
-            return RecordStatus.pending, {}
-        if not file_result.valid:
-            return RecordStatus.blocked, {}
-        return RecordStatus.pending, file_result.matched_files or {}
 
     async def _register_output_links(
         self,

@@ -1,10 +1,12 @@
 """Integration tests for post-submit edit locking.
 
 ``RecordType.editable`` / ``RecordType.edit_window_days`` lock finished
-records for non-superusers on every API path that can change a submitted
-answer: PATCH /data, PATCH /submit, PATCH /status, PATCH /bulk/status, and
-hard POST /invalidate. Superusers bypass the lock. ``RecordRead.is_editable``
-exposes the verdict to the frontend.
+records for non-admins on the API paths that can change a submitted
+answer: PATCH /data, PATCH /submit, and hard POST /invalidate. Raw status
+changes (PATCH /status, PATCH /bulk/status) are admin-only, so the edit
+lock never reaches them — a non-admin gets 403 first. Admins (superuser or
+the ``admin`` role) bypass the lock. ``RecordRead.is_editable`` exposes the
+verdict to the frontend.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -79,8 +81,7 @@ async def _seed_finished_record(
 ) -> Record:
     """Create a finished record and pin ``finished_at`` deterministically.
 
-    The status event listener sets ``finished_at`` to "now" during
-    construction; the explicit assignment below overrides it.
+    ``Record(...)`` does not stamp ``finished_at``; set it explicitly.
     """
     record = Record(
         patient_id=patient.id,
@@ -133,25 +134,25 @@ class TestEditableFalse:
     async def test_status_change_off_finished_locked(
         self, editor_client, editor_user, test_session, test_patient, test_study, test_series
     ):
+        """Raw status changes are admin-only — a non-admin owner gets 403, not the edit lock."""
         rt = await _seed_type(test_session, "locked-status-rt", editable=False)
         rec = await _seed_finished_record(
             test_session, test_patient, test_study, test_series, rt, editor_user
         )
         resp = await editor_client.patch(f"{RECORDS_BASE}/{rec.id}/status?record_status=pending")
-        assert resp.status_code == 409
+        assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_bulk_status_locked(
         self, editor_client, editor_user, test_session, test_patient, test_study, test_series
     ):
+        """Raw status changes are admin-only — a non-admin owner gets 403, not the edit lock."""
         rt = await _seed_type(test_session, "locked-bulk-rt", editable=False)
         rec = await _seed_finished_record(
             test_session, test_patient, test_study, test_series, rt, editor_user
         )
         resp = await editor_client.patch(f"{RECORDS_BULK_STATUS}?new_status=pending", json=[rec.id])
-        assert resp.status_code == 409
-        # The error names the blocking record so multi-id calls are debuggable
-        assert f"Record {rec.id}" in resp.text
+        assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_invalidate_hard_locked_soft_allowed(
@@ -241,23 +242,6 @@ class TestEditWindow:
         )
         assert resp.status_code == 409
 
-    @pytest.mark.asyncio
-    async def test_expired_window_locks_status_change(
-        self, editor_client, editor_user, test_session, test_patient, test_study, test_series
-    ):
-        rt = await _seed_type(test_session, "window-status-rt", edit_window_days=1)
-        rec = await _seed_finished_record(
-            test_session,
-            test_patient,
-            test_study,
-            test_series,
-            rt,
-            editor_user,
-            finished_days_ago=2,
-        )
-        resp = await editor_client.patch(f"{RECORDS_BASE}/{rec.id}/status?record_status=pending")
-        assert resp.status_code == 409
-
 
 class TestDefaultsUnaffected:
     """Default RecordType (editable=True, no window) keeps current behavior."""
@@ -276,16 +260,17 @@ class TestDefaultsUnaffected:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_status_change_off_finished_allowed(
+    async def test_status_change_forbidden_for_owner(
         self, editor_client, editor_user, test_session, test_patient, test_study, test_series
     ):
+        """Raw status changes are admin-only regardless of ``editable`` — a non-admin owner gets 403."""
         rt = await _seed_type(test_session, "default-status-rt")
         rec = await _seed_finished_record(
             test_session, test_patient, test_study, test_series, rt, editor_user
         )
         resp = await editor_client.patch(f"{RECORDS_BASE}/{rec.id}/status?record_status=pending")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "pending"
+        assert resp.status_code == 403
+        assert (await test_session.get(Record, rec.id)).status == RecordStatus.finished
 
 
 class TestIsEditableComputed:

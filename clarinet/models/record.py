@@ -8,7 +8,7 @@ for backward compatibility.
 
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Protocol, get_args
 from uuid import UUID
 
 from pydantic import (
@@ -17,16 +17,18 @@ from pydantic import (
     StringConstraints,
     Tag,
     computed_field,
+    field_validator,
     model_validator,
 )
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, event, func
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
-from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
+from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordCommandName, RecordData
 from clarinet.utils.pagination import SortOrder
 
-from ..exceptions import ValidationError
+from ..exceptions import DirectRecordWriteError, ValidationError
 from .base import BaseModel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientInfo
@@ -266,19 +268,25 @@ class Record(RecordBase, table=True):
                 )
 
 
-# Add event listener to update timestamps based on status changes
 @event.listens_for(Record.status, "set")
-def set_record_timestamps(target: Record, value: Any, oldvalue: Any, _initiator: Any) -> None:
-    """Update record timestamps when status changes."""
-    if value == oldvalue:
-        return
-    match value:
-        case RecordStatus.inwork:
-            target.started_at = datetime.now(UTC)
-        case RecordStatus.finished:
-            target.finished_at = datetime.now(UTC)
-        case _:
-            return
+@event.listens_for(Record.user_id, "set")
+def refuse_direct_lifecycle_writes(
+    target: Record, _value: Any, _oldvalue: Any, initiator: Any
+) -> None:
+    """Refuse assigning ``status`` / ``user_id`` on a record that is already saved.
+
+    After the INSERT only ``RecordRepository.write_transition`` changes them — a
+    Core UPDATE this listener never sees — behind ``RecordService``'s lifecycle
+    policy. A new, unsaved record may set both (create); loads and refreshes
+    fire no ``set`` event. The ORM counterpart of django-fsm's ``protected=True``.
+    """
+    state = sa_inspect(target)
+    assert state is not None  # an ORM-mapped instance always has inspection state
+    if state.has_identity:
+        raise DirectRecordWriteError(
+            f"Record.{initiator.key} of a saved record is written only by "
+            "RecordService (RecordRepository.write_transition)"
+        )
 
 
 class RecordCreate(RecordBase):
@@ -300,12 +308,22 @@ class RecordContextInfoUpdate(SQLModel):
     context_info: str | None = Field(default=None, max_length=3000)
 
 
+class EditLockRules(Protocol):
+    """What the edit lock reads from a record type (``RecordTypeBase`` or ``TypeRules``)."""
+
+    @property
+    def editable(self) -> bool: ...
+
+    @property
+    def edit_window_days(self) -> int | None: ...
+
+
 def is_record_editable(
     status: RecordStatus,
     finished_at: datetime | None,
-    record_type: RecordTypeBase,
+    record_type: EditLockRules,
 ) -> bool:
-    """Whether a record's submitted data may still be changed by non-superusers.
+    """Whether a record's submitted data may still be changed by non-admin people.
 
     Non-finished records are always editable — nothing has been submitted yet
     (POST submission paths gate on status separately). For finished records
@@ -320,8 +338,8 @@ def is_record_editable(
     if not record_type.editable:
         return False
     if record_type.edit_window_days is None or finished_at is None:
-        # finished_at is None only on legacy/imported rows (the status event
-        # listener always sets it) — fail open rather than lock them forever.
+        # finished_at is None only on legacy/imported rows (the status writer
+        # always sets it) — fail open rather than lock them forever.
         return True
     if finished_at.tzinfo is None:
         # SQLite returns naive datetimes; stored values are UTC.
@@ -349,6 +367,25 @@ class RecordRead(RecordBase):
     series: SeriesBase | None = None
     record_type: RecordTypeRead
     display_anon_id: str | None = None
+    # Commands the requesting user may run on this record now — filled per viewer
+    # by ``api/masking.py`` from the lifecycle policy (``record_lifecycle``).
+    allowed_commands: list[RecordCommandName] = Field(default_factory=list)
+
+    @field_validator("allowed_commands", mode="before")
+    @classmethod
+    def drop_unknown_commands(cls, v: Any) -> Any:
+        """Tolerate command names this client's Literal doesn't know yet.
+
+        A client one version behind a server that shipped a new lifecycle
+        command would otherwise fail to parse every ``RecordRead`` — the
+        unknown name is dropped instead of raising.
+        """
+        if not isinstance(v, list):
+            return v
+        # RecordCommandName is a PEP 695 alias (TypeAliasType) — get_args needs
+        # the underlying Literal via __value__, not the alias object itself.
+        known = set(get_args(RecordCommandName.__value__))
+        return [name for name in v if name in known]
 
     @model_validator(mode="before")
     @classmethod
@@ -357,7 +394,7 @@ class RecordRead(RecordBase):
         if isinstance(data, Record):
             result: dict[str, Any] = {}
             for field_name in cls.model_fields:
-                if field_name in ("files", "file_checksums", "file_links"):
+                if field_name in ("files", "file_checksums", "file_links", "allowed_commands"):
                     continue
                 result[field_name] = getattr(data, field_name, None)
             try:
@@ -432,10 +469,11 @@ class RecordRead(RecordBase):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_editable(self) -> bool:
-        """Whether the submitted data may still be changed by non-superusers.
+        """Whether non-admin people (not a superuser, not the `admin` role)
+        may edit or hard-invalidate this finished record.
 
-        Server-side verdict for the frontend (form/Re-submit gating) — see
-        :func:`is_record_editable`. Superuser bypass is the client's concern.
+        See :func:`is_record_editable`. The frontend gates actions on
+        ``allowed_commands`` instead, where the server applies the admin bypass.
         """
         return is_record_editable(self.status, self.finished_at, self.record_type)
 

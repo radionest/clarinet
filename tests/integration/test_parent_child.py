@@ -244,8 +244,8 @@ class TestApiRecordParent:
 
     @pytest.mark.asyncio
     async def test_user_id_inherited_from_parent(self, client, test_session, seed):
-        # Create user
-        user = make_user()
+        # Create user — superuser: passes the new-owner role check (types have no role)
+        user = make_user(is_superuser=True)
         test_session.add(user)
         await test_session.commit()
         await test_session.refresh(user)
@@ -282,7 +282,7 @@ class TestApiRecordParent:
     @pytest.mark.asyncio
     async def test_user_id_not_inherited_by_default(self, client, test_session, seed):
         """Without inherit_user_from_parent on the type, user_id stays None."""
-        user = make_user()
+        user = make_user(is_superuser=True)  # passes the new-owner role check (type has no role)
         test_session.add(user)
         await test_session.commit()
         await test_session.refresh(user)
@@ -321,7 +321,7 @@ class TestApiRecordParent:
         (None here) and cannot see the inherited one — the service must
         re-check and reject with 409.
         """
-        user = make_user()
+        user = make_user(is_superuser=True)  # passes the new-owner role check (type has no role)
         test_session.add(user)
         await test_session.commit()
         await test_session.refresh(user)
@@ -365,9 +365,9 @@ class TestApiRecordParent:
 
     @pytest.mark.asyncio
     async def test_explicit_user_id_not_overridden(self, client, test_session, seed):
-        # Create two users
-        user_a = make_user()
-        user_b = make_user()
+        # Create two users — superuser: passes the new-owner role check (type has no role)
+        user_a = make_user(is_superuser=True)
+        user_b = make_user(is_superuser=True)
         test_session.add_all([user_a, user_b])
         await test_session.commit()
         await test_session.refresh(user_a)

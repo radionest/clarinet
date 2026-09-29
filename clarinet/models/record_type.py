@@ -134,9 +134,9 @@ class RecordTypeBase(SQLModel):
         default=True,
         sa_column_kwargs={"server_default": sql_expression.true()},
         description=(
-            "Whether non-superusers may change a submitted (finished) record: "
-            "re-submit data, re-open via status change, or hard-invalidate. "
-            "False locks the answer at submit."
+            "False: non-admin people (not a superuser, not the `admin` role) "
+            "may not edit or hard-invalidate a finished record once the type "
+            "locks it."
         ),
     )
     # Nullable by design (None = no time limit), so the additive migration
@@ -198,6 +198,18 @@ class RecordTypeBase(SQLModel):
             "edit any record of this type, not only the owner/unassigned. Each data "
             "edit reassigns ownership (record.user_id) to the editing user. Requires "
             "'user' not in unique_by."
+        ),
+    )
+
+    # See ``mask_patient_data`` above for the rationale on ``server_default`` and
+    # the dialect-aware ``sql_expression.false()`` literal.
+    releasable: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": sql_expression.false()},
+        description=(
+            "Whether the owner of a pending or inwork record of this type may give it "
+            "back (DELETE /records/{id}/user): the owner is cleared and inwork falls "
+            "back to pending. Admins and the service token may always unassign."
         ),
     )
 
@@ -471,6 +483,7 @@ class RecordTypeOptional(SQLModel):
     parent_required: bool | None = Field(default=None)
     inherit_user_from_parent: bool | None = Field(default=None)
     editable: bool | None = Field(default=None)
+    releasable: bool | None = Field(default=None)
     edit_window_days: int | None = Field(default=None, ge=0, le=3650)
     level: DicomQueryLevel | None = None
 

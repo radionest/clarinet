@@ -97,7 +97,8 @@ invalidation crosses levels freely: a series-level change can invalidate
 patient-level records and vice versa.
 
 - **hard** — reset status to `pending`, append the reason to `context_info`,
-  keep `user_id`. Always fires `on_status("pending")`.
+  keep `user_id`. Always fires `on_status("pending")` (a `preparing` record
+  keeps its status and re-fires `on_status("preparing")`).
 - **soft** — append the reason only; never changes status, never fires triggers.
 
 Two consequences that are easy to get wrong:
@@ -123,14 +124,22 @@ Do not confuse them:
 An explicit `user_id` in `add_record()` always wins. `parent_record_id` is never
 auto-resolved — flows must state parent links explicitly.
 
+Either way the resulting owner must hold the created type's role or be a
+superuser (a `role_name = NULL` type can only be owned by a superuser);
+otherwise the create fails with 409 `OWNER_LACKS_ROLE`, the engine logs the
+action error and moves on, and nothing is created.
+
 ## How triggers get dispatched
 
-Never from routers. `RecordService` wraps the record mutations
-(`update_status`, `assign_user`, `submit_data`, `update_data`,
-`notify_file_change`, `bulk_update_status`, `notify_file_updates`) and awaits
-the matching engine trigger; `StudyService` fires entity triggers
-fire-and-forget via `engine.fire()`. The engine is injected by
-`get_recordflow_engine(request)` and is `None` when disabled.
+Never from routers. Every record command in `RecordService` (create, claim,
+assign, unassign, submit, edit, fail, restart, set-status, unblock — see
+[Domain model → Transitions](./domain-model.md#transitions)) awaits its engine
+trigger only **after** its transaction commits, so a flow sees the committed
+record and its audit event and no transaction is held open while it calls back
+into the API; `notify_file_change` / `notify_file_updates` fire the file
+triggers. `StudyService` fires entity triggers fire-and-forget via
+`engine.fire()`. The engine is injected by `get_recordflow_engine(request)` and
+is `None` when disabled.
 
 ## Loading and visualisation
 

@@ -225,6 +225,8 @@ async def _to_record_type_create(
         kwargs["editable"] = rt_def.editable
     if "shared_editing" in rt_def.model_fields_set:
         kwargs["shared_editing"] = rt_def.shared_editing
+    if "releasable" in rt_def.model_fields_set:
+        kwargs["releasable"] = rt_def.releasable
     if "edit_window_days" in rt_def.model_fields_set:
         kwargs["edit_window_days"] = rt_def.edit_window_days
     if "viewer_mode" in rt_def.model_fields_set:

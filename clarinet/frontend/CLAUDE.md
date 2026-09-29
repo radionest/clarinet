@@ -101,5 +101,6 @@ Backend contract (FastAPI-users, bcrypt, `AccessToken`) lives in the backend CLA
 - Do **not** put entity caching inside a page — cache lives in `cache.gleam`. Pages request reloads via `OutMsg` (`ReloadRecords`, `ReloadPatient(id)`, etc.) and read from `shared.cache.*`.
 - Do **not** hand-build URLs — always `router.route_to_path(router.SomeRoute(...))`. It prepends `config.base_path()` for sub-path deploys.
 - Do **not** bypass `load_status.LoadStatus` for async fetches in detail pages — otherwise a failed load gets stuck on the spinner.
+- Do **not** re-derive record lifecycle rules (status contracts, ownership, edit lock, admin bypass) in Gleam — `utils/permissions.gleam` gates record actions on `record.allowed_commands` (`permissions.allows`), computed per viewer by the server's `record_lifecycle.allowed_commands`. The local predicates it replaced had drifted (lock bypass, submit/restart statuses).
 
 The `OpenCreateRecordModal(args)` flow and the four args variants (Patient/Study/Series/Record) are documented in `.claude/rules/frontend-page-contract.md` §2.

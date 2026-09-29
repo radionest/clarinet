@@ -205,6 +205,27 @@ async def test_shared_editing_change_triggers_update(test_session: AsyncSession)
 
 
 @pytest.mark.asyncio
+async def test_releasable_change_triggers_update(test_session: AsyncSession) -> None:
+    """Toggling ``releasable`` between config versions is a diff."""
+    result = await reconcile_record_types(
+        [_make_config("rel-diff", releasable=False)], test_session
+    )
+    assert "rel-diff" in result.created
+    test_session.expire_all()
+
+    result = await reconcile_record_types([_make_config("rel-diff", releasable=True)], test_session)
+    assert "rel-diff" in result.updated
+    test_session.expire_all()
+
+    row = (
+        (await test_session.execute(select(RecordType).where(RecordType.name == "rel-diff")))
+        .scalars()
+        .first()
+    )
+    assert row.releasable is True
+
+
+@pytest.mark.asyncio
 async def test_orphan_detection(
     test_session: AsyncSession,
     seed_record_type: RecordType,

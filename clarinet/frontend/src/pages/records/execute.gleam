@@ -1,5 +1,4 @@
 // Record execution page — self-contained MVU module
-import api/admin as admin_api
 import api/models.{type Record, type RecordType}
 import api/records
 import api/slicer
@@ -183,7 +182,7 @@ pub type Msg {
   RequestDelete
   Delete
   DeleteResult(Result(Nil, ApiError))
-  // Admin: unassign user from this record (confirmed via modal)
+  // Unassign the owner — admins, or the owner of a releasable record (confirmed via modal)
   RequestUnassign
   UnassignUser
   UnassignUserResult(Result(Record, ApiError))
@@ -324,6 +323,18 @@ fn is_admin_user(shared: Shared) -> Bool {
   case shared.user {
     Some(u) -> permissions.is_admin_user(u)
     None -> False
+  }
+}
+
+// `shared.cache.users` is populated only for admins (ReloadUsers is fired
+// admin-only on load, see init_effects). A non-admin owner viewing their own
+// "Assigned to" row would otherwise see cache.user_email's "…" loading
+// placeholder forever, since that cache never gets filled for them — use the
+// viewer's own email from `shared.user` when the record's owner is the viewer.
+fn assignee_email(shared: Shared, uid: String) -> String {
+  case shared.user {
+    Some(u) if u.id == uid -> u.email
+    _ -> cache.user_email(shared.cache, uid)
   }
 }
 
@@ -628,7 +639,7 @@ pub fn update(
       handle_error(err, "Failed to restart record"),
     )
 
-    // Admin: unassign user — confirm via modal first (mirrors RequestDelete)
+    // Unassign — confirm via modal first (mirrors RequestDelete)
     RequestUnassign -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("record-user", model.record_id),
     ])
@@ -638,7 +649,7 @@ pub fn update(
         Ok(record_id) -> {
           let eff = {
             use dispatch <- effect.from
-            admin_api.unassign_record_user(record_id)
+            records.release_record(record_id)
             |> promise.tap(fn(result) { dispatch(UnassignUserResult(result)) })
             Nil
           }
@@ -1977,21 +1988,25 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
           ])
         None -> element.none()
       },
-      case is_admin_user(shared) {
+      case is_admin_user(shared) || permissions.can_release_record(record) {
         True ->
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
             html.dd([], case record.user_id {
               Some(uid) -> [
-                html.text(cache.user_email(shared.cache, uid)),
+                html.text(assignee_email(shared, uid)),
                 html.text(" "),
-                html.button(
-                  [
-                    attribute.class("btn btn-sm btn-outline"),
-                    event.on_click(RequestUnassign),
-                  ],
-                  [html.text(shared.translate(i18n.BtnUnassign))],
-                ),
+                case permissions.can_release_record(record) {
+                  True ->
+                    html.button(
+                      [
+                        attribute.class("btn btn-sm btn-outline"),
+                        event.on_click(RequestUnassign),
+                      ],
+                      [html.text(shared.translate(i18n.BtnUnassign))],
+                    )
+                  False -> element.none()
+                },
               ]
               None -> [html.text("—")]
             }),

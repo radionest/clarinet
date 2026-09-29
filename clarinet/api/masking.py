@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from clarinet.files import Files
 from clarinet.models import Record, RecordRead, User
+from clarinet.services.record_lifecycle import RecordSnapshot, allowed_commands
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
@@ -203,6 +204,16 @@ def mask_record_patient_data(
     return record.model_copy(update=updates)
 
 
+def record_read_for(record: Record, user: User) -> RecordRead:
+    """``RecordRead`` of ``record`` carrying the commands ``user`` may run on it (no masking).
+
+    ``record`` must be loaded with its ``record_type``; ``user`` with its roles.
+    """
+    read = RecordRead.model_validate(record)
+    read.allowed_commands = allowed_commands(RecordSnapshot.of(record), user.as_actor())
+    return read
+
+
 async def mask_records(
     records: Sequence[Record], user: User, repo: RecordRepository
 ) -> list[RecordRead]:
@@ -218,7 +229,7 @@ async def mask_records(
     Returns:
         List of masked RecordRead objects.
     """
-    reads = [RecordRead.model_validate(r) for r in records]
+    reads = [record_read_for(r, user) for r in records]
     if user.is_superuser:
         return reads
     # Look up only what mask_record_patient_data will rewrite: it passes through

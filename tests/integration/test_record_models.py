@@ -4,18 +4,23 @@ Covers:
 - RecordRead serialization of started_at/finished_at timestamps
 - RecordTypeOptional schema (no id field)
 - SeriesRepository.find_by_criteria() with RecordFind EXISTS filtering
+- The direct-write guard on Record.status / Record.user_id
 """
 
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 
-from clarinet.models.base import DicomQueryLevel, RecordStatus
-from clarinet.models.record import Record, RecordFind, RecordRead, RecordType, RecordTypeOptional
+from clarinet.exceptions.domain import DirectRecordWriteError
+from clarinet.models import Record, RecordStatus
+from clarinet.models.base import DicomQueryLevel
+from clarinet.models.record import RecordFind, RecordRead, RecordType, RecordTypeOptional
 from clarinet.models.study import Series, SeriesFind, Study
+from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.series_repository import SeriesRepository
-from tests.utils.factories import make_patient
+from tests.utils.factories import make_patient, make_record_type, seed_record
 
 # ---------------------------------------------------------------------------
 # Group 1: RecordRead timestamps (started_at / finished_at)
@@ -45,19 +50,18 @@ async def test_record_read_includes_started_at_on_inwork(
     test_session.add(record)
     await test_session.commit()
 
-    # Transition to inwork — event listener should set started_at
-    record.status = RecordStatus.inwork
-    test_session.add(record)
-    await test_session.commit()
-    await test_session.refresh(record)
-
+    # Transition to inwork through the writer — started_at is stamped there.
+    repo = RecordRepository(test_session)
+    await repo.write_transition(
+        record.id,
+        expected_status=RecordStatus.pending,
+        expected_user_id=test_user.id,
+        to=RecordStatus.inwork,
+        owner=test_user.id,
+    )
+    record = await repo.get_with_relations(record.id, populate_existing=True)
     assert record.started_at is not None
-
-    # Eagerly load relations needed by RecordRead
-    await test_session.refresh(record, ["patient", "study", "record_type"])
-    read = RecordRead.model_validate(record, from_attributes=True)
-    data = read.model_dump()
-    assert data["started_at"] is not None
+    assert RecordRead.model_validate(record).model_dump()["started_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -83,18 +87,18 @@ async def test_record_read_includes_finished_at_on_finished(
     test_session.add(record)
     await test_session.commit()
 
-    # Transition to finished
-    record.status = RecordStatus.finished
-    test_session.add(record)
-    await test_session.commit()
-    await test_session.refresh(record)
-
+    # Transition to finished through the writer — finished_at is stamped there.
+    repo = RecordRepository(test_session)
+    await repo.write_transition(
+        record.id,
+        expected_status=RecordStatus.inwork,
+        expected_user_id=test_user.id,
+        to=RecordStatus.finished,
+        owner=test_user.id,
+    )
+    record = await repo.get_with_relations(record.id, populate_existing=True)
     assert record.finished_at is not None
-
-    await test_session.refresh(record, ["patient", "study", "record_type"])
-    read = RecordRead.model_validate(record, from_attributes=True)
-    data = read.model_dump()
-    assert data["finished_at"] is not None
+    assert RecordRead.model_validate(record).model_dump()["finished_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -126,6 +130,91 @@ async def test_record_read_timestamps_none_for_pending(
     data = read.model_dump()
     assert data["started_at"] is None
     assert data["finished_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_record_read_model_validate_defaults_allowed_commands(
+    test_session, test_user, test_patient, test_study
+):
+    """model_validate(record) — not via record_read_for — still works: allowed_commands defaults to []."""
+    record_type = RecordType(
+        name="timestamps-allowed-commands",
+        description="test",
+        level=DicomQueryLevel.STUDY,
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        user_id=test_user.id,
+        record_type_name=record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record, ["patient", "study", "record_type"])
+
+    read = RecordRead.model_validate(record, from_attributes=True)
+    assert read.allowed_commands == []
+
+
+# ---------------------------------------------------------------------------
+# Group 1b: the direct-write guard on Record.status / Record.user_id
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def saved_record(test_session, test_patient, test_study, test_series):
+    test_session.add(make_record_type("guard-rt", unique_by=None))
+    await test_session.commit()
+    return await seed_record(
+        test_session,
+        test_patient.id,
+        test_study.study_uid,
+        test_series.series_uid,
+        "guard-rt",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("attr", "value"), [("status", RecordStatus.finished), ("user_id", uuid4())]
+)
+async def test_a_saved_records_lifecycle_columns_refuse_assignment(
+    test_session, saved_record, attr, value
+):
+    with pytest.raises(DirectRecordWriteError, match=attr):
+        setattr(saved_record, attr, value)
+
+
+@pytest.mark.asyncio
+async def test_generic_field_updates_cannot_bypass_the_guard(test_session, saved_record):
+    # Captured before rollback: rollback() expires saved_record, and a bare
+    # attribute access on an expired instance outside an async context raises
+    # MissingGreenlet.
+    record_id = saved_record.id
+    with pytest.raises(DirectRecordWriteError):
+        await RecordRepository(test_session).update_fields(
+            record_id, {"status": RecordStatus.finished}
+        )
+    await test_session.rollback()
+    fresh = await RecordRepository(test_session).get_with_relations(
+        record_id, populate_existing=True
+    )
+    assert fresh.status != RecordStatus.finished
+
+
+def test_a_new_record_may_set_its_status_and_owner():
+    record = Record(
+        patient_id="P", record_type_name="rt-name", status=RecordStatus.finished, user_id=uuid4()
+    )
+    assert (record.status, record.started_at, record.finished_at) == (
+        RecordStatus.finished,
+        None,
+        None,
+    )
 
 
 # ---------------------------------------------------------------------------

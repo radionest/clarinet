@@ -180,6 +180,11 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     None,
     decode.optional(decode.string),
   )
+  use allowed_commands <- decode.optional_field(
+    "allowed_commands",
+    [],
+    decode.list(decode.string),
+  )
 
   let status = status.from_backend_string(status_str)
 
@@ -215,5 +220,6 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     display_anon_id: display_anon_id,
     is_editable: is_editable,
     shared_editing: shared_editing,
+    allowed_commands: allowed_commands,
   ))
 }

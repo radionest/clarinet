@@ -70,19 +70,29 @@ The behavioural flags (`unique_by`, `shared_editing`, `editable`,
 
 ```mermaid
 stateDiagram-v2
-    [*] --> preparing
-    [*] --> pending
-    preparing --> blocked : files missing or grid mismatch on exit
-    preparing --> pending : files valid
-    [*] --> blocked : created with required inputs missing or grid mismatch
-    blocked --> pending : check-files finds files valid
-    pending --> inwork
-    inwork --> finished
-    inwork --> failed
-    finished --> pending : hard invalidation
-    pending --> pause : administrative
-    pause --> pending : administrative
+    [*] --> pending : create
+    [*] --> preparing : create (admin or system)
+    [*] --> blocked : create, inputs missing or grid mismatch
+    preparing --> pending : set-status, inputs valid
+    preparing --> blocked : set-status to pending, inputs invalid
+    blocked --> pending : unblock (check-files) or restart
+    pending --> inwork : claim or assign
+    inwork --> pending : unassign or owner release or restart
+    pending --> finished : submit
+    inwork --> finished : submit
+    pause --> finished : submit
+    failed --> finished : submit
+    pending --> failed : fail or submit ?status=failed
+    inwork --> failed : fail or submit ?status=failed
+    pause --> failed : submit ?status=failed
+    finished --> pending : restart
+    failed --> pending : restart
+    pause --> pending : restart
 ```
+
+Admins and system actors may also set any status directly (set-status) except
+`preparing → inwork/finished`; system actors use that for locks, re-fires and
+retries.
 
 `RecordStatus` has exactly these seven members.
 
@@ -104,12 +114,77 @@ Contract details that bite:
   it is never observable as pending-with-invalid-files.
 - Direct `preparing → inwork/finished` is rejected with 409 — a preparing record
   must exit through `pending`. Hard invalidation leaves `preparing` untouched.
-- Neither `preparing` nor `blocked` records can be assigned or claimed, and
-  `find_pending_by_user()` excludes both. Prefill is allowed on both; submit
+- Neither `preparing` nor `blocked` records can be claimed, and
+  `find_pending_by_user()` excludes both; an admin may still assign them
+  (owner only, status unchanged). Prefill is allowed on both; submit
   returns 409.
 
-`@event.listens_for(Record.status, "set")` stamps `started_at` on `inwork` and
-`finished_at` on `finished`.
+`RecordRepository.write_transition` stamps `started_at` when a record enters
+`inwork` and `finished_at` when it enters `finished`, in the same UPDATE as
+the status. Assigning `status` or `user_id` on a saved record raises
+(`DirectRecordWriteError`). The one write outside `write_transition`:
+`UserRepository.clear_owned_records` (a Core UPDATE, `user_id = NULL`, status
+untouched) runs before `UserService.delete_user` deletes the user, so the
+FK's own nullify-on-delete cascade never hits the guard.
+
+## Transitions
+
+Every change of a record's status, owner or submitted data is one of ten
+commands, decided by `clarinet/services/record_lifecycle.py::decide` and
+written by `RecordRepository.write_transition`:
+
+| Command | Endpoint(s) | Contract | Person | Admin | System |
+|---|---|---|---|---|---|
+| `create` | `POST /records` | initial status `pending` (`preparing` for admin/system) | ✓ (own type role; owner self or none) | ✓ | ✓ |
+| `claim` | `POST /claim-next`, `PATCH /{id}/user` (self) | `pending`/`inwork`, unassigned or own | ✓ | ✓ | ✓ |
+| `assign` | `PATCH /{id}/user`, admin `PATCH .../assign` | sets owner; only `pending` moves to `inwork` | — | ✓ | ✓ |
+| `unassign` | `DELETE /{id}/user`, admin `DELETE .../user` | clears owner; `inwork` falls back to `pending` | owner only, `releasable` type | ✓ | ✓ |
+| `submit` | `POST /{id}/data`, `POST /{id}/submit` | `pending`/`inwork`/`failed`/`pause` → `finished` or `failed` | ✓ | ✓ | ✓ |
+| `edit` | `PATCH /{id}/data`, `PATCH /{id}/submit` | `finished` only; status unchanged | ✓ (edit lock) | ✓ | ✓ |
+| `fail` | `POST /{id}/fail` | `pending`/`inwork` → `failed` | ✓ | ✓ | ✓ |
+| `restart` | `POST /{id}/invalidate` (hard) | any status but `preparing` → `pending` | ✓ (edit lock) | ✓ | ✓ |
+| `set_status` | `PATCH /{id}/status`, `PATCH /bulk/status`, admin `PATCH .../status` | raw status change; `preparing` exits only via `pending` | — | ✓ | ✓ |
+| `unblock` | `POST /{id}/check-files` | `blocked` → `pending` when inputs are valid | ✓ | ✓ | ✓ |
+
+A person also needs mutation rights (the type's role or superuser, **and**
+admin, owner, unassigned, or `shared_editing`) and, for `edit`/`restart`, must
+clear the edit lock; system actors get the contracts only — no mutation-rights
+or edit-lock check. Downstream flows and workers rely on transitions outside
+the nominal lifecycle (restarts from any status, lock/release round trips),
+and a refused system write fails silently (workers never retry a 4xx, `.call()`
+swallows exceptions) — do not tighten system-actor rules without checking every
+downstream project. A new owner (assign, or create with a given or inherited
+`user_id`) must hold the type's role or be a superuser, for every actor
+including the service token — 409 `OWNER_LACKS_ROLE` otherwise. A non-admin
+creating a record may name only themselves or nobody as `user_id` (403); that
+covers the payload `user_id` only — an owner inherited via
+`inherit_user_from_parent` passes only the role check. A refusal is
+403 when the actor may not run the command on this record at all, and 409 when
+the command's contract refuses the record's current status; a 409 body carries
+`code` (`TRANSITION_NOT_ALLOWED`, `RECORD_EDIT_LOCKED`, `CONCURRENT_TRANSITION`,
+`OWNER_LACKS_ROLE`) and `metadata.status` (the record's current status).
+
+`RecordService._transition` owns the pipeline: `record_lifecycle.decide` →
+`RecordRepository.write_transition` (one conditional UPDATE on status and
+owner, re-decided against fresh state for at most 3 attempts on a concurrent
+miss) →
+the audit row and matched input-file links join the same transaction → one
+commit → SSE and RecordFlow fire only after that commit lands. Status flows
+fire `on_status(to)` only when the command actually changes the status; hard
+invalidation (`restart`) always fires, even pending → pending. A command that
+changes nothing (same status, same owner, no data, no note) writes no audit
+event. `RecordRead.allowed_commands` lists the commands the viewer may run on
+the record right now (`record_lifecycle.allowed_commands`, filled by
+`api/masking.py`) — it does not reflect checks that need I/O (`unique_by`, the
+new owner's roles, input files); the endpoint still enforces those.
+
+Why a conditional UPDATE and not a row lock: `SELECT … FOR UPDATE` is a no-op
+on SQLite and would hold the lock across the flows' nested API calls; a version
+column would pull every `Record` writer (prefill, context-info, viewer lists)
+into the locking and needs a migration. The price: status + owner is the whole
+write condition, so two concurrent in-place edits of a finished record, or an
+A→B→A change between decide and write, go undetected — system edits stay
+last-write-wins; #691 removes in-place edits for people.
 
 ## Record data vs context_info
 
@@ -117,7 +192,7 @@ Contract details that bite:
 
 | Method | HTTP | Precondition | Result | Fires |
 |---|---|---|---|---|
-| submit | `POST /records/{id}/data` | any status except `blocked`, `preparing`, `finished` — in practice `inwork`, since claiming sets it | `finished`, or `failed` via `?status=failed` | `on_status()` |
+| submit | `POST /records/{id}/data` | `pending`, `inwork`, `failed` or `pause` | `finished`, or `failed` via `?status=failed` | `on_status()` |
 | update | `PATCH /records/{id}/data` | finished | finished | `on_data_update()` |
 | prefill | `POST`/`PUT`/`PATCH .../data/prefill` | pending / blocked / preparing | status unchanged | nothing |
 
@@ -145,23 +220,35 @@ safety contract: [Files and anonymization](./files-and-anonymization.md).
 dispatching RecordFlow, with kinds `created`, `status_changed`,
 `data_submitted`, `data_updated`, `assigned`, `unassigned`, `failed`,
 `invalidated`, `context_info_updated`, `files_cleared`, `deleted`. The actor is
-the current user's UUID, or `None` when the request authenticated with
-`X-Internal-Token` (pipeline workers, RecordFlow). `record_event.record_key` is
-a denormalised record id with no FK, so a deleted record's history stays
-correlatable. Prefill writes are deliberately not audited.
+the person's UUID, or `None` for a system actor (`X-Internal-Token`: pipeline
+workers, RecordFlow, cron, operator scripts). A status, owner or data change
+and its event commit in one transaction. `from_status` / `to_status` are set
+only when the command changed the status; a submit or edit that changes the
+owner records it in its one event (`new_value.user_id`, `via`) instead of a
+separate `assigned` event. `record_event.record_key` is a denormalised record
+id with no FK, so a deleted record's history stays correlatable. Prefill
+writes are deliberately not audited.
 
 ## Access control
 
 `AuthorizedRecordDep` grants read access to superusers and to holders of the
 record type's role; `MutableRecordDep` adds mutation for admins (`is_admin`),
 the assigned user or an unassigned record (and bypasses the owner check when
-`shared_editing` is set). Every record mutation goes through it — including
-`/fail`, `/invalidate`, `/check-files` (it can unblock a record and fire
-file-change flows) and, per target record, `PATCH /bulk/status`.
-Assignment (`PATCH /api/records/{id}/user`) is stricter, since it decides who
-the owner is and forces `inwork`: a non-admin may only claim for themselves an
-unassigned `pending`/`inwork` record, even on a `shared_editing` type —
-reassigning, or re-opening a finished record by assigning it, is admin-only.
+`shared_editing` is set). Every single-record mutation goes through it —
+including `/fail`, `/invalidate`, `/check-files` (it can unblock a record and
+fire file-change flows) — except the owner changes: `PATCH` and `DELETE
+/records/{id}/user` take only `AuthorizedRecordDep`, because claim, assign
+and release rights are the lifecycle policy's call. `PATCH /bulk/status` carries no per-target router
+dependency of its own; the service-level policy alone makes it admin- and
+service-token-only.
+The record service re-checks the same rights itself (lifecycle policy), so no
+endpoint can change status or ownership past a weaker router dependency. Raw
+status changes and assigning another user are admin-only; unassigning is too,
+except that the owner of a pending/inwork record may give it back when its
+type sets `releasable`. Assign sets the owner and only moves `pending` to
+`inwork`; a non-admin claims for themselves an unassigned (or own)
+`pending`/`inwork` record. The edit lock yields to admins — superuser or
+`admin` role.
 *Creating* a record is a third rule (`check_record_type_role` on
 `POST /api/records`): an admin — superuser **or** `admin` role — or a holder of
 the type's role; a `role_name = NULL` type is admin-only. The create predicate

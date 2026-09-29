@@ -11,7 +11,7 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 
 | Router | Auth Level | Notes |
 |--------|-----------|-------|
-| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record reads, `MutableRecordDep` on single-record writes (`PATCH /{id}/user` keeps `AuthorizedRecordDep` plus its own inline check); `POST /` requires an admin or the record type's role (`check_record_type_role`) |
+| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record reads, `MutableRecordDep` on single-record writes; `PATCH /{id}/user` keeps `AuthorizedRecordDep` — the router picks claim (a non-admin naming themselves) vs assign, the service's policy decides whether either is allowed; `DELETE /{id}/user` is the owner's release; `POST /` requires an admin or the record type's role (`check_record_type_role`) |
 | `slicer.py` | mixed | `/records/{id}/open` and `/validate` use `AuthorizedRecordDep` (they ship the record's context to the caller's Slicer); `exec`, `ping`, `clear` act only on the caller's own Slicer and stay `CurrentUserDep` |
 | `study.py` | `current_admin_user` | Admin-only (patients, studies, series): is_superuser OR `admin` role |
 | `record_type.py` | `current_superuser` | Admin-only for mutations; read is open to authenticated |
@@ -59,7 +59,7 @@ Config mode guards on `/types` endpoints — see `clarinet/config/CLAUDE.md`.
 
 RecordFlow triggers are dispatched via the **service layer**, not directly from routers:
 
-- `RecordService` wraps record mutations (`update_status`, `assign_user`, `submit_data`, `update_data`, `notify_file_change`, `bulk_update_status`, `notify_file_updates`) and fires the appropriate engine trigger (awaited directly).
+- `RecordService` fires record triggers after each lifecycle command commits — full list: [RecordFlow → How triggers get dispatched](../../docs/kb/recordflow.md#how-triggers-get-dispatched)
 - `StudyService` fires entity-creation triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`.
 - Engine is injected via `get_recordflow_engine(request)` in `dependencies.py` (returns `None` when disabled).
 
@@ -73,13 +73,16 @@ Invalidation (routes through RecordService):
 data_submitted / data_updated / assigned / unassigned / failed / invalidated /
 context_info_updated / files_cleared / deleted with snapshot; machine markers
 like claim/bulk/cascade go into `new_value.via`, `reason` stays human text).
-The actor comes from `AuditActorDep` (`dependencies.py`, backed by
-`auth_config.is_service_request`): the current user's UUID, or `None` when
-the request authenticated via `X-Internal-Token` (pipeline workers,
-RecordFlow) — every mutating endpoint passes `actor_id=actor` into the
-service. `record_event.record_key` is a denormalized record id without FK —
-it keeps a deleted record's history correlatable after `record_id` goes NULL.
-Prefill writes are deliberately not audited (high-volume system noise).
+The actor comes from `ActorDep` (`dependencies.py::get_actor`, backed by
+`auth_config.is_service_request`): a `HumanActor`, or a `SystemActor` when the
+request carries a valid `X-Internal-Token` (audit `actor_id=None`) — every
+mutating endpoint passes `actor=actor` into the service. Status, owner and
+data changes and cascade delete commit their event in the same transaction,
+creation right after the INSERT; context-info updates, soft invalidation and
+output-file clearing leave it to the request-teardown commit. `record_event.record_key` is a
+denormalized record id without FK — it keeps a deleted record's history
+correlatable after `record_id` goes NULL. Prefill writes are deliberately not
+audited (high-volume system noise).
 Read endpoints: `GET /records/{id}/events` (AuthorizedRecordDep, oldest
 first) and `GET /admin/records/events/deleted`. Downstream projects need an
 alembic migration for the `record_event` table.

@@ -1,5 +1,6 @@
 """Unit tests for RecordService and StudyService RecordFlow triggers."""
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,9 +9,10 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from clarinet.exceptions.domain import BusinessRuleViolationError, UnsafePathError
+from clarinet.exceptions.domain import UnsafePathError
 from clarinet.files import Files
 from clarinet.models import RecordStatus
+from clarinet.models.actor import SystemActor
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.services.record_service import (
@@ -21,174 +23,44 @@ from clarinet.services.record_service import (
 from clarinet.services.study_service import StudyService
 from clarinet.utils.logger import logger
 
+_MUTATORS = (
+    "create_record",
+    "update_status",
+    "assign_user",
+    "claim_record",
+    "claim_random_from_pool",
+    "unassign_user",
+    "submit_data",
+    "update_data",
+    "bulk_update_status",
+    "invalidate_record",
+    "fail_record",
+    "check_files",
+    "update_context_info",
+    "clear_output_files",
+    "delete_record_cascade",
+)
+
+
+@pytest.mark.parametrize("name", _MUTATORS)
+def test_mutators_require_a_keyword_only_actor(name):
+    params = inspect.signature(getattr(RecordService, name)).parameters
+    actor = params["actor"]
+    assert actor.kind is inspect.Parameter.KEYWORD_ONLY
+    assert actor.default is inspect.Parameter.empty
+    assert not {"acting_user", "actor_id"} & params.keys()
+
 
 class TestRecordServiceTriggers:
     """Test RecordService mutation methods fire correct RecordFlow triggers."""
-
-    @pytest.mark.asyncio
-    async def test_update_status_fires_status_change_trigger(self) -> None:
-        """Test update_status fires status-change trigger when status changes."""
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.inwork
-        old_status = RecordStatus.pending
-        record_read_mock = MagicMock()
-
-        repo_mock = AsyncMock()
-        repo_mock.update_status.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-
-        service = RecordService(repo_mock, engine_mock)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = record_read_mock
-            result, result_old_status = await service.update_status(1, RecordStatus.inwork)
-
-            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.inwork)
-            patched.model_validate.assert_called_once_with(record_mock)
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                record_read_mock, old_status
-            )
-            assert result == record_mock
-            assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_update_status_no_trigger_when_status_unchanged(self) -> None:
-        """Test update_status does not fire trigger when status unchanged."""
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-        old_status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.update_status.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        result, result_old_status = await service.update_status(1, RecordStatus.pending)
-
-        repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.pending)
-        engine_mock.handle_record_status_change.assert_not_awaited()
-        assert result == record_mock
-        assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_update_status_no_trigger_when_engine_none(self) -> None:
-        """Test update_status does not fire trigger when engine is None."""
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.inwork
-        old_status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.update_status.return_value = (record_mock, old_status)
-
-        service = RecordService(repo_mock, engine=None)
-
-        result, result_old_status = await service.update_status(1, RecordStatus.inwork)
-
-        repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.inwork)
-        assert result == record_mock
-        assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_assign_user_fires_status_change_trigger(self) -> None:
-        """Test assign_user fires status-change trigger when status changes."""
-        user_id = uuid4()
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.inwork
-        old_status = RecordStatus.pending
-        record_read_mock = MagicMock()
-
-        prefetch_mock = MagicMock()
-        prefetch_mock.record_type.unique_per_user = False
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = prefetch_mock
-        repo_mock.assign_user.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-
-        service = RecordService(repo_mock, engine_mock)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = record_read_mock
-            result, result_old_status = await service.assign_user(1, user_id)
-
-            repo_mock.get_with_record_type.assert_awaited_once_with(1)
-            repo_mock.assign_user.assert_awaited_once_with(1, user_id)
-            patched.model_validate.assert_called_once_with(record_mock)
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                record_read_mock, old_status
-            )
-            assert result == record_mock
-            assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_assign_user_no_trigger_when_status_unchanged(self) -> None:
-        """Test assign_user does not fire trigger when status unchanged."""
-        user_id = uuid4()
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-        old_status = RecordStatus.pending
-
-        prefetch_mock = MagicMock()
-        prefetch_mock.record_type.unique_per_user = False
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = prefetch_mock
-        repo_mock.assign_user.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        result, result_old_status = await service.assign_user(1, user_id)
-
-        repo_mock.assign_user.assert_awaited_once_with(1, user_id)
-        engine_mock.handle_record_status_change.assert_not_awaited()
-        assert result == record_mock
-        assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_submit_data_fires_status_change_trigger(self) -> None:
-        """Test submit_data fires status-change trigger."""
-        data = {"field": "value"}
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.finished
-        old_status = RecordStatus.inwork
-        record_read_mock = MagicMock()
-
-        repo_mock = AsyncMock()
-        repo_mock.update_data.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-
-        service = RecordService(repo_mock, engine_mock)
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "sync_output_files", new_callable=AsyncMock) as sync_mock,
-        ):
-            patched.model_validate.return_value = record_read_mock
-            result, result_old_status = await service.submit_data(1, data, RecordStatus.finished)
-
-            repo_mock.update_data.assert_awaited_once_with(
-                1, data, new_status=RecordStatus.finished, reassign_to=None
-            )
-            patched.model_validate.assert_called_once_with(record_mock)
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                record_read_mock, old_status
-            )
-            sync_mock.assert_awaited_once_with(record_mock)
-            assert result == record_mock
-            assert result_old_status == old_status
 
     @pytest.mark.asyncio
     async def test_submit_data_with_unsafe_output_pattern_returns_422_before_persisting(
         self,
     ) -> None:
         """The real caller: submit_data must reject a poisoned OUTPUT pattern
-        with 422 BEFORE update_data persists anything, not silently swallow the
-        violation into a 200 after the data is already committed."""
+        with 422 BEFORE write_transition persists anything, not silently swallow
+        the violation into a 200 after the data is already committed."""
         record = _record_read_stub(
             [FileDefinitionRead(name="seg", pattern="seg_{patient_id}.nrrd", role=FileRole.OUTPUT)],
             [],
@@ -199,7 +71,11 @@ class TestRecordServiceTriggers:
 
         repo_mock = AsyncMock()
         repo_mock.get_with_relations.return_value = record
-        repo_mock.update_data.return_value = (record, RecordStatus.pending)
+        repo_mock.write_transition = AsyncMock(return_value=True)
+        repo_mock.session.get = AsyncMock(
+            return_value=SimpleNamespace(is_superuser=True, role_names=[])
+        )
+        repo_mock.session.commit = AsyncMock()
         service = RecordService(repo_mock)
 
         reader_stub = MagicMock()
@@ -212,11 +88,16 @@ class TestRecordServiceTriggers:
         ):
             patched.model_validate.side_effect = lambda r: r
             with pytest.raises(HTTPException) as exc_info:
-                await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
+                await service.submit_data(
+                    7,
+                    {"field": "value"},
+                    RecordStatus.finished,
+                    actor=SystemActor(service_user_id=uuid4()),
+                )
 
         assert exc_info.value.status_code == 422
         # Nothing was persisted, and we never even reached the post-commit sync.
-        repo_mock.update_data.assert_not_awaited()
+        repo_mock.write_transition.assert_not_awaited()
         sync_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -249,7 +130,11 @@ class TestRecordServiceTriggers:
 
         repo_mock = AsyncMock()
         repo_mock.get_with_relations.return_value = record
-        repo_mock.update_data.return_value = (record, RecordStatus.pending)
+        repo_mock.write_transition = AsyncMock(return_value=True)
+        repo_mock.session.get = AsyncMock(
+            return_value=SimpleNamespace(is_superuser=True, role_names=[])
+        )
+        repo_mock.session.commit = AsyncMock()
         service = RecordService(repo_mock)
 
         reader_stub = MagicMock()
@@ -264,9 +149,14 @@ class TestRecordServiceTriggers:
             ) as render_for_spy,
         ):
             patched.model_validate.side_effect = lambda r: r
-            await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
+            await service.submit_data(
+                7,
+                {"field": "value"},
+                RecordStatus.finished,
+                actor=SystemActor(service_user_id=uuid4()),
+            )
 
-        repo_mock.update_data.assert_awaited_once()
+        repo_mock.write_transition.assert_awaited_once()
         sync_mock.assert_awaited_once()
         # Proof, not inference: the sibling was genuinely rendered (call
         # recorded, with {id} actually substituted), and the collection
@@ -399,7 +289,11 @@ class TestRecordServiceTriggers:
 
         repo_mock = AsyncMock()
         repo_mock.get_with_relations.return_value = record
-        repo_mock.update_data.return_value = (record, RecordStatus.pending)
+        repo_mock.write_transition = AsyncMock(return_value=True)
+        repo_mock.session.get = AsyncMock(
+            return_value=SimpleNamespace(is_superuser=True, role_names=[])
+        )
+        repo_mock.session.commit = AsyncMock()
         service = RecordService(repo_mock)
 
         with (
@@ -408,209 +302,19 @@ class TestRecordServiceTriggers:
         ):
             patched.model_validate.side_effect = lambda r: r
             with pytest.raises(HTTPException) as exc_info:
-                await service.submit_data(7, {"field": "value"}, RecordStatus.finished)
+                await service.submit_data(
+                    7,
+                    {"field": "value"},
+                    RecordStatus.finished,
+                    actor=SystemActor(service_user_id=uuid4()),
+                )
 
         # The spec-mandated status for a placeholder-bearing pattern rejected
         # by the value guard -- not the 500 an escaped AnonPathError would
         # produce via the ConfigurationError handler.
         assert exc_info.value.status_code == 422
-        repo_mock.update_data.assert_not_awaited()
+        repo_mock.write_transition.assert_not_awaited()
         sync_mock.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_update_data_fires_data_update_trigger(self) -> None:
-        """Test update_data fires data-update trigger."""
-        data = {"field": "value"}
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-        old_status = RecordStatus.pending
-        record_read_mock = MagicMock()
-
-        repo_mock = AsyncMock()
-        repo_mock.update_data.return_value = (record_mock, old_status)
-
-        engine_mock = AsyncMock()
-
-        service = RecordService(repo_mock, engine_mock)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = record_read_mock
-            result, result_old_status = await service.update_data(1, data)
-
-            repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
-            patched.model_validate.assert_called_once_with(record_mock)
-            engine_mock.handle_record_data_update.assert_awaited_once_with(record_read_mock)
-            assert result == record_mock
-            assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_update_data_no_trigger_when_engine_none(self) -> None:
-        """Test update_data does not fire trigger when engine is None."""
-        data = {"field": "value"}
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-        old_status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.update_data.return_value = (record_mock, old_status)
-
-        service = RecordService(repo_mock, engine=None)
-
-        result, result_old_status = await service.update_data(1, data)
-
-        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
-        assert result == record_mock
-        assert result_old_status == old_status
-
-    @pytest.mark.asyncio
-    async def test_update_data_transfers_ownership_for_shared_type(self) -> None:
-        """Editing a shared record owned by another user threads reassign_to."""
-        actor = uuid4()
-        data = {"field": "value"}
-        fetched = MagicMock()
-        fetched.record_type.shared_editing = True
-        fetched.user_id = uuid4()  # owned by someone else
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_relations.return_value = fetched
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
-        service = RecordService(repo_mock, AsyncMock())
-        # Superuser acting_user skips ensure_record_editable; the transfer branch
-        # is independent of superuser status.
-        acting_user = SimpleNamespace(is_superuser=True, id=actor)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = MagicMock()
-            await service.update_data(1, data, acting_user=acting_user, actor_id=actor)
-
-        repo_mock.get_with_relations.assert_awaited_once_with(1)
-        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=actor)
-
-    @pytest.mark.asyncio
-    async def test_update_data_no_transfer_for_system_call(self) -> None:
-        """acting_user=None (system/worker) never fetches or transfers."""
-        data = {"field": "value"}
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
-        service = RecordService(repo_mock, AsyncMock())
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = MagicMock()
-            await service.update_data(1, data)
-
-        repo_mock.get_with_relations.assert_not_awaited()
-        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
-
-    @pytest.mark.asyncio
-    async def test_update_data_no_transfer_when_already_owner(self) -> None:
-        """No transfer (or reassign) when the editor already owns the record."""
-        actor = uuid4()
-        data = {"field": "value"}
-        fetched = MagicMock()
-        fetched.record_type.shared_editing = True
-        fetched.user_id = actor  # already the owner
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_relations.return_value = fetched
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
-        service = RecordService(repo_mock, AsyncMock())
-        acting_user = SimpleNamespace(is_superuser=True, id=actor)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = MagicMock()
-            await service.update_data(1, data, acting_user=acting_user, actor_id=actor)
-
-        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
-
-    @pytest.mark.asyncio
-    async def test_submit_data_transfers_ownership_for_shared_type(self) -> None:
-        """Re-submitting a shared record owned by another user threads reassign_to."""
-        actor = uuid4()
-        data = {"field": "value"}
-        check = MagicMock()
-        check.user_id = uuid4()  # owned by someone else
-        check.record_type.shared_editing = True
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.finished
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = check
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
-        service = RecordService(repo_mock, AsyncMock())
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "sync_output_files", new_callable=AsyncMock),
-        ):
-            patched.model_validate.return_value = MagicMock()
-            await service.submit_data(1, data, RecordStatus.finished, user_id=actor, actor_id=actor)
-
-        # Transfer branch must NOT go through ensure_user_assigned
-        repo_mock.ensure_user_assigned.assert_not_awaited()
-        repo_mock.update_data.assert_awaited_once_with(
-            1, data, new_status=RecordStatus.finished, reassign_to=actor
-        )
-
-    @pytest.mark.asyncio
-    async def test_update_data_no_transfer_for_service_token(self) -> None:
-        """Service-token writes (acting_user present, actor_id=None) must not transfer ownership."""
-        admin_id = uuid4()
-        other_owner = uuid4()
-        data = {"field": "value"}
-        fetched = MagicMock()
-        fetched.record_type.shared_editing = True
-        fetched.user_id = other_owner  # owned by someone else
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.pending
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_relations.return_value = fetched
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.pending)
-        service = RecordService(repo_mock, AsyncMock())
-        acting_user = SimpleNamespace(is_superuser=True, id=admin_id)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.return_value = MagicMock()
-            await service.update_data(1, data, acting_user=acting_user, actor_id=None)
-
-        repo_mock.update_data.assert_awaited_once_with(1, data, reassign_to=None)
-
-    @pytest.mark.asyncio
-    async def test_submit_data_no_transfer_for_service_token(self) -> None:
-        """Service-token submits (user_id present, actor_id=None) must not transfer ownership."""
-        admin_id = uuid4()
-        other_owner = uuid4()
-        data = {"field": "value"}
-        check = MagicMock()
-        check.user_id = other_owner  # owned by someone else
-        check.record_type.shared_editing = True
-        record_mock = MagicMock()
-        record_mock.status = RecordStatus.finished
-
-        repo_mock = AsyncMock()
-        repo_mock.get_with_record_type.return_value = check
-        repo_mock.update_data.return_value = (record_mock, RecordStatus.inwork)
-        service = RecordService(repo_mock, AsyncMock())
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "sync_output_files", new_callable=AsyncMock),
-        ):
-            patched.model_validate.return_value = MagicMock()
-            await service.submit_data(
-                1, data, RecordStatus.finished, user_id=admin_id, actor_id=None
-            )
-
-        repo_mock.update_data.assert_awaited_once_with(
-            1, data, new_status=RecordStatus.finished, reassign_to=None
-        )
 
     @pytest.mark.asyncio
     async def test_notify_file_change_fires_file_change_trigger(self) -> None:
@@ -637,78 +341,6 @@ class TestRecordServiceTriggers:
         service = RecordService(repo_mock, engine=None)
 
         await service.notify_file_change(record_mock)
-
-    @pytest.mark.asyncio
-    async def test_bulk_update_status_fires_per_record_triggers(self) -> None:
-        """Test bulk_update_status fires triggers only for changed records."""
-        record1_mock = MagicMock()
-        record1_mock.id = 1
-        record1_mock.status = RecordStatus.pending
-
-        record2_mock = MagicMock()
-        record2_mock.id = 2
-        record2_mock.status = RecordStatus.pending
-
-        record3_mock = MagicMock()
-        record3_mock.id = 3
-        record3_mock.status = RecordStatus.inwork  # Already in target status
-
-        updated_record1 = MagicMock()
-        updated_record1.status = RecordStatus.inwork
-
-        updated_record2 = MagicMock()
-        updated_record2.status = RecordStatus.inwork
-
-        record_read1_mock = MagicMock()
-        record_read2_mock = MagicMock()
-
-        repo_mock = AsyncMock()
-        repo_mock.get_optional.side_effect = [record1_mock, record2_mock, record3_mock]
-        repo_mock.get_with_relations.side_effect = [updated_record1, updated_record2]
-
-        engine_mock = AsyncMock()
-
-        service = RecordService(repo_mock, engine_mock)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            patched.model_validate.side_effect = [record_read1_mock, record_read2_mock]
-            await service.bulk_update_status([1, 2, 3], RecordStatus.inwork)
-
-            repo_mock.bulk_update_status.assert_awaited_once_with([1, 2, 3], RecordStatus.inwork)
-            assert repo_mock.get_with_relations.await_count == 2
-            repo_mock.get_with_relations.assert_any_await(1)
-            repo_mock.get_with_relations.assert_any_await(2)
-            assert engine_mock.handle_record_status_change.await_count == 2
-            engine_mock.handle_record_status_change.assert_any_await(
-                record_read1_mock, RecordStatus.pending
-            )
-            engine_mock.handle_record_status_change.assert_any_await(
-                record_read2_mock, RecordStatus.pending
-            )
-
-    @pytest.mark.asyncio
-    async def test_bulk_update_status_no_trigger_when_engine_none(self) -> None:
-        """Test bulk_update_status does not fire triggers when engine is None."""
-        record1_mock = MagicMock()
-        record1_mock.id = 1
-        record1_mock.status = RecordStatus.pending
-
-        updated_record1 = MagicMock()
-        updated_record1.status = RecordStatus.inwork
-
-        repo_mock = AsyncMock()
-        repo_mock.get_optional.return_value = record1_mock
-        repo_mock.get_with_relations.return_value = updated_record1
-
-        service = RecordService(repo_mock, engine=None)
-
-        with patch("clarinet.services.record_service.RecordRead") as patched:
-            await service.bulk_update_status([1], RecordStatus.inwork)
-
-            repo_mock.bulk_update_status.assert_awaited_once_with([1], RecordStatus.inwork)
-            repo_mock.get_optional.assert_awaited_once_with(1)
-            repo_mock.get_with_relations.assert_awaited_once_with(1)
-            patched.model_validate.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_notify_file_updates_fires_per_file_triggers(self) -> None:
@@ -748,13 +380,18 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
         record_read_mock = MagicMock()
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -763,7 +400,7 @@ class TestCreateRecord:
             patched_read.model_validate.return_value = record_read_mock
             patched_vrf.return_value = None  # no input files defined
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
             repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
             patched_vrf.assert_awaited_once_with(record_read_mock, parent=None)
@@ -776,6 +413,8 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
         refreshed_mock = MagicMock()
         record_read_mock = MagicMock()
         refreshed_read_mock = MagicMock()
@@ -787,9 +426,11 @@ class TestCreateRecord:
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
         repo_mock.get_with_relations.return_value = refreshed_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -798,9 +439,11 @@ class TestCreateRecord:
             patched_read.model_validate.side_effect = [record_read_mock, refreshed_read_mock]
             patched_vrf.return_value = file_result_mock
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
-            repo_mock.set_files.assert_awaited_once_with(record_mock, {"input": "file.nii.gz"})
+            repo_mock.set_files.assert_awaited_once_with(
+                record_mock, {"input": "file.nii.gz"}, commit=False
+            )
             repo_mock.get_with_relations.assert_awaited_once()
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 refreshed_read_mock, None
@@ -813,8 +456,11 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
         blocked_mock = MagicMock()
         blocked_mock.status = RecordStatus.blocked
+        blocked_mock.record_type_name = "test-rt"
         record_read_mock = MagicMock()
         blocked_read_mock = MagicMock()
 
@@ -824,10 +470,13 @@ class TestCreateRecord:
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
-        repo_mock.update_status.return_value = (blocked_mock, RecordStatus.pending)
+        repo_mock.write_transition.return_value = True
+        repo_mock.get_with_relations.return_value = blocked_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -836,9 +485,15 @@ class TestCreateRecord:
             patched_read.model_validate.side_effect = [record_read_mock, blocked_read_mock]
             patched_vrf.return_value = file_result_mock
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
-            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.blocked)
+            repo_mock.write_transition.assert_awaited_once_with(
+                1,
+                expected_status=RecordStatus.pending,
+                expected_user_id=None,
+                to=RecordStatus.blocked,
+                owner=None,
+            )
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 blocked_read_mock, None
             )
@@ -851,6 +506,7 @@ class TestCreateRecord:
         record_mock.id = 1
         record_mock.parent_record_id = None
         record_mock.status = RecordStatus.preparing
+        record_mock.user_id = None
         record_read_mock = MagicMock()
 
         file_result_mock = MagicMock()
@@ -859,9 +515,12 @@ class TestCreateRecord:
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -870,9 +529,9 @@ class TestCreateRecord:
             patched_read.model_validate.return_value = record_read_mock
             patched_vrf.return_value = file_result_mock
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
-            repo_mock.update_status.assert_not_awaited()
+            repo_mock.write_transition.assert_not_awaited()
             engine_mock.handle_record_status_change.assert_awaited_once_with(record_read_mock, None)
             assert result == record_mock
 
@@ -882,11 +541,16 @@ class TestCreateRecord:
         record_mock = MagicMock()
         record_mock.id = 1
         record_mock.parent_record_id = None
+        record_mock.status = RecordStatus.pending
+        record_mock.user_id = None
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = record_mock
+        repo_mock.session.commit = AsyncMock()
 
         service = RecordService(repo_mock, engine=None)
+        actor = SystemActor(service_user_id=uuid4())
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched_read,
@@ -895,197 +559,10 @@ class TestCreateRecord:
             patched_read.model_validate.return_value = MagicMock()
             patched_vrf.return_value = None
 
-            result = await service.create_record(record_mock)
+            result = await service.create_record(record_mock, actor=actor)
 
             repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
             assert result == record_mock
-
-
-class TestPreparingExit:
-    """Test exit rules for ``preparing``: pre-write re-validation, rejected targets."""
-
-    @staticmethod
-    def _preparing_mock() -> MagicMock:
-        prep_mock = MagicMock()
-        prep_mock.id = 1
-        prep_mock.parent_record_id = None
-        prep_mock.status = RecordStatus.preparing
-        return prep_mock
-
-    @pytest.mark.asyncio
-    async def test_valid_files_sets_files_and_stays_pending(self) -> None:
-        """preparing → pending with valid matched files registers links, stays pending."""
-        prep_mock = self._preparing_mock()
-        pending_mock = MagicMock()
-        pending_mock.status = RecordStatus.pending
-        refreshed_mock = MagicMock()
-        refreshed_mock.status = RecordStatus.pending
-        prep_read_mock = MagicMock()
-        refreshed_read_mock = MagicMock()
-
-        file_result_mock = MagicMock()
-        file_result_mock.valid = True
-        file_result_mock.matched_files = {"input": "file.nii.gz"}
-
-        repo_mock = AsyncMock()
-        repo_mock.get.return_value = prep_mock
-        repo_mock.get_with_relations.side_effect = [prep_mock, refreshed_mock]
-        repo_mock.update_status.return_value = (pending_mock, RecordStatus.preparing)
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched_read,
-            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
-        ):
-            patched_read.model_validate.side_effect = [prep_read_mock, refreshed_read_mock]
-            patched_vrf.return_value = file_result_mock
-
-            result, old_status = await service.update_status(1, RecordStatus.pending)
-
-            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.pending)
-            patched_vrf.assert_awaited_once_with(prep_read_mock, parent=None)
-            repo_mock.set_files.assert_awaited_once_with(pending_mock, {"input": "file.nii.gz"})
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                refreshed_read_mock, RecordStatus.preparing
-            )
-            assert result == refreshed_mock
-            assert old_status == RecordStatus.preparing
-
-    @pytest.mark.asyncio
-    async def test_invalid_files_lands_in_blocked(self) -> None:
-        """preparing → pending with invalid files writes blocked once; trigger fires once."""
-        prep_mock = self._preparing_mock()
-        blocked_mock = MagicMock()
-        blocked_mock.status = RecordStatus.blocked
-        prep_read_mock = MagicMock()
-        blocked_read_mock = MagicMock()
-
-        file_result_mock = MagicMock()
-        file_result_mock.valid = False
-        file_result_mock.matched_files = {}
-
-        repo_mock = AsyncMock()
-        repo_mock.get.return_value = prep_mock
-        repo_mock.get_with_relations.return_value = prep_mock
-        repo_mock.update_status.return_value = (blocked_mock, RecordStatus.preparing)
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched_read,
-            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
-        ):
-            patched_read.model_validate.side_effect = [prep_read_mock, blocked_read_mock]
-            patched_vrf.return_value = file_result_mock
-
-            result, old_status = await service.update_status(1, RecordStatus.pending)
-
-            # Single status write — the record is never observable as pending
-            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.blocked)
-            repo_mock.set_files.assert_not_awaited()
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                blocked_read_mock, RecordStatus.preparing
-            )
-            assert result == blocked_mock
-            assert old_status == RecordStatus.preparing
-
-    @pytest.mark.asyncio
-    async def test_no_file_registry_stays_pending(self) -> None:
-        """preparing → pending without a file registry stays pending."""
-        prep_mock = self._preparing_mock()
-        pending_mock = MagicMock()
-        pending_mock.status = RecordStatus.pending
-        prep_read_mock = MagicMock()
-        pending_read_mock = MagicMock()
-
-        repo_mock = AsyncMock()
-        repo_mock.get.return_value = prep_mock
-        repo_mock.get_with_relations.return_value = prep_mock
-        repo_mock.update_status.return_value = (pending_mock, RecordStatus.preparing)
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched_read,
-            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
-        ):
-            patched_read.model_validate.side_effect = [prep_read_mock, pending_read_mock]
-            patched_vrf.return_value = None  # no input files defined
-
-            result, old_status = await service.update_status(1, RecordStatus.pending)
-
-            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.pending)
-            repo_mock.set_files.assert_not_awaited()
-            engine_mock.handle_record_status_change.assert_awaited_once_with(
-                pending_read_mock, RecordStatus.preparing
-            )
-            assert result == pending_mock
-            assert old_status == RecordStatus.preparing
-
-    @pytest.mark.asyncio
-    async def test_preparing_to_inwork_rejected(self) -> None:
-        """Direct preparing → inwork is rejected before any status write."""
-        prep_mock = self._preparing_mock()
-
-        repo_mock = AsyncMock()
-        repo_mock.get.return_value = prep_mock
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        with pytest.raises(BusinessRuleViolationError):
-            await service.update_status(1, RecordStatus.inwork)
-
-        repo_mock.update_status.assert_not_awaited()
-        engine_mock.handle_record_status_change.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_bulk_update_routes_preparing_through_single_path(self) -> None:
-        """bulk_update_status sends preparing records through update_status."""
-        plain_mock = MagicMock()
-        plain_mock.status = RecordStatus.pause
-        prep_mock = self._preparing_mock()
-        updated_read_mock = MagicMock()
-
-        repo_mock = AsyncMock()
-        repo_mock.get_optional.side_effect = [plain_mock, prep_mock]
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        with (
-            patch("clarinet.services.record_service.RecordRead") as patched_read,
-            patch.object(service, "update_status", new_callable=AsyncMock) as single_mock,
-        ):
-            patched_read.model_validate.return_value = updated_read_mock
-
-            await service.bulk_update_status([1, 2], RecordStatus.pending)
-
-            repo_mock.bulk_update_status.assert_awaited_once_with([1], RecordStatus.pending)
-            single_mock.assert_awaited_once_with(2, RecordStatus.pending, acting_user=None)
-
-    @pytest.mark.asyncio
-    async def test_bulk_update_preparing_to_inwork_rejected_before_mutation(self) -> None:
-        """bulk preparing → inwork raises before any status is mutated."""
-        plain_mock = MagicMock()
-        plain_mock.status = RecordStatus.pending
-        prep_mock = self._preparing_mock()
-
-        repo_mock = AsyncMock()
-        repo_mock.get_optional.side_effect = [plain_mock, prep_mock]
-
-        engine_mock = AsyncMock()
-        service = RecordService(repo_mock, engine_mock)
-
-        with pytest.raises(BusinessRuleViolationError):
-            await service.bulk_update_status([1, 2], RecordStatus.inwork)
-
-        repo_mock.bulk_update_status.assert_not_awaited()
-        engine_mock.handle_record_status_change.assert_not_awaited()
 
 
 class TestStudyServiceEntityTriggers:
@@ -1364,12 +841,34 @@ def _record_read_stub(
     ``record_type.level`` (default ``"SERIES"``) is read by
     ``RecordService._validate_output_paths`` to resolve a definition's default
     working-dir level; unused by ``_missing_output_links``/``_stored_checksums``.
+    The ``record_type`` role/lock/ownership fields and the top-level
+    ``user_id``/``finished_at``/``record_type_name`` let this same stub pass
+    through ``RecordService._transition`` (``TypeRules.of`` / ``RecordSnapshot.of``
+    / ``_emit_record_updated``) for the submit_data gateway tests.
     """
     return SimpleNamespace(
-        record_type=SimpleNamespace(name="test_type", file_registry=file_registry, level=level),
+        record_type=SimpleNamespace(
+            name="test_type",
+            file_registry=file_registry,
+            level=level,
+            role_name=None,
+            editable=True,
+            edit_window_days=None,
+            shared_editing=False,
+            releasable=False,
+        ),
         file_links=file_links,
         # fields_from accesses record.id / record.parent_record_id directly; callers override
-        **{"id": None, "parent_record_id": None, **fields},
+        **{
+            "id": None,
+            "parent_record_id": None,
+            "user_id": None,
+            "finished_at": None,
+            "record_type_name": "test_type",
+            "study_uid": None,
+            "series_uid": None,
+            **fields,
+        },
     )
 
 

@@ -347,10 +347,55 @@ class RecordParentRequiredError(RecordConstraintViolationError):
     error_code: ClassVar[str] = "PARENT_REQUIRED"
 
 
-class RecordEditLockedError(BusinessRuleViolationError):
-    """Raised when a non-superuser attempts to change a finished record whose
-    type forbids it (``editable=False`` or an elapsed ``edit_window_days``).
+class DirectRecordWriteError(ClarinetError):
+    """A saved record's ``status`` or ``user_id`` was assigned outside the lifecycle gateway.
+
+    A programming error: after the INSERT only ``RecordService`` changes them,
+    through ``RecordRepository.write_transition``.
     """
+
+
+class RecordLifecycleError(BusinessRuleViolationError):
+    """A record command refused by its state, the edit lock, a race or the new owner (409).
+
+    The response carries ``code`` and the record's current status (``metadata``)
+    next to the unchanged ``detail`` text, so clients can stop matching the text.
+    ``status`` is ``None`` when no record exists yet (create).
+    """
+
+    error_code: ClassVar[str] = "TRANSITION_NOT_ALLOWED"
+
+    def __init__(self, message: str, *, status: str | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    def metadata(self) -> dict[str, str]:
+        return {} if self.status is None else {"status": self.status}
+
+
+class RecordEditLockedError(RecordLifecycleError):
+    """A non-admin person may not change a finished record whose type locks it
+    (``editable=False`` or an elapsed ``edit_window_days``)."""
+
+    error_code: ClassVar[str] = "RECORD_EDIT_LOCKED"
+
+
+class TransitionNotAllowedError(RecordLifecycleError):
+    """A record command's contract refuses the record's current status."""
+
+    error_code: ClassVar[str] = "TRANSITION_NOT_ALLOWED"
+
+
+class ConcurrentTransitionError(RecordLifecycleError):
+    """The record kept changing under a transition until its retries ran out."""
+
+    error_code: ClassVar[str] = "CONCURRENT_TRANSITION"
+
+
+class RecordOwnerLacksRoleError(RecordLifecycleError):
+    """The new owner is neither a superuser nor a holder of the record type's role."""
+
+    error_code: ClassVar[str] = "OWNER_LACKS_ROLE"
 
 
 class WorkflowPlanDigestMismatchError(BusinessRuleViolationError):

@@ -6,19 +6,7 @@ import gleam/option.{None, Some}
 import gleeunit/should
 import utils/permissions
 
-fn make_user(role_names: List(String), is_superuser: Bool) -> models.User {
-  models.User(
-    id: "u1",
-    email: "u@test",
-    is_active: True,
-    is_superuser: is_superuser,
-    is_verified: True,
-    role_names: role_names,
-    capabilities: [],
-  )
-}
-
-fn make_record(user_id: option.Option(String), shared_editing: Bool) -> models.Record {
+fn make_record(allowed: List(String)) -> models.Record {
   models.Record(
     id: Some(42),
     context_info: None,
@@ -27,7 +15,7 @@ fn make_record(user_id: option.Option(String), shared_editing: Bool) -> models.R
     study_uid: None,
     series_uid: None,
     record_type_name: "test_type",
-    user_id: user_id,
+    user_id: None,
     patient_id: "P001",
     parent_record_id: None,
     study_anon_uid: None,
@@ -50,25 +38,58 @@ fn make_record(user_id: option.Option(String), shared_editing: Bool) -> models.R
     radiant: None,
     display_anon_id: None,
     is_editable: True,
-    shared_editing: shared_editing,
+    shared_editing: False,
+    allowed_commands: allowed,
   )
 }
 
-pub fn has_permission_true_when_shared_test() {
-  // A non-admin, non-owner user gets permission via the shared flag.
-  permissions.has_record_permission(
-    Some(make_user(["doctor"], False)),
-    make_record(Some("other-user"), True),
-  )
+pub fn edit_follows_the_server_test() {
+  permissions.can_edit_record(make_record(["edit"]), None) |> should.equal(True)
+  permissions.can_edit_record(make_record([]), None) |> should.equal(False)
+}
+
+pub fn fill_needs_submit_and_an_open_status_test() {
+  permissions.can_fill_record(make_record(["submit"]), None)
   |> should.equal(True)
-}
-
-pub fn has_permission_false_when_not_shared_test() {
-  permissions.has_record_permission(
-    Some(make_user(["doctor"], False)),
-    make_record(Some("other-user"), False),
+  permissions.can_fill_record(
+    models.Record(..make_record(["submit"]), status: types.Finished),
+    None,
   )
   |> should.equal(False)
+  permissions.can_fill_record(make_record([]), None) |> should.equal(False)
+}
+
+pub fn release_follows_the_server_test() {
+  permissions.can_release_record(make_record(["unassign"]))
+  |> should.equal(True)
+  permissions.can_release_record(make_record(["claim"])) |> should.equal(False)
+}
+
+pub fn decoder_reads_allowed_commands_test() {
+  let payload =
+    json.object([
+      #("id", json.int(1)),
+      #("status", json.string("pending")),
+      #("record_type_name", json.string("t")),
+      #("patient_id", json.string("P001")),
+      #("allowed_commands", json.array(["edit", "fail"], json.string)),
+    ])
+    |> json.to_string
+  let assert Ok(rec) = json.parse(payload, records.record_decoder())
+  rec.allowed_commands |> should.equal(["edit", "fail"])
+}
+
+pub fn decoder_defaults_allowed_commands_to_empty_test() {
+  let payload =
+    json.object([
+      #("id", json.int(1)),
+      #("status", json.string("pending")),
+      #("record_type_name", json.string("t")),
+      #("patient_id", json.string("P001")),
+    ])
+    |> json.to_string
+  let assert Ok(rec) = json.parse(payload, records.record_decoder())
+  rec.allowed_commands |> should.equal([])
 }
 
 pub fn decoder_round_trips_shared_editing_test() {

@@ -38,6 +38,18 @@ Dependency injection goes through the `Annotated[X, Depends()]` aliases in
 new `Depends()` wrapper. Writing models and repositories correctly:
 [Persistence conventions](./persistence.md).
 
+**Record mutations.** Every change to a record's status, owner or submitted
+data goes through `RecordService._transition`: the router passes the
+request's `Actor` (`ActorDep`) to a `RecordService` method, which turns the
+call into a command (creation and bulk status reuse the same decide/write
+steps), the pure `services/record_lifecycle.decide`
+accepts or refuses it (403/409), `RecordRepository.write_transition` applies
+it with one conditional UPDATE, the audit row and file links join that
+transaction, and SSE and RecordFlow follow its one commit. Every mutating
+`RecordService` method takes a required keyword-only `actor`; an ORM listener
+refuses direct `status` / `user_id` writes. Commands, contracts and refusal
+codes: [Domain model → Transitions](./domain-model.md#transitions).
+
 ## Exception flow
 
 Repositories and services raise from `clarinet.exceptions.domain` (root base
