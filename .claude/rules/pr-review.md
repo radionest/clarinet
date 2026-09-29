@@ -9,7 +9,7 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent — ex
 
 ## Architecture (see CLAUDE.md, `.claude/rules/`)
 
-- **P1.** DB access only through `clarinet/repositories/` — routers and services must not touch the session directly.
+- **P1.** DB access only through `clarinet/repositories/` — routers and services must not touch the session directly. Exception: a service owns the transaction boundary (`session.commit()` / `rollback()`, never queries) of a command that must commit several repositories' writes together — `RecordService._transition`, `bulk_update_status`, cascade delete.
 - **P2.** Business logic lives in `clarinet/services/`, not in routers or repositories.
 - **P3.** API routers use dependency aliases from `clarinet/api/dependencies.py` — no ad-hoc `Depends(...)` calls.
 - **P4.** Domain exceptions come from `clarinet/exceptions/` (e.g. `NOT_FOUND`, `CONFLICT`). Never raise bare `HTTPException` in services or repositories.
