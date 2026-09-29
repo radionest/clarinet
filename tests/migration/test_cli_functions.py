@@ -17,7 +17,7 @@ from alembic.autogenerate import render_python_code
 from alembic.operations import ops
 from alembic.runtime.migration import MigrationContext
 from alembic.script import Script
-from sqlalchemy import Boolean, Column, DateTime, Integer, func, inspect, text
+from sqlalchemy import Boolean, Column, DateTime, Integer, create_engine, func, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql import expression as sql_expression
 
@@ -392,6 +392,17 @@ class TestOutdatedEnvPy:
 
         assert not self._warnings(caplog)
 
+    def test_env_py_passing_overrides_does_not_warn(
+        self, migration_project: tuple[Path, str, Engine], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        project_path, _db_url, _engine = migration_project
+        init_and_apply(project_path)
+
+        (project_path / "alembic" / "env.py").write_text(OVERRIDE_ENV_PY)
+        create_migration("next", autogenerate=True, project_path=project_path)
+
+        assert not self._warnings(caplog)
+
     def test_create_migration_warns(
         self, migration_project: tuple[Path, str, Engine], caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -428,14 +439,14 @@ LEGACY_UUID_COLUMNS = [
 class TestSqliteBatchMigrations:
     """SQLite has no ALTER COLUMN: autogenerate must emit batch ops that keep rows (#655)."""
 
-    def test_legacy_uuid_column_rebuilt_without_data_loss(
-        self, migration_project: tuple[Path, str, Engine]
-    ) -> None:
-        project_path, _db_url, engine = migration_project
+    UID = "3fa85f6457174562b3fc2c963f66afa6"  # not all-digit: stays TEXT under NUMERIC affinity
+
+    def _legacy_uuid_revision(self, project_path: Path, engine: Engine) -> Script:
+        """Autogenerate against a populated pre-#655 SQLite database (columns declared UUID)."""
         if engine.dialect.name != "sqlite":
             pytest.skip("rewrites sqlite_master DDL")
         init_and_apply(project_path)
-        uid = "3fa85f6457174562b3fc2c963f66afa6"  # not all-digit: stays TEXT under NUMERIC affinity
+        uid = self.UID
 
         with engine.begin() as conn:
             # Rebuild the five tables as a pre-#655 database has them: the
@@ -475,28 +486,78 @@ class TestSqliteBatchMigrations:
                 text("INSERT INTO userroleslink (user_id, role_name) VALUES (:id, 'doctor')"),
                 {"id": uid},
             )
+            # ON DELETE CASCADE / SET NULL children: an FK-enforcing connection
+            # would delete or null these when the rebuild DROPs "user".
+            conn.execute(
+                text(
+                    "INSERT INTO access_token (token, user_id, created_at, expires_at, "
+                    "last_accessed) VALUES ('tok', :id, '2026-01-01', '2099-01-01', '2026-01-01')"
+                ),
+                {"id": uid},
+            )
+            conn.execute(
+                text("INSERT INTO record_event (kind, actor_id) VALUES ('created', :id)"),
+                {"id": uid},
+            )
 
         script = create_migration("portable uuid", autogenerate=True, project_path=project_path)
-
         assert isinstance(script, Script)
+        return script
+
+    def test_legacy_uuid_column_rebuilt_without_data_loss(
+        self, migration_project: tuple[Path, str, Engine]
+    ) -> None:
+        project_path, _db_url, engine = migration_project
+        script = self._legacy_uuid_revision(project_path, engine)
+
         body = _upgrade_body(Path(script.path))
         for table, _column in LEGACY_UUID_COLUMNS:
             assert f"batch_alter_table('{table}'" in body
         run_migrations("head", project_path)
         with engine.connect() as conn:
-            assert conn.execute(text('SELECT id FROM "user"')).scalar_one() == uid
-            assert conn.execute(text("SELECT user_id FROM userroleslink")).scalar_one() == uid
+            assert conn.execute(text('SELECT id FROM "user"')).scalar_one() == self.UID
+            assert conn.execute(text("SELECT user_id FROM userroleslink")).scalar_one() == self.UID
+            assert conn.execute(text("SELECT user_id FROM access_token")).scalar_one() == self.UID
+            assert conn.execute(text("SELECT actor_id FROM record_event")).scalar_one() == self.UID
 
         converged = create_migration("again", autogenerate=True, project_path=project_path)
 
         assert isinstance(converged, Script)
         assert "op." not in _upgrade_body(Path(converged.path))
 
+    def test_legacy_uuid_downgrade_refuses_to_run(
+        self, migration_project: tuple[Path, str, Engine]
+    ) -> None:
+        """The reverse rebuild casts each hex UUID to the reflected NUMERIC: 3fa85f… becomes 3."""
+        project_path, _db_url, engine = migration_project
+        self._legacy_uuid_revision(project_path, engine)
+        run_migrations("head", project_path)
+
+        with pytest.raises(NotImplementedError):
+            rollback_migration(1, project_path)
+
+        with engine.connect() as conn:
+            assert conn.execute(text('SELECT id FROM "user"')).scalar_one() == self.UID
+
+
+# A project env.py that keeps a table another tool owns out of autogenerate.
+OVERRIDE_ENV_PY = """\
+from clarinet.utils.migrations import run_env
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    return not (type_ == "table" and name == "other_tool")
+
+
+run_env(include_object=include_object)
+"""
+
 
 class TestRunEnv:
     def test_offline_sql_through_run_env(
         self, migration_project: tuple[Path, str, Engine], capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """Covers the initial revision only: a SQLite table rebuild cannot run offline."""
         project_path, _db_url, _engine = migration_project
         init_and_apply(project_path)
 
@@ -527,6 +588,45 @@ class TestRunEnv:
         run_migrations("head", project_path)
         assert index in {ix["name"] for ix in inspect(engine).get_indexes(table)}
 
+    def test_now_default_column_added_to_populated_table(
+        self, migration_project: tuple[Path, str, Engine]
+    ) -> None:
+        """SQLite rejects ADD COLUMN with a non-constant default; only a batch rebuild adds it."""
+        project_path, _db_url, engine = migration_project
+        init_and_apply(project_path)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE pipeline_task_run DROP COLUMN created_at"))
+            conn.execute(
+                text(
+                    "INSERT INTO pipeline_task_run (id, task_name, queue, started_at) "
+                    "VALUES ('t1', 'task', 'q', '2026-01-01 00:00:00')"
+                )
+            )
+
+        create_migration("restore created_at", autogenerate=True, project_path=project_path)
+        run_migrations("head", project_path)
+
+        with engine.connect() as conn:
+            created_at = conn.execute(
+                text("SELECT created_at FROM pipeline_task_run WHERE id = 't1'")
+            ).scalar_one()
+        assert created_at is not None
+
+    def test_configure_overrides_reach_autogenerate(
+        self, migration_project: tuple[Path, str, Engine]
+    ) -> None:
+        project_path, _db_url, engine = migration_project
+        init_and_apply(project_path)
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE other_tool (id INTEGER PRIMARY KEY)"))
+        (project_path / "alembic" / "env.py").write_text(OVERRIDE_ENV_PY)
+
+        script = create_migration("next", autogenerate=True, project_path=project_path)
+
+        # Without include_object autogenerate emits op.drop_table('other_tool').
+        assert isinstance(script, Script)
+        assert "op." not in _upgrade_body(Path(script.path))
+
 
 class TestCrossDialectRegression:
     """Regression for #450: the project scaffold defaults to SQLite, so migrations
@@ -552,3 +652,38 @@ class TestCrossDialectRegression:
             columns = get_columns(engine, "recordtype")
             assert columns["mask_patient_data"]["default"] == "true"
             assert columns["shared_editing"]["default"] == "false"
+
+    def test_postgresql_generated_revision_applies_on_populated_sqlite(
+        self, migration_project: tuple[Path, str, Engine], tmp_path: Path
+    ) -> None:
+        """The other direction: on PostgreSQL func.now() compiled to sa.text('now()')."""
+        project_path, _db_url, engine = migration_project
+        if engine.dialect.name != "postgresql":
+            pytest.skip("needs revisions autogenerated on PostgreSQL")
+        init_and_apply(project_path)
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE pipeline_task_run DROP COLUMN created_at"))
+        create_migration("restore created_at", autogenerate=True, project_path=project_path)
+        initial = get_migration_history(project_path)[-1][0]
+
+        sqlite_url = f"sqlite:///{tmp_path / 'apply.db'}"
+        sqlite_engine = create_engine(sqlite_url)
+        try:
+            with override_database_url(sqlite_url):
+                run_migrations(initial, project_path)
+                with sqlite_engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE pipeline_task_run DROP COLUMN created_at"))
+                    conn.execute(
+                        text(
+                            "INSERT INTO pipeline_task_run (id, task_name, queue, started_at) "
+                            "VALUES ('t1', 'task', 'q', '2026-01-01 00:00:00')"
+                        )
+                    )
+                run_migrations("head", project_path)
+            with sqlite_engine.connect() as conn:
+                created_at = conn.execute(
+                    text("SELECT created_at FROM pipeline_task_run WHERE id = 't1'")
+                ).scalar_one()
+        finally:
+            sqlite_engine.dispose()
+        assert created_at is not None

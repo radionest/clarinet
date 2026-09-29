@@ -5,14 +5,16 @@ from functools import partial
 from logging.config import fileConfig
 from pathlib import Path
 from textwrap import dedent
-from typing import Literal
+from typing import Any, Literal
 
 from alembic import command
+from alembic.autogenerate import renderers
 from alembic.autogenerate.api import AutogenContext
 from alembic.config import Config
+from alembic.operations import ops
 from alembic.runtime.migration import MigrationContext
 from alembic.script import Script, ScriptDirectory
-from sqlalchemy import DefaultClause, create_engine, engine_from_config, pool, text
+from sqlalchemy import DefaultClause, Uuid, create_engine, engine_from_config, pool, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.sql import functions as sql_functions
 from sqlalchemy.sql.expression import False_, True_
@@ -188,13 +190,61 @@ def render_item(
     return False
 
 
-def run_env() -> None:
-    """Body of every project's ``alembic/env.py`` (a three-line shim, #655).
+class _IrreversibleDowngradeOp(ops.MigrateOperation):
+    """Rendered as a ``raise`` heading a downgrade that would destroy data."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+
+@renderers.dispatch_for(_IrreversibleDowngradeOp)
+def _render_irreversible_downgrade(
+    autogen_context: AutogenContext,  # noqa: ARG001
+    op: _IrreversibleDowngradeOp,
+) -> str:
+    return f"raise NotImplementedError({op.message!r})"
+
+
+def _refuse_lossy_uuid_downgrade(directives: list[ops.MigrationScript]) -> None:
+    """Make a downgrade that turns a ``Uuid`` column into another type raise.
+
+    On a SQLite database created before #655 the user-id columns reflect as
+    ``NUMERIC``, so the revision that rebuilds them as ``Uuid`` gets a downgrade
+    back to ``NUMERIC`` — and the batch rebuild's ``CAST(col AS NUMERIC)`` keeps
+    only each hex UUID's leading numeric prefix. The ops stay below the
+    ``raise`` for whoever writes a lossless downgrade by hand.
+    """
+    for script in directives:
+        for downgrade_ops in script.downgrade_ops_list:
+            columns = [
+                f"{table_ops.table_name}.{op.column_name}"
+                for table_ops in downgrade_ops.ops
+                if isinstance(table_ops, ops.ModifyTableOps)
+                for op in table_ops.ops
+                if isinstance(op, ops.AlterColumnOp)
+                and isinstance(op.existing_type, Uuid)
+                and op.modify_type is not None
+                and not isinstance(op.modify_type, Uuid)
+            ]
+            if columns:
+                message = (
+                    f"converting {', '.join(columns)} from Uuid destroys every id "
+                    "(#655); write this downgrade by hand"
+                )
+                downgrade_ops.ops.insert(0, _IrreversibleDowngradeOp(message))
+
+
+def run_env(**configure_overrides: Any) -> None:
+    """Body of every project's ``alembic/env.py`` (a short shim, #655).
 
     ``env.py`` is written once by ``init-migrations`` and never refreshed, so
     render/compare/batch policy lives here and reaches existing projects with
     the package. Model modules imported before the call are part of the
     autogenerate target — everything on ``SQLModel.metadata`` is.
+
+    ``configure_overrides`` go to ``context.configure`` over the defaults below
+    (``include_object``, ``version_table``, …); a project's
+    ``process_revision_directives`` runs after the framework's own.
     """
     from alembic import context
 
@@ -204,21 +254,34 @@ def run_env() -> None:
     if config.config_file_name is not None:
         fileConfig(config.config_file_name)
 
+    project_directives = configure_overrides.pop("process_revision_directives", None)
+
+    def process_revision_directives(
+        context: MigrationContext, revision: object, directives: list[ops.MigrationScript]
+    ) -> None:
+        _refuse_lossy_uuid_downgrade(directives)
+        if project_directives is not None:
+            project_directives(context, revision, directives)
+
     url = config.get_main_option("sqlalchemy.url") or ""
-    configure = partial(
-        context.configure,
-        target_metadata=SQLModel.metadata,
-        render_item=render_item,
-        # Explicit: Alembic < 1.12 defaulted to False.
-        compare_type=True,
+    defaults: dict[str, Any] = {
+        "target_metadata": SQLModel.metadata,
+        "render_item": render_item,
+        # Alembic's default since 1.12; explicit because the #655 UUID fix
+        # depends on type comparison.
+        "compare_type": True,
         # Batch on every dialect: a revision must apply on both SQLite and
         # PostgreSQL whichever one generated it. PostgreSQL runs plain ALTERs
         # (recreate="auto"); SQLite has no ALTER COLUMN, so it rebuilds the
         # table and copies rows through CAST(col AS <new type>) - safe because
         # the model types are portable (Uuid -> CHAR(32), TEXT affinity).
-        render_as_batch=True,
-    )
+        "render_as_batch": True,
+        "process_revision_directives": process_revision_directives,
+    }
+    configure = partial(context.configure, **(defaults | configure_overrides))
 
+    # Offline (--sql) mode cannot reflect, so a batch op that rebuilds a SQLite
+    # table raises CommandError there unless the revision passes copy_from.
     if context.is_offline_mode():
         configure(url=url, literal_binds=True, dialect_opts={"paramstyle": "named"})
         with context.begin_transaction():
@@ -254,7 +317,8 @@ def generate_alembic_env(
 
     It ships with the clarinet package, so env-level fixes arrive on upgrade.
     Import project model modules above the run_env() call to include their
-    tables in autogenerate.
+    tables in autogenerate; pass context.configure() options to run_env(...)
+    to override its defaults.
     """
 
     import sys
@@ -302,7 +366,7 @@ def get_alembic_config(project_path: Path | None = None) -> Config:
 def _warn_if_env_outdated(project_path: Path) -> None:
     """Warn when a project's env.py predates :func:`run_env` (#655)."""
     env_py = project_path / "alembic" / "env.py"
-    if env_py.exists() and "run_env()" not in env_py.read_text():
+    if env_py.exists() and "run_env(" not in env_py.read_text():
         logger.warning(
             f"{env_py} does not call clarinet.utils.migrations.run_env(): it misses the "
             "framework's render/compare/batch settings, so autogenerated migrations may "

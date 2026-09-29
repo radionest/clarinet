@@ -126,15 +126,19 @@ which PostgreSQL rejects (#450); on PostgreSQL `func.now()` would land as
 `sa.text('now()')`, which SQLite rejects. `render_item` in
 `clarinet/utils/migrations.py` renders them as `sa.true()` / `sa.false()` /
 `sa.func.now()`, compiled by the database applying the migration. The
-generated `alembic/env.py` is a three-line shim over `run_env()` in the same
+generated `alembic/env.py` is a short shim over `run_env()` in the same
 module, which passes `render_item`, `compare_type=True` and
 `render_as_batch=True`: type, nullability and index changes render as batch
 operations — plain `ALTER`s on PostgreSQL, table rebuilds on SQLite (which has
-no `ALTER COLUMN`) — so a revision applies on both, whichever database generated
-it. Foreign-key and unique-constraint changes still need a hand-written step,
-because the framework's constraints are unnamed. `env.py` is written only when
-missing, so an `env.py` from before #655 is replaced by hand (CHANGELOG), and
-`clarinet init-migrations` / `clarinet db migrate create` warn until it is. The
+no `ALTER COLUMN`, and no `ADD COLUMN` with a non-constant default such as
+`func.now()` on a populated table) — so a revision applies on both, whichever
+database generated it. Foreign-key and unique-constraint changes still need a
+hand-written step, because the framework's constraints are unnamed; offline
+`--sql` output cannot include a SQLite rebuild, which needs reflection. Extra
+`context.configure()` options go to `run_env(...)` as keyword arguments.
+`env.py` is written only when missing, so an `env.py` from before #655 is
+replaced by hand (CHANGELOG), and `clarinet init-migrations` /
+`clarinet db migrate create` warn until it is. The
 hook sees model defaults only — a downgrade that re-adds a dropped boolean
 column still renders the reflected `sa.text('0')`.
 
@@ -185,9 +189,10 @@ a hand-written step in that note.
   `NUMERIC`, so autogenerate never reaches an empty diff and emits
   `alter_column` ops SQLite rejects (#655). `Uuid` is native `UUID` on
   PostgreSQL and `CHAR(32)` on SQLite. A SQLite database created before #655
-  gets a revision that rebuilds the five columns; its generated `downgrade()`
-  converts them back to the reflected `NUMERIC`, and the rebuild casts every
-  UUID to a number — replace that body with `raise NotImplementedError`.
+  gets a revision that rebuilds the five columns; converting them back to the
+  reflected `NUMERIC` would cast every UUID to a number, so `run_env()` makes
+  any downgrade from `Uuid` to another type start with
+  `raise NotImplementedError`.
 - **`SQLModel.Field()` takes `schema_extra`, not `json_schema_extra`.** The
   Pydantic spelling silently does nothing on SQLModel subclasses.
 - **Primary keys are `int | None`** until flush, so mypy flags passing
