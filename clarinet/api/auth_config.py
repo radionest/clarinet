@@ -237,6 +237,8 @@ class ScopedCookieTransport(CookieTransport):
     ``clarinet_session; Path=/`` and overwrote each other's session. A leftover
     ``Path=/`` cookie would still shadow the scoped one — browsers send it last
     and Starlette keeps the last duplicate — so login and logout expire it.
+    A root deploy on the same host keeps setting ``Path=/`` under the same
+    name and still collides; it needs its own ``cookie_name``.
     """
 
     def _expire_legacy_cookie(self, response: Response) -> Response:
@@ -258,7 +260,8 @@ class ScopedCookieTransport(CookieTransport):
         return self._expire_legacy_cookie(await super().get_logout_response())
 
 
-# Cookie transport configuration (KISS - only cookies, no tokens)
+# Browser sessions: the only fastapi-users transport (no Bearer). Internal
+# clients bypass it via X-Internal-Token — see current_active_user below.
 cookie_transport = ScopedCookieTransport(
     cookie_name=settings.cookie_name,
     cookie_max_age=settings.session_expire_seconds,

@@ -172,7 +172,8 @@ The session cookie is scoped to `Path=root_url` (`ScopedCookieTransport` in
 `api/auth_config.py`) so apps under different sub-paths of one host keep separate
 sessions. Login and logout also expire a legacy `Path=/` cookie: Starlette keeps the
 last duplicate cookie and browsers send the broadest path last, so a leftover one
-would shadow the scoped cookie.
+would shadow the scoped cookie. A root deploy (`root_url=""`) co-hosted with
+sub-path apps still sets `Path=/` and collides — it needs its own `cookie_name`.
 
 ### Auth caching
 
