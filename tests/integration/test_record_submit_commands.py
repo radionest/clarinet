@@ -108,6 +108,19 @@ async def test_shared_editing_edit_transfers_the_owner(lc):
 
 
 @pytest.mark.asyncio
+async def test_shared_editing_edit_of_unassigned_record_is_labelled_shared_update(lc):
+    rt = await lc.record_type("lc-edit-shared-free", shared_editing=True)
+    rec = await lc.seed(rt, status=S.finished)
+    await lc.service().update_data(rec.id, {"a": 2}, actor=human(lc.colleague))
+    (event,) = await _events(lc, rec.id)
+    assert event.new_value == {
+        "fields": ["a"],
+        "user_id": str(lc.colleague.id),
+        "via": "shared_update",
+    }
+
+
+@pytest.mark.asyncio
 async def test_edit_of_a_pending_record_is_409(lc, test_settings):
     rec = await lc.seed(await lc.record_type("lc-edit-pend"), status=S.pending, user_id=lc.owner.id)
     async with client_as(lc.owner, lc.session, test_settings) as client:

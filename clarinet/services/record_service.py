@@ -495,11 +495,11 @@ class RecordService:
                 if new_owner is not None:
                     new_value["user_id"] = str(new_owner)
                     new_value["via"] = (
-                        "submit"
+                        "shared_update"
+                        if isinstance(cmd, Edit)
+                        else "submit"
                         if snap.user_id is None
                         else "shared_submit"
-                        if isinstance(cmd, Submit)
-                        else "shared_update"
                     )
             case Fail(reason=fail_reason):
                 kind = "failed"
