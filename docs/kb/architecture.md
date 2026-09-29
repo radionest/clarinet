@@ -138,6 +138,13 @@ anywhere, so the real URL is `{root_url}/clarinet_frontend.js`. Sub-path
 deployments work because `index.html` carries `<base href="$BASE_PATH/">`,
 substituted server-side from `root_path` — the relative `src` alone would break
 on any client-side route deeper than the root.
+Per-app browser state is scoped the same way, because apps under different
+sub-paths of one host share an origin: the session cookie carries
+`Path={root_url}` (`ScopedCookieTransport`, `api/auth_config.py`; login/logout
+also expire a legacy `Path=/` cookie, which Starlette would otherwise read as the
+last duplicate), and localStorage keys are prefixed `clarinet{base_path}:`
+(`storage.prefix_for`). A root deploy's `Path=/` cookie still reaches every
+sub-path, so a root app co-hosted with sub-path apps needs its own `cookie_name`.
 It follows MVU: every page under `src/pages/` is a self-contained module
 exposing `init`/`update`/`view`, and pages never touch global state directly —
 they emit `OutMsg` values that `main.gleam` translates into store mutations.

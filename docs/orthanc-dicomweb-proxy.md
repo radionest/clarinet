@@ -228,7 +228,7 @@ sudo -u clarinet /opt/clarinet/venv/bin/clarinet ohif install --force-config
 staging stand first — this is reference config, not a turnkey artifact.
 
 **2. Add the nginx location** per §4 (`{base_path}/pacs-web/` + `auth_request` +
-`/_clarinet_authz` + `proxy_cache_path`), then reload:
+`{base_path}/_clarinet_authz` + `proxy_cache_path`), then reload:
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx

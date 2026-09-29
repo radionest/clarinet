@@ -79,9 +79,9 @@ async def get_me(user: User = Depends(current_active_user)) -> User:
 
 
 # Cookie-only on purpose — not ``current_active_user``, which also honours
-# ``X-Internal-Token``. nginx caches this verdict under the session cookie alone,
-# so a cookie-less, token-authenticated 200 would be stored under the empty key
-# and admit anonymous callers until the cache entry expires.
+# ``X-Internal-Token``. nginx caches this verdict per session cookie
+# (``{base_path}:$cookie_...``), so a cookie-less, token-authenticated 200 would be
+# stored under the cookie-less key and admit anonymous callers until it expires.
 _cookie_user = fastapi_users.current_user(active=True)
 
 

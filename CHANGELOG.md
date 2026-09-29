@@ -815,7 +815,7 @@
   shadow the scoped one. The cookie name is unchanged. **Upgrade notes:**
   upgrade every project on a host together — one still on an older release keeps
   setting `Path=/` and logs the others out; users log in once more per project.
-  In nginx `auth_request` locations namespace the cache key per project,
+  In nginx, give each project its own authz location (`{base_path}/_clarinet_authz`) and namespace its cache key,
   `proxy_cache_key {base_path}:$cookie_clarinet_session;` (see
   `docs/orthanc-dicomweb-proxy.md`). A root deploy (`root_url=""`) on the same
   host as sub-path projects still collides; give it its own `cookie_name`.
