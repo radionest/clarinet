@@ -225,10 +225,47 @@ async def require_registration_enabled() -> None:
         raise HTTPException(status_code=403, detail="Self-registration is disabled")
 
 
-# Cookie transport configuration (KISS - only cookies, no tokens)
-cookie_transport = CookieTransport(
+def session_cookie_path(root_url: str) -> str:
+    """Cookie path for the session: the app's sub-path, "/" at the root."""
+    return root_url.rstrip("/") or "/"
+
+
+class ScopedCookieTransport(CookieTransport):
+    """Session cookie scoped to the app's sub-path.
+
+    Several apps under different sub-paths on one host used to share
+    ``clarinet_session; Path=/`` and overwrote each other's session. A leftover
+    ``Path=/`` cookie would still shadow the scoped one — browsers send it last
+    and Starlette keeps the last duplicate — so login and logout expire it.
+    A root deploy on the same host keeps setting ``Path=/`` under the same
+    name and still collides; it needs its own ``cookie_name``.
+    """
+
+    def _expire_legacy_cookie(self, response: Response) -> Response:
+        if self.cookie_path != "/":
+            response.delete_cookie(
+                self.cookie_name,
+                path="/",
+                domain=self.cookie_domain,
+                secure=self.cookie_secure,
+                httponly=self.cookie_httponly,
+                samesite=self.cookie_samesite,
+            )
+        return response
+
+    async def get_login_response(self, token: str) -> Response:
+        return self._expire_legacy_cookie(await super().get_login_response(token))
+
+    async def get_logout_response(self) -> Response:
+        return self._expire_legacy_cookie(await super().get_logout_response())
+
+
+# Browser sessions: the only fastapi-users transport (no Bearer). Internal
+# clients bypass it via X-Internal-Token — see current_active_user below.
+cookie_transport = ScopedCookieTransport(
     cookie_name=settings.cookie_name,
     cookie_max_age=settings.session_expire_seconds,
+    cookie_path=session_cookie_path(settings.root_url),
     cookie_httponly=True,  # Protection from XSS
     cookie_secure=not settings.debug,  # HTTPS in production
     cookie_samesite="lax",  # Protection from CSRF

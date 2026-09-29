@@ -111,7 +111,7 @@ end
 ## 4. nginx — same-origin proxy + auth
 
 Add to the Clarinet server block (`deploy/nginx/clarinet.conf`). The session cookie
-(`clarinet_session`) rides along same-origin; an `auth_request` subrequest validates it
+(`clarinet_session`, `Path={base_path}`) rides along same-origin; an `auth_request` subrequest validates it
 against Clarinet before any image is served. **Cache the subrequest** so per-frame auth cost
 is near zero.
 
@@ -121,7 +121,7 @@ proxy_cache_path /var/cache/nginx/clarinet_authz keys_zone=authz:1m max_size=10m
 
 # --- DICOMweb proxy to the local Orthanc ---
 location {base_path}/pacs-web/ {
-    auth_request /_clarinet_authz;          # 401 -> denied; OHIF surfaces an auth error
+    auth_request {base_path}/_clarinet_authz;   # 401 -> denied; OHIF surfaces an auth error
 
     # NO trailing slash on proxy_pass: preserve the full path so Orthanc's DicomWeb.Root
     # (= {base_path}/pacs-web/) matches and emitted BulkDataURIs keep the public prefix.
@@ -134,7 +134,7 @@ location {base_path}/pacs-web/ {
     # proxy_set_header X-Orthanc-Shared-Secret "<secret>";   # enforce in Orthanc if used
 }
 
-location = /_clarinet_authz {
+location = {base_path}/_clarinet_authz {
     internal;
     proxy_pass http://127.0.0.1:8000{base_path}/api/auth/dicomweb-access;
     proxy_pass_request_body off;
@@ -143,7 +143,7 @@ location = /_clarinet_authz {
     proxy_set_header X-Real-IP        $remote_addr;          # preserve client IP (ip-binding)
     proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
     proxy_cache authz;
-    proxy_cache_key $cookie_clarinet_session;
+    proxy_cache_key {base_path}:$cookie_clarinet_session;
     proxy_cache_valid 200 10s;                               # ~1 FastAPI hit / 10s / session
 }
 ```
@@ -160,9 +160,9 @@ Notes:
   router — an admin, or a user holding at least one role — so a role-less account (e.g.
   self-registered) cannot read the PACS. Deployments set up before this endpoint existed
   must update the `proxy_pass` line above.
-- **Cookie-only by design.** The verdict is cached under `$cookie_clarinet_session`, so the
+- **Cookie-only by design.** The verdict is cached per session cookie, so the
   endpoint ignores `X-Internal-Token`: a cookie-less, token-authenticated 200 would be cached
-  under the empty key and admit anonymous callers for the cache TTL. The
+  under the cookie-less key (`{base_path}:`) and admit anonymous callers for the cache TTL. The
   `proxy_set_header X-Internal-Token ""` line is the same guard at the nginx layer.
 - **Client IP / `session_ip_check`.** `session_ip_check` is **off by default**
   (`settings.py`). When you enable it, Clarinet validates `request.client.host`; forward
@@ -175,9 +175,16 @@ Notes:
   (`/api/auth/dicomweb-access` itself checks the DB on every call). This is a deliberate
   latency/load tradeoff on the image hot path; lower `proxy_cache_valid` if you need
   near-instant revocation.
-- **Cookie name.** `proxy_cache_key $cookie_clarinet_session` assumes the default
+- **Cookie name.** `$cookie_clarinet_session` in the cache key assumes the default
   `settings.cookie_name = "clarinet_session"`. If you override `cookie_name`, update the
   cache key to match.
+- **Several projects on one host.** Paste the block once per project: the
+  `{base_path}/_clarinet_authz` location name keeps the copies from colliding, and the
+  `{base_path}:` cache-key prefix keeps them from sharing verdicts in the common `authz`
+  zone (a `Path=/` cookie left by a release before the session cookie was scoped to
+  `root_url` reaches every sub-path). A root deploy (`root_url=""`) cannot share a host
+  with sub-path projects under the same `cookie_name` — its `Path=/` cookie reaches every
+  sub-path and Clarinet reads the last duplicate; give it its own `cookie_name`.
 
 ## 5. Speed
 
@@ -221,7 +228,7 @@ sudo -u clarinet /opt/clarinet/venv/bin/clarinet ohif install --force-config
 staging stand first — this is reference config, not a turnkey artifact.
 
 **2. Add the nginx location** per §4 (`{base_path}/pacs-web/` + `auth_request` +
-`/_clarinet_authz` + `proxy_cache_path`), then reload:
+`{base_path}/_clarinet_authz` + `proxy_cache_path`), then reload:
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx

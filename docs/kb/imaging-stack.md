@@ -170,7 +170,10 @@ printable ASCII (0x20–0x7E), rejecting silently rather than raising so a bad
 header cannot break the unrelated endpoints that share the dependency. The path
 *content* is deliberately not parsed — UNC, a mounted POSIX path, a drive
 letter and `smb://…` are all legitimate, and Slicer on the client machine is
-the authority on what works locally.
+the authority on what works locally. The frontend keeps the value in
+localStorage under a key namespaced by the app's base path
+(`storage.prefix_for`), so apps under different sub-paths of one host keep
+separate values; the session cookie is scoped to `root_url` for the same reason.
 
 ### `__execResult` — how a validator writes into a record
 

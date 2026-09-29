@@ -808,6 +808,17 @@
   picks the storage path up from the per-project cookie — check it once per
   project, since a value saved while the leak was live may belong to another
   project.
+- **Projects deployed under sub-paths of one host no longer log each other
+  out.** Every project set `clarinet_session; Path=/`, so logging in to one
+  overwrote the session of every other. The cookie is now `Path={root_url}`;
+  login and logout also expire the old `Path=/` cookie, which would otherwise
+  shadow the scoped one. The cookie name is unchanged. **Upgrade notes:**
+  upgrade every project on a host together — one still on an older release keeps
+  setting `Path=/` and logs the others out; users log in once more per project.
+  In nginx, give each project its own authz location (`{base_path}/_clarinet_authz`) and namespace its cache key,
+  `proxy_cache_key {base_path}:$cookie_clarinet_session;` (see
+  `docs/orthanc-dicomweb-proxy.md`). A root deploy (`root_url=""`) on the same
+  host as sub-path projects still collides; give it its own `cookie_name`.
 - The patient, study, series and record-type info cards lay out as a
   label/value grid, as the record page always did — every label used to
   stack above its value (the grid rule only matched a `<dl>` nested inside

@@ -1,5 +1,10 @@
 # Update Log
 
+## 2026-09-29
+
+* **Update**: [Architecture](./architecture.md) — per-app browser state on a shared host: the session cookie is scoped to `root_url` (legacy `Path=/` expired at login/logout), localStorage keys to `clarinet{base_path}:`; a co-hosted root deploy needs its own `cookie_name`.
+* **Update**: [Imaging stack](./imaging-stack.md) — the client storage path is kept in localStorage under a per-app key (`storage.prefix_for`).
+
 ## 2026-09-27
 
 * **Update**: [Domain model](./domain-model.md) — the DICOMweb proxy gate is now `current_dicomweb_user`: the same admin-or-role check as `current_role_holder`, with a passed session cookie reused for `session_cache_ttl_seconds`.
