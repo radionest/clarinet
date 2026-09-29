@@ -111,7 +111,7 @@ end
 ## 4. nginx — same-origin proxy + auth
 
 Add to the Clarinet server block (`deploy/nginx/clarinet.conf`). The session cookie
-(`clarinet_session`) rides along same-origin; an `auth_request` subrequest validates it
+(`clarinet_session`, `Path={base_path}`) rides along same-origin; an `auth_request` subrequest validates it
 against Clarinet before any image is served. **Cache the subrequest** so per-frame auth cost
 is near zero.
 
@@ -143,7 +143,7 @@ location = /_clarinet_authz {
     proxy_set_header X-Real-IP        $remote_addr;          # preserve client IP (ip-binding)
     proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
     proxy_cache authz;
-    proxy_cache_key $cookie_clarinet_session;
+    proxy_cache_key {base_path}:$cookie_clarinet_session;
     proxy_cache_valid 200 10s;                               # ~1 FastAPI hit / 10s / session
 }
 ```
@@ -177,7 +177,10 @@ Notes:
   near-instant revocation.
 - **Cookie name.** `proxy_cache_key $cookie_clarinet_session` assumes the default
   `settings.cookie_name = "clarinet_session"`. If you override `cookie_name`, update the
-  cache key to match.
+  cache key to match. The `{base_path}:` prefix keeps apps under different sub-paths of
+  one host from sharing verdicts: they usually share one `authz` cache zone, and a
+  `Path=/` cookie left by a release before the session cookie was scoped to `root_url`
+  reaches every sub-path.
 
 ## 5. Speed
 

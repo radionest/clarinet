@@ -168,6 +168,12 @@ Session-based auth (fastapi-users, `AccessToken`). Subcommands of `uv run clarin
 `cleanup-all` (asks for confirmation). Helpers live in `clarinet/utils/session.py`;
 the long-running cleanup loop is `SessionCleanupService` in `clarinet/services/session_cleanup.py`.
 
+The session cookie is scoped to `Path=root_url` (`ScopedCookieTransport` in
+`api/auth_config.py`) so apps under different sub-paths of one host keep separate
+sessions. Login and logout also expire a legacy `Path=/` cookie: Starlette keeps the
+last duplicate cookie and browsers send the broadest path last, so a leftover one
+would shadow the scoped cookie.
+
 ### Auth caching
 
 `DatabaseStrategy.read_token` and the `X-Internal-Token` path check the DB on
