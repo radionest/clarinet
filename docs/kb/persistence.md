@@ -184,7 +184,10 @@ a hand-written step in that note.
   (the same class). SQLite keeps the declared name `UUID` and reflects it as
   `NUMERIC`, so autogenerate never reaches an empty diff and emits
   `alter_column` ops SQLite rejects (#655). `Uuid` is native `UUID` on
-  PostgreSQL and `CHAR(32)` on SQLite.
+  PostgreSQL and `CHAR(32)` on SQLite. A SQLite database created before #655
+  gets a revision that rebuilds the five columns; its generated `downgrade()`
+  converts them back to the reflected `NUMERIC`, and the rebuild casts every
+  UUID to a number — replace that body with `raise NotImplementedError`.
 - **`SQLModel.Field()` takes `schema_extra`, not `json_schema_extra`.** The
   Pydantic spelling silently does nothing on SQLModel subclasses.
 - **Primary keys are `int | None`** until flush, so mypy flags passing

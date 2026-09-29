@@ -208,4 +208,9 @@ Tests: the autouse `_reset_auth_throttle` fixture clears the counters.
 
 ## Alembic Migrations
 
-`make db-upgrade`, `make db-downgrade`, `make db-migration`. Or: `uv run alembic revision --autogenerate -m "msg"`.
+The framework ships no migrations: each downstream project owns its `alembic/`
+history (`clarinet init-migrations`, `clarinet db migrate create`), and a schema
+change here ships a CHANGELOG **Downstream migration** note instead — see
+[Who owns migrations](../docs/kb/persistence.md#who-owns-migrations).
+`make db-upgrade` / `db-downgrade` / `db-migration` wrap `uv run alembic` for a
+developer-local, gitignored `alembic/` + `alembic.ini` scratch setup only.

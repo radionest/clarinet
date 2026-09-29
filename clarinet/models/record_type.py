@@ -167,9 +167,10 @@ class RecordTypeBase(SQLModel):
     # ``ALTER TABLE recordtype ADD COLUMN ... NOT NULL DEFAULT true`` instead
     # of the unsafe ``... NOT NULL`` form. Without it PostgreSQL rejects the
     # migration on populated tables: ``column "mask_patient_data" of relation
-    # "recordtype" contains null values``. SQLite was lenient and silently
-    # allowed the bad form, which is how the bug originally slipped through
-    # tests (PR #144, fixed in PR #149).
+    # "recordtype" contains null values``. SQLite rejects it on a populated
+    # table too but accepts it on an empty one, and test databases are empty,
+    # which is how the bug originally slipped through tests (PR #144, fixed in
+    # PR #149).
     #
     # Use ``sql_expression.true()`` (NOT ``text("1")`` or ``text("true")``):
     # it is the only dialect-aware Boolean literal in SQLAlchemy — renders as
