@@ -228,8 +228,8 @@ def _refuse_lossy_uuid_downgrade(directives: list[ops.MigrationScript]) -> None:
             ]
             if columns:
                 message = (
-                    f"converting {', '.join(columns)} from Uuid destroys every id "
-                    "(#655); write this downgrade by hand"
+                    f"converting {', '.join(columns)} from Uuid may destroy ids - "
+                    "a cast to NUMERIC does (#655); write this downgrade by hand"
                 )
                 downgrade_ops.ops.insert(0, _IrreversibleDowngradeOp(message))
 

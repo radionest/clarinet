@@ -128,8 +128,9 @@ which PostgreSQL rejects (#450); on PostgreSQL `func.now()` would land as
 `sa.func.now()`, compiled by the database applying the migration. The
 generated `alembic/env.py` is a short shim over `run_env()` in the same
 module, which passes `render_item`, `compare_type=True` and
-`render_as_batch=True`: type, nullability and index changes render as batch
-operations — plain `ALTER`s on PostgreSQL, table rebuilds on SQLite (which has
+`render_as_batch=True`: added columns and type, nullability and index changes
+render as batch operations — plain `ALTER`s on PostgreSQL, table rebuilds on
+SQLite where needed (which has
 no `ALTER COLUMN`, and no `ADD COLUMN` with a non-constant default such as
 `func.now()` on a populated table) — so a revision applies on both, whichever
 database generated it. Foreign-key and unique-constraint changes still need a
@@ -147,7 +148,7 @@ hand-written add-nullable → backfill → `alter_column(nullable=False)` migrat
 Regression coverage lives in `tests/migration/test_schema_integrity.py`,
 `tests/migration/test_data_preservation.py` and
 `tests/migration/test_cli_functions.py` (`TestCrossDialectRegression`
-autogenerates on SQLite and applies on PostgreSQL); the PostgreSQL leg runs in CI
+autogenerates on each dialect and applies on the other); the PostgreSQL leg runs in CI
 (`test-postgres` job) and as stages 2b and 6 of `make test-all-stages`.
 
 ## Who owns migrations
