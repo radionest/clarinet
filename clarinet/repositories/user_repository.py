@@ -10,7 +10,6 @@ from sqlmodel import col, select
 from clarinet.exceptions.domain import UserNotFoundError
 from clarinet.models import Record, User, UserRole
 from clarinet.repositories.base import BaseRepository
-from clarinet.services.events.models import EntityEvent
 from clarinet.utils.session import revoke_user_sessions
 
 
@@ -22,12 +21,12 @@ class UserRepository(BaseRepository[User]):
         super().__init__(session, User)
         self._role_repo = BaseRepository(session, UserRole)
 
-    async def clear_owned_records(self, user_id: UUID) -> list[EntityEvent]:
+    async def clear_owned_records(self, user_id: UUID) -> list[tuple[int, str]]:
         """Null ``Record.user_id`` for every record owned by *user_id*; leaves status untouched.
 
-        Returns one record ``updated`` event per cleared record for the caller
-        to publish after its commit — the Core UPDATE is invisible to the SSE
-        capture, which the ORM nullify it replaces was not.
+        Returns ``(record id, record_type_name)`` of each cleared record, for the
+        caller to publish SSE events after its commit — the Core UPDATE is
+        invisible to the SSE capture, which the ORM nullify it replaces was not.
 
         Run before ``session.delete(user)`` in ``UserService.delete_user``:
         without this, SQLAlchemy's own FK-nullify-on-parent-delete cascade
@@ -53,10 +52,7 @@ class UserRepository(BaseRepository[User]):
             .values(user_id=None)
             .execution_options(synchronize_session=False)
         )
-        return [
-            EntityEvent(entity="record", action="updated", id=str(rid), record_type_name=rtn)
-            for rid, rtn in owned.all()
-        ]
+        return [(rid, rtn) for rid, rtn in owned.all() if rid is not None]
 
     async def get_with_roles(self, user_id: UUID) -> User:
         """Get user with roles loaded.
