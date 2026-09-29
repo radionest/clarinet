@@ -1,9 +1,9 @@
 ---
 type: Convention
 title: Persistence conventions
-description: How to write SQLModel models, repositories and migrations here — schema naming, eager loading, the server_default rule for additive migrations, and the pitfalls that only surface on PostgreSQL.
-tags: [sqlmodel, repositories, migrations, alembic, postgres]
-timestamp: 2026-07-21T19:46:32Z
+description: How to write SQLModel models, repositories and migrations here — schema naming, eager loading, the server_default rule for additive migrations, who owns migrations, and dialect pitfalls on PostgreSQL and SQLite.
+tags: [sqlmodel, repositories, migrations, alembic, postgres, sqlite]
+timestamp: 2026-09-29T12:00:00Z
 ---
 
 The repository layer owns every DB access; see [Backend architecture](./architecture.md)
@@ -94,8 +94,10 @@ Gleam types under `clarinet/frontend/src/api/`.
 
 **Every new non-nullable column on an existing table must declare a
 `server_default`.** Without one, Alembic autogenerate emits
-`ALTER TABLE … ADD COLUMN … NOT NULL`, which PostgreSQL rejects on any populated
-table. SQLite silently accepts it, so SQLite-only test runs never catch this.
+`ALTER TABLE … ADD COLUMN … NOT NULL`, which PostgreSQL and SQLite both reject
+once the table has rows (SQLite: `Cannot add a NOT NULL column with default
+value NULL`). Both accept it on an empty table, and test databases are empty,
+so the test suite alone never catches this.
 
 ```python
 from sqlalchemy.sql import expression as sql_expression
@@ -118,14 +120,26 @@ with `server_default=false()`). A metadata guard
 literals. Do **not** use `text("1")` (breaks PG), `text("true")` (SQLite rejects
 it inside some `ALTER TABLE`s), or plain `"1"` (causes spurious autogen diffs).
 
-Autogenerate still compiles a `server_default` with the database it is connected
-to, so on SQLite — the scaffold default — `false()` would land in the migration
-as `sa.text('0')`, which PostgreSQL rejects (#450). The generated `env.py`
-therefore passes the `render_item` hook from `clarinet/utils/migrations.py`,
-which renders these literals as `sa.true()` / `sa.false()` so that the database
-applying the migration compiles them. `env.py` is only written when missing:
-older projects add the hook by hand (CHANGELOG entry for #450), and
-`clarinet init-migrations` / `clarinet db migrate create` warn until they do. The
+Autogenerate compiles a `server_default` with the database it is connected
+to: on SQLite — the scaffold default — `false()` would land as `sa.text('0')`,
+which PostgreSQL rejects (#450); on PostgreSQL `func.now()` would land as
+`sa.text('now()')`, which SQLite rejects. `render_item` in
+`clarinet/utils/migrations.py` renders them as `sa.true()` / `sa.false()` /
+`sa.func.now()`, compiled by the database applying the migration. The
+generated `alembic/env.py` is a short shim over `run_env()` in the same
+module, which passes `render_item`, `compare_type=True` and
+`render_as_batch=True`: added columns and type, nullability and index changes
+render as batch operations — plain `ALTER`s on PostgreSQL, table rebuilds on
+SQLite where needed (which has
+no `ALTER COLUMN`, and no `ADD COLUMN` with a non-constant default such as
+`func.now()` on a populated table) — so a revision applies on both, whichever
+database generated it. Foreign-key and unique-constraint changes still need a
+hand-written step, because the framework's constraints are unnamed; offline
+`--sql` output cannot include a SQLite rebuild, which needs reflection. Extra
+`context.configure()` options go to `run_env(...)` as keyword arguments.
+`env.py` is written only when missing, so an `env.py` from before #655 is
+replaced by hand (CHANGELOG), and `clarinet init-migrations` /
+`clarinet db migrate create` warn until it is. The
 hook sees model defaults only — a downgrade that re-adds a dropped boolean
 column still renders the reflected `sa.text('0')`.
 
@@ -134,13 +148,32 @@ hand-written add-nullable → backfill → `alter_column(nullable=False)` migrat
 Regression coverage lives in `tests/migration/test_schema_integrity.py`,
 `tests/migration/test_data_preservation.py` and
 `tests/migration/test_cli_functions.py` (`TestCrossDialectRegression`
-autogenerates on SQLite and applies on PostgreSQL); the PostgreSQL leg runs as
-stage 6 of `make test-all-stages`.
+autogenerates on each dialect and applies on the other); the PostgreSQL leg runs in CI
+(`test-postgres` job) and as stages 2b and 6 of `make test-all-stages`.
 
-The framework itself ships **no** migrations — `alembic/` is generated per
-downstream project by `clarinet/utils/migrations.py` via `clarinet init-migrations`
-and `clarinet db migrate`. Downstream projects therefore need their own
-migration for each new framework table (`record_event`, `pipeline_task_run`, …).
+## Who owns migrations
+
+The framework ships **no** migrations, by design: downstream projects run and
+are tested in different environments, upgrade from different framework
+versions, and some migrations need project-specific data backfills. Each
+project owns its `alembic/` history, generated by `clarinet init-migrations`
+and `clarinet db migrate create`. The framework owns the inputs to that
+autogenerate and tests them:
+
+1. Models use dialect-portable column types (`PortableJSON`, `sqlalchemy.Uuid`).
+2. `alembic/env.py` is a shim over `clarinet.utils.migrations.run_env()`, so
+   render/compare/batch policy ships with the package.
+3. `tests/migration/test_cli_functions.py::TestCreateMigration` asserts that
+   autogenerate right after `upgrade head` is empty and applies — on SQLite,
+   and on PostgreSQL in CI's `test-postgres` job.
+4. Every schema change ships a CHANGELOG **Downstream migration** note; new
+   framework tables (`record_event`, `pipeline_task_run`, …) need one too.
+
+Autogenerate does not handle everything portably: PostgreSQL enum labels
+(`ALTER TYPE … ADD VALUE`), `server_default` changes (`compare_server_default`
+is off) and foreign-key / unique-constraint changes (the framework's constraints
+are unnamed, so the rendered `drop_constraint` fails on the other dialect) need
+a hand-written step in that note.
 
 ## Pitfalls
 
@@ -152,6 +185,15 @@ migration for each new framework table (`record_event`, `pipeline_task_run`, …
   for them. Use the `PortableJSON` alias from `clarinet/types.py`
   (`JSON().with_variant(JSONB(), "postgresql")`) so PostgreSQL gets JSONB and its
   GROUP BY / DISTINCT / equality support.
+- **UUID columns use `sqlalchemy.Uuid`**, never `postgresql.UUID` / `sa.UUID`
+  (the same class). SQLite keeps the declared name `UUID` and reflects it as
+  `NUMERIC`, so autogenerate never reaches an empty diff and emits
+  `alter_column` ops SQLite rejects (#655). `Uuid` is native `UUID` on
+  PostgreSQL and `CHAR(32)` on SQLite. A SQLite database created before #655
+  gets a revision that rebuilds the five columns; converting them back to the
+  reflected `NUMERIC` would cast every UUID to a number, so `run_env()` makes
+  any downgrade from `Uuid` to another type start with
+  `raise NotImplementedError`.
 - **`SQLModel.Field()` takes `schema_extra`, not `json_schema_extra`.** The
   Pydantic spelling silently does nothing on SQLModel subclasses.
 - **Primary keys are `int | None`** until flush, so mypy flags passing

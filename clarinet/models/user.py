@@ -10,8 +10,7 @@ from uuid import UUID, uuid4
 from fastapi_users import schemas
 from pydantic import Field as PydanticField
 from pydantic import computed_field, field_serializer
-from sqlalchemy import Column, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import Column, ForeignKey, Uuid
 from sqlmodel import Field, Relationship, SQLModel
 
 from clarinet.utils.fastapi_users_db import SQLModelBaseUserDB
@@ -28,7 +27,7 @@ class UserRolesLink(BaseModel, table=True):
 
     user_id: UUID = Field(
         sa_column=Column(
-            PG_UUID(as_uuid=True),
+            Uuid,
             ForeignKey("user.id"),
             primary_key=True,
         ),
@@ -54,7 +53,7 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
     # Override id field to ensure proper UUID handling
     id: UUID = Field(
         default_factory=uuid4,
-        sa_column=Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4),
+        sa_column=Column(Uuid, primary_key=True, default=uuid4),
     )
 
     # Relationships with existing models

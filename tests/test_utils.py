@@ -315,13 +315,18 @@ class TestAdminUtils:
 class TestMigrationTemplate:
     """Tests for Alembic env.py template generation."""
 
-    def test_env_py_uses_sqlmodel_metadata(self):
+    def test_env_py_delegates_to_run_env(self):
         from clarinet.utils.migrations import generate_alembic_env
 
         content = generate_alembic_env()
-        assert "from clarinet.models.base import Base" not in content
-        assert "from sqlmodel import SQLModel" in content
-        assert "target_metadata = SQLModel.metadata" in content
+        assert "from clarinet.utils.migrations import run_env" in content
+        assert content.rstrip().endswith("run_env()")
+
+    def test_env_py_is_ascii(self):
+        # init_alembic_in_project writes it with the platform default encoding.
+        from clarinet.utils.migrations import generate_alembic_env
+
+        assert generate_alembic_env().isascii()
 
 
 # ===================================================================

@@ -1,5 +1,9 @@
 # Update Log
 
+## 2026-09-29
+
+* **Update**: [Persistence conventions](./persistence.md) — added the "Who owns migrations" contract (framework ships none; it owns portable models, the `run_env()` shim and the autogenerate tests), corrected the SQLite NOT NULL `ADD COLUMN` rule, and documented `run_env()` — its batch mode (constraint changes stay hand-written, no SQLite rebuild offline), keyword overrides, and the `raise` it puts in a lossy `Uuid` downgrade.
+
 ## 2026-09-27
 
 * **Update**: [Domain model](./domain-model.md) — the DICOMweb proxy gate is now `current_dicomweb_user`: the same admin-or-role check as `current_role_holder`, with a passed session cookie reused for `session_cache_ttl_seconds`.

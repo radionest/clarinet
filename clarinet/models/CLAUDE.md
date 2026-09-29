@@ -224,8 +224,7 @@ only, it never aborts startup.
 
 Without it, alembic autogenerate emits `ALTER TABLE ... ADD COLUMN ... NOT NULL`,
 which PostgreSQL rejects with `column "..." of relation "..." contains null values`
-on any populated database. SQLite is more lenient and silently accepts the same DDL,
-so SQLite-only test runs do **not** catch this — the bug surfaces only against PG.
+on any populated database. SQLite rejects the same DDL on a populated table too (`Cannot add a NOT NULL column with default value NULL`) but accepts it on an empty one — and test databases are empty, so the test suite alone does **not** catch this.
 
 **Pattern (booleans):**
 ```python
@@ -253,11 +252,12 @@ integer literal breaks PG — the PR #149 v1 trap, fixed in #150); `text("true")
 PG via implicit cast but causes spurious alembic autogen diffs).
 
 Autogenerate compiles them with the database it runs against — generated on
-SQLite, `false()` lands in the migration as `sa.text('0')` and PostgreSQL rejects
-it (#450). The generated `env.py` passes `render_item` from
-`clarinet/utils/migrations.py`, which renders them as `sa.true()`/`sa.false()`
-instead; projects whose `env.py` predates the hook add it by hand (CHANGELOG
-entry for #450) — `init-migrations` and `db migrate create` warn until they do.
+SQLite, `false()` lands as `sa.text('0')` and PostgreSQL rejects it (#450).
+`render_item` in `clarinet/utils/migrations.py` renders them (and `func.now()`)
+dialect-neutrally; the generated `env.py` is a shim over `run_env()` there,
+which passes the hook. Projects whose `env.py` predates the shim replace it by
+hand (CHANGELOG entry for #655) — `init-migrations` and `db migrate create`
+warn until they do.
 
 **Alternatives:** nullable `Optional[X]` — only if `None` is domain-meaningful;
 or a hand-written add-nullable → backfill → `alter_column(nullable=False)`
@@ -267,10 +267,15 @@ migration for values inexpressible as a single SQL literal.
 (metadata scan), `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
 (real `ALTER TABLE` on populated SQLite + PG) and
 `tests/migration/test_cli_functions.py::TestCrossDialectRegression` (autogenerate on
-SQLite, apply on PG). The PG leg = stage 6 of `make test-all-stages`, or
+SQLite, apply on PG). The PG leg runs in CI (`test-postgres` job) and as stages 2b and 6 of `make test-all-stages`, or
 `make test-migration` with `CLARINET_TEST_DATABASE_URL` pointing at any PG
 instance; see `tests/migration/conftest.py`.
 
 ## Type Aliases (`clarinet/types.py`)
 
 `PortableJSON = JSON().with_variant(JSONB(), "postgresql")` — JSONB on PostgreSQL (supports GROUP BY / DISTINCT / equality), JSON on SQLite. Use for all JSON columns.
+
+UUID columns: `Column(Uuid, …)` (`from sqlalchemy import Uuid`) — never
+`sqlalchemy.dialects.postgresql.UUID` / `sa.UUID` (one class): SQLite reflects a
+declared `UUID` as `NUMERIC`, so autogenerate never comes back empty and emits
+`alter_column` ops SQLite rejects (#655).

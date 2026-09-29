@@ -173,8 +173,8 @@ Clarinet is a framework — alembic migrations are generated and applied in the
 downstream project. After upgrading Clarinet, run:
 
 ```sh
-make db-migration  # → alembic revision --autogenerate -m "add data_validators column"
-make db-upgrade
+clarinet db migrate create -m "add data_validators column"
+clarinet db migrate
 ```
 
 SQLAlchemy issues an explicit `SELECT col1, col2, ...` enumerated from model
