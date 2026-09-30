@@ -161,10 +161,7 @@ fn stat_card(label: String, value: String) -> Element(Msg) {
   ])
 }
 
-fn records_section(
-  records: List(Record),
-  translate: fn(Key) -> String,
-) -> Element(Msg) {
+fn records_section(records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
     case records {
