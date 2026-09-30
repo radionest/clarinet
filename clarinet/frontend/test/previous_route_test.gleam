@@ -95,3 +95,20 @@ pub fn list_filters_are_stripped_test() {
     main.update(model, store.OnRouteChange(router.RecordDetail("5")))
   new_model.previous_route |> should.equal(Some(router.Records(dict.new())))
 }
+
+pub fn record_types_sort_is_stripped_test() {
+  let filters = dict.from_list([#("sort", "level"), #("sort_dir", "desc")])
+  // Admin routes redirect non-admins before previous_route is recorded.
+  let model =
+    store.Model(
+      ..make_model(router.AdminRecordTypes(filters)),
+      user: Some(models.User(..make_user(), is_superuser: True)),
+    )
+  let #(new_model, _eff) =
+    main.update(
+      model,
+      store.OnRouteChange(router.AdminRecordTypeDetail("ct_seg")),
+    )
+  new_model.previous_route
+  |> should.equal(Some(router.AdminRecordTypes(dict.new())))
+}

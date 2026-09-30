@@ -49,7 +49,7 @@ fn navbar(model: Model) -> Element(Msg) {
               current_route: model.route,
             ),
             nav_link(
-              route: router.AdminRecordTypes,
+              route: router.AdminRecordTypes(dict.new()),
               text: t(i18n.NavRecordTypes),
               current_route: model.route,
             ),

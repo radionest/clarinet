@@ -24,7 +24,7 @@ pub type Route {
   PatientNew
   SeriesDetail(id: String)
   AdminDashboard(filters: Dict(String, String))
-  AdminRecordTypes
+  AdminRecordTypes(filters: Dict(String, String))
   AdminRecordTypeDetail(name: String)
   AdminRecordTypeEdit(name: String)
   AdminReports
@@ -53,7 +53,7 @@ pub fn route_to_path(route: Route) -> String {
     PatientDetail(id) -> "/patients/" <> id
     SeriesDetail(id) -> "/series/" <> id
     AdminDashboard(_) -> "/admin"
-    AdminRecordTypes -> "/admin/record-types"
+    AdminRecordTypes(_) -> "/admin/record-types"
     AdminRecordTypeDetail(name) -> "/admin/record-types/" <> name
     AdminRecordTypeEdit(name) -> "/admin/record-types/" <> name <> "/edit"
     AdminReports -> "/admin/reports"
@@ -98,7 +98,8 @@ pub fn parse_route(uri: Uri) -> Route {
     ["admin", "quarto-reports"] -> AdminQuartoReports
     ["admin", "workflow"] -> AdminWorkflow
     ["admin", "activity"] -> AdminActivity
-    ["admin", "record-types"] -> AdminRecordTypes
+    ["admin", "record-types"] ->
+      AdminRecordTypes(parse_filters_from_query(uri.query))
     ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
     ["admin", "record-types", name] -> AdminRecordTypeDetail(name)
     ["settings"] -> Settings
@@ -127,7 +128,7 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | PatientNew
     | RecordNew
     | AdminDashboard(_)
-    | AdminRecordTypes
+    | AdminRecordTypes(_)
     | AdminRecordTypeDetail(_)
     | AdminRecordTypeEdit(_)
     | AdminWorkflow
@@ -162,7 +163,7 @@ pub fn get_route_title(route: Route) -> String {
     PatientNew -> "New Patient"
     SeriesDetail(_) -> "Series Details"
     AdminDashboard(_) -> "Admin Dashboard"
-    AdminRecordTypes -> "Record Types"
+    AdminRecordTypes(_) -> "Record Types"
     AdminRecordTypeDetail(_) -> "Record Type Details"
     AdminRecordTypeEdit(_) -> "Edit Record Type"
     AdminReports -> "Reports"
@@ -183,7 +184,7 @@ fn section(route: Route) -> String {
     Records(_) | RecordDetail(_) | RecordNew -> "records"
     Patients(_) | PatientDetail(_) | PatientNew -> "patients"
     AdminDashboard(_) -> "admin"
-    AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) ->
+    AdminRecordTypes(_) | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) ->
       "record-types"
     AdminReports -> "reports"
     AdminQuartoReports -> "quarto"
@@ -228,6 +229,7 @@ pub fn route_to_query(route: Route) -> Option(String) {
     Records(filters)
     | Studies(filters)
     | Patients(filters)
+    | AdminRecordTypes(filters)
     | AdminDashboard(filters) -> filters_to_query(filters)
     _ -> None
   }

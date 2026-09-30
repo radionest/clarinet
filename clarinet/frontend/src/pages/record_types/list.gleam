@@ -1,46 +1,92 @@
 // Record types list page (admin only) — self-contained MVU module
-import api/models
+import api/models.{type RecordTypeStats}
+import clarinet_frontend/i18n.{type Key}
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
+import gleam/order
+import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import router
 import shared.{type OutMsg, type Shared}
+import utils/records_list_state
+import utils/table_sort.{type SortDirection}
 
 // --- Model ---
 
 pub type Model {
-  Model
+  Model(active_filters: Dict(String, String))
 }
 
 // --- Msg ---
 
 pub type Msg {
-  NoOp
+  ColumnHeaderClicked(column: String)
 }
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  #(Model, effect.none(), [shared.ReloadRecordTypeStats])
+const default_sort_col = "name"
+
+const storage_key = "record_types.filters"
+
+pub fn init(
+  filters: Dict(String, String),
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let #(filters, eff) =
+    records_list_state.resolve_initial_filters(
+      filters,
+      storage_key,
+      router.AdminRecordTypes,
+      [],
+    )
+  #(Model(active_filters: filters), eff, [shared.ReloadRecordTypeStats])
 }
 
 // --- Update ---
 
 pub fn update(
   model: Model,
-  _msg: Msg,
+  msg: Msg,
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  #(model, effect.none(), [])
+  case msg {
+    ColumnHeaderClicked(col) -> {
+      let #(cur_col, cur_dir) =
+        table_sort.read_sort(model.active_filters, default_sort_col)
+      let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
+      let new_filters =
+        table_sort.write_sort(
+          model.active_filters,
+          new_col,
+          new_dir,
+          default_sort_col,
+        )
+      #(
+        Model(active_filters: new_filters),
+        records_list_state.sync_filters_effect(
+          new_filters,
+          router.AdminRecordTypes,
+          storage_key,
+          [],
+        ),
+        [],
+      )
+    }
+  }
 }
 
 // --- View ---
 
-pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  let #(sort_col, sort_dir) =
+    table_sort.read_sort(model.active_filters, default_sort_col)
+
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Record Types")]),
@@ -50,14 +96,23 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
         html.p([attribute.class("text-muted")], [
           html.text("No record type data available."),
         ])
-      Some(stats) -> record_types_table(stats)
+      Some(stats) ->
+        stats
+        |> list.sort(record_type_comparator(sort_col, sort_dir))
+        |> record_types_table(shared.translate, sort_col, sort_dir)
     },
   ])
 }
 
 fn record_types_table(
-  stats: List(models.RecordTypeStats),
+  stats: List(RecordTypeStats),
+  t: fn(Key) -> String,
+  sort_col: String,
+  sort_dir: SortDirection,
 ) -> Element(Msg) {
+  let th = fn(key, col) {
+    table_sort.th_sortable(t(key), col, sort_col, sort_dir, ColumnHeaderClicked)
+  }
   case stats {
     [] ->
       html.p([attribute.class("text-muted")], [
@@ -68,18 +123,18 @@ fn record_types_table(
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              html.th([], [html.text("Name")]),
-              html.th([], [html.text("Label")]),
-              html.th([], [html.text("Level")]),
-              html.th([], [html.text("Role")]),
-              html.th([], [html.text("Min/Max Users")]),
-              html.th([], [html.text("Total Records")]),
-              html.th([], [html.text("Pending")]),
-              html.th([], [html.text("In Work")]),
-              html.th([], [html.text("Finished")]),
-              html.th([], [html.text("Failed")]),
-              html.th([], [html.text("Unique Users")]),
-              html.th([], [html.text("Actions")]),
+              th(i18n.ThName, "name"),
+              th(i18n.ThLabel, "label"),
+              th(i18n.ThLevel, "level"),
+              th(i18n.ThRole, "role"),
+              table_sort.th_static(t(i18n.ThMinMaxUsers)),
+              th(i18n.ThTotalRecords, "total_records"),
+              th(i18n.StatusPending, "pending"),
+              th(i18n.StatusInProgress, "inwork"),
+              th(i18n.StatusCompleted, "finished"),
+              th(i18n.StatusFailed, "failed"),
+              th(i18n.ThUniqueUsers, "unique_users"),
+              table_sort.th_static(t(i18n.ThActions)),
             ]),
           ]),
           html.tbody([], list.map(stats, record_type_row)),
@@ -88,7 +143,64 @@ fn record_types_table(
   }
 }
 
-fn record_type_row(stat: models.RecordTypeStats) -> Element(Msg) {
+fn record_type_comparator(
+  col: String,
+  dir: SortDirection,
+) -> fn(RecordTypeStats, RecordTypeStats) -> order.Order {
+  let by_int = fn(get: fn(RecordTypeStats) -> Int) {
+    table_sort.with_direction(fn(a, b) { int.compare(get(a), get(b)) }, dir)
+  }
+  // Rows shown as "-" (no label/role) stay last in both directions.
+  let by_optional_text = fn(get: fn(RecordTypeStats) -> Option(String)) {
+    fn(a, b) {
+      case get(a), get(b) {
+        Some(x), Some(y) -> table_sort.with_direction(compare_text, dir)(x, y)
+        Some(_), None -> order.Lt
+        None, Some(_) -> order.Gt
+        None, None -> order.Eq
+      }
+    }
+  }
+  let primary = case col {
+    "label" -> by_optional_text(fn(s) { s.label })
+    "level" -> by_int(fn(s) { level_rank(s.level) })
+    "role" -> by_optional_text(fn(s) { s.role_name })
+    "total_records" -> by_int(fn(s) { s.total_records })
+    "pending" -> by_int(fn(s) { s.records_by_status.pending })
+    "inwork" -> by_int(fn(s) { s.records_by_status.inwork })
+    "finished" -> by_int(fn(s) { s.records_by_status.finished })
+    "failed" -> by_int(fn(s) { s.records_by_status.failed })
+    "unique_users" -> by_int(fn(s) { s.unique_users })
+    _ ->
+      table_sort.with_direction(
+        fn(a: RecordTypeStats, b: RecordTypeStats) {
+          compare_text(a.name, b.name)
+        },
+        dir,
+      )
+  }
+  // Level, role and zero counts tie a lot and the stats API has no ORDER BY:
+  // break ties by name so rows don't reshuffle on every SSE refetch.
+  fn(a, b) {
+    order.lazy_break_tie(primary(a, b), fn() { string.compare(a.name, b.name) })
+  }
+}
+
+fn compare_text(a: String, b: String) -> order.Order {
+  string.compare(string.lowercase(a), string.lowercase(b))
+}
+
+/// DICOM hierarchy order — alphabetical would put SERIES before STUDY.
+fn level_rank(level: String) -> Int {
+  case level {
+    "PATIENT" -> 0
+    "STUDY" -> 1
+    "SERIES" -> 2
+    _ -> 3
+  }
+}
+
+fn record_type_row(stat: RecordTypeStats) -> Element(Msg) {
   let min_max = case stat.min_records, stat.max_records {
     Some(min), Some(max) -> int.to_string(min) <> "/" <> int.to_string(max)
     Some(min), None -> int.to_string(min) <> "/-"

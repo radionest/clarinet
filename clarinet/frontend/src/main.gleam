@@ -1045,6 +1045,7 @@ fn strip_stale_filters(route: Route) -> Route {
     router.Patients(_) -> router.Patients(dict.new())
     router.Studies(_) -> router.Studies(dict.new())
     router.AdminDashboard(_) -> router.AdminDashboard(dict.new())
+    router.AdminRecordTypes(_) -> router.AdminRecordTypes(dict.new())
     other -> other
   }
 }
@@ -1202,10 +1203,10 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         store.SeriesDetailPage,
         store.SeriesDetailMsg,
       )
-    router.AdminRecordTypes ->
+    router.AdminRecordTypes(filters) ->
       init_page(
         model,
-        record_types_list.init,
+        record_types_list.init(filters, _),
         store.RecordTypesListPage,
         store.RecordTypesListMsg,
       )

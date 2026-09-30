@@ -5,6 +5,7 @@ import cache/bucket
 import clarinet_frontend/i18n.{type Key}
 import components/entity_link
 import components/status_badge
+import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -83,7 +84,9 @@ fn render_detail(shared: Shared, stat: RecordTypeStats) -> Element(Msg) {
       ]),
       html.a(
         [
-          attribute.href(router.route_to_path(router.AdminRecordTypes)),
+          attribute.href(
+            router.route_to_path(router.AdminRecordTypes(dict.new())),
+          ),
           attribute.class("btn btn-secondary"),
         ],
         [html.text("Back to Record Types")],
