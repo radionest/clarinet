@@ -74,7 +74,7 @@ uv run clarinet init [path]              # Scaffold a new project
 uv run clarinet run [--headless]         # Start the server
 uv run clarinet db init                  # Initialize DB with admin user
 uv run clarinet admin create             # Create admin user
-uv run clarinet admin reset-password     # Reset admin password
+uv run clarinet admin reset-password     # Reset user password (any user, by email)
 uv run clarinet worker [--queues ...]    # Run pipeline worker
 uv run clarinet session stats            # Session statistics
 uv run clarinet session cleanup          # Clean expired sessions (+ --days retention)
