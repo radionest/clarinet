@@ -1,5 +1,6 @@
 """Tests for ``clarinet admin reset-password`` (helper: ``reset_user_password``)."""
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -48,7 +49,7 @@ async def _run_reset(username: str, new_password: str, test_session: AsyncSessio
     """Invoke ``reset_user_password`` with a session-context mock."""
 
     @asynccontextmanager
-    async def _session_ctx() -> AsyncSession:
+    async def _session_ctx() -> AsyncIterator[AsyncSession]:
         yield test_session
 
     with patch("clarinet.utils.admin.db_manager") as mock_dbm:
