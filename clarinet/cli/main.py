@@ -1595,9 +1595,9 @@ def main() -> None:
     )
 
     # admin reset-password subcommand
-    admin_reset = admin_subparsers.add_parser("reset-password", help="Reset admin password")
+    admin_reset = admin_subparsers.add_parser("reset-password", help="Reset user password")
     admin_reset.add_argument(
-        "--username", type=str, default="admin", help="Admin username to reset"
+        "--username", type=str, default="admin", help="Username (email) to reset"
     )
 
     # init-migrations command
@@ -2026,7 +2026,7 @@ def main() -> None:
         elif args.admin_command == "reset-password":
             import getpass
 
-            from clarinet.utils.admin import reset_admin_password
+            from clarinet.utils.admin import reset_user_password
 
             password = getpass.getpass("Enter new password: ")
             confirm = getpass.getpass("Confirm password: ")
@@ -2034,7 +2034,7 @@ def main() -> None:
                 logger.error("Passwords do not match")
                 sys.exit(1)
 
-            asyncio.run(reset_admin_password(args.username, password))
+            asyncio.run(reset_user_password(args.username, password))
         else:
             admin_parser.print_help()
     elif args.command == "worker":
