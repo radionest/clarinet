@@ -12,12 +12,17 @@ from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
 
 
-async def reset_admin_password(username: str, new_password: str) -> bool:
+async def reset_user_password(username: str, new_password: str) -> bool:
     """
-    Reset the password for an admin user.
+    Reset the password for any existing user, superuser or not.
+
+    The operator running the CLI already has shell access to the server, so
+    the target's privilege level is not a security boundary here (D15).
+    Revokes the user's sessions in the same commit as the hash write
+    (``UserRepository.update_password``, #651).
 
     Args:
-        username: The admin username (email)
+        username: The user's email
         new_password: The new password to set
 
     Returns:
@@ -29,10 +34,6 @@ async def reset_admin_password(username: str, new_password: str) -> bool:
 
         if not user:
             logger.error(f"User '{username}' not found")
-            return False
-
-        if not user.is_superuser:
-            logger.error(f"User '{username}' is not a superuser")
             return False
 
         await UserRepository(session).update_password(user, get_password_hash(new_password))
