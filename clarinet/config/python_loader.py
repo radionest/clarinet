@@ -5,8 +5,8 @@ Discovers ``record_types.py`` in a given folder and collects all
 to ``RecordTypeCreate`` objects for the reconciler.
 
 Imports go through the ``clarinet_plan`` anchor package
-(``clarinet/config/plan_package.py``) — no ``sys.path`` manipulation.
-Contract: ``.claude/rules/custom-code-loading.md``.
+(``clarinet/config/plan_package.py``) — no ``sys.path`` manipulation. The
+full loading contract lives in that module's docstrings.
 """
 
 import json

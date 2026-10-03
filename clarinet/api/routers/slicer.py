@@ -188,7 +188,7 @@ async def open_record_in_slicer(
     # scripts that may call back to the Clarinet API. NOT injected on the
     # submit path (_process_submission in record.py) — validators that need to
     # write back into record.data should use __execResult merging instead.
-    # See clarinet/services/slicer/CLAUDE.md → "__execResult Result-Merging Contract".
+    # See docs/kb/imaging-stack.md → "__execResult — how a validator writes into a record".
     context["clarinet_api_url"] = str(request.base_url).rstrip("/")
     context["clarinet_auth_cookie"] = (
         f"{settings.cookie_name}={request.cookies.get(settings.cookie_name, '')}"

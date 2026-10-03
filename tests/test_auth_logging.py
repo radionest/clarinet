@@ -2,8 +2,7 @@
 
 These tests guard the structured `extra={...}` payloads attached to login,
 session-creation, and token-validation log records. The auth pipeline relies on
-those payloads for jq filtering and forensic analysis (see
-`.claude/rules/logging-pii.md`); a refactor that drops `extra=` would silently
+those payloads for jq filtering and forensic analysis; a refactor that drops `extra=` would silently
 break operational tooling without breaking unit tests of behavior — this file
 exists to catch that.
 

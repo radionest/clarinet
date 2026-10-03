@@ -266,7 +266,7 @@ class RecordTypeService:
     ) -> RecordData:
         """Merge a Slicer validator's ``__execResult`` into already-validated data.
 
-        Contract documented in ``clarinet/services/slicer/CLAUDE.md`` →
+        Contract documented in docs/kb/imaging-stack.md →
         "``__execResult`` Result-Merging Contract":
 
         * ``exec_result`` is the return value of ``SlicerService.execute()``.

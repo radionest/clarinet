@@ -878,7 +878,7 @@ async def _reconcile_with_mocked_env(
     slicer_context_hydrators). ``spec_set=True`` keeps attribute names
     honest — a typo in a ``config_*_file`` assignment would raise instead
     of silently leaving the real attribute as an auto-created MagicMock
-    (see tests/CLAUDE.md → MagicMock pitfalls).
+    (MagicMock auto-creates attributes — always prefer ``spec=``/``spec_set=``).
     """
     from unittest.mock import AsyncMock, patch
 

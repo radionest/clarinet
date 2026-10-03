@@ -168,7 +168,7 @@ class DbScrubber:
         rows = (await self.session.execute(stmt)).all()
         if self.keep_patient_ids is not None:
             # Count only — the ids are operator-supplied PHI (MRNs); keep them
-            # out of logs per .claude/rules/logging-pii.md.
+            # out of logs (PHI never passes through log calls).
             missing = len(self.keep_patient_ids - {r[0] for r in rows})
             if missing:
                 logger.warning(f"{missing} requested patient id(s) not found; skipping")

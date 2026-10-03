@@ -148,5 +148,6 @@ each skip work already done, so a retry is cheap; `render_quarto_report` and
 `register_task()` refuses to let a project task shadow a built-in of the same
 name.
 
-Settings tables, testing with `InMemoryBroker` and RabbitMQ cleanup:
-`.claude/rules/pipeline-ops.md`.
+Settings tables: the pipeline settings block in `clarinet/settings.py`;
+testing with `InMemoryBroker` and RabbitMQ cleanup are covered by the
+pipeline test suite under `tests/`.

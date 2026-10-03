@@ -1,6 +1,6 @@
 """Regression tests for the Orthanc reachability probe.
 
-The VM's Orthanc has REST auth on (``deploy/CLAUDE.md``). The probes used to
+The VM's Orthanc has REST auth on (stock orthanc:orthanc user). The probes used to
 send no credentials and lump the resulting 401 in with connection errors, so
 every DICOM test skipped as "not reachable" while the PACS was up.
 """

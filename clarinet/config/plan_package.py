@@ -16,7 +16,7 @@ directory on ``sys.path``" is therefore inexpressible, stdlib shadowing by a
 double registration).  ``exactly-once`` execution comes for free from Python's
 native module cache, so cross-flow imports work in both directions.
 
-Lifecycle (see ``.claude/rules/custom-code-loading.md``):
+Lifecycle:
 
 * ``activate_plan_package(root)`` — startup / worker entry; installs a fresh
   anchor rooted at *root*.

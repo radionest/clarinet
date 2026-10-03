@@ -53,7 +53,7 @@ Async SQLAlchemy cannot lazy-load, so a missed `selectinload()` surfaces as
   `session.delete()` a link that is still inside the loaded collection: the
   deleted objects stay there, and their remove events — through pydantic's
   value-based `__eq__` on link models — strip the freshly added links from it
-  (#567; mechanism in `clarinet/repositories/CLAUDE.md`, "M2M Link Lifecycle").
+  (#567; the full mechanism is the "M2M Link Lifecycle" section of this page).
 - For aggregates, batch-fetch instead of looping:
   `select(RecordType).where(RecordType.name.in_(names))` → build a dict.
 - The authenticated `User` (`read_token`, the `X-Internal-Token` admin row, the

@@ -47,7 +47,8 @@ my_project/
 ```
 
 Every plan file imports as a `clarinet_plan.` submodule off this single root
-(no `sys.path`). See `.claude/rules/custom-code-loading.md`. `plan/lib/` is
+(no `sys.path`). See the loading contract in `clarinet/config/plan_package.py`.
+`plan/lib/` is
 the vendored/third-party location; both configs installed by `clarinet
 quality init` exclude it from linting and type-checking.
 
@@ -69,7 +70,7 @@ pipeline_enabled = true                         # Requires RabbitMQ
 frontend_enabled = true
 ```
 
-Config modes (TOML vs Python): see `clarinet/config/CLAUDE.md`.
+Config modes (TOML vs Python): see `clarinet/config/` module docstrings.
 
 ## Running
 

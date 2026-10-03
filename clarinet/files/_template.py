@@ -201,7 +201,7 @@ def assert_path_safe_value(key: str, value: str) -> None:
     may carry PHI that ``scrub_sensitive`` (``clarinet/utils/logger.py``) does
     not redact:
     it only catches credential-shaped text (passwords, tokens, DB URLs),
-    never PHI (see ``.claude/rules/logging-pii.md``).
+    never PHI.
     """
     for bad in _UNSAFE_IN_VALUE:
         if bad in value:

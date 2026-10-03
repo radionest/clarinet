@@ -78,17 +78,16 @@ dev-notes
 .superpowers/
 docs/superpowers/
 
-# Claude Code local config (settings.local.json, worktrees, runtime dirs)
-# Exception: project infra shared via git — rules/, agents/, commands/, hooks/, settings.json
-.claude/*
-!.claude/rules/
-!.claude/agents/
-!.claude/commands/
-!.claude/hooks/
-!.claude/settings.json
-
-# OpenSpec local spec store (Claude working memory, synced via doc-review gate)
-/openspec
+# Local AI-assistant harness (claude-code / zcode context files, hooks, skills).
+# Never tracked: synced per-machine via ~/hermes-config (projects/clarinet/),
+# linked into the checkout by hermes-config/scripts/link_clarinet_harness.sh.
+/.claude/*
+/.zcode/
+/AGENTS.md
+/CLAUDE.md
+/openspec/
+**/CLAUDE.md
+!examples/project_template/.claude/CLAUDE.md
 
 # CTK DICOM tag cache that headless Slicer drops in its cwd (make test-all-stages stage 1)
 /ctkDICOMTagCache.sql

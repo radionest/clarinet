@@ -662,7 +662,7 @@ class TestSharedFileDefinitions:
         assert response.status_code == 200
 
         # The shared test session caches the pre-PATCH link collection of the
-        # patched type (tests/CLAUDE.md, "Identity Map Caching"); reload from DB.
+        # patched type (identity-map caching); reload from DB.
         test_session.expire_all()
         seg = await _seg_entry(client, auth_headers, guarded_type)
         assert seg["grid_conform_to"] is None

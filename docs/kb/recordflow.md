@@ -66,8 +66,9 @@ Conditions come in two flavours: `.if_(...)` for cross-record comparisons
 (`record('a').data.x != record('b').data.x`) and `.if_record(F.x == v, ...)` for
 self-referential ones, with AND semantics and `on_missing="skip"` by default.
 `.match(F.field).case(v).default()` gives stop-on-first-match pattern matching
-and absorbs a preceding `if_record()` as its guard. Full method reference:
-`.claude/rules/recordflow-dsl.md`.
+and absorbs a preceding `if_record()` as its guard. Full method reference: the
+docstrings in `clarinet/services/recordflow/` and the flow modules under
+`tests/` exercising the DSL.
 
 ## Evaluation context
 

@@ -27,8 +27,8 @@ my_project/
 ```
 
 Scaffold one with `clarinet init <name> --template research|demo`. For an
-existing project, `clarinet agent init` installs the framework's agent docs into
-`.claude/rules/clarinet/`.
+existing project, `clarinet agent init` installs the framework's agent docs
+into the project's `.claude/rules/clarinet/`.
 
 ## Two config modes
 
@@ -227,5 +227,6 @@ A broken plan file must crash startup, never degrade silently.
   `RecordConstraintViolationError` from `reconcile_config`) → `StartupError`;
   `run_worker` converts `ConfigLoadError` → `SystemExit(1)`.
 
-Full loading contract, including the test-sanitation fixtures:
-[`.claude/rules/custom-code-loading.md`](../../.claude/rules/custom-code-loading.md).
+Full loading contract, including the test-sanitation fixtures: the
+`clarinet_plan` anchor machinery in `clarinet/config/plan_package.py` and
+`clarinet/config/python_loader.py`.
