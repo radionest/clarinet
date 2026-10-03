@@ -1,0 +1,90 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "SessionStart": [
+        {
+          "matcher": "",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/uv-sync.sh",
+              "timeout": 300
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": "Edit|Write",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/require-worktree.sh",
+              "timeout": 5
+            }
+          ]
+        },
+        {
+          "matcher": "Agent",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/require-worktree-agent.sh",
+              "timeout": 5
+            }
+          ]
+        },
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/block-branch-switch.sh",
+              "timeout": 5
+            },
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/bash-anti-patterns.sh",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "matcher": "EnterWorktree",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/worktree-venv.sh",
+              "timeout": 10
+            }
+          ]
+        },
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/pr-monitor.sh",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "matcher": "",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/worktree-stop.sh",
+              "timeout": 10
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

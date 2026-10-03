@@ -1,0 +1,37 @@
+# Path-Scoped Rules — Topic Index
+
+Each rule file declares a `paths:` frontmatter glob and is auto-loaded when Claude reads or edits matching files. Rules without `paths:` load unconditionally.
+
+When adding a new rule: pick a focused topic, set `paths:` to the directory or file pattern where it applies, keep the file under ~150 lines. Refer back here from `CLAUDE.md` rather than duplicating the list.
+
+Durable, cross-cutting explanation lives in the knowledge base at [`docs/kb/`](../../docs/kb/index.md) — architecture, domain model, subsystem behaviour and the rationale behind them. It is not auto-loaded; rules stay file-specific and operational, pages stay conceptual. When a change alters behaviour a page describes, update the page in the same PR.
+
+## Index
+
+| Rule file | Topic | Triggers on |
+|---|---|---|
+| `api-deps.md` | DI aliases, RBAC, factory patterns, DICOMweb endpoints | `clarinet/api/dependencies.py`, `clarinet/api/routers/**` |
+| `api-urls.md` | Full endpoint URL table with status codes and auth | routers, tests |
+| `ci-debugging.md` | gh CLI / GitHub Actions debugging workflow | `.github/workflows/**` |
+| `custom-code-loading.md` | plan/ custom-code loading: `clarinet_plan` anchor (single root), CustomCodeRegistry, fail-fast | `plan_package.py`, `python_loader.py`, `custom_registry.py`, registry modules, `flow_loader.py`, pipeline `worker.py` |
+| `e2e-tests.md` | Frontend stack, VM sub-path, Playwright selectors | `deploy/test/e2e/**` |
+| `file-registry.md` | File definition M2M system | `file_schema.py`, file definition repo |
+| `frontend-page-contract.md` | MVU page contract, Shared/OutMsg, effects, LoadStatus, cache, errors | `clarinet/frontend/src/**/*.gleam`, test |
+| `frontend-routing-forms.md` | API layer, routing under sub-path, list pattern, forms, server HTML | `clarinet/frontend/src/**/*.gleam`, test |
+| `frontend-reference.md` | Decoder gotchas, logging, common pitfalls, toolchain | `clarinet/frontend/src/**/*.gleam`, test |
+| `logging-pii.md` | Sanitize Referer/Origin before logging, loguru `extra=` quirk | `auth_config.py`, `logger.py` |
+| `pipeline-ops.md` | Pipeline settings, testing, dependencies | `clarinet/services/pipeline/**` |
+| `pr-review.md` | Project-specific PR review checklist | used by `pr-diff-reviewer` subagent |
+| `project-setup.md` | Project init, settings, `plan/` structure | `settings.toml`, `plan/**` |
+| `record-data-api.md` | submit/update/prefill data flow + `context_info` markdown sidecar | `plan/workflows/**` (root + examples) |
+| `record-data-validator.md` | Python validators for cross-field/cross-element RecordData invariants | `plan/validators*` (root + examples) |
+| `record-repo.md` | Specialized methods, invalidation, auto_id | record repositories |
+| `recordflow-dsl.md` | Full RecordFlow DSL API reference | `recordflow/**`, `*_flow.py` |
+| `release.md` | Release process — tag `v*` → CI builds wheel + publishes GitHub Release; hotfix flow | `.github/workflows/release.yml`, `pyproject.toml` |
+| `schema-hydration.md` | Dynamic field options resolver | `schema_hydration.py`, hydrators |
+| `schemathesis.md` | Property-based testing guide, boundary-value handling | `tests/schema/**` |
+| `slicer-context.md` | Slicer context builder & hydration | `context*.py`, hydrators |
+| `slicer-helper-api.md` | SlicerHelper full API + VTK pitfalls | `clarinet/services/slicer/helper.py` |
+| `test-debugging.md` | jq recipes for test/log analysis | `tests/**` |
+
+This README has no `paths:` frontmatter, so it auto-loads into every session as a compact topic index — keep it short; detailed content belongs in the rule files. `pr-review.md` is the exception: self-scoped to its own path, it is read explicitly by the `pr-diff-reviewer` subagent rather than auto-loaded.
