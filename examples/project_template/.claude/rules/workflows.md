@@ -248,7 +248,7 @@ def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
 
 ## Part B — RecordFlow DSL
 
-> Full DSL reference — `<clarinet>/clarinet/.claude/rules/recordflow-dsl.md`. Here's a compact overview for everyday use.
+> Full DSL reference — `<clarinet>/clarinet/docs/recordflow-dsl.md`. Here's a compact overview for everyday use.
 
 ### Triggers
 

@@ -257,7 +257,7 @@ class TestServerDefaultsForAdditiveMigrations:
             "null values'. Add sa_column_kwargs={'server_default': "
             "sql_expression.true()} (or .false()) to the SQLModel Field "
             "definition. Do NOT use text('1') — it emits a bare integer literal "
-            "on PG and breaks CREATE TABLE. See clarinet/models/CLAUDE.md → "
+            "on PG and breaks CREATE TABLE. See docs/kb/persistence.md → "
             "'Additive migrations on populated tables'.\n"
             f"Offenders: {offenders}"
         )

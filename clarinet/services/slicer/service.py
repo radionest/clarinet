@@ -83,8 +83,8 @@ class SlicerService:
             The script's ``__execResult`` dict (or ``{}`` if the script did not
             assign one). When called from ``_process_submission`` for a
             ``slicer_result_validator``, this dict is merged into ``record.data``
-            — see ``clarinet/services/slicer/CLAUDE.md`` →
-            "``__execResult`` Result-Merging Contract".
+            — see docs/kb/imaging-stack.md →
+            "``__execResult`` — how a validator writes into a record".
         """
         full_script = self._build_script(
             script, context, include_correspondence=include_correspondence

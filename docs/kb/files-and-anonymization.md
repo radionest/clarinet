@@ -124,8 +124,8 @@ the run cleanly.
 
 What a name like `"mask"` means is declared by the project's file registry —
 `FileDefinition` rows linked to record types and records. That side of the
-system is covered in [Domain model](./domain-model.md) and, in detail, in
-`.claude/rules/file-registry.md`.
+system is covered in [Domain model](./domain-model.md); the field table lives in
+[`clarinet/docs/file-registry.md`](../../clarinet/docs/file-registry.md).
 
 ## Path-safety guards
 
@@ -487,8 +487,8 @@ paths stay open:
   — it would need a project-authored `.call()` callback that touches
   `Files` inside an entity flow fired via `engine.fire()`.
 
-`record.data` may carry PHI that log scrubbing does not redact
-(`.claude/rules/logging-pii.md`); the working-directory path under
+`record.data` may carry PHI that log scrubbing does not redact;
+the working-directory path under
 unanonymized fallback (`base`, embedded directly in `str(exc)`) remains a
 real, open exposure everywhere this section's guard does not reach.
 

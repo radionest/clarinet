@@ -9,7 +9,7 @@ Backend callers run with the default ``fallback_to_unanonymized=False``
 to surface the asymmetric-anonymization race instead of silently
 rendering a non-anonymized path. UX callers (viewer URIs, Slicer args,
 admin endpoints) pass ``True`` to fall back to the raw UID — see
-``services/dicom/CLAUDE.md`` for the full anonymization contract.
+docs/kb/imaging-stack.md and docs/kb/files-and-anonymization.md for the full anonymization contract.
 """
 
 from clarinet.exceptions.domain import AnonPathError

@@ -30,7 +30,7 @@ async def sync_file_links(
     the DELETE at the next flush. Never ``session.delete()`` a link that is still
     inside the loaded collection — the stale object's remove events strip the
     freshly added links from it, and the caller reads back ``[]`` (#567;
-    mechanism in ``clarinet/repositories/CLAUDE.md``, "M2M Link Lifecycle").
+    mechanism in ``docs/kb/persistence.md``, eager-loading M2M bullets).
 
     Args:
         record_type: RecordType to sync links for; ``file_links`` must be loaded.

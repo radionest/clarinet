@@ -12,7 +12,7 @@ To provision the VM:
 * a ``*.qmd`` in ``settings.quarto_reports_path`` whose ``clarinet.data`` reports
   resolve to ``*.sql`` files in ``settings.reports_path``
 
-See ``docs/quarto-reports.md`` and ``.claude/rules/e2e-tests.md``.
+See ``docs/quarto-reports.md`` for report conventions.
 """
 
 import os

@@ -647,7 +647,7 @@ async def _process_submission(
 
         # If the validator returned __execResult, merge it into validated_data
         # (validator wins on conflicts) and re-validate. See
-        # clarinet/services/slicer/CLAUDE.md → "__execResult Result-Merging Contract".
+        # docs/kb/imaging-stack.md → "__execResult — how a validator writes into a record".
         validated_data = await rt_service.apply_validator_result_merge(
             record, validated_data, exec_result
         )

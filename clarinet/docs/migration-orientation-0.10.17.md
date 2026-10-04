@@ -129,7 +129,7 @@ a `FOREIGN` one. The `conform_to` path needs the bundled `grid_relation`, so the
 script must be sent with `execute(..., include_correspondence=True)` (record
 open/validate and the submit validator already do; an ad-hoc `/slicer/exec`
 call must opt in) — otherwise `export_segmentation` raises `SlicerHelperError`.
-See [`.claude/rules/slicer-helper-api.md`](../../.claude/rules/slicer-helper-api.md).
+See [`clarinet/docs/slicer-helper-api.md`](slicer-helper-api.md).
 
 ### Also: pre-2026-03-08 clarinet NRRDs may now fail to read
 

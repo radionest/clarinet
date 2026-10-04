@@ -124,8 +124,8 @@ lifespan. Shut the old resource down, then immediately install a fresh one —
 | Logger | `from clarinet.utils.logger import logger` — never import loguru directly |
 
 Routers carry no `prefix=` of their own; every prefix is assigned by
-`include_router` in `clarinet/api/app.py`. The full endpoint table lives in
-`.claude/rules/api-urls.md`.
+`include_router` in `clarinet/api/app.py`. URL constants for tests live in
+`tests/utils/urls.py`.
 
 ## Frontend
 
@@ -148,6 +148,5 @@ sub-path, so a root app co-hosted with sub-path apps needs its own `cookie_name`
 It follows MVU: every page under `src/pages/` is a self-contained module
 exposing `init`/`update`/`view`, and pages never touch global state directly —
 they emit `OutMsg` values that `main.gleam` translates into store mutations.
-Contract and pitfalls: `clarinet/frontend/CLAUDE.md` plus the three
-path-scoped rules `frontend-page-contract.md`, `frontend-routing-forms.md` and
-`frontend-reference.md`.
+Frontend contract and pitfalls: [`clarinet/frontend/README.md`](../../clarinet/frontend/README.md);
+detailed per-page patterns live in the page modules themselves.

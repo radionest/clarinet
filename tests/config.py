@@ -56,8 +56,8 @@ RABBITMQ_MANAGEMENT_URL = f"http://{RABBITMQ_HOST}:{RABBITMQ_MANAGEMENT_PORT}"
 PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST") or "localhost"
 PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_REST_PORT = int(os.environ.get("CLARINET_TEST_PACS_REST_PORT", "8042"))
-# The deploy VM's Orthanc has REST auth on with the stock orthanc:orthanc user
-# (see deploy/CLAUDE.md); an Orthanc with auth off ignores the header. The
+# The deploy VM's Orthanc has REST auth on with the stock orthanc:orthanc user;
+# an Orthanc with auth off ignores the header. The
 # credentials ride in the URL so every `requests` call site authenticates
 # without passing `auth=` — never print PACS_REST_URL, print PACS_HOST instead.
 PACS_REST_USER = os.environ.get("CLARINET_TEST_PACS_REST_USER", "orthanc")

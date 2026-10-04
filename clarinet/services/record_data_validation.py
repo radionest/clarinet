@@ -14,7 +14,7 @@ the file at app startup (lifespan); decorators register functions in a
 module-level registry. ``reconcile_config`` raises ``ConfigurationError`` if a
 RecordType references an unregistered name.
 
-See :doc:`.claude/rules/record-data-validator.md` for the contract and a
+See the module docstrings in this package for the contract and a
 worked example.
 """
 
@@ -44,7 +44,7 @@ class ValidatorContext:
     Validators receive this context instead of a raw ``AsyncSession``,
     ensuring they only access data through repository interfaces.
     All repositories share the request's session — sequential ``await`` only,
-    no ``asyncio.gather`` (see ``clarinet/CLAUDE.md``).
+    no ``asyncio.gather`` (see docs/kb/architecture.md, "AsyncSession is not concurrency-safe").
     """
 
     record_repo: RecordRepository
@@ -158,7 +158,7 @@ async def run_record_validators(
     """Run every validator listed on ``record.record_type.data_validators``.
 
     Validators run sequentially (shared ``AsyncSession`` — concurrent queries
-    on one connection deadlock on PostgreSQL, see ``clarinet/CLAUDE.md``).
+    on one connection deadlock on PostgreSQL, see docs/kb/architecture.md).
     Errors from each validator are aggregated into a single
     :class:`RecordDataValidationError`, so the user sees every issue at once
     instead of fixing them one-by-one.

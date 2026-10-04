@@ -41,7 +41,7 @@
 
 ## 2026-07-21
 
-* **Initialization**: [Backend architecture](./architecture.md) — layered design, exception flow, the shared-`AsyncSession` concurrency rule and the ordered application lifespan, gathered from the root and `clarinet/` CLAUDE.md files so the startup ordering constraints live in one place.
+* **Initialization**: [Backend architecture](./architecture.md) — layered design, exception flow, the shared-`AsyncSession` concurrency rule and the ordered application lifespan, gathered from the architecture sources so the startup ordering constraints live in one place.
 * **Initialization**: [Domain model](./domain-model.md) — the entity hierarchy, RecordType flags, the `preparing`/`blocked`/`pause` lifecycle and the data-vs-`context_info` split, which were previously spread across `models/`, `api/` and two rule files.
 * **Initialization**: [Persistence conventions](./persistence.md) — model and repository conventions plus the additive-migration `server_default` rule; captured because the failure mode is invisible on SQLite and only appears against PostgreSQL.
 * **Initialization**: [Project configuration and the clarinet_plan package](./plan-package.md) — config modes, the single-import-root design and the fail-fast contract; recorded with the reasoning behind the no-`sys.path` rule.

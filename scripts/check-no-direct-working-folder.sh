@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Lint guard: reject direct `.working_folder` access in services / api.
 #
-# After the FileRepository refactor (P29 in .claude/rules/pr-review.md),
+# After the FileRepository refactor (P29 in the private agent rules,
+# synced via ~/hermes-config),
 # path resolution is owned by FileRepository — `.working_folder` no longer
 # exists on RecordRead / SeriesRead, and re-introducing it in code under
 # `clarinet/services/` or `clarinet/api/` is a regression we want to catch
@@ -88,7 +89,7 @@ if [[ "${found_violations}" -eq 1 ]]; then
   echo "  (or add '# noqa: working_folder' on the line if the use is legitimate)" >&2
   echo "" >&2
   echo "${violations}" >&2
-  echo "See P29 in .claude/rules/pr-review.md." >&2
+  echo "See the FileRepository ownership notes in the private agent rules (~/hermes-config)." >&2
   exit 1
 fi
 

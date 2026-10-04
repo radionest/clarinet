@@ -186,7 +186,7 @@ async def get_online_users(_current_user: AdminUserDep, session: SessionDep) -> 
     return OnlineUsersResponse(user_ids=sorted(str(u) for u in ids))
 ```
 - `tests/utils/urls.py`: `ADMIN_ONLINE_USERS_URL = "/api/admin/online-users"`.
-- URL-таблица: `.claude/rules/api-urls.md` → строка в разделе Admin.
+- URL-таблица: `tests/utils/urls.py` → строка в разделе Admin.
 
 ### 3.9 `clarinet/settings.py`
 Рекомендация C — **новой настройки не нужно** (reuse `session_idle_timeout_minutes`).

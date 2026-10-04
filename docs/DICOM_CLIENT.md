@@ -16,9 +16,8 @@
 ### Компоненты
 
 > **Note:** this page predates the move of the DIMSE core to the `dimsechord`
-> package. The current reference is
-> [`clarinet/services/dicom/CLAUDE.md`](../clarinet/services/dicom/CLAUDE.md)
-> and [`docs/kb/imaging-stack.md`](kb/imaging-stack.md); the `DicomClient`
+> package. The current reference is [`docs/kb/imaging-stack.md`](kb/imaging-stack.md)
+> (see also `clarinet/services/dicom/` module docstrings); the `DicomClient`
 > examples below still hold, the internals below do not.
 
 ```

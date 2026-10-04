@@ -5,8 +5,9 @@ okf_version: "0.1"
 # Clarinet knowledge base
 
 Durable, cross-cutting knowledge about the framework. Operational instructions
-(commands, worktree rules, checklists) stay in `CLAUDE.md`; file-specific
-reference stays in the path-scoped `.claude/rules/`.
+(commands, workflows, checklists) stay in `CONTRIBUTING.md` and the `make help`
+output; deep per-file reference lives with the code (docstrings, module
+comments).
 
 # Core
 
