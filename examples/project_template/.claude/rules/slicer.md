@@ -124,7 +124,7 @@ Context variables (injected by build_slicer_context):
 
 ### `SlicerHelper`
 
-The main helper for PACS / segmentation / layout / alignment. Full API + VTK pitfalls — `<clarinet>/clarinet/.claude/rules/slicer-helper-api.md`. Basic toolkit:
+The main helper for PACS / segmentation / layout / alignment. Full API + VTK pitfalls — `<clarinet>/clarinet/docs/slicer-helper-api.md`. Basic toolkit:
 
 ```python
 s = SlicerHelper(working_folder)

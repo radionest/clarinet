@@ -522,7 +522,7 @@ once the painting effort is already spent.
 For the full per-parameter behavior of any row above (return types, exact
 docstring contracts, related methods), see
 [`docs/image-service.md`](./image-service.md) and
-the `SlicerHelper` sections of `docs/image-service.md` —
+[`clarinet/docs/slicer-helper-api.md`](../clarinet/docs/slicer-helper-api.md) —
 this table is a map, not a replacement for either.
 
 ---
@@ -815,7 +815,7 @@ route through `_read_grid_on_disk` for every grid read.
   direction together.
 - **`resample=True` near-threshold verdicts may differ between runtimes.** The
   Slicer-side set-op guards (`subtract_segmentations` and friends,
-  the `SlicerHelper` sections of `docs/image-service.md`)
+  [`clarinet/docs/slicer-helper-api.md`](../clarinet/docs/slicer-helper-api.md))
   re-grid via a native labelmap re-export, while the server-side path uses
   `reindex_to` — both exact for a `REARRANGED` pair, but a resample opt-in
   (`allow_resample=True` / `resample=True`) that lands genuinely near a
@@ -881,11 +881,11 @@ route through `_read_grid_on_disk` for every grid read.
   — operational guide for detecting and remediating misoriented volumes and
   stale NRRD files in a deployed project, including the conversion-orientation
   epoch whose design rationale this document covers.
-- the `SlicerHelper` sections of `docs/image-service.md` —
+- [`clarinet/docs/slicer-helper-api.md`](../clarinet/docs/slicer-helper-api.md) —
   full `SlicerHelper` API surface and VTK/Slicer pitfalls, including the
   `export_segmentation`/`conform_to` mechanics and pitfall 7 (`loadVolume`
   canonicalization).
-- [`docs/kb/persistence.md`](../docs/kb/persistence.md) — the
+- [`clarinet/docs/file-registry.md`](../clarinet/docs/file-registry.md) — the
   `FileDefinition` field table and the config-load rejection rules for
   `grid_conform_to`/`on_grid_mismatch`, terser than this document's own
   [Runtime grid-conformance enforcement](#runtime-grid-conformance-enforcement)

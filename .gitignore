@@ -37,7 +37,7 @@ clarinet/static/
 # Generated data
 examples/*/data/
 
-# Alembic setup is a downstream-project concern (see CLAUDE.md / memory)
+# Alembic setup is a downstream-project concern (see clarinet/docs/project-setup.md)
 examples/*/alembic.ini
 examples/*/alembic/
 

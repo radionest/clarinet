@@ -148,6 +148,5 @@ sub-path, so a root app co-hosted with sub-path apps needs its own `cookie_name`
 It follows MVU: every page under `src/pages/` is a self-contained module
 exposing `init`/`update`/`view`, and pages never touch global state directly —
 they emit `OutMsg` values that `main.gleam` translates into store mutations.
-Frontend contract and pitfalls: `clarinet/frontend/` module docs and
-`docs/grid-workflows.md`; detailed per-page patterns live in the page modules
-themselves.
+Frontend contract and pitfalls: [`clarinet/frontend/README.md`](../../clarinet/frontend/README.md);
+detailed per-page patterns live in the page modules themselves.

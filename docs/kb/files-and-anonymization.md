@@ -124,8 +124,8 @@ the run cleanly.
 
 What a name like `"mask"` means is declared by the project's file registry —
 `FileDefinition` rows linked to record types and records. That side of the
-system is covered in [Domain model](./domain-model.md) and
-[Persistence](./persistence.md).
+system is covered in [Domain model](./domain-model.md); the field table lives in
+[`clarinet/docs/file-registry.md`](../../clarinet/docs/file-registry.md).
 
 ## Path-safety guards
 

@@ -218,5 +218,5 @@ are preserved, so `Files` still resolves the anonymized DICOM on disk.
 
 ## Details
 
-- `<clarinet>/clarinet/.claude/rules/pipeline-ops.md` — queues, retries/DLQ, built-in task reference
+- `<clarinet>/clarinet/docs/pipeline-ops.md` — queues, retries/DLQ, built-in task reference
 - `workflows.md` — `@pipeline_task`, `TaskContext`, RecordFlow DSL

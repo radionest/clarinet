@@ -267,7 +267,7 @@ class RecordTypeService:
         """Merge a Slicer validator's ``__execResult`` into already-validated data.
 
         Contract documented in docs/kb/imaging-stack.md →
-        "``__execResult`` Result-Merging Contract":
+        "``__execResult`` — how a validator writes into a record":
 
         * ``exec_result`` is the return value of ``SlicerService.execute()``.
         * If it is a non-empty dict, its keys are merged over ``validated_data``
