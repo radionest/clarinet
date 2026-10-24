@@ -103,7 +103,7 @@ segment_ct = RecordDef(
 | `label` | Short display name for the UI |
 | `role` (alias `role_name`) | Who performs it: `"doctor"`, `"auto"`, `"expert"`, or a custom role from `extra_roles` |
 | `min_records`, `max_records` | How many records of this type must/may exist per level context (patient/study/series) |
-| `unique_by` | Uniqueness partitions within the level context: set from `{"user", "parent"}` (default both), or `None` — no uniqueness. Legacy `unique_per_user=` is accepted, translated and deprecation-warned |
+| `unique_by` | Uniqueness partitions within the level context: set from `{"user", "parent"}` (default both), or `None` — no uniqueness (TOML: `false`). An empty set fails config load. So does a non-collection OUTPUT pattern that can't tell coexisting records apart: `"user"` needs `{user_id}`, `"parent"` with `parent_required=True` needs `{parent_id}`, `None` with `max_records` unset or `> 1` needs `{id}`; `{id}` always passes, and `allow_path_collision=True` on the `FileRef` exempts that binding (Output-Path Uniqueness in `<clarinet>/clarinet/.claude/rules/file-registry.md`). Legacy `unique_per_user=` is accepted, translated and deprecation-warned |
 | `files` | `list[FileRef(...)]` — link to `FileDef` |
 | `data_schema` | A `"schemas/X.schema.json"` path or an inline `dict`. The path is relative to `config_tasks_path` (i.e. `plan/`). Shared sub-schemas can be extracted into a separate file and pulled into any schema via `$ref` — see the `schemas` section |
 | `slicer_script` | Path to the Slicer script: `"scripts/segment.py"` |
