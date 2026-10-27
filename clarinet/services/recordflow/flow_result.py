@@ -154,7 +154,7 @@ class FlowResult:
     - ``"all"`` — every record must match (empty list ⇒ False).
 
     Example:
-        record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R
+        record('first-check').data.verdict != record('second-review').data.verdict
         record('first-check').any().d.is_good == True
     """
 
@@ -326,10 +326,10 @@ class Field(FlowResult):
 
     Example:
         F = Field()
-        record("first_check")
+        record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True, F.study_type == "CT")
-            .add_record("segment_CT")
+            .add_record("segment-ct-single")
     """
 
     def __init__(self) -> None:

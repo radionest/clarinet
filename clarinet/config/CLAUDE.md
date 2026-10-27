@@ -34,9 +34,9 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 
 seg_mask = FileDef(pattern="seg.nrrd", level="SERIES", description="Segmentation mask")
 
-lesion_seg = RecordDef(
-    name="lesion_seg",
-    description="Lesion segmentation",
+defect_segmentation = RecordDef(
+    name="defect-segmentation",
+    description="Defect segmentation",
     files=[FileRef(seg_mask, "input")],
 )
 ```

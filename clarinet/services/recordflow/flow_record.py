@@ -5,19 +5,19 @@ This module provides the FlowRecord class and the record() factory function
 for creating declarative flow definitions.
 
 Example usage:
-    record('doctor_report')
+    record('first-check')
         .on_status('finished')
-        .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
-        .or_(record('doctor_report').data.BIRADS_L != record('ai_report').data.BIRADS_L)
-        .add_record('confirm_birads')
+        .if_(record('first-check').data.verdict != record('second-review').data.verdict)
+        .or_(record('first-check').data.severity != record('second-review').data.severity)
+        .add_record('comparison-adjudication')
 
     # Invalidate dependent records when data is updated
-    record('master_model')
+    record('master-model')
         .on_data_update()
-        .invalidate_records('child_analysis', mode='hard')
+        .invalidate_records('child-analysis', mode='hard')
 
     # Trigger on entity creation
-    series().on_created().add_record('series_markup')
+    series().on_created().add_record('series-markup')
 """
 
 from __future__ import annotations
@@ -56,10 +56,10 @@ class FlowRecord:
     when a record of a specific type changes status.
 
     Example:
-        record('doctor_report')
+        record('first-check')
             .on_status('finished')
-            .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
-            .add_record('confirm_birads')
+            .if_(record('first-check').data.verdict != record('second-review').data.verdict)
+            .add_record('comparison-adjudication')
     """
 
     def __init__(self, record_name: str, *, entity_trigger: str | None = None):
@@ -207,10 +207,10 @@ class FlowRecord:
 
         Example:
             F = Field()
-            record("first_check")
+            record("first-check")
                 .on_status("finished")
                 .if_record(F.is_good == True, F.study_type == "CT")
-                .add_record("segment_CT")
+                .add_record("segment-ct-single")
         """
         if not conditions:
             raise ValueError("if_record() requires at least one condition")
@@ -674,14 +674,14 @@ def record(record_name: str) -> FlowRecord:
         A new FlowRecord instance for chaining DSL methods.
 
     Example:
-        record('doctor_report')
+        record('first-check')
             .on_status('finished')
-            .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
-            .add_record('confirm_birads')
+            .if_(record('first-check').data.verdict != record('second-review').data.verdict)
+            .add_record('comparison-adjudication')
 
-        record('master_model')
+        record('master-model')
             .on_data_update()
-            .invalidate_records('child_analysis', mode='hard')
+            .invalidate_records('child-analysis', mode='hard')
     """
     new_record = FlowRecord(record_name)
     RECORD_REGISTRY.append(new_record)
@@ -709,7 +709,7 @@ def series() -> FlowRecord:
         A new FlowRecord for chaining DSL methods.
 
     Example:
-        series().on_created().add_record('series_markup')
+        series().on_created().add_record('series-markup')
     """
     return _entity_factory("series")
 
@@ -721,7 +721,7 @@ def study() -> FlowRecord:
         A new FlowRecord for chaining DSL methods.
 
     Example:
-        study().on_created().add_record('study_review')
+        study().on_created().add_record('study-review')
     """
     return _entity_factory("study")
 
