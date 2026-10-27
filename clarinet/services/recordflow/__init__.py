@@ -8,10 +8,10 @@ Example usage:
     from clarinet.services.recordflow import record, RecordFlowEngine
 
     # Define a flow
-    record('doctor_report')
+    record('first-check')
         .on_status('finished')
-        .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
-        .add_record('confirm_birads')
+        .if_(record('first-check').data.verdict != record('second-review').data.verdict)
+        .add_record('comparison-adjudication')
 
     # Create and configure the engine
     engine = RecordFlowEngine(clarinet_client)

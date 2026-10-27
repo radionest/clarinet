@@ -10,9 +10,9 @@ User-facing API::
 
     segmentation = FileDef(pattern="seg.nrrd", description="Segmentation mask")
 
-    lesion_seg = RecordDef(
-        name="lesion_seg",
-        description="Lesion segmentation task",
+    defect_segmentation = RecordDef(
+        name="defect-segmentation",
+        description="Defect segmentation task",
         files=[FileRef(segmentation, "input")],
     )
 """

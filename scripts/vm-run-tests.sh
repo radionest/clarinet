@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the test suite inside the Clarinet VM against PostgreSQL.
 # Uses an SSH tunnel to reach VM's PostgreSQL from the host.
-# Called by `make test-all-stages` (stages 7).
+# Called by `make test-all-stages` (stage 6).
 #
 # Usage: vm-run-tests.sh [--skip-schema]
 set -euo pipefail
@@ -117,12 +117,12 @@ eval "$VM_ENV"
 
 cd "$PROJECT_DIR"
 
-log "=== Stage 7a: unit tests (PostgreSQL) ==="
+log "=== Stage 6a: unit tests (PostgreSQL) ==="
 uv run pytest tests/ \
     -m "not pipeline and not dicom and not slicer and not schema" \
     -n auto --dist loadgroup -q
 
-log "=== Stage 7b: test-fast (PostgreSQL) ==="
+log "=== Stage 6b: test-fast (PostgreSQL) ==="
 # slicer tests excluded: they hit host-local 3D Slicer sequentially in Stage 5b,
 # parallel xdist would race against the single-threaded Slicer web server.
 uv run pytest tests/ \
@@ -130,7 +130,7 @@ uv run pytest tests/ \
     -n auto --dist loadgroup -q
 
 if [ "$SKIP_SCHEMA" != "1" ]; then
-    log "=== Stage 7c: schema tests (PostgreSQL) ==="
+    log "=== Stage 6c: schema tests (PostgreSQL) ==="
     uv run pytest tests/schema/ -m schema --no-header -q
 else
     warn "Schema tests skipped (SKIP_SCHEMA=1)"

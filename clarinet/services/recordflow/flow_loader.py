@@ -91,10 +91,10 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     Example file content:
         from clarinet.services.recordflow import record
 
-        record('doctor_report')
+        record('first-check')
             .on_status('finished')
-            .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
-            .add_record('confirm_birads')
+            .if_(record('first-check').data.verdict != record('second-review').data.verdict)
+            .add_record('comparison-adjudication')
     """
     if not file_path.exists():
         logger.warning(f"Flow file not found: {file_path}")

@@ -37,11 +37,11 @@ paths:
 `.match(F.field).case(value).action()` — Python-like pattern matching with stop-on-first-match.
 
 ```python
-record("first_check").on_finished().if_record(F.is_good == True)
+record("first-check").on_finished().if_record(F.is_good == True)
     .match(F.study_type)
-    .case("CT").create_record("seg_CT_single", "seg_CT_archive")
-    .case("UT").create_record("seg_UT_single")
-    .default().create_record("seg_unknown")
+    .case("CT").create_record("segment-ct-single", "segment-ct-with-archive")
+    .case("UT").create_record("segment-ut-single")
+    .default().create_record("segment-unknown")
 ```
 
 - `.match(field)` absorbs preceding `if_record()` as guard; assigns `match_group` id
@@ -88,10 +88,10 @@ record('report').d.field_name               # Shorthand
 # Self-referential: Field proxy for triggering record's own data
 from clarinet.services.recordflow import Field
 F = Field()
-record("first_check")
+record("first-check")
     .on_status("finished")
     .if_record(F.is_good == True, F.study_type == "CT")
-    .add_record("segment_CT")
+    .add_record("segment-ct-single")
 ```
 
 `if_record(*conditions, on_missing="skip")` — AND semantics for multiple conditions.

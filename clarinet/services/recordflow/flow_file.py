@@ -5,7 +5,7 @@ This module provides the FlowFileRecord class and the file() factory function
 for defining workflows triggered by project-level file changes.
 
 Example usage:
-    file(master_model).on_update().invalidate_all_records("create_master_projection")
+    file(master_model).on_update().invalidate_all_records("create-master-projection")
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class FlowFileRecord:
     when a project-level file changes on disk (detected via checksum comparison).
 
     Example:
-        file(master_model).on_update().invalidate_all_records("create_master_projection")
+        file(master_model).on_update().invalidate_all_records("create-master-projection")
     """
 
     def __init__(self, file_name: str) -> None:
@@ -143,7 +143,7 @@ def file(file_obj: Any) -> FlowFileRecord:
         ValueError: If the file name is empty.
 
     Example:
-        file(master_model).on_update().invalidate_all_records("create_master_projection")
+        file(master_model).on_update().invalidate_all_records("create-master-projection")
     """
     if isinstance(file_obj, str):
         name: str = file_obj

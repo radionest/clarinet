@@ -21,21 +21,21 @@ Workflows are defined in `*_flow.py` files:
 ```python
 from clarinet.services.recordflow import record, flow, series, file  # flow is an alias for record
 
-record('doctor_report')
+record('first-check')
     .on_status('finished')
-    .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
-    .add_record('confirm_birads', context_info='BIRADS disagreement')
+    .if_(record('first-check').data.verdict != record('second-review').data.verdict)
+    .add_record('comparison-adjudication', context_info='Verdict disagreement')
 
 # Invalidate dependent records when parent data is updated
-record('master_model')
+record('master-model')
     .on_data_update()
-    .invalidate_records('child_analysis', 'derived_report', mode='hard')
+    .invalidate_records('child-analysis', 'derived-report', mode='hard')
 
 # Auto-create record when a new series is imported
-series().on_created().add_record('series_markup')
+series().on_created().add_record('series-markup')
 
 # Invalidate records when a project-level file changes
-file(master_model).on_update().invalidate_all_records('create_master_projection')
+file(master_model).on_update().invalidate_all_records('create-master-projection')
 ```
 
 ## Action Models (`flow_action.py`)
