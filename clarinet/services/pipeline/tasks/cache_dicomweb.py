@@ -15,8 +15,8 @@ Triggered from RecordFlow via ``do_task``::
     from clarinet.flow import record
     from clarinet.services.pipeline.tasks.cache_dicomweb import prefetch_dicom_web
 
-    record("first_check").on_finished().do_task(prefetch_dicom_web)
-    record("manual_review").on_finished().do_task(prefetch_dicom_web, skip_if_anon=False)
+    record("first-check").on_finished().do_task(prefetch_dicom_web)
+    record("manual-review").on_finished().do_task(prefetch_dicom_web, skip_if_anon=False)
 """
 
 from __future__ import annotations

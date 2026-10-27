@@ -58,7 +58,7 @@ ClientStoragePathDep    # Annotated[str | None, Depends(get_client_storage_path)
 
 ```python
 AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]   # record read access
-MutableRecordDep    = Annotated[Record, Depends(authorize_mutable_record_access)]  # + admin/owner/unassigned
+MutableRecordDep    = Annotated[Record, Depends(authorize_mutable_record_access)]  # + admin/owner/unassigned/shared_editing
 AuditActorDep       = Annotated[UUID | None, Depends(get_audit_actor)]  # current user id, or None for X-Internal-Token (system)
 ```
 

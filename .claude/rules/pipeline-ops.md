@@ -37,7 +37,7 @@ Integration tests: `tests/integration/test_pipeline_integration.py` (real Rabbit
 - Run: `uv run pytest -m pipeline -v` or `make test-integration`
 - Fixtures in `tests/integration/conftest.py`: `pipeline_broker_factory`, `_check_rabbitmq`, `_purge_test_queues`
 - Test queues created with `x-expires: 3600000` (1h) — auto-deleted by RabbitMQ if abandoned
-- Pre-session cleanup fixture deletes orphaned test resources via Management HTTP API
+- Pre-session orphan cleanup runs in the e2e suite: `_cleanup_orphaned_e2e_resources` (`tests/e2e/conftest.py`) deletes leftover test resources via the Management HTTP API
 - CLI: `uv run clarinet rabbitmq clean` / `--dry-run` / `uv run clarinet rabbitmq status`
 - Makefile: `make clean-rabbitmq`
 

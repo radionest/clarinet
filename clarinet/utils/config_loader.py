@@ -186,7 +186,7 @@ async def _resolve_data_schema(
     Args:
         props: Config properties dict (mutated in place).
         config_dir: Directory containing the config file.
-        stem: Config file stem (e.g. ``"lesion_seg"``).
+        stem: Config file stem (e.g. ``"defect-segmentation"``).
 
     Returns:
         The mutated *props* dict, or ``None`` if no schema was found.
