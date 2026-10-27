@@ -35,7 +35,7 @@ Integration tests: `tests/integration/test_pipeline_integration.py` (real Rabbit
 - `pytest.mark.pipeline` marker — auto-skips when RabbitMQ unreachable (fails instead under `CLARINET_TEST_REQUIRE_RABBITMQ=1`); a reachable broker that rejects the login fails with `ACCESS_REFUSED`, not a skip
 - `make test-all-stages` points them at its VM broker (`scripts/vm-test-env.sh`), overriding any `CLARINET_TEST_RABBITMQ_*`
 - Run: `uv run pytest -m pipeline -v` or `make test-integration`
-- Fixtures in `tests/integration/conftest.py`: `pipeline_broker_factory`, `_check_rabbitmq`, `_purge_test_queues`, `_cleanup_orphaned_test_resources`
+- Fixtures in `tests/integration/conftest.py`: `pipeline_broker_factory`, `_check_rabbitmq`, `_purge_test_queues`
 - Test queues created with `x-expires: 3600000` (1h) — auto-deleted by RabbitMQ if abandoned
 - Pre-session cleanup fixture deletes orphaned test resources via Management HTTP API
 - CLI: `uv run clarinet rabbitmq clean` / `--dry-run` / `uv run clarinet rabbitmq status`
