@@ -555,9 +555,10 @@ async def update_record_context_info(
     """Replace ``context_info`` (markdown source) on a record.
 
     Permitted to admins (which includes pipeline service tokens), the
-    record's assigned user, and any role-authorised user when the record is
-    unassigned. Pass ``null`` to clear the field. The rendered HTML is
-    available on the response as ``context_info_html``.
+    record's assigned user, any role-authorised user when the record is
+    unassigned, and — when the record type has ``shared_editing=True`` — any
+    holder of its role. Pass ``null`` to clear the field. The rendered HTML
+    is available on the response as ``context_info_html``.
     """
     record = await service.update_context_info(record_id, body.context_info, actor_id=actor)
     return await mask_record(record, user, service.repo)
