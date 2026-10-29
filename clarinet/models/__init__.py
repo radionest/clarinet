@@ -86,6 +86,9 @@ from .record_type import (
 # Report models (custom SQL reports)
 from .report import ReportFormat, ReportTemplate
 
+# Global search models
+from .search import GlobalSearchQuery, GlobalSearchResults
+
 # Study models
 from .study import (
     Series,
@@ -112,6 +115,8 @@ __all__ = [
     "FileDefinition",
     "FileDefinitionRead",
     "FileRole",
+    "GlobalSearchQuery",
+    "GlobalSearchResults",
     "Patient",
     "PatientBase",
     "PatientInfo",
