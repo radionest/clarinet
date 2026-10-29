@@ -1,8 +1,13 @@
 """Global search: repository lookups, service route-by-shape, POST /api/search."""
 
+import hashlib
+
+from clarinet.models.search import GlobalSearchResults
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
+from clarinet.services.study_service import StudyService
+from clarinet.settings import settings
 from tests.utils.factories import make_patient, make_series, make_study
 
 
@@ -84,3 +89,113 @@ async def test_series_repo_existing_lookups(test_session):
     repo = SeriesRepository(test_session)
     assert (await repo.find_by_anon_uid("2.25.4248")).series_uid == ser.series_uid
     assert (await repo.find_by_series_uid(ser.series_uid)).study_uid == s.study_uid
+
+
+# --- Service: route-by-shape resolution ---
+
+
+def _service(test_session) -> StudyService:
+    return StudyService(
+        study_repo=StudyRepository(test_session),
+        patient_repo=PatientRepository(test_session),
+        series_repo=SeriesRepository(test_session),
+    )
+
+
+async def _seed_tree(test_session):
+    """Patient 4242 with two studies (one 2.25-anonymized) and one series."""
+    p = make_patient("SRCH_TREE_PAT", "Tree Patient", auto_id=4242)
+    s_plain = make_study(p.id, uid="1.2.840.113786.100")
+    s_anon = make_study(p.id, uid="1.2.840.113786.101")
+    s_anon.anon_uid = "2.25.100101"
+    ser = make_series(s_plain.study_uid, uid="1.2.840.113786.100.1")
+    ser.anon_uid = "2.25.100102"
+    await _seed(test_session, p, s_plain, s_anon, ser)
+    return p, s_plain, s_anon, ser
+
+
+async def test_search_auto_id_bare_digits(test_session):
+    p, *_rest = await _seed_tree(test_session)
+    result = await _service(test_session).global_search("4242")
+    assert isinstance(result, GlobalSearchResults)
+    assert [x.id for x in result.patients] == [p.id]
+    assert result.studies == []
+
+
+async def test_search_auto_id_prefixed(test_session):
+    p, *_rest = await _seed_tree(test_session)
+    result = await _service(test_session).global_search(f"{settings.anon_id_prefix}_4242")
+    assert [x.id for x in result.patients] == [p.id]
+
+
+async def test_search_study_anon_uid(test_session):
+    _p, _s, s_anon, _ser = await _seed_tree(test_session)
+    result = await _service(test_session).global_search("2.25.100101")
+    assert [s.study_uid for s in result.studies] == [s_anon.study_uid]
+
+
+async def test_search_series_anon_uid_returns_parent_study(test_session):
+    _p, s_plain, _s, ser = await _seed_tree(test_session)
+    result = await _service(test_session).global_search("2.25.100102")
+    assert [s.study_uid for s in result.studies] == [s_plain.study_uid]
+    assert ser.series_uid != s_plain.study_uid  # guard: series mapped to study
+
+
+async def test_search_raw_study_uid(test_session):
+    _p, s_plain, *_rest = await _seed_tree(test_session)
+    result = await _service(test_session).global_search("1.2.840.113786.100")
+    assert [s.study_uid for s in result.studies] == [s_plain.study_uid]
+
+
+async def test_search_raw_series_uid_returns_parent_study(test_session):
+    _p, s_plain, _s, ser = await _seed_tree(test_session)
+    result = await _service(test_session).global_search(ser.series_uid)
+    assert [s.study_uid for s in result.studies] == [s_plain.study_uid]
+
+
+async def test_search_patient_lo_id(test_session):
+    p, *_rest = await _seed_tree(test_session)
+    result = await _service(test_session).global_search("SRCH_TREE_PAT")
+    assert [x.id for x in result.patients] == [p.id]
+
+
+async def test_search_per_study_hash(monkeypatch, test_session):
+    monkeypatch.setattr(settings, "anon_per_study_patient_id", True)
+    monkeypatch.setattr(settings, "anon_uid_salt", "us-test-salt")
+    monkeypatch.setattr(settings, "anon_per_study_patient_id_hex_length", 8)
+    _p, s_plain, *_rest = await _seed_tree(test_session)
+    expected = hashlib.sha256(f"us-test-salt:{s_plain.study_uid}".encode()).hexdigest()[:8]
+    result = await _service(test_session).global_search(f"{settings.anon_id_prefix}_{expected}")
+    assert [s.study_uid for s in result.studies] == [s_plain.study_uid]
+
+
+async def test_search_per_study_hash_gate_off_falls_through(monkeypatch, test_session):
+    # Gate off (the default): the hash-shaped query must NOT scan and must
+    # fall to the text fallback, which cannot match it.
+    monkeypatch.setattr(settings, "anon_per_study_patient_id", False)
+    await _seed_tree(test_session)
+    result = await _service(test_session).global_search(f"{settings.anon_id_prefix}_deadbeef")
+    assert result.patients == []
+    assert result.studies == []
+
+
+async def test_search_text_fallback_matches_name(test_session):
+    await _seed(test_session, make_patient("SRCH_NAME_PAT", "Zoe Zapata", auto_id=4299))
+    result = await _service(test_session).global_search("zapata")
+    assert [x.id for x in result.patients] == ["SRCH_NAME_PAT"]
+
+
+async def test_search_no_match_returns_empty(test_session):
+    await _seed_tree(test_session)
+    result = await _service(test_session).global_search("zzz-no-such-thing")
+    assert result.patients == [] and result.studies == []
+
+
+async def test_search_fallback_respects_limit(test_session):
+    for i in range(3):
+        await _seed(
+            test_session,
+            make_patient(f"SRCH_LIM_{i}", f"Limit Match {i}", auto_id=4300 + i),
+        )
+    result = await _service(test_session).global_search("limit match", limit=2)
+    assert len(result.patients) == 2

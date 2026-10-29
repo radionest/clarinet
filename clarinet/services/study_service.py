@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import re
 from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import (
@@ -13,7 +14,8 @@ from clarinet.exceptions.domain import (
     StudyAlreadyExistsError,
 )
 from clarinet.models import Patient, Series, Study
-from clarinet.models.patient import validate_patient_id
+from clarinet.models.patient import PATIENT_ID_PATTERN, validate_patient_id
+from clarinet.models.search import GlobalSearchResults
 from clarinet.models.study import SeriesFind
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
@@ -23,6 +25,10 @@ from clarinet.settings import settings
 
 if TYPE_CHECKING:
     from clarinet.services.recordflow.engine import RecordFlowEngine
+
+_AUTO_ID_RE = re.compile(r"\d+")
+_DOTTED_UID_RE = re.compile(r"\d+(?:\.\d+)+")
+_ANON_UID_RE = re.compile(r"2\.25\.\d[\d.]*")
 
 
 class StudyService:
@@ -77,6 +83,83 @@ class StudyService:
         """
         patients = await self.patient_repo.get_all_with_studies(skip=skip, limit=limit)
         return list(patients)
+
+    # Global search
+
+    async def global_search(self, query: str, limit: int = 25) -> GlobalSearchResults:
+        """Resolve any project identifier to patients/studies (route-by-shape).
+
+        Exact identifier lookups run first, in this order: auto_id (bare
+        digits or ``f"{anon_id_prefix}_{auto_id}"``), anonymized ``2.25.*``
+        UIDs (study, then series — a series hit resolves to its parent
+        study), raw dotted DICOM UIDs (study, then series), per-study
+        anonymization hashes (only when ``settings.anon_per_study_patient_id``
+        is on; see :meth:`_find_by_per_study_hash`), and DICOM LO PatientIDs.
+        When no exact match hit anything, falls back to an ilike search over
+        patient id/name/anon_name.
+        """
+        q = query.strip()
+        patients: list[Patient] = []
+        study_uids: list[str] = []
+        prefix = settings.anon_id_prefix
+
+        auto_id: int | None = None
+        if _AUTO_ID_RE.fullmatch(q):
+            auto_id = int(q)
+        elif (m := re.fullmatch(rf"{re.escape(prefix)}_(\d+)", q)) is not None:
+            auto_id = int(m.group(1))
+
+        if auto_id is not None:
+            found = await self.patient_repo.find_by_auto_id(auto_id)
+            if found is not None:
+                patients.append(found)
+        elif _ANON_UID_RE.fullmatch(q):
+            study = await self.study_repo.find_by_anon_uid(q)
+            if study is None:
+                series = await self.series_repo.find_by_anon_uid(q)
+                if series is not None:
+                    study_uids.append(series.study_uid)
+            else:
+                study_uids.append(study.study_uid)
+        elif _DOTTED_UID_RE.fullmatch(q):
+            study = await self.study_repo.find_by_uid(q)
+            if study is None:
+                series = await self.series_repo.find_by_series_uid(q)
+                if series is not None:
+                    study_uids.append(series.study_uid)
+            else:
+                study_uids.append(study.study_uid)
+        elif settings.anon_per_study_patient_id and (
+            re.fullmatch(rf"{re.escape(prefix)}_[0-9a-fA-F]+", q) is not None
+        ):
+            study_uids.extend(await self._find_by_per_study_hash(q.lower()))
+        elif PATIENT_ID_PATTERN.fullmatch(q):
+            found = await self.patient_repo.find_by_id(q)
+            if found is not None:
+                patients.append(found)
+
+        if not patients and not study_uids:
+            patients = list(await self.patient_repo.search(query=q, skip=0, limit=limit))
+
+        loaded_patients = await self.patient_repo.find_with_studies_by_ids([p.id for p in patients])
+        loaded_studies = await self.study_repo.find_with_relations_by_uids(study_uids)
+        return GlobalSearchResults(patients=loaded_patients, studies=loaded_studies)
+
+    async def _find_by_per_study_hash(self, hashed_id: str) -> list[str]:
+        """Study UIDs whose per-study anonymization PatientID equals ``hashed_id``.
+
+        The hash is not stored anywhere, so every study UID is re-derived via
+        ``Files.per_study_patient_id`` (the shared salt/length/prefix source)
+        and compared — a table scan bounded by the study count.
+        """
+        from clarinet.files import Files
+
+        pairs = await self.study_repo.list_uids_with_patient_ids()
+        return [
+            study_uid
+            for study_uid, _patient_id in pairs
+            if Files.per_study_patient_id(study_uid).lower() == hashed_id
+        ]
 
     async def get_patient(self, patient_id: str) -> Patient:
         """Get patient by ID.
