@@ -10,7 +10,7 @@ from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from clarinet.exceptions.domain import DatabaseIntegrityError, PatientNotFoundError
 from clarinet.models import Patient, Study
@@ -213,8 +213,8 @@ class PatientRepository(BaseRepository[Patient]):
             return []
         statement = (
             select(Patient)
-            .where(Patient.id.in_(ids))
-            .options(  # type: ignore
+            .where(col(Patient.id).in_(ids))
+            .options(
                 selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
             )
         )

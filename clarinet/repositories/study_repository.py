@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from clarinet.exceptions.domain import StudyNotFoundError
 from clarinet.models import Patient, Record, Series, Study
@@ -109,8 +109,8 @@ class StudyRepository(BaseRepository[Study]):
             return []
         statement = (
             select(Study)
-            .where(Study.study_uid.in_(study_uids))
-            .options(  # type: ignore
+            .where(col(Study.study_uid).in_(study_uids))
+            .options(
                 selectinload(Study.patient),  # type: ignore
                 selectinload(Study.series),  # type: ignore
             )
