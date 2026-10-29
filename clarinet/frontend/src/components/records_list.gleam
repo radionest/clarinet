@@ -272,7 +272,15 @@ fn header_row(
         False -> []
       },
       case config.show_study_series {
-        True -> [table_sort.th_static(t(i18n.ThStudySeries))]
+        True -> [
+          table_sort.th_sortable(
+            t(i18n.ThStudySeries),
+            "study_date",
+            sort_col,
+            sort_dir,
+            config.on_column_click,
+          )
+        ]
         False -> []
       },
       case config.show_modality {

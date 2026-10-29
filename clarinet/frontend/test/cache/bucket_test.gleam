@@ -47,6 +47,13 @@ pub fn sort_to_backend_string_modality_test() {
   |> should.equal("modality_desc")
 }
 
+pub fn sort_to_backend_string_study_date_test() {
+  bucket.sort_to_backend_string(bucket.StudyDateAsc)
+  |> should.equal("study_date_asc")
+  bucket.sort_to_backend_string(bucket.StudyDateDesc)
+  |> should.equal("study_date_desc")
+}
+
 // --- default_query / query helpers ---
 
 pub fn default_query_all_none_test() {

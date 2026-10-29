@@ -107,9 +107,12 @@ pub fn patient_page_records_cell_leads_with_study_date_test() {
 
 /// Regression guard: records without a study (patient-level) keep rendering "-".
 pub fn patient_page_records_cell_without_study_stays_dash_test() {
-  render_patient_with([make_record(7)])
-  |> string.contains(">Study / Series</th>")
-  |> should.be_true
+  let html = render_patient_with([make_record(7)])
+  // The Study / Series header is sortable: the label is wrapped in a button.
+  html |> string.contains(">Study / Series</button></th>") |> should.be_true
+  // The study/series cell (the only class="cell-desc" cell in the table)
+  // of a study-less record renders just the dash, not a joined summary.
+  html |> string.contains("<td class=\"cell-desc\">-</td>") |> should.be_true
 }
 
 // --- Study page ---

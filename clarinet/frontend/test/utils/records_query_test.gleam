@@ -1,6 +1,7 @@
 // Unit tests for utils/records_query.
 import cache/bucket.{
-  IdAsc, ModalityDesc, PatientAsc, RecordTypeDesc, StatusAsc, UserDesc,
+  IdAsc, ModalityDesc, PatientAsc, RecordTypeDesc, StatusAsc, StudyDateAsc,
+  StudyDateDesc, UserDesc,
 }
 import gleam/dict
 import gleam/option.{None, Some}
@@ -109,6 +110,19 @@ pub fn parse_sort_modality_desc_test() {
     dict.from_list([#("sort", "modality"), #("sort_dir", "desc")])
   records_query.parse_sort_from_filters(filters)
   |> should.equal(ModalityDesc)
+}
+
+pub fn parse_sort_study_date_asc_test() {
+  let filters = dict.from_list([#("sort", "study_date")])
+  records_query.parse_sort_from_filters(filters)
+  |> should.equal(StudyDateAsc)
+}
+
+pub fn parse_sort_study_date_desc_test() {
+  let filters =
+    dict.from_list([#("sort", "study_date"), #("sort_dir", "desc")])
+  records_query.parse_sort_from_filters(filters)
+  |> should.equal(StudyDateDesc)
 }
 
 pub fn parse_sort_unknown_column_falls_back_test() {
