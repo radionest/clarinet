@@ -10,7 +10,7 @@ from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from clarinet.exceptions.domain import DatabaseIntegrityError, PatientNotFoundError
 from clarinet.models import Patient, Study
@@ -197,6 +197,30 @@ class PatientRepository(BaseRepository[Patient]):
         statement = select(Patient).where(Patient.id == patient_id)
         result = await self.session.execute(statement)
         return result.scalars().first()
+
+    async def find_by_auto_id(self, auto_id: int) -> Patient | None:
+        """Find a patient by numeric auto_id (exact match)."""
+        statement = select(Patient).where(Patient.auto_id == auto_id)
+        result = await self.session.execute(statement)
+        return result.scalars().first()
+
+    async def find_with_studies_by_ids(self, ids: list[str]) -> list[Patient]:
+        """Find patients by exact IDs with studies+series eagerly loaded.
+
+        Returns patients in the order of ``ids``; missing IDs are skipped.
+        """
+        if not ids:
+            return []
+        statement = (
+            select(Patient)
+            .where(col(Patient.id).in_(ids))
+            .options(
+                selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
+            )
+        )
+        result = await self.session.execute(statement)
+        by_id = {p.id: p for p in result.scalars().all()}
+        return [by_id[i] for i in ids if i in by_id]
 
     async def get_studies(self, patient_id: str) -> list[Study]:
         """Get all studies for a patient.

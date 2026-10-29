@@ -3,6 +3,7 @@ import config
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import utils/permissions
@@ -20,6 +21,7 @@ pub type Route {
   RecordDetail(id: String)
   RecordNew
   Patients(filters: Dict(String, String))
+  Search(q: String)
   PatientDetail(id: String)
   PatientNew
   SeriesDetail(id: String)
@@ -49,6 +51,7 @@ pub fn route_to_path(route: Route) -> String {
     RecordDetail(id) -> "/records/" <> id
     RecordNew -> "/records/new"
     Patients(_) -> "/patients"
+    Search(_) -> "/search"
     PatientNew -> "/patients/new"
     PatientDetail(id) -> "/patients/" <> id
     SeriesDetail(id) -> "/series/" <> id
@@ -90,6 +93,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["records", "new"] -> RecordNew
     ["records", id] -> RecordDetail(id)
     ["patients"] -> Patients(parse_filters_from_query(uri.query))
+    ["search"] -> Search(parse_search_query(uri.query))
     ["patients", "new"] -> PatientNew
     ["patients", id] -> PatientDetail(id)
     ["series", id] -> SeriesDetail(id)
@@ -132,7 +136,8 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | AdminRecordTypeDetail(_)
     | AdminRecordTypeEdit(_)
     | AdminWorkflow
-    | AdminActivity -> True
+    | AdminActivity
+    | Search(_) -> True
     _ -> False
   }
 }
@@ -161,6 +166,7 @@ pub fn get_route_title(route: Route) -> String {
     Patients(_) -> "Patients"
     PatientDetail(_) -> "Patient Details"
     PatientNew -> "New Patient"
+    Search(_) -> "Search"
     SeriesDetail(_) -> "Series Details"
     AdminDashboard(_) -> "Admin Dashboard"
     AdminRecordTypes(_) -> "Record Types"
@@ -183,6 +189,7 @@ fn section(route: Route) -> String {
     Studies(_) | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
     Records(_) | RecordDetail(_) | RecordNew -> "records"
     Patients(_) | PatientDetail(_) | PatientNew -> "patients"
+    Search(_) -> "search"
     AdminDashboard(_) -> "admin"
     AdminRecordTypes(_) | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) ->
       "record-types"
@@ -216,6 +223,23 @@ fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
   }
 }
 
+// The search route carries a single free-form `q` param — deliberately NOT
+// routed through parse_filters_from_query (record-filter whitelist).
+fn parse_search_query(query: Option(String)) -> String {
+  case query {
+    None -> ""
+    Some(qs) ->
+      case uri.parse_query(qs) {
+        Ok(pairs) ->
+          pairs
+          |> list.find(fn(pair) { pair.0 == "q" })
+          |> result.map(fn(pair) { pair.1 })
+          |> result.unwrap("")
+        Error(_) -> ""
+      }
+  }
+}
+
 pub fn filters_to_query(filters: Dict(String, String)) -> Option(String) {
   let serializable = record_filters.keep_serializable(filters)
   case dict.is_empty(serializable) {
@@ -231,6 +255,7 @@ pub fn route_to_query(route: Route) -> Option(String) {
     | Patients(filters)
     | AdminRecordTypes(filters)
     | AdminDashboard(filters) -> filters_to_query(filters)
+    Search(q) -> Some(uri.query_to_string([#("q", q)]))
     _ -> None
   }
 }

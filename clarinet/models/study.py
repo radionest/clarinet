@@ -42,7 +42,7 @@ class Study(StudyBase, table=True):
 
     study_uid: DicomUID = Field(primary_key=True)
     patient_id: PatientID = Field(foreign_key="patient.id", ondelete="CASCADE")
-    anon_uid: str | None = None
+    anon_uid: str | None = Field(default=None, index=True)
 
     patient: Patient = Relationship(back_populates="studies")
     series: list["Series"] = Relationship(back_populates="study", cascade_delete=True)
@@ -79,7 +79,7 @@ class Series(SeriesBase, table=True):
     """Model representing a series within an imaging study."""
 
     series_uid: DicomUID = Field(primary_key=True)
-    anon_uid: str | None = None
+    anon_uid: str | None = Field(default=None, index=True)
     series_description: str | None = Field(default=None)
     series_number: int
 

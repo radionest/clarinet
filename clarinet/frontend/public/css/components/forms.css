@@ -76,6 +76,13 @@
     }
 }
 
+/* Search page — query input + submit button in one row */
+.search-form {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-lg);
+}
+
 .form-title {
     font-family: var(--font-display);
     font-size: 1.4rem;

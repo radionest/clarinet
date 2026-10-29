@@ -16,6 +16,7 @@ pub type Key {
   NavQuartoReports
   NavWorkflow
   NavAdmin
+  NavSearchPlaceholder
 
   // --- Common buttons ---
   BtnLogout
@@ -33,6 +34,7 @@ pub type Key {
   BtnClearFilters
   BtnLogin
   BtnNewPatient
+  BtnSearch
   BtnCreateRecord
 
   // --- Common table headers ---
@@ -209,6 +211,11 @@ pub type Key {
   StudyMsgDeleteFailed
   StudyMsgLoadFailed
   StudyLoading(uid: String)
+
+  // --- Search ---
+  SearchTitle
+  SearchNoResults
+  SearchFailed
 
   // --- Series ---
   SeriesPrefix(uid: String)
@@ -430,6 +437,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, NavWorkflow -> "Граф процессов"
     En, NavAdmin -> "Admin"
     Ru, NavAdmin -> "Админ"
+    En, NavSearchPlaceholder -> "Search: ID, anon ID, study/series UID…"
+    Ru, NavSearchPlaceholder -> "Поиск: ID, анон ID, UID исследования/серии…"
 
     // --- Common buttons ---
     En, BtnLogout -> "Logout"
@@ -462,6 +471,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, BtnLogin -> "Войти"
     En, BtnNewPatient -> "New Patient"
     Ru, BtnNewPatient -> "Новый пациент"
+    En, BtnSearch -> "Search"
+    Ru, BtnSearch -> "Найти"
     En, BtnCreateRecord -> "Create Record"
     Ru, BtnCreateRecord -> "Создать запись"
 
@@ -798,6 +809,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, StudyMsgLoadFailed -> "Не удалось загрузить исследование"
     En, StudyLoading(uid) -> "Loading study " <> uid
     Ru, StudyLoading(uid) -> "Загрузка исследования " <> uid
+
+    // --- Search ---
+    En, SearchTitle -> "Global Search"
+    Ru, SearchTitle -> "Универсальный поиск"
+    En, SearchNoResults -> "Nothing found."
+    Ru, SearchNoResults -> "Ничего не найдено."
+    En, SearchFailed -> "Search failed"
+    Ru, SearchFailed -> "Поиск не удался"
 
     // --- Series ---
     En, SeriesPrefix(uid) -> "Series: " <> uid

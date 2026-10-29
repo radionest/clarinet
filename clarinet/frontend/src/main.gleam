@@ -39,6 +39,7 @@ import pages/records/execute as record_execute
 import pages/records/list as records_list
 import pages/records/new as record_new
 import pages/register
+import pages/search as search_page
 import pages/series/detail as series_detail
 import pages/settings as settings_page
 import pages/studies/detail as study_detail
@@ -404,6 +405,21 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.NoOp -> #(model, effect.none())
 
+    // Navbar omnibox
+    store.GlobalSearchInput(v) ->
+      #(store.Model(..model, global_search: v), effect.none())
+
+    store.GlobalSearchSubmit -> {
+      let q = string.trim(model.global_search)
+      case q {
+        "" -> #(model, effect.none())
+        _ -> #(
+          store.Model(..model, global_search: ""),
+          dispatch_msg(store.Navigate(router.Search(q))),
+        )
+      }
+    }
+
     // Cache delegation (all data loading, caches, auto-assign)
     store.CacheMsg(cmsg) -> delegate_cache(model, cmsg)
 
@@ -746,6 +762,21 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         fn(m, s) { series_detail.update(m, page_msg, s) },
         store.SeriesDetailPage,
         store.SeriesDetailMsg,
+      )
+
+    // Global search page delegation
+    store.SearchMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) {
+          case p {
+            store.SearchPage(m) -> Ok(m)
+            _ -> Error(Nil)
+          }
+        },
+        fn(m, s) { search_page.update(m, page_msg, s) },
+        store.SearchPage,
+        store.SearchMsg,
       )
 
     // Record type page delegation
@@ -1203,6 +1234,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         store.SeriesDetailPage,
         store.SeriesDetailMsg,
       )
+    router.Search(q) ->
+      init_page(model, search_page.init(q, _), store.SearchPage, store.SearchMsg)
     router.AdminRecordTypes(filters) ->
       init_page(
         model,
@@ -1494,6 +1527,8 @@ fn view_content(model: Model) -> Element(Msg) {
       element.map(study_detail.view(pm, shared), store.StudyDetailMsg)
     store.SeriesDetailPage(pm) ->
       element.map(series_detail.view(pm, shared), store.SeriesDetailMsg)
+    store.SearchPage(pm) ->
+      element.map(search_page.view(pm, shared), store.SearchMsg)
     store.RecordsListPage(pm) ->
       element.map(records_list.view(pm, shared), store.RecordsListMsg)
     store.RecordExecutePage(pm) ->

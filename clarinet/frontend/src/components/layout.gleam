@@ -33,6 +33,25 @@ fn navbar(model: Model) -> Element(Msg) {
       case is_admin(model) {
         True ->
           element.fragment([
+            html.form(
+              [
+                attribute.class("navbar-search"),
+                event.on_submit(fn(_) { store.GlobalSearchSubmit }),
+              ],
+              [
+                html.input([
+                  attribute.class("navbar-search-input"),
+                  attribute.type_("search"),
+                  attribute.placeholder(t(i18n.NavSearchPlaceholder)),
+                  attribute.value(model.global_search),
+                  event.on_input(store.GlobalSearchInput),
+                ]),
+                html.button(
+                  [attribute.class("navbar-search-btn"), attribute.type_("submit")],
+                  [html.text(t(i18n.BtnSearch))],
+                ),
+              ],
+            ),
             nav_link(
               route: router.Records(dict.new()),
               text: t(i18n.NavRecords),
