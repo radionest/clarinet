@@ -88,6 +88,43 @@ class StudyRepository(BaseRepository[Study]):
         result = await self.session.execute(statement)
         return result.scalars().all()
 
+    async def find_by_uid(self, study_uid: str) -> Study | None:
+        """Find a study by exact study_uid (None when missing)."""
+        statement = select(Study).where(Study.study_uid == study_uid)
+        result = await self.session.execute(statement)
+        return result.scalars().first()
+
+    async def find_by_anon_uid(self, anon_uid: str) -> Study | None:
+        """Find a study by exact anonymized UID (None when missing)."""
+        statement = select(Study).where(Study.anon_uid == anon_uid)
+        result = await self.session.execute(statement)
+        return result.scalars().first()
+
+    async def find_with_relations_by_uids(self, study_uids: list[str]) -> list[Study]:
+        """Find studies by exact UIDs with patient+series eagerly loaded.
+
+        Returns studies in the order of ``study_uids``; missing UIDs are skipped.
+        """
+        if not study_uids:
+            return []
+        statement = (
+            select(Study)
+            .where(Study.study_uid.in_(study_uids))
+            .options(  # type: ignore
+                selectinload(Study.patient),  # type: ignore
+                selectinload(Study.series),  # type: ignore
+            )
+        )
+        result = await self.session.execute(statement)
+        by_uid = {s.study_uid: s for s in result.scalars().all()}
+        return [by_uid[u] for u in study_uids if u in by_uid]
+
+    async def list_uids_with_patient_ids(self) -> list[tuple[str, str]]:
+        """All (study_uid, patient_id) pairs — scan source for per-study hash resolution."""
+        statement = select(Study.study_uid, Study.patient_id)
+        result = await self.session.execute(statement)
+        return [(str(row[0]), str(row[1])) for row in result.all()]
+
     async def get_patient(self, study_id: str) -> Patient:
         """Get patient for a study.
 

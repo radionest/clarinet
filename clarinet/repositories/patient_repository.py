@@ -198,6 +198,30 @@ class PatientRepository(BaseRepository[Patient]):
         result = await self.session.execute(statement)
         return result.scalars().first()
 
+    async def find_by_auto_id(self, auto_id: int) -> Patient | None:
+        """Find a patient by numeric auto_id (exact match)."""
+        statement = select(Patient).where(Patient.auto_id == auto_id)
+        result = await self.session.execute(statement)
+        return result.scalars().first()
+
+    async def find_with_studies_by_ids(self, ids: list[str]) -> list[Patient]:
+        """Find patients by exact IDs with studies+series eagerly loaded.
+
+        Returns patients in the order of ``ids``; missing IDs are skipped.
+        """
+        if not ids:
+            return []
+        statement = (
+            select(Patient)
+            .where(Patient.id.in_(ids))
+            .options(  # type: ignore
+                selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
+            )
+        )
+        result = await self.session.execute(statement)
+        by_id = {p.id: p for p in result.scalars().all()}
+        return [by_id[i] for i in ids if i in by_id]
+
     async def get_studies(self, patient_id: str) -> list[Study]:
         """Get all studies for a patient.
 
