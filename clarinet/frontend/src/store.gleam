@@ -47,6 +47,8 @@ pub type Model {
     loading: Bool,
     error: Option(String),
     success_message: Option(String),
+    // Navbar omnibox input
+    global_search: String,
     // Global entity caches
     cache: cache.Model,
     // Modal state
@@ -178,6 +180,10 @@ pub type Msg {
   CloseModal
   ConfirmModalAction
 
+  // Navbar omnibox
+  GlobalSearchInput(String)
+  GlobalSearchSubmit
+
   // Project info
   ProjectInfoLoaded(Result(ProjectInfo, ApiError))
 
@@ -211,6 +217,7 @@ pub fn init() -> Model {
     loading: False,
     error: None,
     success_message: None,
+    global_search: "",
     cache: cache.init(),
     modal_open: False,
     modal_content: NoModal,

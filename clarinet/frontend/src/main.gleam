@@ -405,6 +405,21 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.NoOp -> #(model, effect.none())
 
+    // Navbar omnibox
+    store.GlobalSearchInput(v) ->
+      #(store.Model(..model, global_search: v), effect.none())
+
+    store.GlobalSearchSubmit -> {
+      let q = string.trim(model.global_search)
+      case q {
+        "" -> #(model, effect.none())
+        _ -> #(
+          store.Model(..model, global_search: ""),
+          dispatch_msg(store.Navigate(router.Search(q))),
+        )
+      }
+    }
+
     // Cache delegation (all data loading, caches, auto-assign)
     store.CacheMsg(cmsg) -> delegate_cache(model, cmsg)
 
