@@ -272,7 +272,15 @@ fn header_row(
         False -> []
       },
       case config.show_study_series {
-        True -> [table_sort.th_static(t(i18n.ThStudySeries))]
+        True -> [
+          table_sort.th_sortable(
+            t(i18n.ThStudySeries),
+            "study_date",
+            sort_col,
+            sort_dir,
+            config.on_column_click,
+          )
+        ]
         False -> []
       },
       case config.show_modality {
@@ -397,8 +405,15 @@ fn study_series_text(record: Record) -> String {
 }
 
 fn format_study_series_summary(record: Record) -> String {
+  // Date leads at a fixed width so same-named studies ("abdomen") are told
+  // apart by scanning the leading dates down the column. Masked (anonymized,
+  // non-superuser) rows carry the API's 1976-01-01 sentinel — shown as-is.
   let study_part = case record.study {
-    Some(study) -> option.unwrap(study.study_description, "-")
+    Some(study) ->
+      case study.study_description {
+        Some(description) -> study.date <> " " <> description
+        None -> study.date
+      }
     None -> "-"
   }
 

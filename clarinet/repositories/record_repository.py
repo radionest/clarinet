@@ -7,7 +7,7 @@ SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
 import random
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from itertools import batched
 from typing import Any, assert_never
@@ -123,6 +123,13 @@ class _SortColumnKind(Enum):
     `_build_criteria_query` — removing it would cause a `MissingGreenlet`
     lazy-load in async context."""
 
+    STUDY_ALIAS = "study_alias"
+    """Resolves against the per-query `aliased(Study)` outerjoin created in
+    `find_page`. Same eager-load caveat as MODALITY_ALIAS: `extract_key`
+    reads `r.study.date` from the relationship, so it depends on
+    `selectinload(Record.study)` staying in `_build_criteria_query` —
+    removing it would cause a `MissingGreenlet` in async context."""
+
 
 @dataclass(frozen=True)
 class _SortSpec:
@@ -145,13 +152,15 @@ class _SortSpec:
         elif self.column_attr is not None:
             raise ValueError(f"{self.kind} sort spec must not carry column_attr")
 
-    def column(self, series_alias: Any) -> Mapped[Any] | None:
+    def column(self, series_alias: Any, study_alias: Any) -> Mapped[Any] | None:
         """Return the SQL column expression for ORDER BY / WHERE."""
         match self.kind:
             case _SortColumnKind.NONE:
                 return None
             case _SortColumnKind.MODALITY_ALIAS:
                 return col(series_alias.modality)
+            case _SortColumnKind.STUDY_ALIAS:
+                return col(study_alias.date)
             case _SortColumnKind.RECORD_COLUMN:
                 return col(self.column_attr)
             case _:
@@ -253,6 +262,22 @@ _SORT_SPECS: dict[SortOrder, _SortSpec] = {
         ascending=False,
         nullable=True,
         extract_key=lambda r: r.series.modality if r.series else None,
+    ),
+    "study_date_asc": _SortSpec(
+        kind=_SortColumnKind.STUDY_ALIAS,
+        column_attr=None,
+        ascending=True,
+        nullable=True,
+        extract_key=lambda r: r.study.date if r.study else None,
+        cast_cursor=lambda raw: date.fromisoformat(raw),
+    ),
+    "study_date_desc": _SortSpec(
+        kind=_SortColumnKind.STUDY_ALIAS,
+        column_attr=None,
+        ascending=False,
+        nullable=True,
+        extract_key=lambda r: r.study.date if r.study else None,
+        cast_cursor=lambda raw: date.fromisoformat(raw),
     ),
 }
 
@@ -1547,16 +1572,23 @@ class RecordRepository(BaseRepository[Record]):
         statement = await self._build_criteria_query(criteria)
         sort_spec = _SORT_SPECS[sort]
 
-        # Optional join for modality sort (Series may not be filtered elsewhere)
+        # Optional joins for alias sorts (Series/Study may not be filtered elsewhere)
         series_sort_alias: Any = None
+        study_sort_alias: Any = None
         if sort_spec.kind is _SortColumnKind.MODALITY_ALIAS:
             series_sort_alias = aliased(Series)
             statement = statement.outerjoin(
                 series_sort_alias,
                 col(Record.series_uid) == col(series_sort_alias.series_uid),
             )
+        elif sort_spec.kind is _SortColumnKind.STUDY_ALIAS:
+            study_sort_alias = aliased(Study)
+            statement = statement.outerjoin(
+                study_sort_alias,
+                col(Record.study_uid) == col(study_sort_alias.study_uid),
+            )
 
-        sort_col = sort_spec.column(series_sort_alias)
+        sort_col = sort_spec.column(series_sort_alias, study_sort_alias)
         ascending = sort_spec.ascending
 
         # Sort order: primary by sort column (NULLS LAST for nullable), tie-break by id.

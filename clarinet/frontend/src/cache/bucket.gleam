@@ -21,6 +21,8 @@ pub type SortOrder {
   UserDesc
   ModalityAsc
   ModalityDesc
+  StudyDateAsc
+  StudyDateDesc
 }
 
 /// Parameters for a /records/find query. Each distinct combination is a
@@ -127,6 +129,8 @@ pub fn sort_to_backend_string(sort: SortOrder) -> String {
     UserDesc -> "user_desc"
     ModalityAsc -> "modality_asc"
     ModalityDesc -> "modality_desc"
+    StudyDateAsc -> "study_date_asc"
+    StudyDateDesc -> "study_date_desc"
   }
 }
 

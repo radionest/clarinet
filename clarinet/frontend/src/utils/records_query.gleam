@@ -10,7 +10,7 @@
 import cache/bucket.{
   type RecordsQuery, type SortOrder, IdAsc, IdDesc, ModalityAsc, ModalityDesc,
   PatientAsc, PatientDesc, RecordTypeAsc, RecordTypeDesc, RecordsQuery,
-  StatusAsc, StatusDesc, UserAsc, UserDesc,
+  StatusAsc, StatusDesc, StudyDateAsc, StudyDateDesc, UserAsc, UserDesc,
 }
 import gleam/dict.{type Dict}
 import gleam/option.{None, Some}
@@ -100,6 +100,11 @@ pub fn parse_sort(
       case ascending {
         True -> ModalityAsc
         False -> ModalityDesc
+      }
+    Some("study_date") ->
+      case ascending {
+        True -> StudyDateAsc
+        False -> StudyDateDesc
       }
     // Unknown / missing column → always IdAsc, ignoring sort_dir. A stale
     // URL like `?sort=removed_col&sort_dir=desc` should not silently flip

@@ -93,6 +93,28 @@ pub fn patient_page_links_each_study_and_record_once_test() {
   links_to(html, "/records/7") |> should.equal(1)
 }
 
+pub fn patient_page_records_cell_leads_with_study_date_test() {
+  let record =
+    models.Record(
+      ..make_record(7),
+      study: Some(make_study(Some("CT Chest"))),
+      series: Some(models.Series(..make_series(Some("T2 AX")), records: None)),
+    )
+  render_patient_with([record])
+  |> string.contains("2024-03-01 CT Chest / MR - T2 AX")
+  |> should.be_true
+}
+
+/// Regression guard: records without a study (patient-level) keep rendering "-".
+pub fn patient_page_records_cell_without_study_stays_dash_test() {
+  let html = render_patient_with([make_record(7)])
+  // The Study / Series header is sortable: the label is wrapped in a button.
+  html |> string.contains(">Study / Series</button></th>") |> should.be_true
+  // The study/series cell (the only class="cell-desc" cell in the table)
+  // of a study-less record renders just the dash, not a joined summary.
+  html |> string.contains("<td class=\"cell-desc\">-</td>") |> should.be_true
+}
+
 // --- Study page ---
 
 pub fn study_page_title_reads_description_and_date_test() {
@@ -180,6 +202,10 @@ fn render_record(record: models.Record) -> String {
 }
 
 fn render_patient() -> String {
+  render_patient_with([make_record(7), make_record(8)])
+}
+
+fn render_patient_with(items: List(models.Record)) -> String {
   let key =
     bucket.Records(records_query.with_patient_scope(
       records_query.from_filters(dict.new()),
@@ -188,7 +214,7 @@ fn render_patient() -> String {
   let ctx =
     cache.init()
     |> cache.put_patient(make_patient())
-    |> with_bucket(key, [make_record(7), make_record(8)])
+    |> with_bucket(key, items)
     |> make_shared
   let #(model, _eff, _out) = patient_detail.init("P001", ctx)
   patient_detail.view(

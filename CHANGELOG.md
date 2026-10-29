@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Records tables show and sort by the study date.** The shared
+  study/series cell (Records page, patient detail) leads with the study's
+  acquisition date (`2024-05-12 abdomen / MR - ABDOMEN`), so same-named
+  studies are tellable apart at a glance, and the column is sortable
+  server-side (`study_date_asc` / `study_date_desc`, NULLS LAST for
+  patient-level records, keyset-cursor safe). Masking is unchanged:
+  non-superusers still see the `1976-01-01` sentinel for anonymized patients.
 - **The NRRD header to LPS grid resolver is public.**
   `clarinet.services.image.nrrd_grid_from_header(header, source=None, *,
   spatial=slice(0, 3))` and its `NrrdGrid` result place a pynrrd header's
