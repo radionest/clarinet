@@ -215,6 +215,7 @@ pub type Key {
   // --- Search ---
   SearchTitle
   SearchNoResults
+  SearchFailed
 
   // --- Series ---
   SeriesPrefix(uid: String)
@@ -814,6 +815,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, SearchTitle -> "Универсальный поиск"
     En, SearchNoResults -> "Nothing found."
     Ru, SearchNoResults -> "Ничего не найдено."
+    En, SearchFailed -> "Search failed"
+    Ru, SearchFailed -> "Поиск не удался"
 
     // --- Series ---
     En, SeriesPrefix(uid) -> "Series: " <> uid

@@ -15,6 +15,7 @@ from clarinet.services.study_service import StudyService
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from tests.utils.factories import make_patient, make_series, make_study, make_user
+from tests.utils.urls import SEARCH
 
 
 async def _seed(test_session, *entities):
@@ -159,6 +160,14 @@ async def test_search_raw_series_uid_returns_parent_study(test_session):
     assert [s.study_uid for s in result.studies] == [s_plain.study_uid]
 
 
+async def test_search_2_25_rooted_raw_uid(test_session):
+    p = make_patient("SRCH_RAW25_PAT", "Raw25 Patient", auto_id=4250)
+    s_raw = make_study(p.id, uid="2.25.999.1")
+    await _seed(test_session, p, s_raw)
+    result = await _service(test_session).global_search("2.25.999.1")
+    assert [s.study_uid for s in result.studies] == [s_raw.study_uid]
+
+
 async def test_search_patient_lo_id(test_session):
     p, *_rest = await _seed_tree(test_session)
     result = await _service(test_session).global_search("SRCH_TREE_PAT")
@@ -264,7 +273,7 @@ async def search_tree(test_session):
 
 async def test_api_search_by_auto_id(superuser_client, search_tree):
     p, *_rest = search_tree
-    resp = await superuser_client.post("/api/search", json={"query": "4242"})
+    resp = await superuser_client.post(SEARCH, json={"query": "4242"})
     assert resp.status_code == 200
     body = resp.json()
     assert [x["id"] for x in body["patients"]] == [p.id]
@@ -274,24 +283,24 @@ async def test_api_search_by_auto_id(superuser_client, search_tree):
 
 async def test_api_search_by_study_anon_uid(superuser_client, search_tree):
     _p, _s, s_anon, _ser = search_tree
-    resp = await superuser_client.post("/api/search", json={"query": "2.25.100101", "limit": 10})
+    resp = await superuser_client.post(SEARCH, json={"query": "2.25.100101", "limit": 10})
     assert resp.status_code == 200
     assert [s["study_uid"] for s in resp.json()["studies"]] == [s_anon.study_uid]
 
 
 async def test_api_search_validation_errors(superuser_client):
-    empty = await superuser_client.post("/api/search", json={"query": ""})
-    extra = await superuser_client.post("/api/search", json={"query": "x", "bogus": 1})
+    empty = await superuser_client.post(SEARCH, json={"query": ""})
+    extra = await superuser_client.post(SEARCH, json={"query": "x", "bogus": 1})
     assert empty.status_code == 422
     assert extra.status_code == 422
 
 
 async def test_api_search_non_admin_forbidden(plain_user_client, search_tree):
-    resp = await plain_user_client.post("/api/search", json={"query": "4242"})
-    assert resp.status_code in [401, 403]
+    resp = await plain_user_client.post(SEARCH, json={"query": "4242"})
+    assert resp.status_code == 403
 
 
 async def test_api_search_no_results(superuser_client, search_tree):
-    resp = await superuser_client.post("/api/search", json={"query": "zzz-none"})
+    resp = await superuser_client.post(SEARCH, json={"query": "zzz-none"})
     assert resp.status_code == 200
     assert resp.json() == {"patients": [], "studies": []}

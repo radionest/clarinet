@@ -1,7 +1,7 @@
 // Global search page — self-contained MVU module
 import api/models
 import api/search.{type SearchResults}
-import api/types.{type ApiError}
+import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
 import components/entity_link
 import gleam/int
@@ -35,7 +35,7 @@ pub fn init(q: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     QueryInput(v) -> #(Model(..model, query: v), effect.none(), [])
@@ -47,11 +47,17 @@ pub fn update(
       )
     SearchLoaded(Ok(results)) ->
       #(Model(..model, results: Some(results), loading: False), effect.none(), [])
+    SearchLoaded(Error(AuthError(_))) ->
+      #(
+        Model(..model, results: None, loading: False),
+        effect.none(),
+        [shared.Logout],
+      )
     SearchLoaded(Error(_err)) ->
       #(
         Model(..model, results: None, loading: False),
         effect.none(),
-        [shared.ShowError("Search failed")],
+        [shared.ShowError(shared.translate(i18n.SearchFailed))],
       )
   }
 }

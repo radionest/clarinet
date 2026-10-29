@@ -2,6 +2,7 @@
 // Views are rendered to HTML; effects never run.
 import api/models
 import api/search.{type SearchResults, SearchResults}
+import api/types
 import cache
 import clarinet_frontend/i18n
 import gleam/option.{None, Some}
@@ -108,4 +109,18 @@ pub fn search_page_empty_results_test() {
     )
   let html = search_page.view(model, make_shared()) |> element.to_string
   html |> string.contains("Nothing found.") |> should.be_true
+}
+
+// --- Update: auth errors log out ---
+
+pub fn search_page_auth_error_logs_out_test() {
+  let model = search_page.Model(query: "x", results: None, loading: False)
+  let assert [shared.Logout] =
+    search_page.update(
+      model,
+      search_page.SearchLoaded(Error(types.AuthError("expired"))),
+      make_shared(),
+    )
+    |> fn(t) { t.2 }
+  Nil
 }

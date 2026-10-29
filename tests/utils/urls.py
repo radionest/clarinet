@@ -69,6 +69,7 @@ PATIENTS_BASE = "/api/patients"
 
 # --- Studies ---
 STUDIES_BASE = "/api/studies"
+SEARCH = "/api/search"
 
 # --- Series ---
 SERIES_BASE = "/api/series"

@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 _AUTO_ID_RE = re.compile(r"\d+")
 _DOTTED_UID_RE = re.compile(r"\d+(?:\.\d+)+")
-_ANON_UID_RE = re.compile(r"2\.25\.\d[\d.]*")
 
 
 class StudyService:
@@ -90,9 +89,10 @@ class StudyService:
         """Resolve any project identifier to patients/studies (route-by-shape).
 
         Exact identifier lookups run first, in this order: auto_id (bare
-        digits or ``f"{anon_id_prefix}_{auto_id}"``), anonymized ``2.25.*``
-        UIDs (study, then series — a series hit resolves to its parent
-        study), raw dotted DICOM UIDs (study, then series), per-study
+        digits or ``f"{anon_id_prefix}_{auto_id}"``), dotted UIDs — the
+        anonymized ``2.25.*`` convention first, then raw DICOM UIDs (each
+        study-then-series; a series hit resolves to its parent study; a PACS
+        may issue raw UIDs under the ``2.25`` root too), per-study
         anonymization hashes (only when ``settings.anon_per_study_patient_id``
         is on; see :meth:`_find_by_per_study_hash`), and DICOM LO PatientIDs.
         When no exact match hit anything, falls back to an ilike search over
@@ -119,22 +119,10 @@ class StudyService:
             found = await self.patient_repo.find_by_auto_id(auto_id)
             if found is not None:
                 patients.append(found)
-        elif _ANON_UID_RE.fullmatch(q):
-            study = await self.study_repo.find_by_anon_uid(q)
-            if study is None:
-                series = await self.series_repo.find_by_anon_uid(q)
-                if series is not None:
-                    study_uids.append(series.study_uid)
-            else:
-                study_uids.append(study.study_uid)
         elif _DOTTED_UID_RE.fullmatch(q):
-            study = await self.study_repo.find_by_uid(q)
-            if study is None:
-                series = await self.series_repo.find_by_series_uid(q)
-                if series is not None:
-                    study_uids.append(series.study_uid)
-            else:
-                study_uids.append(study.study_uid)
+            uid = await self._resolve_uid_query(q)
+            if uid is not None:
+                study_uids.append(uid)
         elif settings.anon_per_study_patient_id and (
             re.fullmatch(rf"{re.escape(prefix)}_[0-9a-fA-F]+", q) is not None
         ):
@@ -150,6 +138,23 @@ class StudyService:
         loaded_patients = await self.patient_repo.find_with_studies_by_ids([p.id for p in patients])
         loaded_studies = await self.study_repo.find_with_relations_by_uids(study_uids)
         return GlobalSearchResults(patients=loaded_patients, studies=loaded_studies)
+
+    async def _resolve_uid_query(self, q: str) -> str | None:
+        """Study UID for a UID-shaped query: anonymized lookups first (the
+        project's 2.25.* convention), then raw study/series UIDs (a PACS may
+        issue raw UIDs under the 2.25 root too). None when nothing matches.
+        """
+        for study_lookup, series_lookup in (
+            (self.study_repo.find_by_anon_uid, self.series_repo.find_by_anon_uid),
+            (self.study_repo.find_by_uid, self.series_repo.find_by_series_uid),
+        ):
+            study = await study_lookup(q)
+            if study is not None:
+                return study.study_uid
+            series = await series_lookup(q)
+            if series is not None:
+                return series.study_uid
+        return None
 
     async def _find_by_per_study_hash(self, hashed_id: str) -> list[str]:
         """Study UIDs whose per-study anonymization PatientID equals ``hashed_id``.

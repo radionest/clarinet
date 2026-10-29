@@ -138,3 +138,50 @@
         color: var(--brass-bright);
     }
 }
+
+/* Global search — compact query form in the ebony chrome */
+.navbar-search {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin-right: var(--spacing-sm);
+    min-width: 0;
+}
+
+.navbar-search-input {
+    width: 200px;
+    max-width: 26vw;
+    min-width: 0;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: var(--radius-md);
+    color: var(--chrome-text-bright);
+
+    &::placeholder {
+        color: var(--chrome-text);
+    }
+
+    &:focus {
+        border-color: var(--brass-bright);
+    }
+}
+
+.navbar-search-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: var(--radius-md);
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    color: var(--chrome-text);
+    cursor: pointer;
+    transition: all 0.15s;
+
+    &:hover {
+        border-color: var(--brass-bright);
+        color: var(--brass-bright);
+    }
+}
