@@ -13,7 +13,7 @@ client. That covers the routing layer, request validation, response
 serialization, and the criteria-builder pipeline together.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -252,3 +252,83 @@ class TestSortPaginationCrossPagesViaApi:
         items = await _fetch_all_pages(client, {"sort": "id_asc", "wo_user": True})
         assert all(r["user_id"] is None for r in items)
         assert len(items) > 0
+
+
+@pytest_asyncio.fixture
+async def study_date_dataset(test_session: AsyncSession):
+    """Three studies with distinct, unsorted dates + two patient-level
+    records (study_uid None), so study_date sort covers date ordering,
+    the id tie-break and the NULLS-LAST zone."""
+    repo_pat = PatientRepository(test_session)
+    patient = await repo_pat.create(make_patient("SDATE_PAT"))
+    rt_patient = make_record_type("sdate-patient-rt")
+    rt_patient.level = DicomQueryLevel.PATIENT
+    rt_study = make_record_type("sdate-study-rt")
+    rt_study.level = DicomQueryLevel.STUDY
+    test_session.add_all([rt_patient, rt_study])
+
+    studies = []
+    for i, days in enumerate((10, 0, 5)):  # deliberately not sorted
+        study = make_study(patient.id, f"1.2.3.950.{i}")
+        study.date = date(2025, 6, 1) + timedelta(days=days)
+        test_session.add(study)
+        studies.append(study)
+    await test_session.commit()
+
+    for study in studies:
+        await seed_record(
+            test_session,
+            patient_id=patient.id,
+            study_uid=study.study_uid,
+            series_uid=None,
+            rt_name=rt_study.name,
+        )
+    for _ in range(2):
+        await seed_record(
+            test_session,
+            patient_id=patient.id,
+            study_uid=None,
+            series_uid=None,
+            rt_name=rt_patient.name,
+        )
+
+
+class TestStudyDateSortPagination:
+    @pytest.mark.asyncio
+    async def test_study_date_asc_nulls_last_ordered(self, client: AsyncClient, study_date_dataset):
+        items = await _fetch_all_pages(client, {"sort": "study_date_asc"})
+        dates = [r["study"]["date"] if r.get("study") else None for r in items]
+        non_null = [d for d in dates if d is not None]
+        nulls = [d for d in dates if d is None]
+        assert dates == non_null + nulls  # NULLS LAST across pages
+        assert non_null == sorted(non_null)  # ISO dates sort temporally in PG and SQLite
+        assert len(items) == 5
+
+    @pytest.mark.asyncio
+    async def test_study_date_desc_nulls_last_ordered(
+        self, client: AsyncClient, study_date_dataset
+    ):
+        items = await _fetch_all_pages(client, {"sort": "study_date_desc"})
+        dates = [r["study"]["date"] if r.get("study") else None for r in items]
+        non_null = [d for d in dates if d is not None]
+        nulls = [d for d in dates if d is None]
+        assert dates == non_null + nulls
+        assert non_null == sorted(non_null, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_study_date_asc_cursor_roundtrip_crosses_null_zone(
+        self, client: AsyncClient, study_date_dataset
+    ):
+        """limit=2 over 5 rows: page2 starts past the newest date, page3 sits
+        fully in the NULL zone — the cursor must survive both transitions."""
+        page1 = await client.post(RECORDS_FIND, json={"sort": "study_date_asc", "limit": 2})
+        assert page1.status_code == 200, page1.text
+        cursor = page1.json()["next_cursor"]
+        assert cursor is not None
+        page2 = await client.post(
+            RECORDS_FIND, json={"sort": "study_date_asc", "limit": 2, "cursor": cursor}
+        )
+        assert page2.status_code == 200, page2.text
+        ids1 = [r["id"] for r in page1.json()["items"]]
+        ids2 = [r["id"] for r in page2.json()["items"]]
+        assert set(ids1).isdisjoint(set(ids2))

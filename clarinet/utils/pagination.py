@@ -23,6 +23,8 @@ SortOrder = Literal[
     "user_desc",
     "modality_asc",
     "modality_desc",
+    "study_date_asc",
+    "study_date_desc",
 ]
 
 
