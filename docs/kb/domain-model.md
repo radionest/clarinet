@@ -56,6 +56,21 @@ explicit values advance the counter so they cannot collide. A bare
 test code must supply one or use the factories. `Patient.anon_id` is derived
 from it as `f"{settings.anon_id_prefix}_{auto_id}"`.
 
+### Identifier forms and global search
+
+`POST /api/search` (admin-gated, body `{"query": str, "limit"?: int}`) classifies
+the query by its shape and resolves it exactly before any text search; response
+is grouped `{patients, studies}` (a series hit returns its parent study):
+
+| Query shape | Resolved as |
+|---|---|
+| `42` / `CLARINET_42` | `Patient.auto_id` → patient with studies |
+| `2.25.…` | `Study.anon_uid`, then `Series.anon_uid` |
+| dotted UID `1.2.840.…` | `Study.study_uid`, then `Series.series_uid` |
+| `CLARINET_ab12cd34` | per-study hash `sha256(f"{salt}:{study_uid}")[:hex_length]` — scanned only when `CLARINET_ANON_PER_STUDY_PATIENT_ID` is on |
+| DICOM LO PatientID | exact `Patient.id` |
+| anything else / no exact hit | ilike over patient `id` / `name` / `anon_name` |
+
 ## RecordType
 
 A `RecordType` is the project's declaration of one kind of work. It names the
