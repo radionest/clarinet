@@ -22,6 +22,7 @@ import pages/records/execute as record_execute_page
 import pages/records/list as records_list_page
 import pages/records/new as record_new_page
 import pages/register as register_page
+import pages/search as search_page
 import pages/series/detail as series_detail_page
 import pages/settings as settings_page
 import pages/studies/detail as study_detail_page
@@ -87,6 +88,7 @@ pub type PageModel {
   RecordExecutePage(record_execute_page.Model)
   RecordNewPage(record_new_page.Model)
   StudiesListPage(studies_list_page.Model)
+  SearchPage(search_page.Model)
   StudyDetailPage(study_detail_page.Model)
   SeriesDetailPage(series_detail_page.Model)
   RecordTypesListPage(record_types_list_page.Model)
@@ -142,6 +144,9 @@ pub type Msg {
   StudiesListMsg(studies_list_page.Msg)
   StudyDetailMsg(study_detail_page.Msg)
   SeriesDetailMsg(series_detail_page.Msg)
+
+  // Global search page delegation
+  SearchMsg(search_page.Msg)
 
   // Record type page delegation
   RecordTypesListMsg(record_types_list_page.Msg)
