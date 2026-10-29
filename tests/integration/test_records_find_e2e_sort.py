@@ -319,8 +319,10 @@ class TestStudyDateSortPagination:
     async def test_study_date_asc_cursor_roundtrip_crosses_null_zone(
         self, client: AsyncClient, study_date_dataset
     ):
-        """limit=2 over 5 rows: page2 starts past the newest date, page3 sits
-        fully in the NULL zone — the cursor must survive both transitions."""
+        """limit=2 over 5 rows: page2 starts at the newest date (row 3) and
+        ends in the NULL zone (row 4), page3 sits fully in the NULL zone —
+        the cursor must survive both transitions, so drain every page until
+        next_cursor is None."""
         page1 = await client.post(RECORDS_FIND, json={"sort": "study_date_asc", "limit": 2})
         assert page1.status_code == 200, page1.text
         cursor = page1.json()["next_cursor"]
@@ -329,6 +331,35 @@ class TestStudyDateSortPagination:
             RECORDS_FIND, json={"sort": "study_date_asc", "limit": 2, "cursor": cursor}
         )
         assert page2.status_code == 200, page2.text
-        ids1 = [r["id"] for r in page1.json()["items"]]
-        ids2 = [r["id"] for r in page2.json()["items"]]
-        assert set(ids1).isdisjoint(set(ids2))
+        pages: list[list[str]] = [
+            [r["id"] for r in page1.json()["items"]],
+            [r["id"] for r in page2.json()["items"]],
+        ]
+        assert set(pages[0]).isdisjoint(set(pages[1]))
+
+        # Drain the tail: page2's cursor is built in the NULL zone, so the
+        # next request consumes the null-zone cursor branch.
+        cursor = page2.json().get("next_cursor")
+        for _ in range(10):  # safety bound — 5 rows at limit 2 cannot exceed 3 pages
+            if cursor is None:
+                break
+            page = await client.post(
+                RECORDS_FIND, json={"sort": "study_date_asc", "limit": 2, "cursor": cursor}
+            )
+            assert page.status_code == 200, page.text
+            pages.append([r["id"] for r in page.json()["items"]])
+            cursor = page.json().get("next_cursor")
+        assert cursor is None, "pagination never terminated"
+
+        all_ids = [rid for page_ids in pages for rid in page_ids]
+        # Pages are pairwise disjoint and their union is the full dataset —
+        # the fixture seeds exactly 5 records (3 dated + 2 patient-level),
+        # so the cursor neither replayed nor skipped a row.
+        assert len(set(all_ids)) == len(all_ids) == 5
+
+    @pytest.mark.asyncio
+    async def test_unknown_sort_value_rejected(self, client: AsyncClient):
+        """Spec scenario "Unknown sort value": the `SortOrder` Literal rejects
+        unknown values with 422 at request validation, before any DB access."""
+        response = await client.post(RECORDS_FIND, json={"sort": "bogus"})
+        assert response.status_code == 422
