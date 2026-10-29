@@ -397,8 +397,15 @@ fn study_series_text(record: Record) -> String {
 }
 
 fn format_study_series_summary(record: Record) -> String {
+  // Date leads at a fixed width so same-named studies ("abdomen") are told
+  // apart by scanning the leading dates down the column. Masked (anonymized,
+  // non-superuser) rows carry the API's 1976-01-01 sentinel — shown as-is.
   let study_part = case record.study {
-    Some(study) -> option.unwrap(study.study_description, "-")
+    Some(study) ->
+      case study.study_description {
+        Some(description) -> study.date <> " " <> description
+        None -> study.date
+      }
     None -> "-"
   }
 
