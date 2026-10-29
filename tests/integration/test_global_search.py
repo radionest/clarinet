@@ -197,6 +197,18 @@ async def test_search_no_match_returns_empty(test_session):
     assert result.patients == [] and result.studies == []
 
 
+async def test_search_auto_id_out_of_int4_range(test_session):
+    await _seed_tree(test_session)
+    result = await _service(test_session).global_search("9" * 20)
+    assert result.patients == [] and result.studies == []
+
+
+async def test_search_whitespace_only_returns_empty(test_session):
+    await _seed_tree(test_session)
+    result = await _service(test_session).global_search("   ")
+    assert result.patients == [] and result.studies == []
+
+
 async def test_search_fallback_respects_limit(test_session):
     for i in range(3):
         await _seed(

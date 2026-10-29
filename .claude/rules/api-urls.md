@@ -112,6 +112,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/series/find` | POST | 200 | Search series |
 | `/api/series/{uid}` | GET | 200 | Series details |
 | `/api/series/{uid}/add_anonymized` | POST | 200 | Add anonymized series |
+| `/api/search` | POST | 200 | Global search by any identifier (admin) |
 
 ### Admin (`/api/admin`)
 

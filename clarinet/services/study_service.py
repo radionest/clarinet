@@ -99,6 +99,8 @@ class StudyService:
         patient id/name/anon_name.
         """
         q = query.strip()
+        if not q:
+            return GlobalSearchResults()
         patients: list[Patient] = []
         study_uids: list[str] = []
         prefix = settings.anon_id_prefix
@@ -108,6 +110,10 @@ class StudyService:
             auto_id = int(q)
         elif (m := re.fullmatch(rf"{re.escape(prefix)}_(\d+)", q)) is not None:
             auto_id = int(m.group(1))
+
+        if auto_id is not None and not (1 <= auto_id <= 2**31 - 1):
+            # Patient.auto_id is an int4 — an out-of-range value cannot match
+            auto_id = None
 
         if auto_id is not None:
             found = await self.patient_repo.find_by_auto_id(auto_id)
