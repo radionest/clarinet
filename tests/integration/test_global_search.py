@@ -2,13 +2,19 @@
 
 import hashlib
 
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from clarinet.api.app import app
+from clarinet.api.auth_config import current_active_user
 from clarinet.models.search import GlobalSearchResults
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
 from clarinet.services.study_service import StudyService
 from clarinet.settings import settings
-from tests.utils.factories import make_patient, make_series, make_study
+from clarinet.utils.database import get_async_session
+from tests.utils.factories import make_patient, make_series, make_study, make_user
 
 
 async def _seed(test_session, *entities):
@@ -199,3 +205,81 @@ async def test_search_fallback_respects_limit(test_session):
         )
     result = await _service(test_session).global_search("limit match", limit=2)
     assert len(result.patients) == 2
+
+
+# --- API: POST /api/search ---
+
+
+async def _commit(test_session, entity):
+    test_session.add(entity)
+    await test_session.commit()
+    await test_session.refresh(entity)
+    return entity
+
+
+def _client_for(test_session, user) -> AsyncClient:
+    """ASGI client with the session and current_active_user overridden."""
+
+    async def override_get_session():
+        yield test_session
+
+    app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[current_active_user] = lambda: user
+    transport = ASGITransport(app=app)
+    return AsyncClient(transport=transport, base_url="http://test", cookies={})
+
+
+@pytest_asyncio.fixture
+async def superuser_client(test_session, test_settings):
+    user = await _commit(test_session, make_user(is_superuser=True))
+    async with _client_for(test_session, user) as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def plain_user_client(test_session, test_settings):
+    user = await _commit(test_session, make_user(is_superuser=False))
+    async with _client_for(test_session, user) as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def search_tree(test_session):
+    return await _seed_tree(test_session)
+
+
+async def test_api_search_by_auto_id(superuser_client, search_tree):
+    p, *_rest = search_tree
+    resp = await superuser_client.post("/api/search", json={"query": "4242"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [x["id"] for x in body["patients"]] == [p.id]
+    assert body["patients"][0]["studies"]  # PatientRead requires studies — eager load works
+    assert body["studies"] == []
+
+
+async def test_api_search_by_study_anon_uid(superuser_client, search_tree):
+    _p, _s, s_anon, _ser = search_tree
+    resp = await superuser_client.post("/api/search", json={"query": "2.25.100101", "limit": 10})
+    assert resp.status_code == 200
+    assert [s["study_uid"] for s in resp.json()["studies"]] == [s_anon.study_uid]
+
+
+async def test_api_search_validation_errors(superuser_client):
+    empty = await superuser_client.post("/api/search", json={"query": ""})
+    extra = await superuser_client.post("/api/search", json={"query": "x", "bogus": 1})
+    assert empty.status_code == 422
+    assert extra.status_code == 422
+
+
+async def test_api_search_non_admin_forbidden(plain_user_client, search_tree):
+    resp = await plain_user_client.post("/api/search", json={"query": "4242"})
+    assert resp.status_code in [401, 403]
+
+
+async def test_api_search_no_results(superuser_client, search_tree):
+    resp = await superuser_client.post("/api/search", json={"query": "zzz-none"})
+    assert resp.status_code == 200
+    assert resp.json() == {"patients": [], "studies": []}

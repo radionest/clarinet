@@ -21,6 +21,7 @@ from clarinet.models import (
     StudyCreate,
 )
 from clarinet.models.patient import PATIENT_ID_REGEX, PatientRead
+from clarinet.models.search import GlobalSearchQuery, GlobalSearchResults
 from clarinet.models.study import SeriesFind, StudyRead
 
 # Annotated path-parameter that enforces the DICOM LO PatientID format
@@ -235,3 +236,15 @@ async def add_anonymized_series(
 ) -> Series:
     """Add anonymized UID to a series."""
     return await service.add_anonymized_series_uid(series_uid, anon_uid)
+
+
+# Global search
+
+
+@router.post("/search", response_model=GlobalSearchResults)
+async def global_search(
+    search_query: GlobalSearchQuery,
+    service: StudyServiceDep,
+) -> GlobalSearchResults:
+    """Resolve any identifier (auto/anon id, UID, per-study hash) to patients/studies."""
+    return await service.global_search(search_query.query, search_query.limit)
