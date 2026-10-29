@@ -13,10 +13,12 @@
   `anon_per_study_patient_id` is on, and DICOM LO PatientIDs; when no exact
   lookup hit, it falls back to an `ilike` search over patient
   id/name/anon_name. The Gleam frontend gains a `/search?q=…` page and a
-  navbar omnibox (En/Ru). **Downstream migration:** the new indexes on
-  `study.anon_uid` / `series.anon_uid` need a migration in the project —
-  `clarinet db migrate create -m "add anon_uid indexes"`, then
-  `clarinet db migrate`.
+  navbar omnibox (En/Ru). **Downstream migration:** the framework ships no
+  migrations of its own, so the new indexes on `study.anon_uid` /
+  `series.anon_uid` need one generated in the project —
+  `clarinet db migrate create -m "add anon_uid indexes"` (review the
+  generated file: autogenerate diffs against the live database and may
+  bundle unrelated pending model changes), then `clarinet db migrate`.
 - **The NRRD header to LPS grid resolver is public.**
   `clarinet.services.image.nrrd_grid_from_header(header, source=None, *,
   spatial=slice(0, 3))` and its `NrrdGrid` result place a pynrrd header's
