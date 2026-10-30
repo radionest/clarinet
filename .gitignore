@@ -68,8 +68,9 @@ docs/*.png
 TASKIQ_*.md
 REFACTOR.md
 
-# Test RecordType configs (scratch/development)
-/tasks/
+# Test RecordType configs: scratch by default, tracked *.toml fixtures stay committable
+/tasks/*
+!/tasks/*.toml
 
 # Dev notes (centralized storage via symlink)
 dev-notes
@@ -79,16 +80,22 @@ dev-notes
 docs/superpowers/
 
 # Claude Code local config (settings.local.json, worktrees, runtime dirs)
-# Exception: project infra shared via git — rules/, agents/, commands/, hooks/, settings.json
+# Exception: project infra shared via git — rules/, agents/, commands/, hooks/,
+# skills/, settings.json
 .claude/*
 !.claude/rules/
 !.claude/agents/
 !.claude/commands/
 !.claude/hooks/
+!.claude/skills/
 !.claude/settings.json
+# Nested local settings (e.g. examples/demo/.claude/) — never commit
+**/.claude/settings.local.json
 
-# OpenSpec local spec store (Claude working memory, synced via doc-review gate)
-/openspec
+# OpenSpec: tracked in git (specs, changes, decisions register) — see AGENTS.md → OpenSpec
+
+# zcode local runtime (plans); rules are not auto-loaded — canonical rules live in .claude/rules/
+/.zcode/
 
 # CTK DICOM tag cache that headless Slicer drops in its cwd (make test-all-stages stage 1)
 /ctkDICOMTagCache.sql

@@ -14,7 +14,9 @@ if [ -n "$FILE_PATH" ]; then
   REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
   case "$FILE_PATH" in
     "$REPO_ROOT"/.claude/*) exit 0 ;;  # .claude/ infra — allowed on main
-    "$REPO_ROOT"/openspec/*) exit 0 ;; # planning scratch — always allow
+    "$REPO_ROOT"/openspec/*) exit 0 ;; # spec store — allowed on main
+    "$REPO_ROOT"/AGENTS.md|"$REPO_ROOT"/CLAUDE.md) exit 0 ;; # harness canon — edit on main
+    "$REPO_ROOT"/.gitignore|"$REPO_ROOT"/.github/*) exit 0 ;; # harness infra — edit on main
     "$REPO_ROOT"/*) ;;                  # file in repo — keep checking
     *) exit 0 ;;                        # file outside repo — skip
   esac

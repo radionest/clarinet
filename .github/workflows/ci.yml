@@ -19,6 +19,37 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Ruff lint
+        run: uv run ruff check clarinet/ tests/
+
+      - name: Ruff format check
+        run: uv run ruff format --check clarinet/ tests/
+
+      - name: Working-folder guard (P29)
+        run: bash scripts/check-no-direct-working-folder.sh
+
+      - name: mypy
+        run: uv run mypy clarinet/
+
   test-unit:
     runs-on: ubuntu-latest
     strategy:
