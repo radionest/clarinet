@@ -95,17 +95,13 @@ def is_harmless_variant(lines: list[str]) -> bool:
 def run_git(cmd: list[str]) -> str:
     """Run git command, return stdout stripped. Returns empty string on failure."""
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=5
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=5)
         return result.stdout.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return ""
 
 
-def check_incremental_mode(
-    reviewed_sha: str, head: str, config: Config
-) -> tuple[bool, str]:
+def check_incremental_mode(reviewed_sha: str, head: str, config: Config) -> tuple[bool, str]:
     """
     Check if changes since reviewed SHA are small enough to skip re-review.
     Returns (allowed, reason).
@@ -125,9 +121,7 @@ def check_incremental_mode(
     reviewed_files = set(
         run_git(["git", "diff", "--name-only", merge_base, reviewed_sha]).splitlines()
     )
-    new_files = set(
-        run_git(["git", "diff", "--name-only", reviewed_sha, head]).splitlines()
-    )
+    new_files = set(run_git(["git", "diff", "--name-only", reviewed_sha, head]).splitlines())
 
     if require_same_files:
         extra_files = new_files - reviewed_files
@@ -235,7 +229,7 @@ def main():
                 "Emergency bypass: SKIP_PR_REVIEW=1 gh pr create ..."
                 if config.get("allow_emergency_bypass", True)
                 else ""
-            )
+            ),
         }
     }
 
