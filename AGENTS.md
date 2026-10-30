@@ -114,6 +114,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - Feature development: always enter a worktree via `EnterWorktree` before making changes
 - **`Plan` / `python-developer` / `feature-dev:*` agents are blocked on main by `require-worktree-agent.sh`** (read-only `feature-dev:code-explorer` and `feature-dev:code-reviewer` are exempt). Enter the worktree before launching them — applies to research stages too (e.g. `feature-dev` phase 4 architecture spawns), not only when editing
 - Quick fixes, typos, config changes — work directly in main, no worktree needed. **But** `require-worktree.sh` blocks `Edit`/`Write` on repo files when on main; `.claude/`, `openspec/` and harness infra (`AGENTS.md`, `CLAUDE.md`, `.gitignore`, `.github/`) are exempted (shared infra — edit in main), everything else under `clarinet/`, `tests/`, `alembic/`, `examples/` requires a worktree
+- zcode sessions: same discipline, no `EnterWorktree` tool — create a worktree manually (`git worktree add`) before edits. The zcode hooks in `.zcode/config.json` (`require-worktree.py`, `block-branch-switch.py`) enforce main-is-read-only with the same exemptions as `require-worktree.sh`; they need a one-time trust approval in the zcode client
 - To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
 - **"Goto worktree of branch X"** — first run `git worktree list`, find the worktree that has branch X, then `EnterWorktree(name=<worktree-name>)`. Do NOT pass a branch name to `EnterWorktree` — it creates a *new* worktree with prefix `worktree-{name}`, causing double-prefix bugs
 - Worktrees contain only git-tracked files. **Checked-in** under `.claude/` (whitelisted in `.gitignore`, visible in every worktree, edit normally + commit): `rules/`, `agents/`, `commands/`, `hooks/`, `skills/`, `settings.json`. `openspec/` is tracked as well — worktrees see specs, changes and the decisions register. Hooks always execute from `$CLAUDE_PROJECT_DIR/.claude/` (the main checkout) — worktree edits to `hooks/`/`settings.json` take effect only after merge to main. **Local-only** (NOT in git, edit via the main project path): `settings.local.json`, runtime dirs (`plans/`, `projects/`, `worktrees/`). Build artifacts (formosh) are not copied
@@ -144,6 +145,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - **Knowledge base** in [`docs/kb/`](docs/kb/index.md) — durable, cross-cutting explanation (architecture, domain model, subsystems). Not auto-loaded: read the relevant page before changing behaviour in its area, and update it in the same PR when that behaviour changes.
 - **Scoped CLAUDE.md** in subdirectories — always-loaded when entering that directory
 - **Path-scoped rules** in `.claude/rules/` — auto-loaded only when editing matching files. See [`.claude/rules/README.md`](.claude/rules/README.md) for the topic index.
+- **Client loading**: the auto-loading above is Claude Code behavior. zcode merges only this root `AGENTS.md` — it never auto-loads nested `CLAUDE.md` or `.claude/rules/`; read them on demand when working in that subtree.
 
 | Knowledge base page | Covers |
 |---|---|
@@ -163,6 +165,10 @@ Update the most specific file. Scoped CLAUDE.md files and rules deliberately kee
 This project **tracks `openspec/` in git** — specs, active changes and the
 decisions register (`openspec/decisions.md`) are the design source of truth,
 so they survive worktrees, reach the remote and are reviewable in PRs.
+
+zcode: this **overrides** the global `openspec-artifacts` digest in
+`~/.zcode/AGENTS.md` — here `openspec/` is committed; never symlink a local
+spec store over this tracked directory.
 
 Workflow: `propose → design → tasks` on the change branch → the PR diff carries
 code **and** `openspec/changes/<name>/` → after merge, `openspec archive` on

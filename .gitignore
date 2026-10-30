@@ -94,8 +94,11 @@ docs/superpowers/
 
 # OpenSpec: tracked in git (specs, changes, decisions register) — see AGENTS.md → OpenSpec
 
-# zcode local runtime (plans); rules are not auto-loaded — canonical rules live in .claude/rules/
-/.zcode/
+# zcode: hooks + config.json are tracked (worktree gates, see AGENTS.md → Worktree Workflow);
+# local runtime (plans/) stays ignored
+/.zcode/*
+!/.zcode/config.json
+!/.zcode/hooks/
 
 # CTK DICOM tag cache that headless Slicer drops in its cwd (make test-all-stages stage 1)
 /ctkDICOMTagCache.sql

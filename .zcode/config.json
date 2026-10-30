@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "PreToolUse": [
+        {
+          "matcher": "Edit|Write",
+          "hooks": [
+            { "type": "command", "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/require-worktree.py", "timeout": 5 }
+          ]
+        },
+        {
+          "matcher": "Bash",
+          "hooks": [
+            { "type": "command", "command": "${ZCODE_PROJECT_DIR}/.zcode/hooks/block-branch-switch.py", "timeout": 5 }
+          ]
+        }
+      ]
+    }
+  }
+}
