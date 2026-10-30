@@ -1,0 +1,57 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+# --- Project context (shown to AI when creating artifacts) --- #
+context: |
+  Decision register. `openspec/decisions.md` owns every globally-cited decision
+  namespace — `D<n>` (study and pipeline design) and `F<n>` (clarinet framework-API
+  mapping). It is a sibling of `openspec/specs/`, belongs to no change, and is never
+  archived, so a `→ D<n>` pointer from source, tests or documentation resolves there
+  permanently.
+
+  Archiving a change MUST, after the delta-spec sync and before moving the change
+  directory, append every decision the change coined to that register and leave a
+  one-line pointer in its `design.md`. Same stop-on-failure semantics as the spec
+  sync: on failure nothing moves. This step is also written into
+  `.claude/skills/openspec-archive-change/SKILL.md`; it is duplicated here because
+  that file is CLI-generated and a regeneration would otherwise drop it silently.
+
+  Before coining a decision number, check it against the register AND every other
+  change's `design.md`. Numbers are unique within a namespace across all changes,
+  active and archived. A definition is a column-0 list item under `## Decisions`
+  (`- **D<n> — …`); a bolded cross-reference in a Risks bullet is not one, and
+  counting it reports collisions that do not exist.
+
+  Spec style. Specs are the detailed, openspec-style requirements:
+  `### Requirement:` blocks with SHALL/MUST normative language, each followed by
+  `#### Scenario:` blocks in WHEN/THEN/AND form. A requirement without at least
+  one scenario is incomplete. Task decomposition in tasks.md uses `- [ ] N. ...`
+  checkbox items grouped under numbered sub-sections; every task is
+  self-contained (files it touches, commands to verify) so it can be delegated
+  to a weaker model or subagent as a single unit with acceptance criteria.
+
+  Documentation routing. A rule is one imperative line plus a `→ D<n>` pointer
+  in the project's always-loaded docs; the reasoning, alternatives and
+  measurements go in the register.
+  Plan docs. For a large change a deeper step-by-step plan MAY sit next to
+  `tasks.md` to keep a weak-model executor on rails, but it is scaffolding:
+  deleted when the change archives. Durable reasoning lives in `design.md` and
+  the register, task state in `tasks.md`. Never keep a permanent `plans/`
+  subtree inside a change.

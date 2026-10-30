@@ -1,0 +1,11 @@
+{
+  "enforce_review": true,
+  "allow_emergency_bypass": true,
+  "require_worktree": true,
+  "branch_exclusions": ["main", "master"],
+  "incremental_mode": {
+    "enabled": true,
+    "max_total_changes": 20,
+    "require_same_files": true
+  }
+}
